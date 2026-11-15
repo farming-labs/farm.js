@@ -31,7 +31,7 @@ describe("React AOT keyed-array position hints", () => {
     expect(result.compiled).toEqual(["Table"]);
     expect(result.optimizations.keyedArrayPositionHints).toBe(5);
     expect(result.code).toContain("createCompilerKeyedArrayPositionUpdate");
-    expect(result.code).toContain("keyedRowsPositionHintedRuntimeFeature");
+    expect(result.code).toContain("keyedRowsPlainPositionHintedRuntimeFeature");
   });
 
   it.each([
@@ -39,19 +39,19 @@ describe("React AOT keyed-array position hints", () => {
       expression: "current.with(0, next)",
       helper: "createCompilerKeyedArrayPositionUpdate",
       name: "a native replacement",
-      runtimeFeature: "keyedRowsPositionHintedRuntimeFeature",
+      runtimeFeature: "keyedRowsPlainPositionHintedRuntimeFeature",
     },
     {
       expression: "current.toSpliced(1, 0, next)",
       helper: "createCompilerKeyedArrayPositionUpdate",
       name: "a single insertion",
-      runtimeFeature: "keyedRowsPositionHintedRuntimeFeature",
+      runtimeFeature: "keyedRowsPlainPositionHintedRuntimeFeature",
     },
     {
       expression: "current.toSpliced(0, 2)",
       helper: "createCompilerKeyedArrayPositionUpdate",
       name: "a range removal",
-      runtimeFeature: "keyedRowsPositionHintedRuntimeFeature",
+      runtimeFeature: "keyedRowsPlainPositionHintedRuntimeFeature",
     },
     {
       expression: "current.toSpliced(0, 0, next, second)",
@@ -204,7 +204,8 @@ describe("React AOT keyed-array position hints", () => {
     expect(result.compiled).toEqual(["Table"]);
     expect(result.optimizations.keyedArrayPositionHints).toBe(7);
     expect(result.code).toContain("createCompilerKeyedArrayPositionUpdate");
-    expect(result.code).toMatch(/\.get\(\)\.remove/);
+    // The updater runs later, so the prop is read when the handler starts.
+    expect(result.code).toMatch(/_positions = _farmState\[\d+\]\.get\(\)[\s\S]*_positions\.remove/);
     expect(result.code).toContain("current.length - 1");
   });
 

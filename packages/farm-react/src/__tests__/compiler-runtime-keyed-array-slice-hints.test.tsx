@@ -4,7 +4,10 @@ import { createRoot, hydrateRoot, type Root } from "react-dom/client";
 import { renderToString } from "react-dom/server";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import {
-  createCompiledComponent,
+  createCompiledComponent as createCompleteCompiledComponent,
+  createCompiledComponentWithFeatures,
+  keyedRowsFilterHintedRuntimeFeature,
+  keyedRowsFilterOnlyRuntimeFeature,
   createCompilerKeyedArrayFilter,
   createCompilerKeyedArraySlice,
   type CompilerKeyedRowElement,
@@ -28,6 +31,7 @@ interface Counters {
 }
 
 const roots: Root[] = [];
+let createCompiledComponent: typeof createCompleteCompiledComponent;
 
 beforeEach(() => {
   globalThis.IS_REACT_ACT_ENVIRONMENT = true;
@@ -164,7 +168,17 @@ function createSliceHarness(initialItems: Item[], readsCollection = false) {
   };
 }
 
-describe("compiled keyed-array slice hints", () => {
+describe.each(
+  [undefined, keyedRowsFilterHintedRuntimeFeature, keyedRowsFilterOnlyRuntimeFeature].flatMap(
+    (feature) => (["static", "hybrid"] as const).map((reactivity) => ({ feature, reactivity })),
+  ),
+)("$reactivity slice hints (feature: $feature.name)", ({ feature, reactivity }) => {
+  beforeEach(() => {
+    createCompiledComponent = feature
+      ? (definition) =>
+          createCompiledComponentWithFeatures({ ...definition, reactivity }, [feature])
+      : (definition) => createCompleteCompiledComponent({ ...definition, reactivity });
+  });
   it("preserves native runtime-bound coercion exactly once and in order", () => {
     const source = [
       { id: "a", label: "Alpha" },

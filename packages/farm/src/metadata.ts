@@ -1,5 +1,6 @@
-import type { Metadata } from "./types";
-import { renderFarmAgentJsonLd, type FarmAgentJsonLd } from "./agent-config";
+import type { Metadata, Viewport } from "./types";
+import type { FarmAgentJsonLd } from "./agent-config";
+import { renderFarmAgentJsonLd, serializeJsonLd } from "./agent-json-ld";
 
 export type MetadataImageKind = "opengraph" | "twitter";
 
@@ -18,9 +19,60 @@ export interface RenderedMetadataHead {
   hasFavicon: boolean;
   /** False when the title is the framework fallback rather than configured. */
   hasExplicitTitle: boolean;
+  /** The viewport tag, then any theme-color and color-scheme tags. */
+  viewport: string;
 }
 
+/**
+ * Marks head tags rendered from app-defined metadata that no fixed selector can
+ * match, so client navigation can find and replace them.
+ */
+export const FARM_METADATA_ATTRIBUTE = "data-farm-metadata";
+
 type MetadataRecord = Metadata & Record<string, any>;
+
+/** The 404 page's title when its module doesn't name one; a layout title template still wraps it. */
+export const FARM_NOT_FOUND_TITLE = "404 - Page Not Found";
+
+/**
+ * Metadata for the not-found page, shared by the development renderer and the production
+ * server: the layouts' metadata (so a title template, description or icons carry over),
+ * then the not-found module's own `metadata` and `generateMetadata()`, titled
+ * FARM_NOT_FOUND_TITLE when the module doesn't name itself.
+ */
+export async function resolveFarmNotFoundMetadata(
+  layoutModules: ReadonlyArray<Record<string, any> | null | undefined>,
+  notFoundModule: Record<string, any> | null | undefined,
+): Promise<MetadataRecord> {
+  let metadata: MetadataRecord = {};
+  for (const layout of layoutModules) {
+    if (!layout) continue;
+    metadata = mergeMetadata(metadata, layout.metadata);
+    if (typeof layout.generateMetadata === "function") {
+      metadata = mergeMetadata(metadata, await layout.generateMetadata({ params: {} }));
+    }
+    metadata = await mergeModuleViewport(metadata, layout, { params: {} });
+  }
+  // The page's own metadata is merged onto the layouts in one step, so a layout title
+  // template wraps whichever title applies: the page's, or the 404 default.
+  let own: MetadataRecord = {};
+  let latestTitle: Metadata["title"] | undefined;
+  if (notFoundModule) {
+    own = mergeMetadata(own, notFoundModule.metadata);
+    latestTitle = notFoundModule.metadata?.title;
+    if (typeof notFoundModule.generateMetadata === "function") {
+      const generated = await notFoundModule.generateMetadata({ params: {}, searchParams: {} });
+      own = mergeMetadata(own, generated);
+      if (generated?.title !== undefined) latestTitle = generated.title;
+    }
+    own = await mergeModuleViewport(own, notFoundModule, { params: {}, searchParams: {} });
+  }
+  // Combining into `own` turns `{ absolute }` into `{ default }`, which the layouts' template
+  // would then wrap, so an absolute title goes on as written.
+  const title =
+    isRecord(latestTitle) && normalizeContent(latestTitle.absolute) ? latestTitle : own.title;
+  return mergeMetadata(metadata, { ...own, title: title ?? FARM_NOT_FOUND_TITLE });
+}
 
 export function mergeMetadata(
   base: MetadataRecord | undefined,
@@ -32,12 +84,96 @@ export function mergeMetadata(
   return {
     ...base,
     ...next,
+    jsonLd: mergeMetadataJsonLd(base.jsonLd, next.jsonLd),
     title: mergeMetadataTitle(base.title, next.title),
+    other: mergeNestedMetadata(base.other, next.other),
     openGraph: mergeNestedMetadata(base.openGraph, next.openGraph),
     twitter: mergeNestedMetadata(base.twitter, next.twitter),
     alternates: mergeNestedMetadata((base as any).alternates, (next as any).alternates),
     icons: mergeNestedMetadata((base as any).icons, (next as any).icons),
+    verification: mergeNestedMetadata(base.verification, next.verification),
+    viewport: mergeNestedMetadata(base.viewport, next.viewport),
   };
+}
+
+/**
+ * Merge a layout's or page's `viewport` export and `generateViewport()` result onto the metadata
+ * collected so far, as Next.js does: each module overrides the keys it sets.
+ */
+export async function mergeModuleViewport(
+  metadata: MetadataRecord,
+  module: Record<string, any> | null | undefined,
+  props: unknown,
+): Promise<MetadataRecord> {
+  let merged = metadata;
+  if (isRecord(module?.viewport)) {
+    merged = mergeMetadata(merged, { viewport: module.viewport });
+  }
+  if (typeof module?.generateViewport === "function") {
+    const generated = await module.generateViewport(props);
+    if (isRecord(generated)) merged = mergeMetadata(merged, { viewport: generated });
+  }
+  return merged;
+}
+
+const DEFAULT_VIEWPORT: Viewport = { width: "device-width", initialScale: 1 };
+const VIEWPORT_CONTENT_KEYS = [
+  ["width", "width"],
+  ["height", "height"],
+  ["initialScale", "initial-scale"],
+  ["minimumScale", "minimum-scale"],
+  ["maximumScale", "maximum-scale"],
+  ["userScalable", "user-scalable"],
+  ["viewportFit", "viewport-fit"],
+  ["interactiveWidget", "interactive-widget"],
+] as const;
+
+/**
+ * The viewport tag Next.js renders: the default `width=device-width, initial-scale=1` with the
+ * merged `viewport` exports over it, plus `theme-color` and `color-scheme` tags when set. The tags
+ * carry FARM_METADATA_ATTRIBUTE, so client navigation replaces them but never a viewport tag the
+ * app wrote into its own document.
+ */
+export function renderViewportHead(viewport: unknown): string {
+  const marker = ` ${FARM_METADATA_ATTRIBUTE}`;
+  if (typeof viewport === "string") {
+    return `<meta name="viewport" content="${escapeAttribute(viewport)}"${marker}>`;
+  }
+  const resolved: Record<string, unknown> = {
+    ...DEFAULT_VIEWPORT,
+    ...(isRecord(viewport) ? viewport : {}),
+  };
+  const content = VIEWPORT_CONTENT_KEYS.flatMap(([key, name]) => {
+    const value = resolved[key];
+    if (value === undefined || value === null || value === "") return [];
+    if (typeof value === "boolean") return [`${name}=${value ? "yes" : "no"}`];
+    return [`${name}=${String(value)}`];
+  }).join(", ");
+  const tags = content
+    ? [`<meta name="viewport" content="${escapeAttribute(content)}"${marker}>`]
+    : [];
+
+  const themeColors = Array.isArray(resolved.themeColor)
+    ? resolved.themeColor
+    : resolved.themeColor === undefined
+      ? []
+      : [resolved.themeColor];
+  for (const entry of themeColors) {
+    const color = typeof entry === "string" ? entry : isRecord(entry) ? entry.color : undefined;
+    const content = normalizeContent(color);
+    if (!content) continue;
+    const media = isRecord(entry) ? normalizeContent(entry.media) : undefined;
+    tags.push(
+      `<meta name="theme-color" content="${escapeAttribute(content)}"${
+        media ? ` media="${escapeAttribute(media)}"` : ""
+      }${marker}>`,
+    );
+  }
+  const colorScheme = normalizeContent(resolved.colorScheme);
+  if (colorScheme) {
+    tags.push(`<meta name="color-scheme" content="${escapeAttribute(colorScheme)}"${marker}>`);
+  }
+  return tags.join("\n  ");
 }
 
 function mergeMetadataTitle(base: Metadata["title"], next: Metadata["title"]): Metadata["title"] {
@@ -49,6 +185,12 @@ function mergeMetadataTitle(base: Metadata["title"], next: Metadata["title"]): M
   }
 
   if (!isRecord(next)) return next;
+
+  const absoluteTitle = normalizeContent(next.absolute);
+  if (absoluteTitle) {
+    const { absolute: _absolute, ...rest } = next;
+    return { ...rest, default: absoluteTitle };
+  }
 
   const defaultTitle = normalizeContent(next.default) ?? resolveMetadataTitle(base);
   return {
@@ -62,6 +204,13 @@ function mergeMetadataTitle(base: Metadata["title"], next: Metadata["title"]): M
 
 function applyTitleTemplate(template: string, title: string): string {
   return template.split("%s").join(title);
+}
+
+/** Layout and page JSON-LD accumulate instead of replacing each other. */
+function mergeMetadataJsonLd(base: Metadata["jsonLd"], next: Metadata["jsonLd"]) {
+  if (base === undefined) return next;
+  if (next === undefined) return base;
+  return [...normalizeArray(base), ...normalizeArray(next)] as NonNullable<Metadata["jsonLd"]>;
 }
 
 export function addMetadataImageReference(
@@ -97,6 +246,34 @@ export function addMetadataImageReference(
   return {
     ...metadata,
     twitter,
+  };
+}
+
+const MARKDOWN_MIME_TYPE = "text/markdown";
+
+/**
+ * Advertise a page's Markdown mirror as `alternates.types["text/markdown"]`
+ * unless the page already declares one. `href` comes from the request path, so
+ * it is kept same-origin the same way the default canonical is.
+ */
+export function addMetadataMarkdownAlternate(
+  metadata: MetadataRecord,
+  href: string | null | undefined,
+): MetadataRecord {
+  if (!href) return metadata;
+
+  const alternates = isRecord(metadata.alternates) ? metadata.alternates : {};
+  const types = isRecord(alternates.types) ? alternates.types : {};
+  if (Object.keys(types).some((type) => type.toLowerCase() === MARKDOWN_MIME_TYPE)) {
+    return metadata;
+  }
+
+  return {
+    ...metadata,
+    alternates: {
+      ...alternates,
+      types: { ...types, [MARKDOWN_MIME_TYPE]: sanitizeSelfCanonicalPathname(href) },
+    },
   };
 }
 
@@ -142,6 +319,9 @@ export function renderMetadataHead(
   appendMetaName(tags, "creator", resolvedMetadata.creator);
   appendMetaName(tags, "publisher", resolvedMetadata.publisher);
   appendMetaName(tags, "robots", normalizeRobots(resolvedMetadata.robots));
+  if (isRecord(resolvedMetadata.robots)) {
+    appendMetaName(tags, "googlebot", normalizeRobots(resolvedMetadata.robots.googleBot));
+  }
 
   const alternates = (resolvedMetadata as any).alternates;
   const explicitCanonical = isRecord(alternates) ? alternates.canonical : undefined;
@@ -151,7 +331,10 @@ export function renderMetadataHead(
   // stable identity for the URL.
   const canonicalHref =
     explicitCanonical != null
-      ? resolveMetadataUrl(explicitCanonical, metadataBase)
+      ? resolveMetadataUrl(
+          resolvePageRelativeUrl(explicitCanonical, options.pathname),
+          metadataBase,
+        )
       : options.pathname
         ? resolveMetadataUrl(sanitizeSelfCanonicalPathname(options.pathname), metadataBase)
         : undefined;
@@ -161,9 +344,24 @@ export function renderMetadataHead(
 
   if (isRecord(alternates) && isRecord(alternates.languages)) {
     for (const [language, href] of Object.entries(alternates.languages)) {
-      appendLink(tags, "alternate", resolveMetadataUrl(href, metadataBase), {
-        hreflang: language,
-      });
+      appendLink(
+        tags,
+        "alternate",
+        resolveMetadataUrl(resolvePageRelativeUrl(href, options.pathname), metadataBase),
+        { hreflang: language },
+      );
+    }
+  }
+
+  if (isRecord(alternates) && isRecord(alternates.types)) {
+    for (const [type, value] of Object.entries(alternates.types)) {
+      for (const entry of normalizeArray(value)) {
+        const link = isRecord(entry) ? entry : { url: entry };
+        appendLink(tags, "alternate", resolveMetadataUrl(link.url, metadataBase), {
+          type,
+          title: link.title,
+        });
+      }
     }
   }
 
@@ -177,8 +375,13 @@ export function renderMetadataHead(
     );
   }
 
-  appendOpenGraph(tags, resolvedMetadata.openGraph, metadataBase);
+  appendNamedMetaRecord(tags, resolvedMetadata.other);
+  appendOpenGraph(tags, resolvedMetadata.openGraph, metadataBase, {
+    title: explicitTitle,
+    description: resolvedMetadata.description,
+  });
   appendTwitter(tags, resolvedMetadata.twitter, metadataBase);
+  appendVerification(tags, resolvedMetadata.verification);
 
   if (options.jsonLd) {
     const jsonLdConfig = options.jsonLd === true ? {} : options.jsonLd;
@@ -193,11 +396,21 @@ export function renderMetadataHead(
     if (jsonLdScript) tags.push(jsonLdScript);
   }
 
+  // Page and layout JSON-LD is marked so client navigation swaps it, while the
+  // unmarked site-level script above stays put.
+  for (const entry of normalizeArray(resolvedMetadata.jsonLd)) {
+    if (!isRecord(entry)) continue;
+    tags.push(
+      `<script type="application/ld+json" ${FARM_METADATA_ATTRIBUTE}>${serializeJsonLd(entry)}</script>`,
+    );
+  }
+
   return {
     title: escapeText(title),
     tags: tags.length > 0 ? `\n  ${tags.join("\n  ")}` : "",
     hasFavicon,
     hasExplicitTitle: Boolean(explicitTitle),
+    viewport: renderViewportHead(resolvedMetadata.viewport),
   };
 }
 
@@ -212,11 +425,23 @@ function mergeNestedMetadata(base: unknown, next: unknown): any {
   return next ?? base;
 }
 
-function appendOpenGraph(tags: string[], openGraph: Metadata["openGraph"], metadataBase?: string) {
-  if (!isRecord(openGraph)) return;
+/**
+ * Open Graph tags. A page without Open Graph data still gets og:title and og:description
+ * from its own title and description, as social cards and agents citing the page look for
+ * them there.
+ */
+function appendOpenGraph(
+  tags: string[],
+  input: Metadata["openGraph"],
+  metadataBase: string | undefined,
+  page: { title?: string; description?: unknown },
+) {
+  const description = typeof page.description === "string" ? page.description : undefined;
+  if (!isRecord(input) && !page.title && !description) return;
+  const openGraph = (isRecord(input) ? input : {}) as NonNullable<Metadata["openGraph"]>;
 
-  appendMetaProperty(tags, "og:title", openGraph.title);
-  appendMetaProperty(tags, "og:description", openGraph.description);
+  appendMetaProperty(tags, "og:title", openGraph.title ?? page.title);
+  appendMetaProperty(tags, "og:description", openGraph.description ?? description);
   appendMetaProperty(tags, "og:url", resolveMetadataUrl(openGraph.url, metadataBase));
   appendMetaProperty(tags, "og:site_name", openGraph.siteName);
   // Default og:type so a route that sets Open Graph data without a type still
@@ -235,6 +460,26 @@ function appendOpenGraph(tags: string[], openGraph: Metadata["openGraph"], metad
     appendMetaProperty(tags, "og:image:alt", image.alt);
     appendMetaProperty(tags, "og:image:type", image.type);
   }
+
+  for (const video of normalizeMetadataVideos(openGraph.videos, metadataBase)) {
+    appendMetaProperty(tags, "og:video", video.url);
+    appendMetaProperty(tags, "og:video:secure_url", video.secureUrl);
+    appendMetaProperty(tags, "og:video:type", video.type);
+    appendMetaProperty(tags, "og:video:width", video.width);
+    appendMetaProperty(tags, "og:video:height", video.height);
+  }
+
+  if (openGraph.type === "article") {
+    appendMetaProperty(tags, "article:published_time", normalizeDate(openGraph.publishedTime));
+    appendMetaProperty(tags, "article:modified_time", normalizeDate(openGraph.modifiedTime));
+    for (const author of normalizeArray(openGraph.authors)) {
+      appendMetaProperty(tags, "article:author", author);
+    }
+    appendMetaProperty(tags, "article:section", openGraph.section);
+    for (const tag of normalizeArray(openGraph.tags)) {
+      appendMetaProperty(tags, "article:tag", tag);
+    }
+  }
 }
 
 function appendTwitter(tags: string[], twitter: Metadata["twitter"], metadataBase?: string) {
@@ -249,6 +494,20 @@ function appendTwitter(tags: string[], twitter: Metadata["twitter"], metadataBas
   for (const image of normalizeMetadataImages(twitter.images, metadataBase)) {
     appendMetaName(tags, "twitter:image", image.url);
     appendMetaName(tags, "twitter:image:alt", image.alt);
+  }
+}
+
+/**
+ * Meta tags named by the app. No fixed selector matches them, so they carry the
+ * marker client navigation sweeps by; tags with names Farm knows do not.
+ */
+function appendNamedMetaRecord(tags: string[], record: unknown) {
+  if (!isRecord(record)) return;
+
+  for (const [name, value] of Object.entries(record)) {
+    for (const content of normalizeArray(value)) {
+      appendMetaName(tags, name, content, true);
+    }
   }
 }
 
@@ -286,10 +545,13 @@ function appendIconList(tags: string[], rel: string, value: unknown, metadataBas
   }
 }
 
-function appendMetaName(tags: string[], name: string, content: unknown) {
+function appendMetaName(tags: string[], name: string, content: unknown, marked = false) {
   const normalized = normalizeContent(content);
-  if (!normalized) return;
-  tags.push(`<meta name="${escapeAttribute(name)}" content="${escapeAttribute(normalized)}">`);
+  if (!normalized || !name) return;
+  const marker = marked ? ` ${FARM_METADATA_ATTRIBUTE}` : "";
+  tags.push(
+    `<meta name="${escapeAttribute(name)}" content="${escapeAttribute(normalized)}"${marker}>`,
+  );
 }
 
 function appendMetaProperty(tags: string[], property: string, content: unknown) {
@@ -298,6 +560,23 @@ function appendMetaProperty(tags: string[], property: string, content: unknown) 
   tags.push(
     `<meta property="${escapeAttribute(property)}" content="${escapeAttribute(normalized)}">`,
   );
+}
+
+const VERIFICATION_META_NAMES = [
+  ["google", "google-site-verification"],
+  ["bing", "msvalidate.01"],
+  ["yandex", "yandex-verification"],
+] as const;
+
+function appendVerification(tags: string[], verification: Metadata["verification"]) {
+  if (!isRecord(verification)) return;
+
+  for (const [key, name] of VERIFICATION_META_NAMES) {
+    for (const token of normalizeArray(verification[key])) {
+      appendMetaName(tags, name, token);
+    }
+  }
+  appendNamedMetaRecord(tags, verification.other);
 }
 
 function appendLink(
@@ -353,6 +632,37 @@ function normalizeMetadataImages(
     .filter((item): item is NonNullable<typeof item> => item !== null);
 }
 
+function normalizeMetadataVideos(
+  value: unknown,
+  metadataBase?: string,
+): Array<{
+  url: string;
+  secureUrl?: string;
+  width?: number;
+  height?: number;
+  type?: string;
+}> {
+  return normalizeArray(value)
+    .map((item) => {
+      if (typeof item === "string") {
+        return { url: resolveMetadataUrl(item, metadataBase) || item };
+      }
+
+      if (!isRecord(item)) return null;
+      const url = resolveMetadataUrl(item.url, metadataBase);
+      if (!url) return null;
+
+      return {
+        url,
+        secureUrl: resolveMetadataUrl(item.secureUrl, metadataBase) || undefined,
+        width: normalizeNumber(item.width),
+        height: normalizeNumber(item.height),
+        type: typeof item.type === "string" ? item.type : undefined,
+      };
+    })
+    .filter((item): item is NonNullable<typeof item> => item !== null);
+}
+
 function normalizeArray(value: unknown): unknown[] {
   if (value == null) return [];
   return Array.isArray(value) ? value : [value];
@@ -370,7 +680,7 @@ function hasMetadataImages(value: unknown): boolean {
 export function resolveMetadataTitle(title: Metadata["title"]): string | undefined {
   if (typeof title === "string") return title;
   if (isRecord(title)) {
-    return normalizeContent(title.default);
+    return normalizeContent(title.absolute) ?? normalizeContent(title.default);
   }
   return undefined;
 }
@@ -380,13 +690,29 @@ function normalizeKeywords(keywords: Metadata["keywords"]): string | undefined {
   return keywords;
 }
 
-function normalizeRobots(robots: Metadata["robots"]): string | undefined {
+const ROBOTS_FLAGS = ["noarchive", "nosnippet", "noimageindex"] as const;
+const ROBOTS_VALUES = [
+  "max-snippet",
+  "max-image-preview",
+  "max-video-preview",
+  "unavailable_after",
+] as const;
+
+/** Serialize `robots` or `robots.googleBot` into a robots meta `content` value. */
+function normalizeRobots(robots: unknown): string | undefined {
   if (typeof robots === "string") return robots;
   if (!isRecord(robots)) return undefined;
 
   const values: string[] = [];
   if (typeof robots.index === "boolean") values.push(robots.index ? "index" : "noindex");
   if (typeof robots.follow === "boolean") values.push(robots.follow ? "follow" : "nofollow");
+  for (const flag of ROBOTS_FLAGS) {
+    if (robots[flag] === true) values.push(flag);
+  }
+  for (const directive of ROBOTS_VALUES) {
+    const value = normalizeContent(robots[directive]);
+    if (value) values.push(`${directive}:${value}`);
+  }
   return values.join(", ") || undefined;
 }
 
@@ -411,6 +737,20 @@ function sanitizeSelfCanonicalPathname(pathname: string): string {
   return collapsed.startsWith("/") ? collapsed : `/${collapsed}`;
 }
 
+/**
+ * Resolve an `alternates` URL that starts with `./` against the current page, as Next.js does:
+ * a layout's `canonical: "./"` names each page below it, not the site root. Same-origin by
+ * construction, and the request path is sanitized as for the default canonical.
+ */
+function resolvePageRelativeUrl(value: unknown, pathname: string | undefined): unknown {
+  if (typeof value !== "string" || !value.startsWith("./") || !pathname) return value;
+  const base = sanitizeSelfCanonicalPathname(pathname).replace(/\/*$/, "/");
+  const resolved = new URL(value, `http://farm.invalid${base}`);
+  const resolvedPath =
+    resolved.pathname.length > 1 ? resolved.pathname.replace(/\/+$/, "") : resolved.pathname;
+  return resolvedPath + resolved.search + resolved.hash;
+}
+
 function resolveMetadataUrl(value: unknown, metadataBase?: string): string | undefined {
   const normalized = normalizeContent(value);
   if (!normalized) return undefined;
@@ -430,6 +770,13 @@ function normalizeNumber(value: unknown): number | undefined {
     return Number.isFinite(parsed) ? parsed : undefined;
   }
   return undefined;
+}
+
+function normalizeDate(value: unknown): string | undefined {
+  if (value instanceof Date) {
+    return Number.isNaN(value.getTime()) ? undefined : value.toISOString();
+  }
+  return normalizeContent(value);
 }
 
 function normalizeContent(value: unknown): string | undefined {

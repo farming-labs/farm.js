@@ -39,3 +39,27 @@ test("checks committed generated types without rewriting stale output", async ()
     await rm(root, { recursive: true, force: true });
   }
 });
+
+test("generates into --root even when farm.config sets another root", async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "farm-cli-generate-root-"));
+  const elsewhere = await mkdtemp(path.join(os.tmpdir(), "farm-cli-generate-elsewhere-"));
+  const apiDirectory = path.join(root, "src/app/api/health");
+  await mkdir(apiDirectory, { recursive: true });
+  await writeFile(
+    path.join(root, "farm.config.mjs"),
+    `export default { root: ${JSON.stringify(elsewhere)} };\n`,
+  );
+  await writeFile(
+    path.join(apiDirectory, "route.ts"),
+    "export const GET = async () => Response.json({ ok: true });\n",
+  );
+
+  try {
+    await generateFarmArtifacts({ root });
+    assert.match(await readFile(path.join(root, "src/lib/api.generated.ts"), "utf8"), /health/);
+    await assert.rejects(readFile(path.join(elsewhere, "src/lib/api.generated.ts"), "utf8"));
+  } finally {
+    await rm(root, { recursive: true, force: true });
+    await rm(elsewhere, { recursive: true, force: true });
+  }
+});

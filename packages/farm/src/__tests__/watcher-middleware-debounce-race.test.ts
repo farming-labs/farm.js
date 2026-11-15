@@ -71,12 +71,13 @@ export default function About() { return <main>about</main>; }`,
 
     // No middleware file exists initially, so the chokidar boot scan never
     // triggers a middleware reload and the spy starts from a clean slate.
-    middlewarePath = path.join(root, "src", "app", "middleware.ts");
-    productsPagePath = path.join(root, "src", "app", "products", "page.tsx");
-    aboutPagePath = path.join(root, "src", "app", "about", "page.tsx");
-
     server = await createServer({ root, images: { provider: "none" } });
     servers.add(server);
+
+    // Replay events the way chokidar reports them: under Vite's resolved root.
+    middlewarePath = path.join(server.config.root, "src", "app", "middleware.ts");
+    productsPagePath = path.join(server.config.root, "src", "app", "products", "page.tsx");
+    aboutPagePath = path.join(server.config.root, "src", "app", "about", "page.tsx");
 
     // chokidar's boot scan schedules a 50 ms route-refresh debounce; let it (and
     // the 100 ms type-artifact debounce) fire and reset before any replay so the

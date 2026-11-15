@@ -1,3 +1,5 @@
+import { normalizeFarmTrailingSlashPathname } from "../trailing-slash";
+import { decodeCookieName } from "../request-cookies";
 import { localizeFarmPathname, resolveFarmLocalePath } from "./routing";
 import { stripFarmBasePath } from "../base-path";
 import type { FarmI18nLocaleSource, ResolvedFarmI18nConfig } from "./types";
@@ -15,6 +17,8 @@ export function getFarmLocaleVaryHeaders(
   resolution: FarmLocaleResolution,
 ): string[] {
   if (!config.enabled || resolution.source === "url") return [];
+  // A locale-neutral file is never resolved from request signals, so it does not vary on them.
+  if (isFarmLocaleNeutralPathname(resolution.pathname)) return [];
 
   const headers: string[] = [];
   if (config.detection.includes("cookie")) headers.push("Cookie");
@@ -63,6 +67,18 @@ export function resolveFarmLocaleRequest(
     };
   }
 
+  // Agents and crawlers fetch site-level files at fixed URLs, and robots.txt is only read at the
+  // origin root. They answer where they are asked for, in the default locale: no redirect to a
+  // detected locale, no cookie, and no Vary on request signals. A locale URL still selects it.
+  if (isFarmLocaleNeutralPathname(pathMatch.pathname)) {
+    return {
+      locale: config.defaultLocale,
+      source: "default",
+      pathname: pathMatch.pathname,
+      persist: false,
+    };
+  }
+
   const detected = detectLocale(request, config);
   const shouldRedirect =
     options.redirect !== false &&
@@ -74,8 +90,12 @@ export function resolveFarmLocaleRequest(
     locale: detected.locale,
     source: detected.source,
     pathname: pathMatch.pathname,
+    // Straight to the locale page's canonical URL, with the app's trailingSlash, not a second hop.
     redirect: shouldRedirect
-      ? `${localizeFarmPathname(pathMatch.pathname, detected.locale, config)}${url.search}${url.hash}`
+      ? `${normalizeFarmTrailingSlashPathname(
+          localizeFarmPathname(pathMatch.pathname, detected.locale, config),
+          config.trailingSlash === true,
+        )}${url.search}${url.hash}`
       : undefined,
     persist: detected.source !== "default",
   };
@@ -192,13 +212,7 @@ function readCookie(header: string | null, name: string): string | undefined {
   for (const part of header.split(";")) {
     const separator = part.indexOf("=");
     if (separator < 0) continue;
-    let key: string;
-    try {
-      key = decodeURIComponent(part.slice(0, separator).trim());
-    } catch {
-      continue;
-    }
-    if (key !== name) continue;
+    if (decodeCookieName(part.slice(0, separator).trim()) !== name) continue;
     try {
       return decodeURIComponent(part.slice(separator + 1).trim());
     } catch {
@@ -206,6 +220,26 @@ function readCookie(header: string | null, name: string): string | undefined {
     }
   }
   return undefined;
+}
+
+/** Application metadata route files, at the root or nested (`/blog/sitemap.xml`). */
+const FARM_LOCALE_NEUTRAL_FILE_NAMES = new Set([
+  "robots.txt",
+  "sitemap.xml",
+  "manifest.webmanifest",
+  "llms.txt",
+  "llms-full.txt",
+]);
+
+/**
+ * Whether a path below the base path and locale names a site-level file that does not vary by
+ * locale: an application metadata route (generated or a route file), an RFC 8615
+ * `/.well-known/` URI (the AI catalog and app manifest among them), or an MCP server card at
+ * `<endpoint>/server-card`, the suffix the AI catalog answers.
+ */
+function isFarmLocaleNeutralPathname(pathname: string): boolean {
+  if (pathname.startsWith("/.well-known/") || pathname.endsWith("/server-card")) return true;
+  return FARM_LOCALE_NEUTRAL_FILE_NAMES.has(pathname.slice(pathname.lastIndexOf("/") + 1));
 }
 
 function isInternalOrApiPath(pathname: string): boolean {

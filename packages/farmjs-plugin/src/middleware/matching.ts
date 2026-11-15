@@ -1,4 +1,8 @@
-import { canonicalizeRequestPathSegments } from "@farm.js/core/middleware";
+import {
+  canonicalizeRequestPathSegments,
+  parseMiddlewareCookieHeader,
+  serializeMiddlewareCookie,
+} from "@farm.js/core/middleware";
 import type { CookieOptions } from "./index.js";
 
 /**
@@ -8,30 +12,11 @@ import type { CookieOptions } from "./index.js";
  * (a latin-1 value from an old link, a crawler, or a bare `%`) must not take
  * the whole map down: an unguarded `decodeURIComponent` throws `URIError`,
  * which fails the request before any middleware runs. Decoding falls back to
- * the raw value per entry instead.
+ * the raw value per entry instead. This is core's parser, so dev and production
+ * agree on which duplicate wins.
  */
 export function parseCookies(cookieHeader?: string): Record<string, string> {
-  if (!cookieHeader) return {};
-
-  return cookieHeader.split(";").reduce(
-    (cookies, cookie) => {
-      const [name, ...rest] = cookie.split("=");
-      const value = rest.join("=").trim();
-      if (name && value) {
-        cookies[name.trim()] = decodeCookieValue(value);
-      }
-      return cookies;
-    },
-    {} as Record<string, string>,
-  );
-}
-
-function decodeCookieValue(value: string): string {
-  try {
-    return decodeURIComponent(value);
-  } catch {
-    return value;
-  }
+  return parseMiddlewareCookieHeader(cookieHeader);
 }
 
 /**
@@ -60,40 +45,9 @@ export function middlewareMatchesPath(pathname: string, middlewarePath: string):
  *
  * `Max-Age=0` is the canonical immediate-expiry directive, so the attribute is
  * emitted whenever `maxAge` is provided — a `0` must not be dropped the way a
- * plain truthiness check would drop it.
+ * plain truthiness check would drop it. This is core's serializer, so a dev
+ * Set-Cookie carries the attributes a browser requires, as production does.
  */
 export function serializeCookie(name: string, value: string, options: CookieOptions = {}): string {
-  let cookie = `${encodeURIComponent(name)}=${encodeURIComponent(value)}`;
-
-  if (options.maxAge != null) {
-    cookie += `; Max-Age=${options.maxAge}`;
-  }
-
-  if (options.expires) {
-    cookie += `; Expires=${options.expires.toUTCString()}`;
-  }
-
-  if (options.path) {
-    cookie += `; Path=${options.path}`;
-  } else {
-    cookie += "; Path=/";
-  }
-
-  if (options.domain) {
-    cookie += `; Domain=${options.domain}`;
-  }
-
-  if (options.secure) {
-    cookie += "; Secure";
-  }
-
-  if (options.httpOnly) {
-    cookie += "; HttpOnly";
-  }
-
-  if (options.sameSite) {
-    cookie += `; SameSite=${options.sameSite.charAt(0).toUpperCase() + options.sameSite.slice(1)}`;
-  }
-
-  return cookie;
+  return serializeMiddlewareCookie(name, value, options);
 }

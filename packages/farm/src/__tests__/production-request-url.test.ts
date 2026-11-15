@@ -1,0 +1,254 @@
+// @vitest-environment node
+import fs from "node:fs";
+import http from "node:http";
+import path from "node:path";
+import { gzipSync } from "node:zlib";
+import { describe, expect, it, vi } from "vitest";
+import { applyMarkdownNegotiationHeaders, resolveMarkdownConfig } from "../markdown";
+import { fetchFarmExternalRewrite } from "../server/response";
+
+function runtime(i18n = false, rewriteDestination = "/base/fr/new?q=rewritten") {
+  const source = fs.readFileSync(path.join(process.cwd(), "src/nitro/universal-build.ts"), "utf8");
+  const start = source.indexOf("async function handleFarmRequest(");
+  const inner = source.indexOf("async function handleFarmRequestInContext(", start);
+  const end = source.indexOf("  if (farmImageHandler", inner);
+  expect(start).toBeGreaterThan(-1);
+  expect(inner).toBeGreaterThan(start);
+  expect(end).toBeGreaterThan(inner);
+  // Expand the same i18n/Markdown template variants as the production builder.
+  // Execute its outer handler and real URL/redirect/rewrite prefix; replace
+  // the unrelated page renderer with a response exposing the resolved URL.
+  const handlers =
+    new Function("config", `return \`${source.slice(start, end)}\`;`)({
+      i18n: { enabled: i18n },
+      md: { enabled: true },
+    }) +
+    '\nreturn new Response(JSON.stringify({pathname, search: url.search}), {headers:{"content-type":"text/html"}});\n}';
+  const parses = vi.fn();
+  const routePathname = (pathname: string) =>
+    pathname.replace(/^\/base/, "").replace(/^\/fr(?=\/)/, "");
+  const request = new Function(
+    "URL",
+    "getFarmRoutePathname",
+    "farmMarkdownConfig",
+    "applyMarkdownNegotiationHeaders",
+    "matchPageRoute",
+    "matchRedirectRoute",
+    "configuredRewriteRoutes",
+    "hasLocalRequestRoute",
+    "matchRewriteRoute",
+    "createRewrittenRequest",
+    "_runWithCurrentRequest",
+    "_runWithFarmI18nRequest",
+    "farmI18nRuntime",
+    "farmI18nConfig",
+    "applyFarmI18nResponse",
+    "isFarmLocalAPIPathname",
+    "farmPluginRuntimeKeepsResponsesPrivate",
+    "_withFarmGuardedResponseCache",
+    "farmPluginRuntime",
+    "fetchFarmExternalRewrite",
+    "farmRequestedUrls",
+    `${handlers}\nreturn handleFarmRequest;`,
+  )(
+    new Proxy(URL, {
+      construct(target, args) {
+        parses(...args);
+        return Reflect.construct(target, args);
+      },
+    }),
+    routePathname,
+    resolveMarkdownConfig(undefined),
+    applyMarkdownNegotiationHeaders,
+    () => true,
+    () => null,
+    ["/old"],
+    (_request: Request, pathname: string) => pathname !== "/old",
+    () => rewriteDestination,
+    (incoming: Request, destination: string) => new Request(new URL(destination, incoming.url)),
+    (_request: Request, handler: () => unknown) => handler(),
+    (_runtime: unknown, _request: Request, handler: (locale: unknown) => unknown) =>
+      handler({ locale: "fr" }),
+    {},
+    {},
+    (response: Response) => response,
+    () => false,
+    false,
+    (response: Response) => response,
+    null,
+    fetchFarmExternalRewrite,
+    new WeakMap<Request, string>(),
+  ) as (request: Request, adapterContext?: unknown) => Promise<Response>;
+  return { request, parses };
+}
+
+describe("production request URL ownership", () => {
+  it("parses once for rendering and Markdown response negotiation", async () => {
+    const r = runtime();
+    const response = await r.request(new Request("https://farm.test/page?q=one&q=two"));
+    expect(await response.json()).toEqual({ pathname: "/page", search: "?q=one&q=two" });
+    expect(response.headers.get("link")).toContain("</page.md>");
+    expect(r.parses).toHaveBeenCalledTimes(1);
+  });
+
+  it.each([false, true])(
+    "reparses configured rewrites without changing original negotiation (i18n=%s)",
+    async (i18n) => {
+      const r = runtime(i18n);
+      const response = await r.request(new Request("https://farm.test/base/fr/old?q=original"));
+      expect(await response.json()).toEqual({ pathname: "/base/fr/new", search: "?q=rewritten" });
+      // The outer response still negotiates against the original public URL,
+      // basePath and locale included, not the rewrite destination.
+      expect(response.headers.get("link")).toContain("</base/fr/old.md>");
+    },
+  );
+
+  it("forwards a rewrite to another origin and drops the encoding fetch decoded", async () => {
+    const upstream = http.createServer((req, res) => {
+      res.setHeader("content-encoding", "gzip");
+      res.end(gzipSync(`upstream ${req.url}`));
+    });
+    await new Promise<void>((resolve) => upstream.listen(0, "127.0.0.1", resolve));
+    const address = upstream.address();
+    if (!address || typeof address === "string") throw new Error("No upstream");
+    try {
+      const r = runtime(false, `http://127.0.0.1:${address.port}/new`);
+      const response = await r.request(new Request("https://farm.test/base/fr/old?q=one"));
+      expect(response.headers.get("content-encoding")).toBeNull();
+      expect(await response.text()).toBe("upstream /new");
+    } finally {
+      await new Promise((resolve) => upstream.close(resolve));
+    }
+  });
+
+  it("passes an upstream redirect through a rewrite to another origin", async () => {
+    let followed = false;
+    const upstream = http.createServer((req, res) => {
+      if (req.url === "/elsewhere") {
+        followed = true;
+        res.end("followed");
+        return;
+      }
+      res.statusCode = 302;
+      res.setHeader("location", "https://login.example/authorize?state=1");
+      res.setHeader("set-cookie", ["oauth_state=1; Path=/", "session=; Max-Age=0"]);
+      res.end();
+    });
+    await new Promise<void>((resolve) => upstream.listen(0, "127.0.0.1", resolve));
+    const address = upstream.address();
+    if (!address || typeof address === "string") throw new Error("No upstream");
+    try {
+      const r = runtime(false, `http://127.0.0.1:${address.port}/login`);
+      const response = await r.request(new Request("https://farm.test/base/fr/old"));
+      // The visitor gets the upstream's redirect and its cookies, as the docs promise: the
+      // upstream response, not the page it points at fetched on the visitor's behalf.
+      expect(response.status).toBe(302);
+      expect(response.headers.get("location")).toBe("https://login.example/authorize?state=1");
+      expect(response.headers.getSetCookie()).toEqual([
+        "oauth_state=1; Path=/",
+        "session=; Max-Age=0",
+      ]);
+      expect(followed).toBe(false);
+    } finally {
+      await new Promise((resolve) => upstream.close(resolve));
+    }
+  });
+
+  it("keeps parsed URLs local to each concurrent request", async () => {
+    const r = runtime();
+    const responses = await Promise.all(
+      ["one", "two"].map((pathname) =>
+        r.request(new Request(`https://farm.test/${pathname}?q=${pathname}`)),
+      ),
+    );
+    expect(await responses[0].json()).toEqual({ pathname: "/one", search: "?q=one" });
+    expect(await responses[1].json()).toEqual({ pathname: "/two", search: "?q=two" });
+    expect(responses[0].headers.get("link")).toContain("</one.md>");
+    expect(responses[1].headers.get("link")).toContain("</two.md>");
+    expect(r.parses).toHaveBeenCalledTimes(2);
+  });
+});
+
+function postMiddlewareRuntime() {
+  // Execute the generated block that adopts the Request middleware returned.
+  const source = fs.readFileSync(path.join(process.cwd(), "src/nitro/universal-build.ts"), "utf8");
+  const start = source.indexOf("  request = middlewareResult.request;");
+  const end = source.indexOf(
+    "  // Middleware may replace the Request when it rewrites a URL.",
+    start,
+  );
+  expect(start).toBeGreaterThan(-1);
+  expect(end).toBeGreaterThan(start);
+  const block = new Function(
+    "hasServerRuntimeIntegrations",
+    `return \`${source.slice(start, end)}\`;`,
+  )(false);
+  const parses = vi.fn();
+  const adopt = new Function(
+    "URL",
+    "getFarmRoutePathname",
+    "request",
+    "middlewareResult",
+    "url",
+    "pathname",
+    "routePathname",
+    `${block}\nreturn { request, url, pathname, routePathname };`,
+  ).bind(
+    null,
+    new Proxy(URL, {
+      construct(target, args) {
+        parses(...args);
+        return Reflect.construct(target, args);
+      },
+    }),
+    (pathname: string) => pathname.replace(/^\/base/, "") || "/",
+  ) as (
+    request: Request,
+    middlewareResult: { request: Request; headers: Headers },
+    url: URL,
+    pathname: string,
+    routePathname: string,
+  ) => { request: Request; url: URL; pathname: string; routePathname: string };
+  return { parses, adopt };
+}
+
+describe("production request URL after middleware", () => {
+  const before = new Request("https://farm.test/base/page?q=one&q=two");
+  const url = new URL(before.url);
+
+  it("reuses the pre-middleware URL when middleware keeps it", () => {
+    const r = postMiddlewareRuntime();
+    // Middleware commonly returns a new Request that only changes headers.
+    const kept = new Request(before, { headers: { "x-from-middleware": "1" } });
+    const result = r.adopt(
+      before,
+      { request: kept, headers: new Headers() },
+      url,
+      "/base/page",
+      "/page",
+    );
+    expect(r.parses).not.toHaveBeenCalled();
+    expect(result.request).toBe(kept);
+    expect(result.url).toBe(url);
+    expect(result).toMatchObject({ pathname: "/base/page", routePathname: "/page" });
+  });
+
+  it.each([
+    ["a rewritten path", "https://farm.test/base/other?q=one&q=two", "/base/other", "/other"],
+    ["a rewritten query", "https://farm.test/base/page?q=three", "/base/page", "/page"],
+  ])("reparses %s", (_label, href, pathname, routePathname) => {
+    const r = postMiddlewareRuntime();
+    const rewritten = new Request(href);
+    const result = r.adopt(
+      before,
+      { request: rewritten, headers: new Headers() },
+      url,
+      "/base/page",
+      "/page",
+    );
+    expect(r.parses).toHaveBeenCalledExactlyOnceWith(href);
+    expect(result.url).not.toBe(url);
+    expect(result.url.href).toBe(href);
+    expect(result).toMatchObject({ pathname, routePathname });
+  });
+});

@@ -1,3 +1,4 @@
+import { loadFarmDevModule } from "@farm.js/core/plugin";
 /**
  * Farm.js API Routes Plugin
  *
@@ -32,12 +33,19 @@ import {
 } from "@farm.js/core/internal/production-runtime";
 import {
   API_ROUTE_METHODS,
+  createFarmInternalServerErrorResponse,
+  FARM_INTERNAL_SERVER_ERROR_BODY,
   getAllowedAPIRouteMethods,
   invokeAPIRouteEndpoint,
   matchAPIRouteAtBasePath,
   resolveAPIRouteEndpoint,
 } from "@farm.js/core/api/runtime";
 import { sendWebResponse } from "@farm.js/core/server";
+import {
+  createDevRequestHeaders,
+  resolveDevRequestURL,
+  resolveViteHtmlFallbackUrl,
+} from "../dev-request.js";
 
 export interface FarmApiOptions {
   /** Source directory containing the api folder (default: 'src') */
@@ -148,11 +156,10 @@ export default function farmApi(options: FarmApiOptions = {}): Plugin {
 
         try {
           return await invokeAPIRouteEndpoint(endpoint, request, match.params);
-        } catch (error: any) {
-          return new Response(JSON.stringify({ error: error.message || "Internal Server Error" }), {
-            status: 500,
-            headers: { "Content-Type": "application/json" },
-          });
+        } catch (error) {
+          // As in core's dev server and production, the failure stays in the server log.
+          console.error(`[API Error] ${pathname}:`, error);
+          return createFarmInternalServerErrorResponse();
         }
       };
 
@@ -196,11 +203,9 @@ export default function farmApi(options: FarmApiOptions = {}): Plugin {
           status: 200,
           headers: { "Content-Type": "application/json" },
         });
-      } catch (error: any) {
-        return new Response(JSON.stringify({ error: error.message || "Internal Server Error" }), {
-          status: 500,
-          headers: { "Content-Type": "application/json" },
-        });
+      } catch (error) {
+        console.error(`[API Error] ${url.pathname}:`, error);
+        return createFarmInternalServerErrorResponse();
       }
     };
   };
@@ -253,7 +258,7 @@ export default function farmApi(options: FarmApiOptions = {}): Plugin {
             const routePath =
               "/api/" + (relativePath === "." ? "" : relativePath.replace(/\\/g, "/"));
 
-            const routeModule = await server.ssrLoadModule(filePath);
+            const routeModule = await loadFarmDevModule(server, filePath);
             const endpoints: Record<string, any> = {};
             const availableMethods: string[] = [];
 
@@ -294,7 +299,7 @@ export default function farmApi(options: FarmApiOptions = {}): Plugin {
         for (const routesFile of routesFiles) {
           if (fs.existsSync(routesFile)) {
             try {
-              const routesModule = await server.ssrLoadModule(routesFile);
+              const routesModule = await loadFarmDevModule(server, routesFile);
 
               // Look for exported endpoints with explicit paths
               for (const [exportName, exportValue] of Object.entries(routesModule)) {
@@ -354,13 +359,21 @@ export default function farmApi(options: FarmApiOptions = {}): Plugin {
       // Add middleware to handle API requests
       return () => {
         const apiMiddleware = _withAfterNodeMiddleware(async (req, res, next) => {
-          const url = req.url || "/";
-          const pathname = url.split("?")[0];
+          // Route on the URL the client sent, not Vite's SPA fallback rewrite,
+          // and put the rewrite back for Vite when this is not an API request.
+          const fallbackUrl = req.url;
+          const requestedUrl = resolveViteHtmlFallbackUrl(req, server.config.base);
+          if (requestedUrl) req.url = requestedUrl;
+          const passThrough = () => {
+            if (requestedUrl && req.url === requestedUrl) req.url = fallbackUrl;
+            return next();
+          };
+          const pathname = resolveDevRequestURL(req).pathname;
           const method = req.method || "GET";
 
           // Only handle /api/ routes
           if (!pathname.startsWith("/api/")) {
-            return next();
+            return passThrough();
           }
 
           // Wait for discovery
@@ -369,7 +382,7 @@ export default function farmApi(options: FarmApiOptions = {}): Plugin {
           }
 
           if (!apiRouterHandler) {
-            return next();
+            return passThrough();
           }
 
           const startTime = Date.now();
@@ -380,7 +393,21 @@ export default function farmApi(options: FarmApiOptions = {}): Plugin {
             if (farmMiddleware) {
               await farmMiddleware.waitForDiscovery?.();
               const middlewareData = new Map<string, any>();
-              const handled = await farmMiddleware.execute(req, res, pathname, middlewareData);
+              let handled: boolean;
+              try {
+                handled = await farmMiddleware.execute(req, res, pathname, middlewareData);
+              } catch (error) {
+                if (res.headersSent) throw error;
+                // As in core's dev server and production: the generic JSON 500, kept out of
+                // shared caches.
+                logResponse(method, pathname, 500, Date.now() - startTime);
+                console.error("[FARM] Middleware error:", error);
+                res.statusCode = 500;
+                res.setHeader("Content-Type", "application/json");
+                res.setHeader("Cache-Control", "private, no-store");
+                res.end(FARM_INTERNAL_SERVER_ERROR_BODY);
+                return;
+              }
               if (handled) {
                 const duration = Date.now() - startTime;
                 logResponse(method, pathname, res.statusCode || 200, duration);
@@ -391,14 +418,8 @@ export default function farmApi(options: FarmApiOptions = {}): Plugin {
             // Convert Node request to Web Request. ctx.rewrite() updates
             // req.url, so dispatch from the current value, not the one
             // captured before middleware ran.
-            const currentUrl = req.url || url;
-            const fullUrl = `http://${req.headers.host || "localhost:3000"}${currentUrl}`;
-            const headers = new Headers();
-            for (const [key, value] of Object.entries(req.headers)) {
-              if (value) {
-                headers.set(key, Array.isArray(value) ? value.join(", ") : value);
-              }
-            }
+            const fullUrl = resolveDevRequestURL(req);
+            const headers = createDevRequestHeaders(req.headers);
 
             // Get body for non-GET requests
             let body: Buffer | undefined;
@@ -434,7 +455,7 @@ export default function farmApi(options: FarmApiOptions = {}): Plugin {
             console.error("[FARM] API error:", error);
             res.statusCode = 500;
             res.setHeader("Content-Type", "application/json");
-            res.end(JSON.stringify({ error: "Internal server error" }));
+            res.end(FARM_INTERNAL_SERVER_ERROR_BODY);
           }
         });
         server.middlewares.use((req, res, next) =>
@@ -472,7 +493,7 @@ export default function farmApi(options: FarmApiOptions = {}): Plugin {
         }
 
         try {
-          const routesModule = await server.ssrLoadModule(file);
+          const routesModule = await loadFarmDevModule(server, file);
 
           // Look for exported endpoints with explicit paths
           // Endpoints can be functions (from better-call) or objects
@@ -531,7 +552,7 @@ export default function farmApi(options: FarmApiOptions = {}): Plugin {
         if (routePathToUpdate) {
           try {
             // Reload the module
-            const routeModule = await server.ssrLoadModule(file);
+            const routeModule = await loadFarmDevModule(server, file);
             const endpoints: Record<string, any> = {};
             const availableMethods: string[] = [];
 
@@ -567,7 +588,7 @@ export default function farmApi(options: FarmApiOptions = {}): Plugin {
             const routePath =
               "/api/" + (relativePath === "." ? "" : relativePath.replace(/\\/g, "/"));
 
-            const routeModule = await server.ssrLoadModule(file);
+            const routeModule = await loadFarmDevModule(server, file);
             const endpoints: Record<string, any> = {};
             const availableMethods: string[] = [];
 

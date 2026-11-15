@@ -1,0 +1,440 @@
+import { canonicalizeRequestPathname } from "../utils/decode";
+import type { MiddlewareConfig, MiddlewareContext, MiddlewareMatcher } from "./types";
+
+interface CompiledPathPattern {
+  kind: "path";
+  regex: RegExp;
+  params: string[];
+}
+
+interface CompiledRegExpPattern {
+  kind: "regexp";
+  regex: RegExp;
+}
+
+interface CompiledSubtreePattern {
+  kind: "subtree";
+  prefix: string;
+}
+
+interface CompiledAllPattern {
+  kind: "all";
+}
+
+type CompiledPattern =
+  | CompiledPathPattern
+  | CompiledRegExpPattern
+  | CompiledSubtreePattern
+  | CompiledAllPattern;
+
+type CompiledMatcher = CompiledPattern | ((ctx: MiddlewareContext) => boolean);
+
+export interface CompiledMiddlewareConfig {
+  matcher?: CompiledMatcher[];
+  exclude?: CompiledPattern[];
+}
+
+interface CachedMiddlewareConfig {
+  compiled: CompiledMiddlewareConfig;
+  matcher: MiddlewareConfig["matcher"];
+  matcherEntries?: MiddlewareMatcher[];
+  excludeEntries?: (string | RegExp)[];
+}
+
+const compiledConfigCache = new WeakMap<MiddlewareConfig, CachedMiddlewareConfig>();
+
+interface FileMiddlewareRoute {
+  path: string;
+}
+
+const compiledRouteCache = new WeakMap<
+  FileMiddlewareRoute,
+  {
+    path: string;
+    exact: CompiledPattern;
+    nested: CompiledPattern;
+  }
+>();
+
+/** Internal file-route preparation shared by discovery and the production runner. */
+export function compileMiddlewareRoute(entry: FileMiddlewareRoute) {
+  const path = entry.path;
+  if (path === "/") return undefined;
+  const cached = compiledRouteCache.get(entry);
+  if (cached?.path === path) return cached;
+  const compiled = {
+    path,
+    exact: compilePattern(path),
+    nested: compilePattern(`${path}/:__farmRest*`),
+  };
+  compiledRouteCache.set(entry, compiled);
+  return compiled;
+}
+
+export function matchesMiddlewareRoute(
+  pathname: string,
+  entry: FileMiddlewareRoute,
+): { matched: boolean; params?: Record<string, string> } {
+  // Compare the live path so edits through getMiddlewares() remain observable.
+  // Weak ownership also releases old patterns when discovery/HMR replaces entries.
+  const compiled = compileMiddlewareRoute(entry);
+  if (!compiled) return { matched: true };
+  const canonicalPathname = canonicalizeRequestPathname(pathname);
+  const exactMatch = matchPattern(compiled.exact, canonicalPathname);
+  if (exactMatch.matched) return exactMatch;
+  const nestedMatch = matchPattern(compiled.nested, canonicalPathname);
+  if (!nestedMatch.matched) return { matched: false };
+  const params = { ...nestedMatch.params };
+  delete params.__farmRest;
+  return { matched: true, params: Object.keys(params).length > 0 ? params : undefined };
+}
+
+/** Match a file middleware route against every pathname the request is served at. */
+export function matchesMiddlewareRouteAt(
+  pathnames: readonly string[],
+  entry: FileMiddlewareRoute,
+): { matched: boolean; params?: Record<string, string> } {
+  for (const pathname of pathnames) {
+    const match = matchesMiddlewareRoute(pathname, entry);
+    if (match.matched) return match;
+  }
+  return { matched: false };
+}
+
+function sameEntries<T>(
+  current: readonly T[] | undefined,
+  previous: readonly T[] | undefined,
+): boolean {
+  return current === undefined || previous === undefined
+    ? current === previous
+    : current.length === previous.length &&
+        current.every((entry, index) => entry === previous[index]);
+}
+
+function toMatcherList(matcher: MiddlewareConfig["matcher"]): MiddlewareMatcher[] {
+  if (!matcher) return [];
+  return Array.isArray(matcher) ? matcher : [matcher];
+}
+
+function escapeRegex(value: string): string {
+  return value.replace(/[|\\{}()[\]^$*+?.]/g, "\\$&");
+}
+
+function parseColonParam(segment: string): { name: string; modifier?: string } {
+  const raw = segment.slice(1);
+  const last = raw[raw.length - 1];
+  const modifier = last === "*" || last === "+" || last === "?" ? last : undefined;
+  return {
+    name: modifier ? raw.slice(0, -1) : raw,
+    modifier,
+  };
+}
+
+const MATCHER_PARAM_NAME = /^[\p{L}\p{N}_$-]+$/u;
+// Regex syntax, a regex `.*` / `.+` (a literal dot then a glob or a plain `+`),
+// or an inline `:param` after literal text (`/user-:id`). Each compiles to a
+// literal that meets no request.
+const MATCHER_UNSUPPORTED_LITERAL = /[()[\]|\\{}^$?:]|\.[*+]/;
+const MATCHER_BRACKET_PARAM = /^\[\[\.\.\.(.+)\]\]$|^\[\.\.\.(.+)\]$|^\[(.+)\]$/;
+
+function isSupportedMatcherSegment(segment: string): boolean {
+  if (segment === "*" || segment === "**") return true;
+  if (segment.startsWith(":")) return MATCHER_PARAM_NAME.test(parseColonParam(segment).name);
+  const bracket = MATCHER_BRACKET_PARAM.exec(segment);
+  if (bracket) return MATCHER_PARAM_NAME.test(bracket[1] ?? bracket[2] ?? bracket[3]);
+  return !MATCHER_UNSUPPORTED_LITERAL.test(segment);
+}
+
+// A `(.*)` subtree compares its prefix as literal text, so a param or wildcard
+// there would never match either.
+function isLiteralMatcherSegment(segment: string): boolean {
+  return !MATCHER_UNSUPPORTED_LITERAL.test(segment) && !segment.includes("*");
+}
+
+/**
+ * Reject a string matcher Farm cannot compile as written. Next-style strings such
+ * as `/((?!api|_next).*)` or `/(api|trpc)(.*)` would otherwise compile to a
+ * literal that meets no request, so a guard behind them silently never runs.
+ *
+ * @internal
+ */
+export function assertSupportedMiddlewareMatcher(pattern: string): void {
+  if (pattern === "*" || pattern === "/(.*)") return;
+  const subtree = pattern.endsWith("(.*)");
+  const path = subtree ? pattern.slice(0, -4) : pattern;
+  const segments = path.split("/").filter(Boolean);
+  if (segments.every(subtree ? isLiteralMatcherSegment : isSupportedMatcherSegment)) return;
+  throw new Error(
+    `Middleware matcher "${pattern}" is not a supported string pattern, so it would never ` +
+      "match a request and the middleware would not run. String matchers do not accept " +
+      "regular-expression syntax such as groups, alternation, character classes, " +
+      "lookaheads, or `.*`, or a param after literal text such as `/user-:id`. Pass a RegExp instead, for example `matcher: /^\\/(?!api|_next).*/`, " +
+      "or use the supported forms: /path/:param, /path/:param*, /path/[param], " +
+      "/path/[...param], /path/*, /path/**, or a trailing (.*) such as /path(.*).",
+  );
+}
+
+function compileConfigPattern(pattern: string | RegExp, compile: typeof compilePattern) {
+  if (typeof pattern === "string") assertSupportedMiddlewareMatcher(pattern);
+  return compile(pattern);
+}
+
+function compilePathPattern(pattern: string, trailingSlash = false): CompiledPathPattern {
+  const params: string[] = [];
+  const segments = pattern.split("/").filter(Boolean);
+
+  if (segments.length === 0) {
+    return { kind: "path", regex: /^\/$/, params };
+  }
+
+  const parts = segments.map((segment) => {
+    if (segment === "**") {
+      return "(?:/.*)?";
+    }
+
+    if (segment === "*") {
+      return "/[^/]+";
+    }
+
+    if (segment.startsWith(":")) {
+      const { name, modifier } = parseColonParam(segment);
+      params.push(name);
+
+      if (modifier === "*") {
+        return "(?:/(.*))?";
+      }
+      if (modifier === "+") {
+        return "/(.+)";
+      }
+      if (modifier === "?") {
+        return "(?:/([^/]+))?";
+      }
+      return "/([^/]+)";
+    }
+
+    // `[[...slug]]` is an optional catch-all: like `[...slug]`, it also meets
+    // the bare parent path. Checked first, or the `[` branch below reads it as
+    // one required segment named `[...slug]`.
+    if (segment.startsWith("[[...") && segment.endsWith("]]")) {
+      params.push(segment.slice(5, -2));
+      return "(?:/(.*))?";
+    }
+
+    if (segment.startsWith("[...") && segment.endsWith("]")) {
+      params.push(segment.slice(4, -1));
+      return "(?:/(.*))?";
+    }
+
+    if (segment.startsWith("[") && segment.endsWith("]")) {
+      params.push(segment.slice(1, -1));
+      return "/([^/]+)";
+    }
+
+    return `/${escapeRegex(segment).replace(/\\\*/g, "[^/]*")}`;
+  });
+
+  return {
+    kind: "path",
+    regex: new RegExp(`^${parts.join("")}${trailingSlash ? "/?" : ""}$`),
+    params,
+  };
+}
+
+/**
+ * Compile a config `matcher` entry. Every route matcher drops a trailing slash,
+ * so `/api/admin/users/` reaches the same API handler (and the same page, via
+ * its redirect) as `/api/admin/users`. A guard written as the exact path has to
+ * run for both, or the trailing slash walks past it. `exclude` keeps the exact
+ * comparison so a trailing slash can only add a guard, never remove one.
+ */
+function compileMatcherPattern(pattern: string | RegExp): CompiledPattern {
+  if (typeof pattern === "string" && pattern !== "*" && !pattern.endsWith("(.*)")) {
+    return compilePathPattern(pattern, true);
+  }
+  return compilePattern(pattern);
+}
+
+function compilePattern(pattern: string | RegExp): CompiledPattern {
+  if (pattern instanceof RegExp) {
+    return { kind: "regexp", regex: pattern };
+  }
+
+  if (pattern === "*" || pattern === "/(.*)") {
+    return { kind: "all" };
+  }
+
+  if (pattern.endsWith("(.*)")) {
+    return {
+      kind: "subtree",
+      prefix: pattern.slice(0, -4).replace(/\/$/, ""),
+    };
+  }
+
+  return compilePathPattern(pattern);
+}
+
+export function compileMiddlewareConfig(config: MiddlewareConfig): CompiledMiddlewareConfig {
+  const compiled = {
+    matcher: config.matcher
+      ? toMatcherList(config.matcher).map((matcher) =>
+          typeof matcher === "function"
+            ? matcher
+            : compileConfigPattern(matcher, compileMatcherPattern),
+        )
+      : undefined,
+    exclude: config.exclude?.map((pattern) => compileConfigPattern(pattern, compilePattern)),
+  };
+  compiledConfigCache.set(config, {
+    compiled,
+    matcher: config.matcher,
+    matcherEntries: Array.isArray(config.matcher) ? config.matcher.slice() : undefined,
+    excludeEntries: config.exclude?.slice(),
+  });
+  return compiled;
+}
+
+function matchPattern(
+  pattern: CompiledPattern,
+  pathname: string,
+): { matched: boolean; params?: Record<string, string> } {
+  if (pattern.kind === "all") {
+    return { matched: true };
+  }
+
+  if (pattern.kind === "subtree") {
+    return {
+      matched: pathname === pattern.prefix || pathname.startsWith(`${pattern.prefix}/`),
+    };
+  }
+
+  pattern.regex.lastIndex = 0;
+  const match = pattern.regex.exec(pathname);
+  if (!match) {
+    return { matched: false };
+  }
+
+  if (pattern.kind === "regexp") {
+    return {
+      matched: true,
+      params: match.groups ? { ...match.groups } : undefined,
+    };
+  }
+
+  const values: Record<string, string> = {};
+  pattern.params.forEach((param, index) => {
+    // The captured text came out of the canonical pathname, so it is already
+    // decoded once. Decoding it again would turn a literal "%2541BC" segment
+    // into "ABC".
+    values[param] = match[index + 1] || "";
+  });
+
+  return {
+    matched: true,
+    params: Object.keys(values).length > 0 ? values : undefined,
+  };
+}
+
+/** `ctx` with `pathname` read as `routePathname`; everything else, writes included, is `ctx`. */
+function withRoutePathname(ctx: MiddlewareContext, routePathname: string): MiddlewareContext {
+  return new Proxy(ctx, {
+    get(target, key) {
+      return key === "pathname" || key === "routePathname"
+        ? routePathname
+        : Reflect.get(target, key, target);
+    },
+  });
+}
+
+/**
+ * Evaluate a function matcher or `.when()` condition. Apps write these against
+ * `ctx.pathname`, the raw request path, which is still percent-encoded and still
+ * carries basePath/locale, while string matchers and the router see the route
+ * pathname. Checking the predicate against both keeps `/%61dmin` and
+ * `/console/admin` from walking past `ctx.pathname.startsWith("/admin")`. Only
+ * adds matches: a predicate true for the raw path stays true.
+ */
+export function matchesMiddlewarePredicate(
+  predicate: (ctx: MiddlewareContext) => boolean,
+  ctx: MiddlewareContext,
+  getRoutePathname: () => string | undefined = () => ctx.routePathname,
+): boolean {
+  if (predicate(ctx)) return true;
+  const routePathname = getRoutePathname();
+  if (routePathname === undefined || routePathname === ctx.pathname) return false;
+  return Boolean(predicate(withRoutePathname(ctx, routePathname)));
+}
+
+/** The route pathname for a request path, as string matchers compare it. */
+export function toMiddlewareRoutePathname(
+  pathname: string,
+  toRoutePathname: (pathname: string) => string = (value) => value,
+): string {
+  return canonicalizeRequestPathname(toRoutePathname(pathname));
+}
+
+export function matchesCompiledMiddlewareConfig(
+  pathname: string,
+  config: CompiledMiddlewareConfig,
+  ctx: MiddlewareContext,
+): { matched: boolean; params?: Record<string, string> } {
+  let canonicalPathname: string | undefined;
+  // Canonicalize at most once for the whole config, and only when a pattern or
+  // a function matcher that missed the raw path needs it.
+  const getCanonicalPathname = () => (canonicalPathname ??= canonicalizeRequestPathname(pathname));
+
+  if (config.exclude) {
+    for (const pattern of config.exclude) {
+      if (matchPattern(pattern, getCanonicalPathname()).matched) {
+        return { matched: false };
+      }
+    }
+  }
+
+  if (config.matcher) {
+    for (const matcher of config.matcher) {
+      if (typeof matcher === "function") {
+        if (matchesMiddlewarePredicate(matcher, ctx, getCanonicalPathname)) {
+          return { matched: true };
+        }
+        continue;
+      }
+
+      const result = matchPattern(matcher, getCanonicalPathname());
+      if (result.matched) {
+        return result;
+      }
+    }
+    return { matched: false };
+  }
+
+  return { matched: true };
+}
+
+export function matchesMiddlewareConfig(
+  pathname: string,
+  config: MiddlewareConfig,
+  ctx: MiddlewareContext,
+): { matched: boolean; params?: Record<string, string> } {
+  const cached = compiledConfigCache.get(config);
+  const unchanged =
+    cached &&
+    (Array.isArray(config.matcher)
+      ? sameEntries(config.matcher, cached.matcherEntries)
+      : config.matcher === cached.matcher) &&
+    sameEntries(config.exclude, cached.excludeEntries);
+  const compiled = unchanged ? cached.compiled : compileMiddlewareConfig(config);
+  return matchesCompiledMiddlewareConfig(pathname, compiled, ctx);
+}
+
+/** Match a middleware config against every pathname the request is served at. */
+export function matchesMiddlewareConfigAt(
+  pathnames: readonly string[],
+  config: MiddlewareConfig,
+  ctx: MiddlewareContext,
+): { matched: boolean; params?: Record<string, string> } {
+  for (const pathname of pathnames) {
+    const match = matchesMiddlewareConfig(pathname, config, ctx);
+    if (match.matched) return match;
+  }
+  return { matched: false };
+}

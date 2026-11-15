@@ -111,6 +111,35 @@ describe("compiled React runtime", () => {
     expect(baseCommits).toBe(2);
   });
 
+  it("flushes an update as the first microtask after the handler", async () => {
+    const CompiledCounter = createCompiledCounter(() => undefined);
+    const container = document.createElement("div");
+    document.body.append(container);
+    const root = createRoot(container);
+    roots.push(root);
+    await act(async () => root.render(<CompiledCounter />));
+
+    const button = container.querySelector("button")!;
+    const seen: string[] = [];
+    await act(async () => {
+      // React's root listener runs the handler before this ancestor listener.
+      document.body.addEventListener(
+        "click",
+        () => {
+          // The update is queued during dispatch, ahead of this microtask.
+          seen.push(`sync ${button.textContent}`);
+          queueMicrotask(() => seen.push(`microtask ${button.textContent}`));
+        },
+        { once: true },
+      );
+      button.click();
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    expect(seen).toEqual(["sync Count: 0", "microtask Count: 1"]);
+  });
+
   it("preserves the host markup across SSR and hydration", async () => {
     const Counter = createCompiledCounter(() => {});
     const html = renderToString(<Counter />);

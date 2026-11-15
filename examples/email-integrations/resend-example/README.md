@@ -82,6 +82,11 @@ To run it:
 2. Start the example: `pnpm --dir examples/email-integrations/resend-example dev`
 3. Open [http://localhost:3005](http://localhost:3005)
 
+The send, schedule, and preview routes spend your Resend credits, so the integration refuses
+callers that `authorize` does not allow. This example allows every caller in development and none
+in production; replace `authorize` in `src/lib/integrations.ts` with your session check before
+deploying it.
+
 For a real webhook listener, point Resend or a tunnel at:
 
 - `http://localhost:3005/api/email/webhook`

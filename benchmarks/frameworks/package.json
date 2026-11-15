@@ -5,6 +5,9 @@
   "scripts": {
     "self-check": "node run.mjs --self-check"
   },
+  "devDependencies": {
+    "parse5": "7.3.0"
+  },
   "engines": {
     "node": ">=22.19.0 <23 || >=24.11.0"
   },

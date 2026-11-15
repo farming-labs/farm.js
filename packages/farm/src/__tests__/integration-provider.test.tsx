@@ -203,7 +203,7 @@ describe("integration providers", () => {
       } as any,
       {} as any,
     );
-    (renderer as any).viteServer = { ssrLoadModule };
+    (renderer as any).viteServer = { environments: { ssr: { runner: { import: ssrLoadModule } } } };
     (renderer as any).rendererRuntime = { createElement };
 
     const wrapped = await (renderer as any).wrapWithIntegrationProviders(

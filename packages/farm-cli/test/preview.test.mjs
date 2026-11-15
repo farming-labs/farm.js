@@ -293,6 +293,28 @@ test("resolves a running local preview target", async () => {
   }
 });
 
+test("never swaps an explicit port for another running app", async () => {
+  const other = await createTestServer();
+  const stopped = await createTestServer();
+  await stopped.close();
+  const previous = process.env.PORT;
+  // PORT is a detection candidate; it must not stand in for the port that was asked for.
+  process.env.PORT = String(other.port);
+  try {
+    await assert.rejects(
+      resolvePreviewTarget({ port: stopped.port, timeoutMs: 500 }),
+      new RegExp(`No running Farm app was found \\(http://localhost:${stopped.port}\\)`),
+    );
+    const detected = await resolvePreviewTarget({ timeoutMs: 500 });
+    assert.equal(detected.port, other.port);
+    assert.equal(detected.source, "detected");
+  } finally {
+    if (previous === undefined) delete process.env.PORT;
+    else process.env.PORT = previous;
+    await other.close();
+  }
+});
+
 test("formats a bare IPv6 preview host as a valid local URL", async () => {
   const target = await resolvePreviewTarget({ host: "::1", port: 4321, noProbe: true });
 
@@ -437,6 +459,26 @@ test("carries a configured relay credential without putting it in the relay URL"
     );
   } finally {
     restoreEnv("FARM_PREVIEW_RELAY_TOKEN", previousToken);
+  }
+});
+
+test("reads the app's .env files, as farm dev does, even with an explicit port", async () => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), "farm-preview-env-"));
+  const previous = process.env.FARM_PREVIEW_NAME;
+  delete process.env.FARM_PREVIEW_NAME;
+  try {
+    await fs.writeFile(path.join(root, ".env"), "FARM_PREVIEW_NAME=from-dotenv\n");
+    const result = await previewFarm({
+      root,
+      provider: "farm",
+      port: 3000,
+      noProbe: true,
+      dryRun: true,
+    });
+    assert.equal(result.plan.requestedName, "from-dotenv");
+  } finally {
+    restoreEnv("FARM_PREVIEW_NAME", previous);
+    await fs.rm(root, { recursive: true, force: true });
   }
 });
 
@@ -703,7 +745,9 @@ test("forwards a gateway request to the local target", async () => {
   const server = await createTestServer((req, res) => {
     res.statusCode = 201;
     res.setHeader("content-type", "application/json");
-    res.end(JSON.stringify({ method: req.method, url: req.url }));
+    res.end(
+      JSON.stringify({ method: req.method, url: req.url, preview: req.headers["x-farm-preview"] }),
+    );
   });
 
   try {
@@ -720,6 +764,9 @@ test("forwards a gateway request to the local target", async () => {
         path: "/api/hello?from=gateway",
         headers: {
           "content-type": "text/plain",
+          // The dev server keeps developer-only files off marked requests; a visitor cannot
+          // choose the value.
+          "x-farm-preview": "forged",
         },
         body: Buffer.from("hello").toString("base64"),
         encoding: "base64",
@@ -731,6 +778,7 @@ test("forwards a gateway request to the local target", async () => {
     assert.deepEqual(JSON.parse(Buffer.from(response.body, "base64").toString()), {
       method: "POST",
       url: "/api/hello?from=gateway",
+      preview: "1",
     });
   } finally {
     await server.close();
@@ -1318,6 +1366,157 @@ test("runs farm preview dry-run through the CLI", async () => {
   }
 });
 
+test("farm preview --no-probe skips the reachability check for an explicit port", async () => {
+  // Nothing listens here, so a probe would fail with "No running Farm app was found".
+  const { port, close } = await createTestServer();
+  await close();
+
+  const { stdout } = await execFileAsync(
+    process.execPath,
+    [cliBin, "preview", "--port", String(port), "--no-probe", "--dry-run"],
+    {
+      env: {
+        ...process.env,
+        FARM_PREVIEW_HOST: "",
+        FARM_PREVIEW_TUNNEL_COMMAND: "farm-preview-agent tunnel --url {url}",
+      },
+    },
+  );
+
+  assert.match(stdout, new RegExp(`Local:\\s+http://localhost:${port}`));
+  assert.match(stdout, /dry run completed/i);
+});
+
+test("farm preview uses FARM_PREVIEW_HOST unless --host is passed", async () => {
+  const server = await createTestServer();
+  const run = (...args) =>
+    execFileAsync(
+      process.execPath,
+      [cliBin, "preview", "--port", String(server.port), ...args, "--dry-run"],
+      {
+        env: {
+          ...process.env,
+          FARM_PREVIEW_HOST: "127.0.0.1",
+          FARM_PREVIEW_TUNNEL_COMMAND: "farm-preview-agent tunnel --url {url}",
+        },
+      },
+    );
+
+  try {
+    assert.match(
+      (await run()).stdout,
+      new RegExp(`Local:\\s+http://127\\.0\\.0\\.1:${server.port}`),
+    );
+    assert.match(
+      (await run("--host", "localhost")).stdout,
+      new RegExp(`Local:\\s+http://localhost:${server.port}`),
+    );
+  } finally {
+    await server.close();
+  }
+});
+
+test("local providers reach the app through a proxy that marks preview requests", async () => {
+  const dir = await fs.mkdtemp(path.join(os.tmpdir(), "farm-preview-local-proxy-"));
+  const resultFile = path.join(dir, "result.json");
+  const script = path.join(dir, "tunnel.cjs");
+  // A stand-in tunnel: it sends visitor requests to the URL farm preview gave it, including ones
+  // that try to forge or strip the marker, opens an HMR-style upgrade, then reports a public URL.
+  await fs.writeFile(
+    script,
+    `const http = require("node:http");
+const fs = require("node:fs");
+const [url, port] = process.argv.slice(2);
+const send = (path, headers = {}) => new Promise((resolve, reject) => {
+  const request = http.request(new URL(path, url), { headers }, (response) => {
+    let body = "";
+    response.on("data", (chunk) => (body += chunk));
+    response.on("end", () => resolve(JSON.parse(body)));
+  });
+  request.on("error", reject);
+  request.end();
+});
+const upgrade = () => new Promise((resolve, reject) => {
+  const request = http.request(new URL("/hmr", url), {
+    headers: { connection: "Upgrade", upgrade: "websocket", "x-farm-preview": "forged" },
+  });
+  request.on("upgrade", (_response, socket) => {
+    socket.once("data", (data) => { resolve(String(data)); socket.destroy(); });
+    socket.write("ping");
+  });
+  request.on("error", reject);
+  request.end();
+});
+(async () => {
+  const result = { url, port, envUrl: process.env.FARM_PREVIEW_LOCAL_URL };
+  result.plain = await send("/plain");
+  result.forged = await send("/forged", { "x-farm-preview": "forged" });
+  result.nominated = await send("/nominated", { connection: "x-farm-preview", "x-farm-preview": "" });
+  result.upgrade = await upgrade();
+  fs.writeFileSync(process.env.FARM_TEST_RESULT_FILE, JSON.stringify(result));
+  process.stdout.write("tunnel ready at https://marked-preview.example.test\\n");
+})().catch((error) => { console.error(error); process.exit(1); });
+`,
+  );
+  const app = createServer((req, res) => {
+    res.setHeader("content-type", "application/json");
+    res.end(
+      JSON.stringify({
+        marker: req.headers["x-farm-preview"] ?? null,
+        connection: req.headers.connection ?? null,
+      }),
+    );
+  });
+  app.on("upgrade", (req, socket) => {
+    socket.write(
+      "HTTP/1.1 101 Switching Protocols\r\nConnection: Upgrade\r\nUpgrade: websocket\r\n\r\n",
+    );
+    socket.once("data", (data) => socket.end(`marker=${req.headers["x-farm-preview"]};${data}`));
+  });
+  await new Promise((resolve) => app.listen(0, "127.0.0.1", resolve));
+  const appPort = app.address().port;
+
+  const previous = {
+    command: process.env.FARM_PREVIEW_TUNNEL_COMMAND,
+    resultFile: process.env.FARM_TEST_RESULT_FILE,
+  };
+  process.env.FARM_PREVIEW_TUNNEL_COMMAND = `${JSON.stringify(process.execPath)} ${JSON.stringify(script)} {url} {port}`;
+  process.env.FARM_TEST_RESULT_FILE = resultFile;
+  try {
+    const preview = await previewFarm({
+      root: dir,
+      provider: "local",
+      url: `http://127.0.0.1:${appPort}`,
+      timeoutMs: 10_000,
+    });
+    assert.equal(preview.publicUrl, "https://marked-preview.example.test");
+    const result = JSON.parse(await fs.readFile(resultFile, "utf8"));
+
+    // The tunnel targets the proxy, never the app port directly.
+    assert.notEqual(Number(result.port), appPort);
+    assert.equal(result.url, `http://127.0.0.1:${result.port}`);
+    assert.equal(result.envUrl, result.url);
+    assert.equal(preview.plan.target.port, Number(result.port));
+    assert.equal(preview.target.port, appPort);
+
+    // Every request carries the marker; a visitor's value is replaced, and naming the marker in
+    // Connection cannot get it dropped on the way to the dev server.
+    assert.equal(result.plain.marker, "1");
+    assert.equal(result.forged.marker, "1");
+    assert.equal(result.nominated.marker, "1");
+    assert.doesNotMatch(String(result.nominated.connection), /x-farm-preview/);
+    assert.equal(result.upgrade, "marker=1;ping");
+
+    // The proxy stops with the tunnel.
+    await assert.rejects(fetch(`http://127.0.0.1:${result.port}/`));
+  } finally {
+    restoreEnv("FARM_PREVIEW_TUNNEL_COMMAND", previous.command);
+    restoreEnv("FARM_TEST_RESULT_FILE", previous.resultFile);
+    await new Promise((resolve) => app.close(resolve));
+    await fs.rm(dir, { recursive: true, force: true });
+  }
+});
+
 async function createTestServer(handler) {
   const server = createServer(
     handler ||
@@ -1639,6 +1838,34 @@ test("ignores vendor documentation URLs before a built-in tunnel is ready", asyn
   const publicUrl = await runPreviewTunnel(plan, 2_000);
   assert.equal(publicUrl, "https://actual-preview.trycloudflare.com");
 });
+
+test(
+  "reads tunnel output that arrives after the tunnel process exits",
+  // The grandchild reproduction relies on POSIX pipe inheritance; on Windows
+  // the noisy-prologue test below covers the same "exit"-before-drain race.
+  { skip: process.platform === "win32" },
+  async () => {
+    // A launcher can exit while the process it started still holds stdout, so
+    // the URL lands in output that arrives after the "exit" event.
+    const announce =
+      "setTimeout(() => process.stdout.write('tunnel ready at https://late-preview.trycloudflare.com\\n'), 100);";
+    const script =
+      "const { spawn } = require('node:child_process');" +
+      `spawn(process.execPath, ['-e', ${JSON.stringify(announce)}], { stdio: ['ignore', 'inherit', 'inherit'] });` +
+      "process.exit(0);";
+
+    const plan = {
+      command: process.execPath,
+      args: ["-e", script],
+      target: { localUrl: "http://127.0.0.1:3000", host: "127.0.0.1", port: 3000, source: "port" },
+      requestedName: "late-preview",
+      requestedHostname: "late-preview.preview.farmjs.dev",
+    };
+
+    const publicUrl = await runPreviewTunnel(plan, 10_000);
+    assert.equal(publicUrl, "https://late-preview.trycloudflare.com");
+  },
+);
 
 test("finds the preview URL after a noisy tunnel prologue", async () => {
   // The scan buffer is bounded, so a tunnel that prints a lot before announcing

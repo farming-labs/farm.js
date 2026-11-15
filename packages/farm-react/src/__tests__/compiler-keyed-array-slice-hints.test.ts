@@ -34,7 +34,7 @@ describe("React AOT keyed-array slice hints", () => {
     expect(result.optimizations.keyedArraySliceHints).toBe(1);
     expect(result.code).toContain("createCompilerKeyedArraySlice");
     expect(result.code).toContain("filterIndexIndependent={true}");
-    expect(result.code).toContain("keyedRowsFilterHintedRuntimeFeature");
+    expect(result.code).toContain("keyedRowsFilterOnlyRuntimeFeature");
     await expect(
       transformWithEsbuild(result.code, "/app/KeyedArraySliceHints.tsx", {
         loader: "tsx",
@@ -61,7 +61,7 @@ describe("React AOT keyed-array slice hints", () => {
 
     expect(result.optimizations.keyedArrayFilterHints).toBe(1);
     expect(result.optimizations.keyedArraySliceHints).toBe(1);
-    expect(result.code).toContain("keyedRowsFilterHintedRuntimeFeature");
+    expect(result.code).toContain("keyedRowsFilterOnlyRuntimeFeature");
     expect(result.code).not.toContain("keyedRowsFilterPrependHintedRuntimeFeature");
   });
 
@@ -83,7 +83,7 @@ describe("React AOT keyed-array slice hints", () => {
     expect(result.diagnostics).toEqual([]);
     expect(result.optimizations.keyedArraySliceHints).toBe(1);
     expect(result.code).toContain("createCompilerKeyedArraySlice");
-    expect(result.code).toContain("keyedRowsFilterHintedRuntimeFeature");
+    expect(result.code).toContain("keyedRowsFilterOnlyRuntimeFeature");
     await expect(
       transformWithEsbuild(result.code, "/app/KeyedArraySliceHints.tsx", {
         loader: "tsx",
@@ -113,7 +113,7 @@ describe("React AOT keyed-array slice hints", () => {
     expect(result.diagnostics).toEqual([]);
     expect(result.optimizations.keyedArraySliceHints).toBe(4);
     expect(result.code.match(/createCompilerKeyedArraySlice\(/g)).toHaveLength(4);
-    expect(result.code).toContain("keyedRowsFilterHintedRuntimeFeature");
+    expect(result.code).toContain("keyedRowsFilterOnlyRuntimeFeature");
   });
 
   it.each([

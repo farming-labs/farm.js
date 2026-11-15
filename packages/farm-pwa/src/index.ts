@@ -1,4 +1,5 @@
 import { definePlugin } from "@farm.js/core/plugin";
+import { isFarmRendererDisabled } from "@farm.js/core/renderer";
 import { normalizeBasePath, withBasePath, writePwaBuildArtifacts } from "./build.js";
 import {
   resolvePwaOptions,
@@ -58,6 +59,14 @@ export function pwa(options: PwaPluginOptions = {}) {
     name: "farm:pwa",
 
     configure(config) {
+      // A service worker caches pages for offline navigation; a backend-only app has none.
+      if (isFarmRendererDisabled(config.renderer)) {
+        throw new Error(
+          "[farm:pwa] A PWA service worker caches pages for offline use, but this app sets " +
+            "`renderer: false` and has no pages. Remove pwa(), or remove `renderer: false` to " +
+            "render pages.",
+        );
+      }
       configuredRoot = config.root ?? ".";
       const basePath = normalizeBasePath(config.basePath);
       configuredBasePath = basePath;

@@ -34,7 +34,6 @@ This example enables route-level `loading.tsx` and `error.tsx` boundaries with:
 export default defineConfig({
   experimental: {
     serverComponents: true,
-    serverActions: true,
   },
 });
 ```
@@ -157,6 +156,6 @@ Important notes:
 
 After exploring this basic example, check out:
 
-- [With Database Example](../with-database) - Shows data fetching and database integration
-- [E-commerce Example](../e-commerce) - A full-featured e-commerce application
-- [Documentation](../../docs) - Complete Farm.js documentation
+- [Local-first Example](../local-first) - A task list with data that syncs and works offline
+- [Stripe Integration Example](../stripe-integration) - Checkout and billing with `@farm.js/stripe`
+- [Documentation](https://farmjs.dev/docs) - Complete Farm.js documentation

@@ -755,4 +755,31 @@ declare module "@farm.js/core" {
   ): Record<string, FarmIntegrationSchema>;
 
   export function getRegisteredIntegrationSchemas(): Record<string, FarmIntegrationSchema>;
+
+  export type IntegrationOriginRejection =
+    | "missing-origin"
+    | "opaque-origin"
+    | "invalid-origin"
+    | "cross-site";
+
+  export type IntegrationOriginResult =
+    | { ok: true }
+    | { ok: false; reason: IntegrationOriginRejection };
+
+  export interface IntegrationOriginPolicy {
+    allowedOrigins?: readonly string[];
+    requireOriginMetadata?: boolean;
+  }
+
+  export function validateIntegrationRequestOrigin(
+    request: Request,
+    policy?: IntegrationOriginPolicy,
+  ): IntegrationOriginResult;
+
+  export function describeIntegrationOriginRejection(reason: IntegrationOriginRejection): string;
+
+  export function resolveIntegrationAllowedOrigins(
+    values: readonly string[] | undefined,
+    label: string,
+  ): readonly string[];
 }

@@ -30,7 +30,7 @@ function GitHubIcon() {
 export function ResourceLinks({ className = "" }: ResourceLinksProps) {
   return (
     <nav className={className} aria-label="Project resources">
-      <a href="https://farm.js.dev/docs/renderers/preact">
+      <a href="https://farmjs.dev/docs/renderers/preact">
         <DocsIcon />
         <span>Docs</span>
       </a>

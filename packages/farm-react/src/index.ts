@@ -1,4 +1,5 @@
 import type { FarmRenderer } from "@farm.js/core/renderer";
+import { resolveCompilerOption } from "./compiler-options";
 
 export type ReactCompilerMode = "infer" | "annotation";
 export type ReactCompilerReactivity = "static" | "hybrid";
@@ -20,11 +21,25 @@ export interface ReactCompilerOptions {
   report?: boolean;
   /** Project-relative report location. Providing it also enables reporting. */
   reportFile?: string;
+  /**
+   * Mount the app's own `createRoot` roots without React DOM when their tree is fully compiled.
+   * The build points `import { createRoot } from "react-dom/client"` in app modules at
+   * `@farm.js/react/compiled-root`, which loads React DOM on demand for anything else.
+   * While on, `onChange` rows beside or inside conditional content or in a list between static
+   * siblings compile to blocks such roots run themselves and React DOM renders through React;
+   * `false` keeps them on the smaller React-owned list. Defaults to `true`.
+   */
+  compiledRoot?: boolean;
 }
 
 export interface ReactRendererOptions {
+  /**
+   * Farm's AOT compiler. `true` enables automatic inference; an object
+   * customizes selection. Unsupported components always stay on React.
+   */
+  compiler?: boolean | ReactCompilerOptions;
   experimental?: {
-    /** `true` enables automatic inference; an object customizes selection. */
+    /** @deprecated Use the top-level `compiler` option. */
     compiler?: boolean | ReactCompilerOptions;
   };
 }
@@ -36,6 +51,7 @@ export interface NormalizedReactCompilerOptions {
   reactivity: ReactCompilerReactivity;
   report: boolean;
   reportFile: string;
+  compiledRoot: boolean;
 }
 
 export const DEFAULT_COMPILER_DIRECTIVE = "use compiler";
@@ -92,8 +108,12 @@ export function normalizeReactCompilerOptions(
   }
   const reportFile = normalizeCompilerReportFile(options.reportFile);
   const report = options.report === true || options.reportFile !== undefined;
+  if (options.compiledRoot !== undefined && typeof options.compiledRoot !== "boolean") {
+    throw new TypeError("The React compiler compiledRoot option must be a boolean.");
+  }
+  const compiledRoot = options.compiledRoot !== false;
 
-  return { mode, directive, onUnsupported, reactivity, report, reportFile };
+  return { mode, directive, onUnsupported, reactivity, report, reportFile, compiledRoot };
 }
 
 const REACT_RENDERER: Readonly<FarmRenderer> = Object.freeze({
@@ -122,9 +142,9 @@ const REACT_RENDERER: Readonly<FarmRenderer> = Object.freeze({
   },
 });
 
-/** Select React and optionally enable Farm's experimental AOT compiler. */
+/** Select React and optionally enable Farm's AOT compiler. */
 export function react(options: ReactRendererOptions = {}): FarmRenderer {
-  const compiler = options.experimental?.compiler;
+  const compiler = resolveCompilerOption(options, true);
   const normalizedCompiler = compiler ? normalizeReactCompilerOptions(compiler) : false;
 
   return {
@@ -142,7 +162,7 @@ export function react(options: ReactRendererOptions = {}): FarmRenderer {
       functionComponents: true,
     },
     options: {
-      experimental: { compiler: normalizedCompiler },
+      compiler: normalizedCompiler,
     },
   };
 }

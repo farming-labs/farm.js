@@ -11,6 +11,8 @@ export function wasm(options: WasmOptions = {}): FarmPlugin {
 
   function plugins(): PluginOption[] {
     const upstream = wasmPlugin();
+    let browserTarget: string | string[] | undefined;
+    let targetValidation: Promise<void> | undefined;
     // The upstream helper uses a root URL. Farm handles page requests before
     // Vite, so give this virtual module Vite's standard null-prefixed identity.
     const helper = "/__vite-plugin-wasm-helper";
@@ -18,11 +20,31 @@ export function wasm(options: WasmOptions = {}): FarmPlugin {
     return [
       {
         ...upstream,
+        configResolved(config) {
+          upstream.configResolved.call(this, config);
+          browserTarget =
+            config.command === "build" && !config.build.ssr
+              ? config.build.target || "esnext"
+              : undefined;
+          targetValidation = undefined;
+        },
         resolveId(id, ...args) {
           if (id === helper) return virtualHelper;
           return upstream.resolveId.call(this, id, ...args);
         },
-        load(id, ...args) {
+        async load(id, ...args) {
+          if (browserTarget && id.toLowerCase().endsWith(".wasm") && !args[0]?.ssr) {
+            // Rolldown preserves top-level await for older targets. Validate the
+            // syntax once, only when a browser or worker actually imports Wasm.
+            targetValidation ??= import("esbuild").then(async ({ transform }) => {
+              await transform("await 0;", {
+                target: browserTarget,
+                format: "esm",
+                logLevel: "silent",
+              });
+            });
+            await targetValidation;
+          }
           return upstream.load.call(this, id === virtualHelper ? helper : id, ...args);
         },
       } satisfies Plugin,

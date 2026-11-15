@@ -579,8 +579,15 @@ async function loadElement(
   store: ScriptStore,
   definition: Readonly<ResolvedScriptDefinition>,
 ): Promise<unknown> {
-  const existingValue = findLoadedValue(store, definition);
-  if (existingValue.found) return existingValue.value;
+  // Only an element this runtime already finished loading counts as loaded.
+  // Pages commonly pre-seed a vendor global (`window.dataLayer ||= []`)
+  // before the vendor script runs, so the global alone proves nothing.
+  if (
+    findManagedElement(store.window.document, definition.name)?.dataset.farmScriptState === "ready"
+  ) {
+    const existingValue = findLoadedValue(store, definition);
+    if (existingValue.found) return existingValue.value;
+  }
 
   removeStaleElements(store.window.document, definition.name);
   const script = store.window.document.createElement("script");

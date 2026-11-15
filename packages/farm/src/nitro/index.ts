@@ -1,3 +1,4 @@
+import { createBundledEnv } from "../env";
 import type { NitroConfig } from "nitro/types";
 import type { ResolvedFarmConfig } from "../config";
 import type { RouteManager } from "../routing/route-manager";
@@ -58,7 +59,8 @@ export async function createNitroConfig(
     distDir,
   });
   const scheduledTasks = mergeScheduledTasks(farmWorkflows.scheduledTasks, farmCron.scheduledTasks);
-  const cloudflareCronConfig = createFarmCronCloudflareConfig(farmCron.jobs);
+  const cloudflareCronConfig =
+    farmCron.provider === "host" ? createFarmCronCloudflareConfig(farmCron.jobs) : undefined;
 
   // Create a runtime registry file to store route managers
   // This will be populated at runtime through Nitro hooks
@@ -92,7 +94,7 @@ export const farmRegistry: {
   clientManifest?: any;
   routePaths?: Record<string, string>;
 } = {
-  env: ${JSON.stringify(config.env || { server: {}, public: {} }, null, 2)},
+  env: ${JSON.stringify(createBundledEnv(config.env), null, 2)},
   deploymentId: ${JSON.stringify(config.deploymentId)},
   basePath: ${JSON.stringify(config.basePath)},
   apiBasePath: ${JSON.stringify(apiBasePath)},
@@ -254,7 +256,7 @@ import type { H3Event } from 'h3';
 import { farmRegistry } from '../farm-registry';
 import React from 'react';
 import { renderToString } from 'react-dom/server';
-import { searchParamsToObject } from '@farm.js/core/internal/production-runtime';
+import { createFarmSearchParams, searchParamsToObject } from '@farm.js/core/internal/production-runtime';
 import { createFarmLegacyRequest, renderFarmLegacyErrorHtml, renderFarmLegacyHtml } from '@farm.js/core/internal/production-runtime';
 
 export default defineEventHandler(async (event: H3Event) => {
@@ -426,7 +428,7 @@ export default defineEventHandler(async (event: H3Event) => {
       // Create page props
       const rawPageProps = {
         params,
-        searchParams: Promise.resolve(searchParamsObject),
+        searchParams: createFarmSearchParams(searchParamsObject),
         path: pathname,
       };
       const pageProps = routeModule.__farmResolveRouteProps
@@ -445,7 +447,7 @@ export default defineEventHandler(async (event: H3Event) => {
               ...rawPageProps,
               params: parsedParams,
               search: parsedSearch,
-              searchParams: Promise.resolve(parsedSearch),
+              searchParams: createFarmSearchParams(parsedSearch),
             };
           })();
       
@@ -523,9 +525,10 @@ export default defineEventHandler(async (event: H3Event) => {
     preset,
     // rootDir must be the project root for Nitro to correctly resolve paths
     rootDir: root,
-    // serverDir should point to where source files are (for scanning)
-    // But we're using scanDirs to point to our server directory
-    serverDir: root,
+    // Only scan the generated server directory below, never the project root:
+    // an app's own `middleware/`, `api/`, or `server.ts` is not a Nitro handler.
+    serverDir: false,
+    serverEntry: false,
     // buildDir is where Nitro builds (temporary working directory)
     buildDir: nitroBuildDir,
     // output.dir is where the final deployable output goes
@@ -619,7 +622,7 @@ export default defineEventHandler(async (event: H3Event) => {
           farmRegistry.apiRouteManager = apiRouteManager;
           farmRegistry.routeManager = routeManager;
           farmRegistry.serverRenderer = serverRenderer;
-          farmRegistry.env = config.env || { server: {}, public: {} };
+          farmRegistry.env = createBundledEnv(config.env);
           farmRegistry.deploymentId = config.deploymentId;
           farmRegistry.basePath = config.basePath;
         };
@@ -673,7 +676,7 @@ export default defineEventHandler(async (event: H3Event) => {
     },
     // Experimental features
     experimental: {
-      tasks: farmWorkflows.workflows.length > 0 || farmCron.jobs.length > 0,
+      tasks: farmWorkflows.workflows.length > 0 || Object.keys(farmCron.tasks).length > 0,
     },
     wasm: false, // Disable for now to avoid issues
   };

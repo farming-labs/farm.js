@@ -96,3 +96,16 @@ export function farmPluginMayAffectRuntimePath(plugin: FarmPlugin, pathname: str
 
   return Boolean(plugin.setup || runtime?.start || runtime?.close);
 }
+
+/**
+ * Whether a server plugin's `runtime.before` runs for every request without declaring
+ * `runtime.cache: "public"`. Like middleware, it may be a guard that let this visitor through,
+ * so the responses it lets pass stay out of shared caches.
+ *
+ * @internal
+ */
+export function _farmPluginsKeepResponsesPrivate(plugins: readonly FarmPlugin[]): boolean {
+  return plugins.some(
+    (plugin) => typeof plugin?.runtime?.before === "function" && plugin.runtime.cache !== "public",
+  );
+}

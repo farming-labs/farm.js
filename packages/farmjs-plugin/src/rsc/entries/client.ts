@@ -1,4 +1,19 @@
 import type { EntryContext } from "../types.js";
+import { generateMobileShellNavigation } from "../mobile-client.js";
+
+// The browser entry always loads, so what it imports must be optimized before the first page.
+export const CLIENT_ENTRY_CORE_IMPORTS = [
+  "@farm.js/core/client",
+  "@farm.js/core/deployment",
+  "@farm.js/core/internal/client-runtime",
+  "@farm.js/core/server-query/client",
+] as const;
+
+/** What the browser entry of an app with i18n imports as well. */
+export const CLIENT_ENTRY_I18N_IMPORTS = [
+  "@farm.js/core/i18n",
+  "@farm.js/core/i18n/client",
+] as const;
 
 export const serverFnTransportErrorClientRuntime = `function createFarmServerFnTransportError(value) {
   const message = value && typeof value === 'object' && typeof value.message === 'string'
@@ -63,11 +78,67 @@ import {
   createFarmDeploymentRequestHeaders,
   isFarmDeploymentMismatchResponse,
 } from '@farm.js/core/deployment';
+import {
+  createFarmMetadataHeadReconciler,
+  createFarmRouteAnnouncer,
+  runFarmNavigationDelegates,
+} from '@farm.js/core/internal/client-runtime';
 `;
+  // <Link href="/about"> renders /console/about under basePath "/console", as the RSC server
+  // rendered it, so the page hydrates with the same href.
+  if (!["", "/"].includes(ctx.basePath.trim())) {
+    imports += `import { setFarmBasePath } from '@farm.js/core/internal/client-runtime';
+setFarmBasePath(${JSON.stringify(ctx.basePath)});
+`;
+  }
+  // trailingSlash: <Link href="/about"> renders /about/, as the RSC server rendered it.
+  if (ctx.trailingSlash) {
+    imports += `import { setFarmTrailingSlashPreference } from '@farm.js/core/internal/client-runtime';
+setFarmTrailingSlashPreference(true);
+`;
+  }
+
+  const i18n = ctx.i18n?.enabled === true;
+  if (i18n) {
+    imports += `import { localizeFarmHref, resolveFarmLocalePath } from '@farm.js/core/i18n';
+import { _setFarmI18nClientSnapshot } from '@farm.js/core/i18n/client';
+
+// A link to another locale loads as a document, as Farm's <Link> does in other apps, so the page
+// and the catalog its client components read change together.
+function farmIsLocaleChange(url) {
+  const snapshot = window.__FARM_I18N__;
+  if (!snapshot || snapshot.routing === 'none') return false;
+  const target = resolveFarmLocalePath(url.pathname, snapshot);
+  return (target.locale || snapshot.defaultLocale) !== snapshot.locale;
+}
+
+// A redirect() thrown while a navigation renders goes to its target in the page's locale, as the
+// server localizes the redirects it answers.
+function farmLocalizeRedirect(url) {
+  const snapshot = window.__FARM_I18N__;
+  return snapshot && url.startsWith('/') && !url.startsWith('//')
+    ? localizeFarmHref(url, snapshot.locale, snapshot)
+    : url;
+}
+`;
+  }
+
+  // farm dev --mobile: every page runs in the shell's WebView, so this entry is the mobile client.
+  if (ctx.mobileClient === "inline") {
+    imports += generateMobileShellNavigation();
+  }
+
+  // The app's client plugins and src/client.ts. Without any, the entry has no plugin runtime.
+  const clientPlugins = ctx.clientPlugins?.empty === false ? ctx.clientPlugins : undefined;
+  if (clientPlugins) {
+    imports += `import { createClientPluginManager } from '@farm.js/core/internal/client-runtime';
+${clientPlugins.imports}
+`;
+  }
 
   if (ctx.actionsEnabled) {
     imports += `import { setServerCallback, encodeReply, createTemporaryReferenceSet } from '@vitejs/plugin-rsc/browser';
-import { applyFarmCacheInvalidations } from '@farm.js/core/cache';
+import { applyFarmCacheInvalidations } from '@farm.js/core/internal/client-runtime';
 import {
   beginFarmServerQueryAction,
   completeFarmServerQueryAction,
@@ -142,8 +213,7 @@ setServerCallback(async (id, args) => {
     // router performs the navigation here.
     if (p.returnValue?.redirect?.url) {
       debug('Server action redirected:', p.returnValue.redirect.url);
-      history.pushState(null, '', p.returnValue.redirect.url);
-      await farmNavigateRef.current?.(location.href);
+      await farmNavigateRef.current?.(p.returnValue.redirect.url, 'push');
       return;
     }
     debug('Server action failed:', id);
@@ -158,6 +228,64 @@ const setPayloadRef = { current: null };
 const farmNavigateRef = { current: null };
 `;
   }
+
+  // Code that only an entry with client plugins has. Each fragment is empty without them, so that
+  // entry stays as it was.
+  const withPlugins = (code: string) => (clientPlugins ? code : "");
+  const clientPluginRuntime = clientPlugins
+    ? `
+// Client plugins run on the manager Farm's other entries use, with this entry's router. A
+// navigation runs their hooks from refetch() and resolves once React commits its payload. The
+// route announcer in BrowserRoot announces navigations, so the manager doesn't.
+let farmRouterReady;
+const farmRouterStarted = new Promise((resolve) => {
+  farmRouterReady = resolve;
+});
+const farmRefreshRef = { current: null };
+const farmClientRuntime = createClientPluginManager(
+  ${clientPlugins.registrations},
+  {
+    router: {
+      // The router exists once the page hydrates; a hook that navigates earlier waits for it.
+      async navigate(href, options) {
+        await farmRouterStarted;
+        await farmNavigateRef.current(href, options?.replace === true ? 'replace' : 'push');
+      },
+      async refresh() {
+        await farmRouterStarted;
+        await farmRefreshRef.current();
+      },
+    },
+    isDev: import.meta.env?.DEV === true,
+    isProd: import.meta.env?.PROD === true,
+    deploymentId: farmDeploymentId,
+    announceRoutes: false,
+  },
+);
+window.__FARM_CLIENT_RUNTIME__ = farmClientRuntime;
+void farmClientRuntime.start();
+if (import.meta.hot) {
+  import.meta.hot.dispose(() => farmClientRuntime.close('hmr'));
+}
+
+// Every payload the root is given, numbered in order, so a navigation knows when React has
+// committed its payload or a later one that replaced it.
+let farmPayloadCount = 0;
+const farmPayloadSequence = new WeakMap();
+const farmPendingCommits = [];
+function farmCommitPayload(payload, signal) {
+  const setPayload = setPayloadRef.current;
+  if (!setPayload) return Promise.resolve();
+  return new Promise((resolve) => {
+    setPayload(payload);
+    // A newer navigation superseded this one, so nothing waits for it.
+    if (signal.aborted) return resolve();
+    signal.addEventListener('abort', () => resolve(), { once: true });
+    farmPendingCommits.push({ sequence: farmPayloadSequence.get(payload), resolve });
+  });
+}
+`
+    : "";
 
   return `${imports}
 ${ctx.clientCachePersistence?.imports ?? ""}
@@ -175,6 +303,34 @@ function reportDeploymentMismatch(response) {
 function debug(...args) {
   ${debugLog}
 }
+${clientPluginRuntime}
+// A server component that fails while a client navigation renders it: a redirect() becomes a
+// client navigation to its target, and anything else loads the URL as a document, so the server
+// answers with its status and error.tsx. Errors in the first render are left to React.
+class FarmNavigationErrorBoundary extends React.Component {
+  constructor(props) {
+    super(props);
+    this.state = { error: null, payload: props.payload };
+  }
+  static getDerivedStateFromProps(props, state) {
+    return props.payload === state.payload ? null : { error: null, payload: props.payload };
+  }
+  static getDerivedStateFromError(error) {
+    return { error };
+  }
+  componentDidCatch(error) {
+    const digest = error && typeof error.digest === 'string' ? error.digest : '';
+    if (digest.startsWith('FARM_REDIRECT;')) {
+      farmNavigateRef.current?.(${i18n ? "farmLocalizeRedirect(digest.split(';').slice(2).join(';'))" : "digest.split(';').slice(2).join(';')"}, 'replace');
+      return;
+    }
+    location.reload();
+  }
+  render() {
+    if (this.state.error && !this.props.navigated) throw this.state.error;
+    return this.state.error ? null : this.props.children;
+  }
+}
 
 async function main() {
   // Prevent double execution (e.g. script loaded twice)
@@ -182,9 +338,10 @@ async function main() {
   
   debug('Starting client hydration');
   
-  // Clean duplicate DOM as early as possible (server may have sent two blocks)
+  // Clean duplicate DOM as early as possible (server may have sent two blocks). Only Farm's own
+  // wrapper: an app that owns the document can have an element with id="root" in its content.
   const rootEl = document.getElementById('root');
-  if (rootEl) {
+  if (rootEl && rootEl.firstElementChild?.hasAttribute('data-farm-root')) {
     while (rootEl.children.length > 1) rootEl.lastElementChild.remove();
     while (rootEl.nextElementSibling) rootEl.nextElementSibling.remove();
   }
@@ -199,40 +356,70 @@ async function main() {
     console.error('[Farm.js] Failed to deserialize RSC payload:', e);
     return;
   }
-  
+
+  // The page the document loaded with is the baseline: it is never announced.
+  const announceRoute = createFarmRouteAnnouncer();
+  // The head tags the server rendered from the page's metadata, which navigations replace.
+  const applyMetadataHead = createFarmMetadataHeadReconciler(initial.metadataHead ?? '');
+${
+  i18n
+    ? `  // The locale the server rendered with, before anything hydrates (window.__FARM_I18N__).
+  if (initial.i18n) _setFarmI18nClientSnapshot(initial.i18n);
+`
+    : ""
+}
   // Root component that manages RSC state
   function BrowserRoot() {
     const [payload, set] = React.useState(initial);
     
     // Expose setter for external updates (navigation, actions, HMR)
     React.useEffect(() => {
-      setPayloadRef.current = (p) => React.startTransition(() => set(p));
+      setPayloadRef.current = ${
+        clientPlugins
+          ? `(p) => {
+        farmPayloadSequence.set(p, ++farmPayloadCount);
+        React.startTransition(() => set(p));
+      };
+      farmRouterReady();`
+          : "(p) => React.startTransition(() => set(p));"
+      }
     }, []);
 
-    // Keep document metadata in sync when an RSC navigation swaps only #root.
+    // Keep the document head in sync when an RSC navigation swaps only #root: the title, and the
+    // tags the server renders from the route's metadata (description, canonical, alternates,
+    // robots, Open Graph...), replaced as a page load of the route renders them.
     React.useEffect(() => {
-      if (typeof payload.metadata?.title === 'string') {
-        document.title = payload.metadata.title;
-      } else {
-        document.title = '';
+      document.title = typeof payload.metadata?.title === 'string' ? payload.metadata.title : '';
+      applyMetadataHead(payload.metadataHead ?? '');
+    }, [payload]);
+${
+  i18n
+    ? `
+    // A payload from back/forward or a refresh carries its locale (and, in development, edited
+    // messages): client components re-read it before the browser paints.
+    React.useLayoutEffect(() => {
+      if (payload !== initial && payload.i18n) _setFarmI18nClientSnapshot(payload.i18n);
+    }, [payload]);
+`
+    : ""
+}
+    // Announce a client navigation to screen readers once its page and title are in place.
+    React.useEffect(() => {
+      if (payload !== initial) announceRoute();
+    }, [payload]);
+${withPlugins(`
+    // A navigation's hooks wait for React to commit its payload, or one set after it.
+    React.useEffect(() => {
+      const committed = farmPayloadSequence.get(payload) ?? 0;
+      while (farmPendingCommits.length > 0 && farmPendingCommits[0].sequence <= committed) {
+        farmPendingCommits.shift().resolve();
       }
-      let description = document.querySelector('meta[name="description"]');
-      if (typeof payload.metadata?.description === 'string') {
-        if (!description) {
-          description = document.createElement('meta');
-          description.setAttribute('name', 'description');
-          document.head.appendChild(description);
-        }
-        description.setAttribute('content', payload.metadata.description);
-      } else {
-        description?.remove();
-      }
-    }, [payload.metadata?.title, payload.metadata?.description]);
-    
+    }, [payload]);
+`)}    
     // Set up client-side navigation
     React.useEffect(() => {
       // Re-fetch RSC when URL changes
-      const nav = () => refetch(location.href);
+      const nav = () => refetch(location.href${withPlugins(", { action: 'pop', from: null }")});
       
       // Handle browser back/forward
       window.addEventListener('popstate', nav);
@@ -256,8 +443,8 @@ async function main() {
           }
 
           e.preventDefault();
-          history.pushState(null, '', a.href);
-          nav();
+          // Link replace marks its anchor; a plain anchor pushes.
+          navigate(a.href, a.hasAttribute('data-replace') ? 'replace' : 'push');
         }
       };
       
@@ -276,30 +463,75 @@ async function main() {
       if (payload.root != null) console.warn('[Farm.js] payload.rootContent missing; not using payload.root to avoid duplicate block. Keys:', Object.keys(payload));
       return null;
     }
-    return content;
+    return React.createElement(
+      FarmNavigationErrorBoundary,
+      { payload, navigated: payload !== initial },
+      content,
+    );
   }
   
+  // An in-app navigation (a link click, a redirect after a server action). Navigation delegates
+  // get it first, after the router's own checks, as Farm's other routers offer it: one that takes
+  // it (a native shell showing the URL on its own screen) leaves the page and URL as they are.
+  // Back/forward, refreshes and same-page moves are not offered; other origins load as documents.
+  async function navigate(href, action) {
+    const url = new URL(href, location.href);
+    if (url.origin !== location.origin${i18n ? " || farmIsLocaleChange(url)" : ""}) {
+      location.assign(url.href);
+      return;
+    }
+    const from = location.pathname + location.search;
+    const to = url.pathname + url.search;
+    if (to !== from && (await runFarmNavigationDelegates({ url: url.href, from, to, action }))) {
+      return;
+    }
+${withPlugins("    const fromHref = location.href;\n")}    if (action === 'replace') history.replaceState(null, '', url.href);
+    else history.pushState(null, '', url.href);
+    await refetch(location.href${withPlugins(", { action, from: fromHref }")});
+  }
+  farmNavigateRef.current = navigate;
+${withPlugins("  farmRefreshRef.current = () => refetch(location.href, { action: 'replace', from: location.href });\n")}
   // Fetch new RSC payload for a URL
-  farmNavigateRef.current = (url) => refetch(url);
-  async function refetch(url) {
+  async function refetch(url${withPlugins(", navigation")}) {
     debug('Fetching RSC for:', url);
-    
+    ${withPlugins("let session;")}
     try {
-      // Request RSC format instead of HTML
-      const res = await fetch(url, {
+${withPlugins(`      // A navigation (not an HMR or server action refresh) runs the client plugins' hooks.
+      if (navigation) {
+        session = await farmClientRuntime.beginNavigation({
+          from: navigation.from,
+          to: url,
+          action: navigation.action,
+        });
+      }
+`)}      // Request the page's RSC payload, '<page>.rsc', which a prerendered page serves as a
+      // static file. The page URL itself may be static HTML.
+      const payloadUrl = new URL(url, location.href);
+      payloadUrl.pathname = payloadUrl.pathname.endsWith('/')
+        ? payloadUrl.pathname + 'index.rsc'
+        : payloadUrl.pathname + '.rsc';
+      const res = await fetch(payloadUrl, {
         headers: createFarmDeploymentRequestHeaders(farmDeploymentId, {
           Accept: 'text/x-component',
         }),
       });
       if (isFarmDeploymentMismatchResponse(res, farmDeploymentId)) {
-        reportDeploymentMismatch(res);
+        ${
+          clientPlugins
+            ? `const error = reportDeploymentMismatch(res);
+        if (session) await farmClientRuntime.failNavigation(session, error);`
+            : "reportDeploymentMismatch(res);"
+        }
         location.assign(url);
         return;
       }
       
       if (!res.ok) {
         console.error('[Farm.js] RSC fetch failed:', res.status);
-        // Fall back to full page navigation
+${withPlugins(`        if (session) {
+          await farmClientRuntime.failNavigation(session, new Error('RSC fetch failed: ' + res.status));
+        }
+`)}        // Fall back to full page navigation
         location.href = url;
         return;
       }
@@ -310,6 +542,10 @@ async function main() {
       // reflect the page actually rendered (auth gates redirect this way).
       if (res.redirected && res.url) {
         const dest = new URL(res.url);
+        if (dest.pathname.endsWith('.rsc')) {
+          const page = dest.pathname.slice(0, -'.rsc'.length);
+          dest.pathname = page.endsWith('/index') ? page.slice(0, -'index'.length) : page;
+        }
         if (dest.origin === location.origin) {
           const target = dest.pathname + dest.search + dest.hash;
           if (target !== location.pathname + location.search + location.hash) {
@@ -318,27 +554,66 @@ async function main() {
         }
       }
       const newPayload = await createFromReadableStream(res.body);
-      setPayloadRef.current?.(newPayload);
+      ${
+        clientPlugins
+          ? `if (session) {
+        await farmClientRuntime.markNavigationLoaded(session);
+        // Not awaited: a server action that redirects awaits this navigation, and React commits
+        // the payload only once that action is done.
+        void farmCommitPayload(newPayload, session.signal)
+          .then(() => farmClientRuntime.resolveNavigation(session))
+          .then(() => farmClientRuntime.scheduleNavigationRendered(session));
+      } else {
+        setPayloadRef.current?.(newPayload);
+      }`
+          : "setPayloadRef.current?.(newPayload);"
+      }
       debug('RSC navigation complete');
     } catch (e) {
       console.error('[Farm.js] RSC navigation failed:', e);
-      // Fall back to full page navigation
+${withPlugins("      if (session) await farmClientRuntime.failNavigation(session, e);\n")}      // Fall back to full page navigation
       location.href = url;
     }
   }
-  const rootElForHydrate = document.getElementById('root');
+  // A root layout that renders <html> owns the document: hydrate it whole, as Next.js does.
+  const rootElForHydrate = initial.ownsDocument ? document : document.getElementById('root');
   if (!rootElForHydrate) {
     console.error('[Farm.js] #root element not found');
     return;
   }
-  // Final cleanup pass before hydrate (in case DOM changed during async)
-  while (rootElForHydrate.children.length > 1) rootElForHydrate.lastElementChild.remove();
-  while (rootElForHydrate.nextElementSibling) rootElForHydrate.nextElementSibling.remove();
+${withPlugins(`  // As in Farm's other entries, client plugins have set up before the page hydrates.
+  const hydration = await farmClientRuntime.beginHydration({
+    container: initial.ownsDocument ? document.documentElement : rootElForHydrate,
+    mode: 'hydrate',
+  });
+`)}  if (!initial.ownsDocument) {
+    // Final cleanup pass before hydrate (in case DOM changed during async)
+    while (rootElForHydrate.children.length > 1) rootElForHydrate.lastElementChild.remove();
+    while (rootElForHydrate.nextElementSibling) rootElForHydrate.nextElementSibling.remove();
+  }
   debug('Hydrating application');
   globalThis.__FARM_RSC_HYDRATED = true;
-  hydrateRoot(rootElForHydrate, React.createElement(BrowserRoot), {
+  // The server renders #root inside <html>{[<head>, <body>]}</html>. That two-child fork is part of
+  // every useId below it, so the client hydrates #root at the same position (second of two) and
+  // its ids match the HTML's. A document the root layout owns is hydrated whole, as rendered.
+  const hydrated = initial.ownsDocument
+    ? React.createElement(BrowserRoot)
+    : [null, React.createElement(BrowserRoot, { key: 'root' })];
+  ${
+    clientPlugins
+      ? `try {
+    hydrateRoot(rootElForHydrate, hydrated, {
+      formState: initial.formState,
+    });
+    await farmClientRuntime.completeHydration(hydration);
+  } catch (error) {
+    await farmClientRuntime.failHydration(hydration, error);
+    throw error;
+  }`
+      : `hydrateRoot(rootElForHydrate, hydrated, {
     formState: initial.formState,
-  });
+  });`
+  }
   
   // Handle HMR for server components
   // When server code changes, re-fetch and re-render

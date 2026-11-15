@@ -73,10 +73,11 @@ async function findProgrammaticRouteSourceFiles(srcRoot: string): Promise<string
   }
 
   try {
-    const glob = await import("fast-glob");
-    return await glob.default("**/*.{ts,tsx,js,jsx}", {
+    const { glob } = await import("tinyglobby");
+    return await glob("**/*.{ts,tsx,js,jsx}", {
       cwd: srcRoot,
       absolute: true,
+      expandDirectories: false,
       ignore: [
         "**/*.d.ts",
         "**/node_modules/**",

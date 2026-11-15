@@ -1,3 +1,4 @@
+import { loadFarmDevModule } from "../dev-module";
 /**
  * Middleware Manager
  *
@@ -8,12 +9,10 @@ import * as fs from "fs";
 import * as path from "path";
 import type { ViteDevServer } from "vite";
 import { toFileModuleUrl } from "../utils/file-module";
-import { canonicalizeRequestPathname } from "../utils/decode";
 import type { IncomingMessage, ServerResponse } from "http";
 import type {
   FarmMiddlewareConfig,
   MiddlewareFunction,
-  MiddlewareMatcher,
   MiddlewareConfig,
   MiddlewareContext,
   MiddlewareResult,
@@ -32,9 +31,21 @@ import { stripFarmLocaleFromPathname } from "../i18n/routing";
 import { stripFarmBasePath } from "../base-path";
 import type { ResolvedFarmI18nConfig } from "../i18n/types";
 import { createCliColors } from "../cli-colors";
-import { appendMiddlewareRoutePath } from "./path";
+import {
+  appendMiddlewareDirectory,
+  appendMiddlewareRoutePath,
+  compareMiddlewareRouteLocations,
+  type MiddlewareRouteLocation,
+} from "./path";
 import type { FarmServerConfig, ResolvedFarmServerConfig } from "../server-http";
 import { resolveFarmRequestURL } from "../server/request";
+import {
+  compileMiddlewareConfig,
+  compileMiddlewareRoute,
+  matchesMiddlewareConfigAt,
+  matchesMiddlewareRouteAt,
+} from "./matcher";
+import { createFarmAPIMiddlewarePathnames } from "../api/server-path";
 
 export interface DiscoveredMiddleware {
   path: string;
@@ -59,6 +70,7 @@ export class MiddlewareManager {
   private appDirs: string[];
   private i18n?: ResolvedFarmI18nConfig;
   private server?: FarmServerConfig | ResolvedFarmServerConfig;
+  private toMiddlewarePathnames: (pathname: string) => readonly string[];
 
   constructor(
     appDir: string | readonly string[],
@@ -66,11 +78,14 @@ export class MiddlewareManager {
     config?: FarmMiddlewareConfig,
     i18n?: ResolvedFarmI18nConfig,
     server?: FarmServerConfig | ResolvedFarmServerConfig,
+    /** The app's public API path (`api.basePath`); `/api` middleware guards it too. */
+    apiBasePath?: string,
   ) {
     this.appDirs = Array.isArray(appDir) ? [...appDir] : [appDir as string];
     this.viteServer = viteServer;
     this.i18n = i18n;
     this.server = server;
+    this.toMiddlewarePathnames = createFarmAPIMiddlewarePathnames(apiBasePath);
     this.configure(config);
   }
 
@@ -85,6 +100,7 @@ export class MiddlewareManager {
     for (const [index, entry] of entries.entries()) {
       const handlers = this.getConfigHandlers(entry);
       const middlewareConfig = this.toMiddlewareConfig(entry);
+      compileMiddlewareConfig(middlewareConfig);
 
       if (handlers.length === 0) {
         this.globalConfig = middlewareConfig;
@@ -105,22 +121,27 @@ export class MiddlewareManager {
    * Discover all middleware.ts files
    */
   async discover(): Promise<void> {
-    const middlewareByPath = new Map<string, DiscoveredMiddleware>();
+    // Keyed by folder, not URL path: route groups share a URL path, and every
+    // group's middleware has to run. A later layer still overrides the same folder.
+    const middlewareByDirectory = new Map<
+      string,
+      { location: MiddlewareRouteLocation; middleware: DiscoveredMiddleware }
+    >();
     for (const appDir of this.appDirs) {
-      const discovered: DiscoveredMiddleware[] = [];
-      await this.discoverInDirectory(appDir, "/", discovered);
-      for (const middleware of discovered) {
-        middlewareByPath.set(middleware.path, middleware);
+      const discovered: Array<{
+        location: MiddlewareRouteLocation;
+        middleware: DiscoveredMiddleware;
+      }> = [];
+      await this.discoverInDirectory(appDir, "/", "", discovered);
+      for (const entry of discovered) {
+        compileMiddlewareRoute(entry.middleware);
+        middlewareByDirectory.set(entry.location.directory, entry);
       }
     }
-    this.middleware = Array.from(middlewareByPath.values());
-
-    // Sort by path depth (root first, then nested)
-    this.middleware.sort((a, b) => {
-      const depthA = a.path.split("/").filter(Boolean).length;
-      const depthB = b.path.split("/").filter(Boolean).length;
-      return depthA - depthB;
-    });
+    // Root first, then nested; the same order production discovery emits.
+    this.middleware = Array.from(middlewareByDirectory.values())
+      .sort((left, right) => compareMiddlewareRouteLocations(left.location, right.location))
+      .map((entry) => entry.middleware);
 
     if (process.env.FARM_VERBOSE && this.middleware.length > 0) {
       logger.success(`Discovered ${this.middleware.length} middleware files`);
@@ -136,7 +157,8 @@ export class MiddlewareManager {
   private async discoverInDirectory(
     dir: string,
     routePath: string,
-    discovered: DiscoveredMiddleware[],
+    directory: string,
+    discovered: Array<{ location: MiddlewareRouteLocation; middleware: DiscoveredMiddleware }>,
   ): Promise<void> {
     if (!fs.existsSync(dir)) {
       return;
@@ -147,17 +169,21 @@ export class MiddlewareManager {
     if (middlewareFile) {
       const middleware = await this.loadMiddleware(middlewareFile, routePath);
       if (middleware) {
-        discovered.push(middleware);
+        discovered.push({ location: { path: routePath, directory }, middleware });
       }
     }
 
     // Recursively check subdirectories
     const entries = fs.readdirSync(dir, { withFileTypes: true });
     for (const entry of entries) {
-      if (entry.isDirectory() && !entry.name.startsWith(".") && !entry.name.startsWith("_")) {
-        const subPath = path.join(dir, entry.name);
-        const subRoutePath = appendMiddlewareRoutePath(routePath, entry.name);
-        await this.discoverInDirectory(subPath, subRoutePath, discovered);
+      // `_private` folders still route their pages, so their middleware has to guard them.
+      if (entry.isDirectory() && !entry.name.startsWith(".")) {
+        await this.discoverInDirectory(
+          path.join(dir, entry.name),
+          appendMiddlewareRoutePath(routePath, entry.name),
+          appendMiddlewareDirectory(directory, entry.name),
+          discovered,
+        );
       }
     }
   }
@@ -184,7 +210,7 @@ export class MiddlewareManager {
       // Load the module
       let module: any;
       if (this.viteServer) {
-        module = await this.viteServer.ssrLoadModule(filePath);
+        module = await loadFarmDevModule(this.viteServer, filePath);
       } else {
         module = await import(/* @vite-ignore */ toFileModuleUrl(filePath));
       }
@@ -192,6 +218,9 @@ export class MiddlewareManager {
       const normalized = normalizeMiddlewareModule(module, routePath);
       if (!normalized) {
         throw new Error("must export a default handler or a named middleware handler");
+      }
+      if (normalized.config) {
+        compileMiddlewareConfig(normalized.config);
       }
 
       return {
@@ -214,14 +243,17 @@ export class MiddlewareManager {
     const pathname = url.pathname;
     // Match the app path page routing sees: without basePath (the locale step
     // strips it too), as the production runner does.
-    const routePathname = this.i18n?.enabled
-      ? stripFarmLocaleFromPathname(pathname, this.i18n)
-      : stripFarmBasePath(pathname, this.i18n?.basePath ?? "/");
+    const toRoutePathname = (value: string) =>
+      this.i18n?.enabled
+        ? stripFarmLocaleFromPathname(value, this.i18n)
+        : stripFarmBasePath(value, this.i18n?.basePath ?? "/");
+    const routePathname = toRoutePathname(pathname);
+    const toMiddlewarePathnames = this.toMiddlewarePathnames;
     const method = req.method || "GET";
     const startTime = Date.now();
 
     let parentData: MiddlewareContext["parent"] | undefined;
-    let ctx = createContext(req, res, this.viteServer, undefined, this.server);
+    let ctx = createContext(req, res, this.viteServer, undefined, this.server, toRoutePathname);
 
     if (this.globalConfig) {
       const globalMatch = this.matchesConfig(routePathname, this.globalConfig, ctx);
@@ -240,7 +272,10 @@ export class MiddlewareManager {
     }> = [
       ...this.configMiddleware.map((mw) => ({ mw, routeMatch: { matched: true } })),
       ...this.middleware
-        .map((mw) => ({ mw, routeMatch: this.matchRoutePath(routePathname, mw.path) }))
+        .map((mw) => ({
+          mw,
+          routeMatch: matchesMiddlewareRouteAt(toMiddlewarePathnames(routePathname), mw),
+        }))
         .filter((entry) => entry.routeMatch.matched),
     ];
 
@@ -258,16 +293,51 @@ export class MiddlewareManager {
     ].join(" ");
     console.log(log);
 
+    // A ctx.rewrite() target is guarded as a direct request for it is, the
+    // same as the production runner: once a pass ends on a rewritten path, the
+    // middleware matching that path which has not run yet gets a pass of its
+    // own. Each one runs at most once, so repeated rewrites end.
+    const ran = new Set<DiscoveredMiddleware>();
+    const allMiddleware = [...this.configMiddleware, ...this.middleware];
+    const globalConfig = this.globalConfig;
+    const trustProxy = this.server?.trustProxy;
+    function* applicableMiddleware() {
+      let passPathname = routePathname;
+      let pass = applicable;
+      for (;;) {
+        for (const entry of pass) yield { ...entry, pathname: passPathname };
+        const rewrittenPathname = toRoutePathname(
+          resolveFarmRequestURL(req, { trustProxy }).pathname,
+        );
+        if (rewrittenPathname === passPathname) return;
+        passPathname = rewrittenPathname;
+        const passPathnames = toMiddlewarePathnames(passPathname);
+        if (globalConfig && !matchesMiddlewareConfigAt(passPathnames, globalConfig, ctx).matched) {
+          return;
+        }
+        pass = allMiddleware
+          .filter((mw) => !ran.has(mw))
+          .map((mw) => ({
+            mw,
+            routeMatch:
+              mw.source === "config"
+                ? { matched: true }
+                : matchesMiddlewareRouteAt(passPathnames, mw),
+          }))
+          .filter((entry) => entry.routeMatch.matched);
+      }
+    }
+
     // Execute middleware in cascade order
-    for (const entry of applicable) {
+    for (const { mw, routeMatch, pathname: passPathname } of applicableMiddleware()) {
       // Check matcher configuration
-      const { mw, routeMatch } = entry;
       const configMatch = mw.config
-        ? this.matchesConfig(routePathname, mw.config, ctx)
+        ? this.matchesConfig(passPathname, mw.config, ctx)
         : { matched: true };
       if (!configMatch.matched) {
         continue;
       }
+      ran.add(mw);
       if (routeMatch.params) {
         ctx.params = { ...ctx.params, ...routeMatch.params };
       }
@@ -277,7 +347,7 @@ export class MiddlewareManager {
 
       // Create new context with parent data
       if (parentData) {
-        ctx = createContext(req, res, this.viteServer, parentData, this.server);
+        ctx = createContext(req, res, this.viteServer, parentData, this.server, toRoutePathname);
         if (routeMatch.params) {
           ctx.params = { ...ctx.params, ...routeMatch.params };
         }
@@ -345,7 +415,19 @@ export class MiddlewareManager {
           durationMs: Date.now() - middlewareStartTime,
         });
       } catch (error) {
-        // redirect() and notFound() are control flow: the caller answers them.
+        // redirect() and notFound() are control flow: the caller answers them, with the headers
+        // this middleware set, as production does.
+        if (
+          (isFarmRedirectError(error) || isFarmNotFoundError(error)) &&
+          !res.headersSent &&
+          !res.writableEnded
+        ) {
+          for (const [key, value] of ctx.headers) {
+            try {
+              res.setHeader(key, value);
+            } catch {}
+          }
+        }
         emitFarmEvent(
           isFarmRedirectError(error) || isFarmNotFoundError(error)
             ? {
@@ -387,85 +469,7 @@ export class MiddlewareManager {
     config: MiddlewareConfig,
     ctx: MiddlewareContext,
   ): { matched: boolean; params?: Record<string, string> } {
-    // Check exclusions
-    if (config.exclude) {
-      for (const pattern of config.exclude) {
-        if (this.matchPattern(pattern, pathname).matched) {
-          return { matched: false };
-        }
-      }
-    }
-
-    // Check matchers
-    if (config.matcher) {
-      for (const matcher of this.toMatcherList(config.matcher)) {
-        if (typeof matcher === "string" || matcher instanceof RegExp) {
-          const result = this.matchPattern(matcher, pathname);
-          if (result.matched) {
-            return result;
-          }
-        } else if (typeof matcher === "function" && matcher(ctx)) {
-          return { matched: true };
-        }
-      }
-      return { matched: false };
-    }
-
-    return { matched: true };
-  }
-
-  /**
-   * Match a pattern against pathname
-   */
-  private matchPattern(
-    pattern: string | RegExp,
-    pathname: string,
-  ): { matched: boolean; params?: Record<string, string> } {
-    // Same canonical pathname the production runner and the route matchers
-    // compare against, so a percent-encoded path cannot slip past a guard in
-    // development either.
-    const canonicalPathname = canonicalizeRequestPathname(pathname);
-
-    if (pattern instanceof RegExp) {
-      pattern.lastIndex = 0;
-      const match = pattern.exec(canonicalPathname);
-      return {
-        matched: !!match,
-        params: match?.groups ? { ...match.groups } : undefined,
-      };
-    }
-
-    if (pattern === "*" || pattern === "/(.*)") {
-      return { matched: true };
-    }
-
-    if (pattern.endsWith("(.*)")) {
-      // Strip a trailing slash before the wildcard so `/admin/(.*)` matches the
-      // `/admin` subtree like `/admin/**` does. Without this the prefix keeps
-      // its slash and the check becomes startsWith("/admin//"), which no path
-      // satisfies, so the matcher silently matches nothing.
-      const prefix = pattern.slice(0, -4).replace(/\/$/, "");
-      return {
-        matched: canonicalPathname === prefix || canonicalPathname.startsWith(`${prefix}/`),
-      };
-    }
-
-    const { regex, params } = this.compilePathPattern(pattern);
-    const match = regex.exec(canonicalPathname);
-    if (!match) {
-      return { matched: false };
-    }
-
-    const values: Record<string, string> = {};
-    params.forEach((param, index) => {
-      // Already decoded once by the canonicalization above.
-      values[param] = match[index + 1] || "";
-    });
-
-    return {
-      matched: true,
-      params: Object.keys(values).length > 0 ? values : undefined,
-    };
+    return matchesMiddlewareConfigAt(this.toMiddlewarePathnames(pathname), config, ctx);
   }
 
   /**
@@ -481,35 +485,6 @@ export class MiddlewareManager {
 
   hasMiddleware(): boolean {
     return this.configMiddleware.length > 0 || this.middleware.length > 0;
-  }
-
-  private matchRoutePath(
-    pathname: string,
-    middlewarePath: string,
-  ): { matched: boolean; params?: Record<string, string> } {
-    if (middlewarePath === "/") return { matched: true };
-
-    const exactMatch = this.matchPattern(middlewarePath, pathname);
-    if (exactMatch.matched) {
-      return exactMatch;
-    }
-
-    const nestedMatch = this.matchPattern(`${middlewarePath}/:__farmRest*`, pathname);
-    if (!nestedMatch.matched) {
-      return { matched: false };
-    }
-
-    const params = { ...nestedMatch.params };
-    delete params.__farmRest;
-    return {
-      matched: true,
-      params: Object.keys(params).length > 0 ? params : undefined,
-    };
-  }
-
-  private toMatcherList(matcher: MiddlewareConfig["matcher"]): MiddlewareMatcher[] {
-    if (!matcher) return [];
-    return Array.isArray(matcher) ? matcher : [matcher];
   }
 
   private getConfigHandlers(
@@ -538,68 +513,5 @@ export class MiddlewareManager {
   ): MiddlewareConfig {
     const { matcher, exclude, runtime } = entry;
     return { matcher, exclude, runtime };
-  }
-
-  private compilePathPattern(pattern: string): { regex: RegExp; params: string[] } {
-    const params: string[] = [];
-    const segments = pattern.split("/").filter(Boolean);
-
-    if (segments.length === 0) {
-      return { regex: /^\/$/, params };
-    }
-
-    const parts = segments.map((segment) => {
-      if (segment === "**") {
-        return "(?:/.*)?";
-      }
-
-      if (segment === "*") {
-        return "/[^/]+";
-      }
-
-      if (segment.startsWith(":")) {
-        const { name, modifier } = this.parseColonParam(segment);
-        params.push(name);
-
-        if (modifier === "*") {
-          return "(?:/(.*))?";
-        }
-        if (modifier === "+") {
-          return "/(.+)";
-        }
-        return "/([^/]+)";
-      }
-
-      if (segment.startsWith("[...") && segment.endsWith("]")) {
-        params.push(segment.slice(4, -1));
-        return "(?:/(.*))?";
-      }
-
-      if (segment.startsWith("[") && segment.endsWith("]")) {
-        params.push(segment.slice(1, -1));
-        return "/([^/]+)";
-      }
-
-      return `/${this.escapeRegex(segment).replace(/\\\*/g, "[^/]*")}`;
-    });
-
-    return {
-      regex: new RegExp(`^${parts.join("")}$`),
-      params,
-    };
-  }
-
-  private parseColonParam(segment: string): { name: string; modifier?: string } {
-    const raw = segment.slice(1);
-    const last = raw[raw.length - 1];
-    const modifier = last === "*" || last === "+" || last === "?" ? last : undefined;
-    return {
-      name: modifier ? raw.slice(0, -1) : raw,
-      modifier,
-    };
-  }
-
-  private escapeRegex(value: string): string {
-    return value.replace(/[|\\{}()[\]^$+?.]/g, "\\$&");
   }
 }

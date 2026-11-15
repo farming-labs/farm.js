@@ -1,12 +1,18 @@
-import { readFile } from "node:fs/promises";
+import { readdir, readFile } from "node:fs/promises";
 import { isIP } from "node:net";
 import type { IncomingMessage } from "node:http";
 import type { ViteDevServer } from "vite";
 import { createModuleInspector, ModuleInspectionError } from "./modules.js";
 import { DEVTOOLS_PATH } from "./types.js";
 
+/** Set by the `farm preview` relay and gateway client on every tunnelled request. */
+const FARM_PREVIEW_REQUEST_HEADER = "x-farm-preview";
+
 /** Guard our early middleware, before Vite's own host/CORS middleware runs. */
 export function isTrustedRequest(req: IncomingMessage, server: ViteDevServer): boolean {
+  // `farm preview` tunnels public visitors in with a localhost Host and marks them; DevTools
+  // describes the developer's machine and is never served on a public preview URL.
+  if (req.headers[FARM_PREVIEW_REQUEST_HEADER] !== undefined) return false;
   try {
     const authority = req.headers.host ?? "";
     if (!authority || /[\s/@\\?#]/.test(authority)) return false;
@@ -36,14 +42,46 @@ export function isTrustedRequest(req: IncomingMessage, server: ViteDevServer): b
   }
 }
 
-export function installDevtoolsServer(server: ViteDevServer, options: { inspect: boolean }): void {
+const escapeAttribute = (value: string) =>
+  value.replace(/[&<>"']/g, (character) => `&#${character.charCodeAt(0)};`);
+
+export function installDevtoolsServer(
+  server: ViteDevServer,
+  options: { inspect: boolean; shortcut?: string | false },
+): void {
   const inspector = createModuleInspector(server);
   const assetRoot = new URL("./ui/", import.meta.url);
   const assets = new Map<string, Promise<Buffer>>();
+  // Font file names are content hashed by the UI build; only serve the ones it shipped.
+  let shippedFonts: Promise<Set<string>> | undefined;
+  const isShippedFont = async (name: string) => {
+    shippedFonts ??= readdir(assetRoot).then(
+      (names) => new Set(names.filter((entry) => entry.endsWith(".woff2"))),
+      () => {
+        shippedFonts = undefined;
+        return new Set<string>();
+      },
+    );
+    return (await shippedFonts).has(name);
+  };
+  const readAsset = (name: string) => {
+    let asset = assets.get(name);
+    if (!asset) {
+      const pending = readFile(new URL(name, assetRoot));
+      assets.set(name, pending);
+      // A failed read must not be served from the cache forever.
+      pending.catch(() => {
+        if (assets.get(name) === pending) assets.delete(name);
+      });
+      asset = pending;
+    }
+    return asset;
+  };
   let closed = false;
   server.httpServer?.once("close", () => {
     closed = true;
     assets.clear();
+    shippedFonts = undefined;
   });
   server.middlewares.use(async (req, res, next) => {
     let url: URL;
@@ -87,7 +125,7 @@ export function installDevtoolsServer(server: ViteDevServer, options: { inspect:
           "default-src 'none'; script-src 'self'; style-src 'self' 'unsafe-inline'; font-src 'self'; img-src 'self'; connect-src 'self'; frame-ancestors 'self'; base-uri 'none'; form-action 'none'",
         );
         send(
-          `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="color-scheme" content="dark light"><title>Farm.js DevTools</title><link rel="stylesheet" href="${DEVTOOLS_PATH}/assets/panel.css"></head><body><div id="farm-devtools" data-inspect="${options.inspect}"></div><script type="module" src="${DEVTOOLS_PATH}/assets/panel.js"></script></body></html>`,
+          `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="color-scheme" content="dark light"><title>Farm.js DevTools</title><link rel="stylesheet" href="${DEVTOOLS_PATH}/assets/panel.css"></head><body><div id="farm-devtools" data-inspect="${options.inspect}" data-shortcut="${escapeAttribute(options.shortcut || "")}"></div><script type="module" src="${DEVTOOLS_PATH}/assets/panel.js"></script></body></html>`,
           "text/html; charset=utf-8",
         );
         return;
@@ -112,12 +150,11 @@ export function installDevtoolsServer(server: ViteDevServer, options: { inspect:
               ? "text/css; charset=utf-8"
               : name === "logo.svg"
                 ? "image/svg+xml"
-                : /^[a-zA-Z0-9_-]+\.woff2$/.test(name)
+                : /^[a-zA-Z0-9_-]+\.woff2$/.test(name) && (await isShippedFont(name))
                   ? "font/woff2"
                   : undefined;
         if (type) {
-          if (!assets.has(name)) assets.set(name, readFile(new URL(name, assetRoot)));
-          send(await assets.get(name)!, type);
+          send(await readAsset(name), type);
           return;
         }
       }

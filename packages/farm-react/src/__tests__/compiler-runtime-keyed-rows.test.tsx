@@ -301,6 +301,163 @@ describe("compiled keyed-row runtime", () => {
     expect(insertBefore).toHaveBeenCalledTimes(1);
   });
 
+  it.each([
+    { name: "an inner swap", order: [0, 6, 2, 3, 4, 5, 1, 7], moves: 2 },
+    { name: "a swap with the last row", order: [7, 1, 2, 3, 4, 5, 6, 0], moves: 2 },
+    { name: "an adjacent swap", order: [0, 1, 2, 4, 3, 5, 6, 7], moves: 1 },
+    { name: "a cycle around unmoved rows", order: [0, 6, 2, 3, 1, 5, 4, 7], moves: 3 },
+    { name: "a rotation", order: [7, 0, 1, 2, 3, 4, 5, 6], moves: 1 },
+    {
+      name: "a reorder past the moved-position limit",
+      order: Array.from({ length: 100 }, (_, index) => 99 - index),
+      moves: 99,
+    },
+  ])("moves only the reordered rows for $name", async ({ order, moves }) => {
+    let setItems: (next: CompilerStateUpdater) => void = () => undefined;
+    let listRenders = 0;
+    const initial: Item[] = Array.from({ length: order.length }, (_, index) => ({
+      id: `row-${index}`,
+      label: `Row ${index}`,
+    }));
+    const Inventory = createCompiledComponent({
+      displayName: "MovedRows",
+      initialize: () => [initial],
+      render(_props: Record<string, never>, state, blocks) {
+        setItems = (next) => state[0].set(next);
+        const items = () => state[0].get() as Item[];
+        const KeyedRows = blocks.KeyedRows;
+        return (
+          <section>
+            <KeyedRows
+              id={0}
+              render={() => {
+                listRenders += 1;
+                return (
+                  <ol>
+                    {items().map((item) => (
+                      <li key={item.id}>{item.label}</li>
+                    ))}
+                  </ol>
+                );
+              }}
+              items={items}
+              rowKey={(item) => (item as Item).id}
+              create={(item) => ({
+                kind: "element",
+                tag: "li",
+                attributes: [],
+                styles: [],
+                children: [(item as Item).label],
+              })}
+              bindings={[{ kind: "text", path: [], read: (item) => [(item as Item).label] }]}
+            />
+          </section>
+        );
+      },
+      bindings: [{ kind: "block", id: 0, dependencies: [0] }],
+    });
+
+    const container = document.createElement("div");
+    document.body.append(container);
+    const root = createRoot(container);
+    roots.push(root);
+    await act(async () => root.render(<Inventory />));
+    const rendersAfterMount = listRenders;
+    const list = container.querySelector("ol")!;
+    const elements = [...list.children] as HTMLElement[];
+    // Focus a row that moves; moving it must not lose focus.
+    const focused = elements[order[1]];
+    focused.tabIndex = -1;
+    focused.focus();
+    expect(document.activeElement).toBe(focused);
+    const insertBefore = vi.spyOn(list, "insertBefore");
+
+    // Reorder and relabel one moved row in the same update.
+    await act(async () => {
+      setItems(
+        order.map((from, to) =>
+          to === 1 ? { ...initial[from], label: `Moved ${from}` } : initial[from],
+        ),
+      );
+      await flushCompilerUpdates();
+    });
+    expect([...list.children]).toEqual(order.map((from) => elements[from]));
+    expect([...list.children].map((row) => row.textContent)).toEqual(
+      order.map((from, to) => (to === 1 ? `Moved ${from}` : `Row ${from}`)),
+    );
+    expect(insertBefore).toHaveBeenCalledTimes(moves);
+    expect(document.activeElement).toBe(focused);
+    expect(listRenders).toBe(rendersAfterMount);
+
+    // The committed order is the new order: later updates find the right rows.
+    await act(async () => {
+      setItems((current: Item[]) => [
+        ...current.map((item, index) => (index === 0 ? { ...item, label: "First" } : item)),
+        { id: "appended", label: "Appended" },
+      ]);
+      await flushCompilerUpdates();
+    });
+    const final = [...list.children];
+    expect(final.slice(0, order.length)).toEqual(order.map((from) => elements[from]));
+    expect(final[0].textContent).toBe("First");
+    expect(final.at(-1)?.textContent).toBe("Appended");
+    expect(listRenders).toBe(rendersAfterMount);
+  });
+
+  it("reconciles a same-length update that replaces a key", async () => {
+    let setItems: (next: CompilerStateUpdater) => void = () => undefined;
+    const Inventory = createCompiledComponent({
+      displayName: "ReplacedKeyRows",
+      initialize: () => [["a", "b", "c", "d"]],
+      render(_props: Record<string, never>, state, blocks) {
+        setItems = (next) => state[0].set(next);
+        const items = () => state[0].get() as string[];
+        const KeyedRows = blocks.KeyedRows;
+        return (
+          <section>
+            <KeyedRows
+              id={0}
+              render={() => (
+                <ol>
+                  {items().map((item) => (
+                    <li key={item}>{item}</li>
+                  ))}
+                </ol>
+              )}
+              items={items}
+              rowKey={(item) => item as string}
+              create={(item) => ({
+                kind: "element",
+                tag: "li",
+                attributes: [],
+                styles: [],
+                children: [String(item)],
+              })}
+              bindings={[{ kind: "text", path: [], read: (item) => [String(item)] }]}
+            />
+          </section>
+        );
+      },
+      bindings: [{ kind: "block", id: 0, dependencies: [0] }],
+    });
+
+    const container = document.createElement("div");
+    document.body.append(container);
+    const root = createRoot(container);
+    roots.push(root);
+    await act(async () => root.render(<Inventory />));
+    const [a, b, , d] = container.querySelectorAll("li");
+
+    // "c" leaves and "x" arrives while "b" and "d" trade places.
+    await act(async () => {
+      setItems(["a", "d", "x", "b"]);
+      await flushCompilerUpdates();
+    });
+    const rows = [...container.querySelectorAll("li")];
+    expect(rows.map((row) => row.textContent)).toEqual(["a", "d", "x", "b"]);
+    expect([rows[0], rows[1], rows[3]]).toEqual([a, d, b]);
+  });
+
   it("remounts the list under React when runtime keys are duplicated", async () => {
     let setItems: (next: CompilerStateUpdater) => void = () => undefined;
     let listRenders = 0;
@@ -362,6 +519,128 @@ describe("compiled keyed-row runtime", () => {
     });
     expect(listRenders).toBeGreaterThan(2);
     expect(container.querySelector("li")?.textContent).toBe("Safe again");
+  });
+
+  it("matches React's string comparison of number and string row keys", async () => {
+    interface KeyedItem {
+      key: number | string;
+      label: string;
+    }
+    let setItems: (next: CompilerStateUpdater) => void = () => undefined;
+    let listRenders = 0;
+    vi.spyOn(console, "error").mockImplementation(() => undefined);
+    const Inventory = createCompiledComponent({
+      displayName: "MixedKeyRows",
+      initialize: () => [
+        [
+          { key: 1, label: "One" },
+          { key: 2, label: "Two" },
+        ],
+      ],
+      render(_props: Record<string, never>, state, blocks) {
+        setItems = (next) => state[0].set(next);
+        const items = () => state[0].get() as KeyedItem[];
+        const KeyedRows = blocks.KeyedRows;
+        return (
+          <main>
+            <KeyedRows
+              id={0}
+              render={() => {
+                listRenders += 1;
+                return (
+                  <ul>
+                    {items().map((item) => (
+                      <li key={item.key}>{item.label}</li>
+                    ))}
+                  </ul>
+                );
+              }}
+              items={items}
+              rowKey={(item) => (item as KeyedItem).key}
+              create={(item) => ({
+                kind: "element",
+                tag: "li",
+                attributes: [],
+                styles: [],
+                children: [(item as KeyedItem).label],
+              })}
+              bindings={[{ kind: "text", path: [], read: (item) => [(item as KeyedItem).label] }]}
+            />
+          </main>
+        );
+      },
+      bindings: [{ kind: "block", id: 0, dependencies: [0] }],
+    });
+
+    const container = document.createElement("div");
+    document.body.append(container);
+    const root = createRoot(container);
+    roots.push(root);
+    await act(async () => root.render(<Inventory />));
+    const rendersAfterMount = listRenders;
+    const [one, two] = container.querySelectorAll("li");
+
+    // React keys "1" and 1 are the same key, so the rows move instead of remounting.
+    await act(async () => {
+      setItems([
+        { key: "2", label: "Two!" },
+        { key: "1", label: "One!" },
+      ]);
+      await flushCompilerUpdates();
+    });
+    expect([...container.querySelectorAll("li")]).toEqual([two, one]);
+    expect(two.textContent).toBe("Two!");
+    expect(one.textContent).toBe("One!");
+
+    // "01" is not 1's spelling, so it is a different key.
+    await act(async () => {
+      setItems([
+        { key: 2, label: "Two" },
+        { key: "01", label: "Zero one" },
+      ]);
+      await flushCompilerUpdates();
+    });
+    const rows = [...container.querySelectorAll("li")];
+    expect(rows[0]).toBe(two);
+    expect(rows[1]).not.toBe(one);
+    expect(rows[1].textContent).toBe("Zero one");
+    expect(listRenders).toBe(rendersAfterMount);
+
+    // 1 and "1" in one list are duplicates, which React owns.
+    await act(async () => {
+      setItems([
+        { key: 1, label: "Number" },
+        { key: "1", label: "String" },
+      ]);
+      await flushCompilerUpdates();
+    });
+    expect([...container.querySelectorAll("li")].map((row) => row.textContent)).toEqual([
+      "Number",
+      "String",
+    ]);
+    expect(listRenders).toBeGreaterThan(rendersAfterMount);
+
+    // Non-finite and signed spellings follow the same rule once the list is safe again.
+    await act(async () => {
+      setItems([
+        { key: "NaN", label: "NaN" },
+        { key: "Infinity", label: "Infinity" },
+        { key: "-1", label: "Minus one" },
+        { key: "1e+21", label: "Big" },
+      ]);
+      await flushCompilerUpdates();
+    });
+    const special = [...container.querySelectorAll("li")];
+    await act(async () => {
+      setItems([
+        { key: 1e21, label: "Big" },
+        { key: -1, label: "Minus one" },
+        { key: Infinity, label: "Infinity" },
+        { key: Number.NaN, label: "NaN" },
+      ]);
+      await flushCompilerUpdates();
+    });
+    expect([...container.querySelectorAll("li")]).toEqual([...special].reverse());
   });
 
   it.each(

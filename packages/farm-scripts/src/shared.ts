@@ -117,7 +117,11 @@ export function normalizeScriptDefinition(input: ScriptDefinition): ResolvedScri
     ...(input.integrity === undefined
       ? {}
       : { integrity: normalizeText(input.integrity, "integrity") }),
-    ...(crossOrigin ? { crossOrigin } : {}),
+    // A cross-origin script fetched in no-cors mode is opaque, so the browser
+    // always fails its integrity check. SRI needs a CORS request.
+    ...(crossOrigin || input.integrity !== undefined
+      ? { crossOrigin: crossOrigin ?? "anonymous" }
+      : {}),
     ...(input.referrerPolicy === undefined ? {} : { referrerPolicy: input.referrerPolicy }),
     ...(input.fetchPriority === undefined ? {} : { fetchPriority: input.fetchPriority }),
   };

@@ -1,6 +1,22 @@
+/*
+ * Farm's workspace style, shared with the Farm Infra dashboard: dashed rules between
+ * regions, mono uppercase labels, 5px controls with a soft shadow, and recessed panes.
+ */
 #farm-devtools {
-  --fd-bg: light-dark(#ffffff, #101010);
-  --fd-side: light-dark(#fafafa, #141414);
+  --fd-bg: light-dark(#ffffff, #151515);
+  --fd-side: light-dark(#fafafa, #171717);
+  --fd-inset: light-dark(#f7f7f6, #101010);
+  --fd-raised: light-dark(#f4f4f3, #1d1d1d);
+  --fd-rule: 1px dashed light-dark(#d4d4d0, #353535);
+  --fd-rule-soft: 1px dashed light-dark(#e2e2de, #2d2d2d);
+  --fd-radius: 5px;
+  --fd-radius-field: 6px;
+  --fd-radius-card: 8px;
+  --fd-space: 20px;
+  --fd-shadow: inset 0 1px rgb(255 255 255 / 0.06), 0 1px 2px rgb(0 0 0 / 0.12);
+  --fd-field: light-dark(#ffffff, #121212);
+  --fd-field-border: light-dark(#d4d4d4, #393939);
+  --fd-field-focus: light-dark(#8f8f8f, #858585);
   --fd-fg: light-dark(#202020, #ededed);
   --fd-muted: light-dark(#676767, #a0a0a0);
   --fd-line: light-dark(#e7e7e7, #2b2b2b);
@@ -80,10 +96,11 @@
 }
 #farm-devtools .fd-label {
   font:
-    400 11px/1.5 "Geist Mono",
+    400 10px/1.5 "Geist Mono",
     monospace;
   color: var(--fd-muted);
-  letter-spacing: 0.1px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
 }
 #farm-devtools .fd-header {
   min-height: 57px;
@@ -92,7 +109,7 @@
   gap: 8px;
   font-size: 11px;
   padding: 10px 18px;
-  border-bottom: 1px solid var(--fd-line);
+  border-bottom: var(--fd-rule);
   flex-wrap: wrap;
 }
 #farm-devtools .fd-brand {
@@ -116,9 +133,9 @@
   width: 32px;
   height: 32px;
   padding: 0;
-  border: 0;
+  border: 1px solid transparent;
   background: transparent;
-  border-radius: 7px;
+  border-radius: var(--fd-radius);
   color: var(--fd-muted);
 }
 #farm-devtools svg {
@@ -130,15 +147,16 @@
 }
 #farm-devtools .fd-body {
   display: grid;
-  grid-template-columns: 174px minmax(0, 1fr);
+  grid-template-columns: 220px minmax(0, 1fr);
   min-height: 584px;
 }
 #farm-devtools .fd-sidebar {
   padding: 20px 10px 12px;
   background: var(--fd-side);
-  border-right: 1px solid var(--fd-line);
+  border-right: var(--fd-rule);
   display: flex;
   flex-direction: column;
+  gap: 2px;
 }
 #farm-devtools .fd-group-label {
   padding: 0 10px 8px;
@@ -150,8 +168,8 @@
   text-align: left;
   width: 100%;
   padding: 8px 10px;
-  border-radius: 7px;
-  border: 0;
+  border-radius: var(--fd-radius);
+  border: 1px solid transparent;
   background: transparent;
   color: var(--fd-muted);
   font-size: 13px;
@@ -159,6 +177,8 @@
 #farm-devtools .fd-nav-button[aria-current="page"] {
   color: var(--fd-fg);
   background: var(--fd-active);
+  border-color: var(--fd-line);
+  box-shadow: var(--fd-shadow);
 }
 #farm-devtools .fd-count {
   margin-left: auto;
@@ -183,8 +203,9 @@
   justify-content: space-between;
   align-items: center;
   gap: 12px;
-  padding: 24px var(--fd-pad) 22px;
+  padding: 24px var(--fd-pad) var(--fd-space);
   flex-wrap: wrap;
+  border-bottom: var(--fd-rule);
 }
 #farm-devtools .fd-subtitle {
   color: var(--fd-muted);
@@ -192,42 +213,25 @@
   margin-top: 5px;
 }
 #farm-devtools .fd-tag {
-  border: 1px solid var(--fd-line);
-  border-radius: 4px;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  border: 1px dotted var(--fd-outline);
+  border-radius: 3px;
   padding: 3px 7px;
   color: var(--fd-muted);
   font:
-    400 11px/1.5 "Geist Mono",
+    400 10px/1.5 "Geist Mono",
     monospace;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
   white-space: nowrap;
 }
-#farm-devtools .fd-stats {
-  display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-  border-top: 1px solid var(--fd-line);
-  border-bottom: 1px solid var(--fd-line);
-}
-#farm-devtools .fd-stat {
-  padding: 17px var(--fd-pad);
-  display: flex;
-  align-items: baseline;
-  justify-content: space-between;
-  gap: 6px;
-}
-#farm-devtools .fd-stat + .fd-stat {
-  border-left: 1px solid var(--fd-line);
-}
-#farm-devtools .fd-stat-value {
-  font:
-    400 24px/1.2 "Geist Mono",
-    monospace;
-  letter-spacing: -1px;
-}
 #farm-devtools .fd-section {
-  padding: 22px var(--fd-pad);
+  padding: var(--fd-space) var(--fd-pad);
 }
 #farm-devtools .fd-section + .fd-section {
-  border-top: 1px solid var(--fd-line);
+  border-top: var(--fd-rule);
 }
 #farm-devtools .fd-section-heading {
   display: flex;
@@ -237,23 +241,29 @@
   margin-bottom: 12px;
 }
 #farm-devtools .fd-link-button {
-  border: 0;
+  border: 1px solid transparent;
   background: transparent;
   display: inline-flex;
   align-items: center;
   justify-content: center;
   gap: 8px;
   padding: 6px 10px;
-  border-radius: 7px;
+  border-radius: var(--fd-radius);
   color: var(--fd-muted);
-  font-size: 12px;
+  font:
+    450 11px/1.4 "Geist Mono Variable",
+    monospace;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
   text-align: left;
 }
 #farm-devtools .fd-button-label {
   min-width: 0;
 }
 #farm-devtools .fd-route-preview {
-  border-top: 1px solid var(--fd-line);
+  border: var(--fd-rule-soft);
+  border-radius: var(--fd-radius-card);
+  overflow: hidden;
 }
 #farm-devtools .fd-preview-row {
   display: grid;
@@ -261,11 +271,11 @@
   gap: 12px;
   align-items: center;
   width: 100%;
-  padding: var(--fd-row) 10px;
+  padding: var(--fd-row) 14px;
   text-align: left;
   background: transparent;
   border: 0;
-  border-bottom: 1px solid var(--fd-line);
+  border-bottom: var(--fd-rule-soft);
 }
 #farm-devtools .fd-preview-row:last-child {
   border-bottom: 0;
@@ -277,8 +287,11 @@
 #farm-devtools .fd-diagnostic {
   display: flex;
   gap: 11px;
-  padding: 10px 0;
+  padding: 14px 16px;
   align-items: flex-start;
+  border: var(--fd-rule-soft);
+  border-radius: var(--fd-radius-card);
+  background: var(--fd-inset);
 }
 #farm-devtools .fd-diagnostic > span {
   display: flex;
@@ -287,8 +300,26 @@
   flex: 0 0 16px;
   height: 20px;
 }
+#farm-devtools .fd-diagnostic > div {
+  flex: 1;
+  min-width: 0;
+}
+#farm-devtools .fd-diagnostic + .fd-diagnostic {
+  margin-top: 8px;
+}
+#farm-devtools .fd-diagnostic-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
 #farm-devtools .fd-diagnostic .fd-label {
   line-height: 20px;
+  margin-top: 2px;
+}
+#farm-devtools .fd-diagnostic-action {
+  padding-top: 8px;
+  border-top: var(--fd-rule-soft);
 }
 #farm-devtools .fd-diagnostic p {
   font-size: 12px;
@@ -305,7 +336,7 @@
   gap: 12px;
   align-items: center;
   padding: 10px 18px;
-  border-top: 1px solid var(--fd-line);
+  border-top: var(--fd-rule);
   font:
     400 9px/1.5 "Geist Mono",
     monospace;
@@ -330,18 +361,39 @@
 #farm-devtools [data-feedback]:empty {
   display: none;
 }
+/* The page heading ends in a dashed rule, so whatever follows it keeps its own space. */
 #farm-devtools .fd-filter-row {
-  padding: 0 var(--fd-pad) 18px;
+  padding: var(--fd-space) var(--fd-pad);
+}
+#farm-devtools .fd-page-heading + .fd-inspect-toolbar {
+  border-top: 0;
+  padding-top: 16px;
+  padding-bottom: 16px;
+}
+/* A pane straight under the heading (Snapshot) sits inset as a card, like the map. */
+#farm-devtools .fd-page-heading + .fd-code-pane {
+  margin: var(--fd-space) var(--fd-pad);
+  border: var(--fd-rule-soft);
+  border-radius: var(--fd-radius-card);
+  overflow: hidden;
 }
 #farm-devtools .fd-search {
   display: flex;
   align-items: center;
   gap: 8px;
-  border: 1px solid var(--fd-line);
-  background: var(--fd-side);
-  border-radius: 5px;
+  border: 1px solid var(--fd-field-border);
+  background: var(--fd-field);
+  border-radius: var(--fd-radius-field);
   padding: 8px 10px;
   color: var(--fd-muted);
+  box-shadow: inset 0 1px 2px rgb(0 0 0 / 0.12);
+  transition:
+    border-color 120ms ease,
+    box-shadow 120ms ease;
+}
+#farm-devtools .fd-search:focus-within {
+  border-color: var(--fd-field-focus);
+  box-shadow: 0 0 0 3px light-dark(rgb(0 0 0 / 0.06), rgb(255 255 255 / 0.07));
 }
 #farm-devtools .fd-search input {
   width: 100%;
@@ -355,17 +407,20 @@
   color: var(--fd-muted);
 }
 #farm-devtools .fd-search kbd {
+  padding: 0 5px;
+  border: 1px solid var(--fd-line);
+  border-radius: 4px;
   font:
-    400 11px/1.5 "Geist Mono",
+    400 10px/1.6 "Geist Mono",
     monospace;
 }
 #farm-devtools .fd-browser {
-  border-top: 1px solid var(--fd-line);
+  border-top: var(--fd-rule);
   display: grid;
   grid-template-columns: minmax(0, 0.95fr) minmax(0, 1.3fr);
 }
 #farm-devtools .fd-list {
-  border-right: 1px solid var(--fd-line);
+  border-right: var(--fd-rule);
   padding: 9px;
 }
 #farm-devtools .fd-list-button {
@@ -374,17 +429,19 @@
   flex-direction: column;
   gap: 6px;
   text-align: left;
-  border: 0;
+  border: 1px solid transparent;
   background: transparent;
-  border-radius: 4px;
+  border-radius: var(--fd-radius);
   padding: 12px 10px;
 }
 #farm-devtools .fd-list-button[aria-pressed="true"] {
   background: var(--fd-active);
+  border-color: var(--fd-line);
+  box-shadow: var(--fd-shadow);
 }
 #farm-devtools .fd-detail {
   min-width: 0;
-  padding: 20px;
+  padding: var(--fd-space);
 }
 #farm-devtools .fd-detail-title {
   display: flex;
@@ -400,14 +457,19 @@
 }
 #farm-devtools .fd-property {
   display: grid;
-  grid-template-columns: 95px minmax(0, 1fr);
+  grid-template-columns: 110px minmax(0, 1fr);
   gap: 15px;
-  border-bottom: 1px solid var(--fd-line);
+  border-bottom: var(--fd-rule-soft);
   padding: 11px 0;
   font-size: 12px;
 }
 #farm-devtools .fd-property dt {
   color: var(--fd-muted);
+  font:
+    400 10px/1.8 "Geist Mono Variable",
+    monospace;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
 }
 #farm-devtools .fd-property dd {
   margin: 0;
@@ -435,7 +497,10 @@
   margin-top: 23px;
 }
 #farm-devtools .fd-empty {
+  margin: 8px 0;
   padding: 25px 12px;
+  border: var(--fd-rule-soft);
+  border-radius: var(--fd-radius-card);
   font-size: 12px;
   color: var(--fd-muted);
   text-align: center;
@@ -446,7 +511,7 @@
   gap: 8px;
   padding: 14px 0;
   align-items: start;
-  border-bottom: 1px solid var(--fd-line);
+  border-bottom: var(--fd-rule-soft);
 }
 #farm-devtools .fd-system-row:last-child {
   border-bottom: 0;
@@ -462,7 +527,7 @@
   margin-top: 3px;
 }
 #farm-devtools details {
-  border-top: 1px solid var(--fd-line);
+  border-top: var(--fd-rule-soft);
   padding: 14px 0;
 }
 #farm-devtools summary {
@@ -478,8 +543,8 @@
   gap: 30px;
 }
 #farm-devtools .fd-inspect-toolbar {
-  border-top: 1px solid var(--fd-line);
-  border-bottom: 1px solid var(--fd-line);
+  border-top: var(--fd-rule);
+  border-bottom: var(--fd-rule);
   padding: 12px var(--fd-pad);
   display: flex;
   gap: 12px;
@@ -487,20 +552,21 @@
   flex-wrap: wrap;
 }
 #farm-devtools select {
-  background: var(--fd-side);
-  border: 1px solid var(--fd-line);
-  border-radius: 4px;
-  padding: 6px 8px;
+  background: var(--fd-field);
+  border: 1px solid var(--fd-field-border);
+  border-radius: var(--fd-radius-field);
+  padding: 7px 9px;
   max-width: 100%;
   min-width: 0;
   font-size: 12px;
+  box-shadow: inset 0 1px 2px rgb(0 0 0 / 0.12);
 }
 #farm-devtools .fd-inspect-toolbar select {
   flex: 1;
 }
 #farm-devtools .fd-pipeline {
   padding: 16px var(--fd-pad);
-  border-bottom: 1px solid var(--fd-line);
+  border-bottom: var(--fd-rule);
 }
 #farm-devtools .fd-comparison {
   display: grid;
@@ -508,15 +574,16 @@
 }
 #farm-devtools .fd-code-pane {
   min-width: 0;
+  background: var(--fd-inset);
 }
 #farm-devtools .fd-code-pane + .fd-code-pane {
-  border-left: 1px solid var(--fd-line);
+  border-left: var(--fd-rule);
 }
 #farm-devtools .fd-code-title {
   min-height: 48px;
   padding: 8px 16px;
   gap: 12px;
-  border-bottom: 1px solid var(--fd-line);
+  border-bottom: var(--fd-rule-soft);
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -527,7 +594,7 @@
 }
 #farm-devtools[data-code-layout="stacked"] .fd-code-pane + .fd-code-pane {
   border-left: 0;
-  border-top: 1px solid var(--fd-line);
+  border-top: var(--fd-rule);
 }
 @media (hover: hover) and (pointer: fine) {
   #farm-devtools button:not(:disabled):hover {
@@ -543,7 +610,7 @@
   #farm-devtools .fd-sidebar {
     padding: 10px;
     border-right: 0;
-    border-bottom: 1px solid var(--fd-line);
+    border-bottom: var(--fd-rule);
     gap: 6px;
   }
   #farm-devtools .fd-group-label {
@@ -568,7 +635,7 @@
   }
   #farm-devtools .fd-code-pane + .fd-code-pane {
     border-left: 0;
-    border-top: 1px solid var(--fd-line);
+    border-top: var(--fd-rule);
   }
 }
 @media (max-width: 500px) {
@@ -581,18 +648,10 @@
   }
   #farm-devtools .fd-list {
     border-right: 0;
-    border-bottom: 1px solid var(--fd-line);
+    border-bottom: var(--fd-rule);
   }
   #farm-devtools .fd-list-button {
     padding: 9px 10px;
-  }
-  #farm-devtools .fd-stat {
-    flex-direction: column;
-    padding: 14px 16px;
-    gap: 7px;
-  }
-  #farm-devtools .fd-stat-value {
-    font-size: 21px;
   }
   #farm-devtools .fd-preview-meta {
     max-width: 90px;
@@ -698,12 +757,12 @@ body {
   }
 }
 #farm-devtools .fd-flush-top {
-  padding-top: 0;
+  padding-top: var(--fd-space);
 }
 #farm-devtools .fd-error {
   padding: 10px 18px;
   color: var(--fd-red);
-  border-bottom: 1px solid var(--fd-line);
+  border-bottom: var(--fd-rule);
   font-size: 12px;
 }
 #farm-devtools .fd-danger {
@@ -753,8 +812,11 @@ body {
 #farm-devtools summary:focus-visible,
 #farm-devtools select:focus-visible,
 #farm-devtools input:focus-visible {
-  outline: 2px solid var(--fd-purple);
+  outline: 2px solid var(--fd-fg);
   outline-offset: 2px;
+}
+#farm-devtools .fd-search input:focus-visible {
+  outline: none;
 }
 @media (max-width: 720px) {
   #farm-devtools .fd-body {
@@ -772,5 +834,71 @@ body {
   }
   #farm-devtools .fd-main {
     flex: 1;
+  }
+}
+
+/* Tags carry a tone; the page heading's tag gets a live dot. */
+#farm-devtools .fd-tag[data-tone="warn"] {
+  border-color: color-mix(in srgb, var(--fd-amber) 55%, transparent);
+  color: var(--fd-amber);
+}
+#farm-devtools .fd-tag[data-tone="bad"] {
+  border-color: color-mix(in srgb, var(--fd-red) 55%, transparent);
+  color: var(--fd-red);
+}
+#farm-devtools .fd-page-heading .fd-tag::before {
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: currentColor;
+  content: "";
+}
+#farm-devtools .fd-section-heading h3,
+#farm-devtools .fd-section > h3 {
+  font:
+    450 11px/20px "Geist Mono Variable",
+    monospace;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+#farm-devtools .fd-section > h3 {
+  margin-bottom: 4px;
+}
+
+/* The Overview's counts: a dashed row of tiles under the heading. */
+#farm-devtools .fd-stats {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  border-bottom: var(--fd-rule);
+}
+#farm-devtools .fd-stat {
+  display: grid;
+  gap: 10px;
+  padding: var(--fd-space) var(--fd-pad);
+}
+#farm-devtools .fd-stat + .fd-stat {
+  border-left: var(--fd-rule);
+}
+#farm-devtools .fd-stat .fd-label {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+}
+#farm-devtools .fd-stat .fd-label svg {
+  width: 13px;
+  height: 13px;
+}
+#farm-devtools .fd-stat-value {
+  font:
+    400 26px/1.1 "Geist Mono Variable",
+    monospace;
+  letter-spacing: -0.04em;
+}
+@media (max-width: 500px) {
+  #farm-devtools .fd-stat {
+    padding: 14px 16px;
+  }
+  #farm-devtools .fd-stat-value {
+    font-size: 21px;
   }
 }

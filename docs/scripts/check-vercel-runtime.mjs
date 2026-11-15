@@ -5,6 +5,16 @@ import os from "node:os";
 import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
+/** Text a reader sees without JavaScript, counted the way the agent-ready scanner counts it. */
+function textLength(html) {
+  return html
+    .replace(/<(script|style|svg|template|head)\b[\s\S]*?<\/\1\s*>/gi, "")
+    .replace(/<[^>]+>/g, "")
+    .replace(/&(?:#\d+|#x[\da-f]+|[a-z]+);/gi, "&")
+    .replace(/\s+/g, " ")
+    .trim().length;
+}
+
 // Run the real function outside the checkout. Otherwise Node can resolve a
 // missing deployment dependency from the workspace and hide a cold-start crash.
 if (process.argv[2] === "--function") {
@@ -13,6 +23,7 @@ if (process.argv[2] === "--function") {
     ["/", "Farm"],
     ["/docs", 'id="nd-docs-layout"'],
     ["/docs/upgrading", "Upgrading"],
+    ["/docs/renderers/react", 'id="aot-compiler"'],
     ["/blog", "Farm"],
     ["/blog/0.1.0", "0.1"],
     ["/agents", "waitlist"],
@@ -20,7 +31,20 @@ if (process.argv[2] === "--function") {
   ]) {
     const response = await handler.fetch(new Request(`https://farmjs.dev${pathname}`));
     assert.equal(response.status, 200, `${pathname} must render`);
-    assert.ok((await response.text()).includes(content), `${pathname} must include ${content}`);
+    const html = await response.text();
+    assert.ok(html.includes(content), `${pathname} must include ${content}`);
+    if (pathname === "/") {
+      // The agent-ready check's structure test wants text to be at least 5% of the HTML;
+      // keep decorative markup (inline SVG, repeated utility lists) from crowding it out.
+      const ratio = textLength(html) / html.length;
+      assert.ok(ratio >= 0.055, `/ text is ${(ratio * 100).toFixed(2)}% of the HTML`);
+    }
+    if (pathname === "/docs/renderers/react") {
+      assert.ok(
+        html.includes('id="experimental-aot-compiler"'),
+        "existing compiler guide fragment links must keep working",
+      );
+    }
     console.log(`PASS ${pathname}`);
   }
   // No real signup or database write is needed to check the API boundary.

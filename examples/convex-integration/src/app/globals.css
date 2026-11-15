@@ -1,0 +1,33 @@
+body {
+  margin: 0;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  background: #fff;
+  color: #111;
+}
+
+.page {
+  max-width: 40rem;
+  margin: 0 auto;
+  padding: 3rem 1rem;
+}
+
+form {
+  display: flex;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+}
+
+input,
+button {
+  font: inherit;
+  padding: 0.5rem 0.75rem;
+  border: 1px solid #111;
+  border-radius: 0;
+  background: #fff;
+  color: #111;
+}
+
+button {
+  background: #111;
+  color: #fff;
+}

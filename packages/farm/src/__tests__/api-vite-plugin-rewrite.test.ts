@@ -29,6 +29,7 @@ interface DevHarness {
   dispatch(
     url: string,
     rewriteTo?: string | null,
+    headers?: Record<string, string>,
   ): Promise<{
     status: number;
     body: string | null;
@@ -59,7 +60,9 @@ async function createDevHarness(
 
   const server = {
     config: { root },
-    ssrLoadModule: (filePath: string) => import(pathToFileURL(filePath).href),
+    environments: {
+      ssr: { runner: { import: (filePath: string) => import(pathToFileURL(filePath).href) } },
+    },
     middlewares: {
       use(fn: typeof handlerFn) {
         handlerFn = fn;
@@ -74,7 +77,7 @@ async function createDevHarness(
   if (!handlerFn) throw new Error("dev middleware was not registered");
 
   return {
-    async dispatch(url, rewriteTo = null) {
+    async dispatch(url, rewriteTo = null, headers = { host: "localhost:3000" }) {
       (server as any).__farmMiddleware__ = {
         waitForDiscovery: async () => {},
         async execute(req: any) {
@@ -88,7 +91,7 @@ async function createDevHarness(
       const req = {
         url,
         method: "GET",
-        headers: { host: "localhost:3000" },
+        headers,
       };
       const res: any = {
         statusCode: 200,
@@ -155,8 +158,14 @@ describe("dev API dispatch after middleware rewrites", () => {
     let rootModule: Record<string, unknown> = {};
     const server: any = {
       config: { root },
-      ssrLoadModule: async (filePath: string) =>
-        filePath === routesFile ? rootModule : { GET: async () => new Response("ok") },
+      environments: {
+        ssr: {
+          runner: {
+            import: async (filePath: string) =>
+              filePath === routesFile ? rootModule : { GET: async () => new Response("ok") },
+          },
+        },
+      },
       moduleGraph: { invalidateModule() {} },
       middlewares: { use() {} },
       watcher: { on() {} },
@@ -200,16 +209,22 @@ describe("dev API dispatch after middleware rewrites", () => {
     let rootMethod = "GET";
     const server = {
       config: { root },
-      ssrLoadModule: async (filePath: string) =>
-        filePath === routeFile
-          ? { GET: async () => new Response("file") }
-          : {
-              health: {
-                __path: "/api/health",
-                __method: rootMethod,
-                handler: async () => new Response("explicit"),
-              },
-            },
+      environments: {
+        ssr: {
+          runner: {
+            import: async (filePath: string) =>
+              filePath === routeFile
+                ? { GET: async () => new Response("file") }
+                : {
+                    health: {
+                      __path: "/api/health",
+                      __method: rootMethod,
+                      handler: async () => new Response("explicit"),
+                    },
+                  },
+          },
+        },
+      },
       middlewares: {
         use(handler: typeof apiMiddleware) {
           apiMiddleware = handler;
@@ -244,7 +259,7 @@ describe("dev API dispatch after middleware rewrites", () => {
     apiMiddleware!({ url: "/api/health", method: "GET", headers: {} }, conflictRes, vi.fn());
     await new Promise((resolve) => setTimeout(resolve, 50));
     expect(conflictRes.statusCode).toBe(500);
-    expect(conflictRes.__body).toContain("Internal server error");
+    expect(JSON.parse(conflictRes.__body)).toEqual({ error: "Internal Server Error" });
 
     rootMethod = "POST";
     await plugin.handleHotUpdate({ file: routesFile, modules: [], server });
@@ -284,6 +299,23 @@ describe("dev API dispatch after middleware rewrites", () => {
     expect(JSON.parse(rewritten.body ?? "")).toEqual({ version: "v2" });
   });
 
+  it("dispatches a path with no route of its own that middleware rewrites to one", async () => {
+    const harness = await createDevHarness({
+      "v2/users": `export const GET = async () => Response.json({ version: "v2" });\n`,
+    });
+
+    const rewritten = await harness.dispatch("/api/alias", "/api/v2/users");
+    expect(rewritten.passedToNext).toBe(false);
+    expect(JSON.parse(rewritten.body ?? "")).toEqual({ version: "v2" });
+
+    // Nothing rewritten: the request goes on as before.
+    const missing = await harness.dispatch("/api/missing");
+    expect(missing.passedToNext).toBe(true);
+    // Outside the API base path, middleware is the page pipeline's.
+    const page = await harness.dispatch("/alias", "/api/v2/users");
+    expect(page.passedToNext).toBe(true);
+  });
+
   it("hands rewrites that leave the API surface to the page pipeline", async () => {
     const harness = await createDevHarness({
       "v1/users": `export const GET = async () => Response.json({ version: "v1" });\n`,
@@ -292,5 +324,36 @@ describe("dev API dispatch after middleware rewrites", () => {
     const result = await harness.dispatch("/api/v1/users", "/dashboard");
     expect(result.passedToNext).toBe(true);
     expect(result.body).toBeNull();
+  });
+
+  it("dispatches the request path, not a path smuggled in the Host header", async () => {
+    const harness = await createDevHarness({
+      public: `export const GET = async () => Response.json({ route: "public" });\n`,
+      "admin/users": `export const GET = async () => Response.json({ route: "admin" });\n`,
+    });
+
+    // Middleware matched /api/public, so the dispatch must stay there.
+    const result = await harness.dispatch("/api/public", null, {
+      host: "localhost:3000/api/admin/users#",
+    });
+    expect(result.passedToNext).toBe(false);
+    expect(JSON.parse(result.body ?? "")).toEqual({ route: "public" });
+  });
+});
+
+describe("dev API route errors", () => {
+  it("answers a throwing route with production's 500 body and logs the error", async () => {
+    const consoleError = vi.spyOn(console, "error").mockImplementation(() => {});
+    const harness = await createDevHarness({
+      boom: `export const GET = async () => { throw new Error("route-secret-detail"); };\n`,
+    });
+
+    const result = await harness.dispatch("/api/boom");
+    expect(result.status).toBe(500);
+    expect(result.body).toBe('{"error":"Internal Server Error"}');
+    expect(consoleError).toHaveBeenCalledWith(
+      "[API Error] /api/boom:",
+      expect.objectContaining({ message: "route-secret-detail" }),
+    );
   });
 });

@@ -227,4 +227,19 @@ const markdown = [
   "",
 ].join("\n");
 await writeFile(path.join(benchmarkDir, "results/latest.md"), `${markdown}\n`);
+
+// These files are committed and `oxfmt --check .` covers them, so format them here rather than
+// leave a red Lint job for whoever runs the benchmark. The frameworks runner does the same.
+await new Promise((resolve, reject) => {
+  const formatter = spawn(
+    "corepack",
+    ["pnpm", "exec", "oxfmt", "results/latest.json", "results/latest.md"],
+    { cwd: benchmarkDir, stdio: "inherit" },
+  );
+  formatter.once("error", reject);
+  formatter.once("exit", (code) =>
+    code === 0 ? resolve() : reject(new Error(`oxfmt exited with ${code}`)),
+  );
+});
+
 console.log("\nresults written to results/latest.json and results/latest.md");

@@ -10,6 +10,8 @@
     "build:hybrid": "FARM_REACTIVITY=hybrid vite build",
     "prepare:official": "node scripts/prepare-official.mjs",
     "summarize:official": "node scripts/summarize-official.mjs",
+    "compare:frameworks": "node scripts/compare-frameworks.mjs",
+    "test:harness": "node --test scripts/prepare-metadata.test.mjs scripts/summarize-official.test.mjs scripts/compare-frameworks.test.mjs",
     "type-check": "tsc --noEmit"
   },
   "dependencies": {
@@ -22,6 +24,6 @@
     "@types/react": "^19.0.0",
     "@types/react-dom": "^19.0.0",
     "typescript": "^5.3.3",
-    "vite": "^5.0.10"
+    "vite": "8.3.4"
   }
 }

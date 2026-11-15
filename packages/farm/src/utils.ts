@@ -102,7 +102,19 @@ export function matchRoute(
   url: string,
   segments: RouteSegment[],
 ): { params: Record<string, string>; matches: boolean } {
-  const urlParts = url.split("/").filter(Boolean).map(decodeRouteSegment);
+  return matchRouteParts(splitRoutePath(url), segments);
+}
+
+/** Decode a pathname once when it will be tested against multiple route chains. */
+export function splitRoutePath(url: string): string[] {
+  return url.split("/").filter(Boolean).map(decodeRouteSegment);
+}
+
+/** Match an already decoded pathname so route-table scans do not repeatedly split it. */
+export function matchRouteParts(
+  urlParts: readonly string[],
+  segments: RouteSegment[],
+): { params: Record<string, string>; matches: boolean } {
   const params: Record<string, string> = {};
   if (segments.length === 0) {
     return { params, matches: urlParts.length === 0 };
@@ -148,7 +160,14 @@ export function matchRoute(
 
 /** Match a route segment chain as an owner of the pathname or one of its descendants. */
 export function matchRoutePrefix(url: string, segments: RouteSegment[]): boolean {
-  const urlParts = url.split("/").filter(Boolean).map(decodeRouteSegment);
+  return matchRoutePrefixParts(splitRoutePath(url), segments);
+}
+
+/** Match an owner chain against an already decoded pathname. */
+export function matchRoutePrefixParts(
+  urlParts: readonly string[],
+  segments: RouteSegment[],
+): boolean {
   let urlIndex = 0;
 
   for (const segment of segments) {
@@ -218,9 +237,15 @@ export async function fileExists(filePath: string): Promise<boolean> {
   }
 }
 
+/**
+ * Files matching `pattern` under `cwd`, sorted. tinyglobby lists them in the order its crawl finds
+ * them, which changes from run to run; routes of equal rank keep the order they were found in, so
+ * an unsorted list makes the client route table, and the hashes of every client chunk, change
+ * between builds of the same app.
+ */
 export async function globFiles(pattern: string, cwd: string): Promise<string[]> {
-  const glob = await import("fast-glob");
-  return glob.default(pattern, { cwd, absolute: false });
+  const { glob } = await import("tinyglobby");
+  return (await glob(pattern, { cwd, expandDirectories: false })).sort();
 }
 
 export function parseSearchParams(

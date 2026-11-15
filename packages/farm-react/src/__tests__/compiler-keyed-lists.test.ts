@@ -34,11 +34,12 @@ describe("React AOT keyed list compiler", () => {
     expect(result.diagnostics).toEqual([]);
     expect(result.optimizations.keyedArrayAppendHints).toBe(1);
     expect(result.code).toContain("createCompilerKeyedArrayAppend");
-    expect(result.code).toContain("keyedRowsHintedRuntimeFeature");
+    expect(result.code).toContain("keyedRowsAppendOnlyRuntimeFeature");
     expect(result.code).not.toContain("keyedRowsConditionalRuntimeFeature");
     expect(result.code).not.toContain("keyedRowsHostRuntimeFeature");
     expect(result.code).toContain("farmBlocks.KeyedRows");
     expect(result.code).toContain("rowKey={item => item.id}");
+    expect(result.code).toContain("cloneRows={true}");
     expect(result.code).toContain('kind: "element"');
     expect(result.code).toContain('kind: "block"');
     expect(result.code).toContain("dependencies: [0]");
@@ -51,6 +52,40 @@ describe("React AOT keyed list compiler", () => {
       code: expect.stringContaining("farmBlocks.KeyedRows"),
     });
   });
+
+  // Rows with defaultValue stay with React (compiler-keyed-rows-react-owned.test.ts).
+  it.each([
+    ["plain rows", "<li key={item.id} className={item.label}><span>{item.label}</span></li>", true],
+    ["inputs", "<li key={item.id}><input placeholder={item.label} /></li>", false],
+    ["textareas", "<li key={item.id}><textarea placeholder={item.label} /></li>", false],
+    [
+      "selects",
+      '<li key={item.id}><select name={item.label}><option value="a">A</option></select></li>',
+      false,
+    ],
+    ["style bindings", "<li key={item.id} style={{ opacity: item.label ? 1 : 0.5 }}>x</li>", false],
+  ])(
+    "marks %s as cloneable only when cloneNode copies their state",
+    async (_name, row, cloneable) => {
+      const result = await compile(`
+      import { useState } from "react";
+      export function Inventory() {
+        const [items, setItems] = useState([{ id: "a", label: "Alpha" }]);
+        return (
+          <section>
+            <button onClick={() => setItems((current) => current.slice(1))}>Drop</button>
+            <ul>{items.map((item) => ${row})}</ul>
+          </section>
+        );
+      }
+    `);
+
+      expect(result.compiled).toEqual(["Inventory"]);
+      expect(result.code).toContain("farmBlocks.KeyedRows");
+      if (cloneable) expect(result.code).toContain("cloneRows={true}");
+      else expect(result.code).not.toContain("cloneRows");
+    },
+  );
 
   it("isolates an aliased public List with a custom row component", async () => {
     const result = await compile(`
@@ -220,7 +255,7 @@ describe("React AOT keyed list compiler", () => {
   it("treats a locally named List as an ordinary static component island", async () => {
     const result = await compile(`
       import { useState } from "react";
-      function List() { return <li>Local</li>; }
+      function List() { const [label] = useState("Local"); return <li>{label}</li>; }
       export function LocalList() {
         const [active, setActive] = useState(false);
         return <ul onClick={() => setActive(!active)}><List /></ul>;

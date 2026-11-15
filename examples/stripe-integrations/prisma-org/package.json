@@ -25,12 +25,12 @@
   "devDependencies": {
     "@farm.js/cli": "workspace:*",
     "@types/better-sqlite3": "^7.6.13",
-    "@types/node": "^20.10.5",
+    "@types/node": "^22.20.5",
     "@types/react": "^18.2.45",
     "@types/react-dom": "^18.2.18",
     "prisma": "^6.7.0",
     "typescript": "^5.3.3",
-    "vite": "^5.0.10",
-    "vitest": "^3.2.7"
+    "vite": "8.3.4",
+    "vitest": "5.0.5"
   }
 }

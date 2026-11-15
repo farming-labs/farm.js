@@ -1,7 +1,7 @@
-import { build } from "esbuild";
 import fs from "node:fs";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
+import { bundleNodeModule } from "./build/node-module-bundle";
 import type { FarmInstrumentationModule } from "./instrumentation-runtime";
 
 export * from "./instrumentation-runtime";
@@ -9,13 +9,16 @@ export * from "./instrumentation-runtime";
 const INSTRUMENTATION_EXTENSIONS = ["ts", "mts", "js", "mjs"] as const;
 
 export function resolveFarmInstrumentationFile(root: string, srcDir = "src"): string | null {
+  // A srcDir of "." makes both lists name the same files.
   const candidates = [
-    ...INSTRUMENTATION_EXTENSIONS.map((extension) =>
-      path.join(root, srcDir, `instrumentation.${extension}`),
-    ),
-    ...INSTRUMENTATION_EXTENSIONS.map((extension) =>
-      path.join(root, `instrumentation.${extension}`),
-    ),
+    ...new Set([
+      ...INSTRUMENTATION_EXTENSIONS.map((extension) =>
+        path.join(root, srcDir, `instrumentation.${extension}`),
+      ),
+      ...INSTRUMENTATION_EXTENSIONS.map((extension) =>
+        path.join(root, `instrumentation.${extension}`),
+      ),
+    ]),
   ].filter((candidate) => fs.existsSync(candidate));
 
   if (candidates.length > 1) {
@@ -38,15 +41,12 @@ export async function loadFarmInstrumentation(
   const outputDirectory = path.join(root, ".farm", ".instrumentation-loader");
   const outputFile = path.join(outputDirectory, "instrumentation.mjs");
   await fs.promises.mkdir(outputDirectory, { recursive: true });
-  await build({
-    entryPoints: [filePath],
+  await bundleNodeModule({
+    root,
+    entry: filePath,
     outfile: outputFile,
-    bundle: true,
-    format: "esm",
-    platform: "node",
     target: "node20",
-    packages: "external",
-    sourcemap: "inline",
+    externalPackages: true,
   });
 
   const url = pathToFileURL(outputFile);

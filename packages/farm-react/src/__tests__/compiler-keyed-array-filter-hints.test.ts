@@ -32,7 +32,7 @@ describe("React AOT keyed-array filter hints", () => {
     expect(result.optimizations.keyedArrayFilterHints).toBe(1);
     expect(result.code).toContain("createCompilerKeyedArrayFilter");
     expect(result.code).toContain("filterIndexIndependent={true}");
-    expect(result.code).toContain("keyedRowsFilterHintedRuntimeFeature");
+    expect(result.code).toContain("keyedRowsFilterOnlyRuntimeFeature");
     await expect(
       transformWithEsbuild(result.code, "/app/KeyedArrayFilterHints.tsx", {
         loader: "tsx",
@@ -82,7 +82,7 @@ describe("React AOT keyed-array filter hints", () => {
     expect(result.optimizations.keyedArrayFilterHints).toBe(1);
     expect(result.code).toContain("createCompilerKeyedArrayFilter");
     expect(result.code).toContain("filterIndexIndependent={true}");
-    expect(result.code).toContain("keyedRowsFilterHintedRuntimeFeature");
+    expect(result.code).toContain("keyedRowsFilterOnlyRuntimeFeature");
     await expect(
       transformWithEsbuild(result.code, "/app/KeyedArrayFilterHints.tsx", {
         loader: "tsx",
@@ -121,7 +121,7 @@ describe("React AOT keyed-array filter hints", () => {
       expect(result.optimizations.keyedArrayFilterHints).toBe(1);
       expect(result.code).toContain("createCompilerKeyedArrayFilter");
       expect(result.code).toContain("filterIndexIndependent={true}");
-      expect(result.code).toContain("keyedRowsFilterHintedRuntimeFeature");
+      expect(result.code).toContain("keyedRowsFilterOnlyRuntimeFeature");
       await expect(
         transformWithEsbuild(result.code, "/app/KeyedArrayFilterHints.tsx", {
           loader: "tsx",

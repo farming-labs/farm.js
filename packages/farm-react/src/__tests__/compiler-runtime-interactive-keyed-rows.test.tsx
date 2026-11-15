@@ -1392,4 +1392,101 @@ describe("interactive compiled keyed-row runtime", () => {
     expect(container.querySelectorAll("li")).toHaveLength(1);
     expect(container.querySelector('[data-key="b"] span')?.textContent).toBe("Beta newest");
   });
+
+  it("keeps React's controlled-field contract when row change events are delegated", async () => {
+    // Delegated rows used to render onChange={undefined}, so React warned that every
+    // compiled controlled input, select, and checkbox had no onChange handler.
+    const errors = vi.spyOn(console, "error").mockImplementation(() => undefined);
+    const changes: string[] = [];
+    const picks: string[] = [];
+    const Fields = createCompiledComponent({
+      displayName: "DelegatedControlledFields",
+      initialize: () => [
+        [
+          { id: "a", label: "Alpha", done: false },
+          { id: "b", label: "Beta", done: true },
+        ],
+      ],
+      render(_props: Record<string, never>, state, blocks) {
+        const items = () => state[0].get() as Item[];
+        const KeyedRows = blocks.KeyedRows;
+        return (
+          <main>
+            <KeyedRows
+              bindings={[]}
+              create={(item) => ({
+                kind: "element",
+                tag: "li",
+                attributes: [{ name: "data-key", value: (item as Item).id }],
+                styles: [],
+                children: [],
+              })}
+              events={[
+                {
+                  name: "onChange",
+                  path: [0],
+                  invoke: (item, _index, event) =>
+                    changes.push(
+                      `${(item as Item).id}:${(event.currentTarget as HTMLInputElement).checked}`,
+                    ),
+                },
+                {
+                  name: "onChange",
+                  path: [1],
+                  invoke: (item) => changes.push(`${(item as Item).id}:label`),
+                },
+                {
+                  name: "onClick",
+                  path: [2],
+                  invoke: (item) => picks.push((item as Item).id),
+                },
+              ]}
+              delegateEvents
+              id={0}
+              items={items}
+              render={(rowEvent) => (
+                <ul>
+                  {items().map((item, index) => (
+                    <li data-key={item.id} key={item.id}>
+                      <input
+                        checked={Boolean(item.done)}
+                        onChange={rowEvent(item, index, 0)}
+                        type="checkbox"
+                      />
+                      <input onChange={rowEvent(item, index, 1)} value={item.label} />
+                      <button onClick={rowEvent(item, index, 2)} type="button">
+                        Pick
+                      </button>
+                    </li>
+                  ))}
+                </ul>
+              )}
+              rowKey={(item) => (item as Item).id}
+            />
+          </main>
+        );
+      },
+      bindings: [{ kind: "block", id: 0, dependencies: [0] }],
+    });
+
+    const container = document.createElement("div");
+    document.body.append(container);
+    const root = createRoot(container);
+    roots.push(root);
+    await act(async () => root.render(<Fields />));
+
+    const warnings = errors.mock.calls.map((call) => call.map(String).join(" "));
+    expect(warnings.filter((message) => message.includes("without an `onChange` handler"))).toEqual(
+      [],
+    );
+
+    // The delegated listener still owns the work: each event reaches its row once.
+    const firstRow = container.querySelector<HTMLLIElement>('li[data-key="a"]')!;
+    await act(async () =>
+      firstRow.querySelector<HTMLInputElement>('input[type="checkbox"]')!.click(),
+    );
+    await act(async () => firstRow.querySelector("button")!.click());
+    expect(changes).toEqual(["a:true"]);
+    expect(picks).toEqual(["a"]);
+  });
 });

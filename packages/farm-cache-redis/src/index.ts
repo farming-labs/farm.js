@@ -4,6 +4,7 @@ import type { RateLimitStorage } from "@farm.js/core/middleware";
 export interface FarmRedisClient {
   get(key: string): Promise<string | null>;
   set(key: string, value: string): Promise<unknown>;
+  set(key: string, value: string, expiryMode: "PX", ttlMs: number): Promise<unknown>;
   set(
     key: string,
     value: string,
@@ -98,7 +99,18 @@ export function redisCache(options: RedisCacheOptions): FarmCacheAdapter {
           { cause: error },
         );
       }
-      await (await getClient()).set(key(cacheKey), serialized);
+      const client = await getClient();
+      // Entries with a finite revalidate carry expiresAt; without PX every distinct
+      // key (a query string, a server query input) would stay in Redis forever.
+      const ttlMs =
+        typeof entry.expiresAt === "number" && Number.isFinite(entry.expiresAt)
+          ? Math.max(1, Math.ceil(entry.expiresAt - Date.now()))
+          : undefined;
+      if (ttlMs === undefined) {
+        await client.set(key(cacheKey), serialized);
+      } else {
+        await client.set(key(cacheKey), serialized, "PX", ttlMs);
+      }
     },
     async delete(cacheKey: string): Promise<void> {
       await (await getClient()).del(key(cacheKey));

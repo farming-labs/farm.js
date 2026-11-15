@@ -13,6 +13,7 @@ import {
 
 export * from "./app-markdown-runtime";
 export {
+  resolveFarmMdxComponentsModulePath,
   resolveMdxConfig,
   type FarmMdxComponent,
   type FarmMdxComponents,
@@ -22,10 +23,7 @@ export {
 
 export async function createFarmMarkdownRouteModuleFromFile(
   filePath: string,
-  options: {
-    components?: FarmMdxComponents;
-    config?: FarmMdxResolvedConfig;
-  } = {},
+  options: Pick<FarmMarkdownPageModuleInput, "components" | "config"> = {},
 ) {
   const source = await readFile(filePath, "utf8");
   return createFarmMarkdownRouteModule({

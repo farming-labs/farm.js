@@ -15,6 +15,7 @@ export default defineConfig({
     globals: true,
     include: ["src/**/*.test.{ts,tsx}", "src/**/*.spec.{ts,tsx}"],
     coverage: {
+      include: ["src/**/*.{ts,tsx}"],
       reporter: ["text", "json", "html"],
       exclude: ["node_modules/", "dist/", "**/*.test.*", "**/*.spec.*"],
     },

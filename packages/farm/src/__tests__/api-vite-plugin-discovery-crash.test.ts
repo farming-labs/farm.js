@@ -112,16 +112,22 @@ async function bootstrapConflictPlugin(): Promise<ConflictHarness> {
   let rootMethod = "GET";
   const server: any = {
     config: { root },
-    ssrLoadModule: async (filePath: string) =>
-      filePath === routeFile
-        ? { GET: async () => new Response("file-get") }
-        : {
-            health: {
-              __path: "/api/health",
-              __method: rootMethod,
-              handler: async () => new Response("root-get"),
-            },
-          },
+    environments: {
+      ssr: {
+        runner: {
+          import: async (filePath: string) =>
+            filePath === routeFile
+              ? { GET: async () => new Response("file-get") }
+              : {
+                  health: {
+                    __path: "/api/health",
+                    __method: rootMethod,
+                    handler: async () => new Response("root-get"),
+                  },
+                },
+        },
+      },
+    },
     middlewares: {
       use(fn: any) {
         registered = fn;
@@ -178,7 +184,7 @@ describe("farmApiPlugin request boundary after failed cold-start discovery", () 
     expect(res.statusCode).toBe(500);
     expect(res.end).toHaveBeenCalled();
     expect(res.setHeader).toHaveBeenCalledWith("Content-Type", "application/json");
-    expect(chunks.join("")).toContain("Internal server error");
+    expect(JSON.parse(chunks.join(""))).toEqual({ error: "Internal Server Error" });
     expect(unhandled).toEqual([]);
   });
 
@@ -236,7 +242,9 @@ describe("farmApiPlugin request boundary after failed cold-start discovery", () 
     let registered: ((req: any, res: any, next: () => void) => void) | undefined;
     const server: any = {
       config: { root },
-      ssrLoadModule: async () => ({ GET: async () => new Response("ok-body") }),
+      environments: {
+        ssr: { runner: { import: async () => ({ GET: async () => new Response("ok-body") }) } },
+      },
       middlewares: {
         use(fn: any) {
           registered = fn;

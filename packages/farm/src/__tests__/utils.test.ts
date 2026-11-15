@@ -4,7 +4,10 @@ import {
   parseRoutePath,
   parseSearchParams,
   matchRoute,
+  matchRouteParts,
   matchRoutePrefix,
+  matchRoutePrefixParts,
+  splitRoutePath,
   segmentsToPattern,
   toPosixPath,
   toRootRelativeUrlPath,
@@ -238,6 +241,18 @@ describe("matchRoute", () => {
       matches: true,
       params: {},
     });
+  });
+
+  it("matches decoded path parts with the same semantics", () => {
+    const pathParts = splitRoutePath("/docs/guides/caf%C3%A9");
+    const segments = parseRoutePath("docs/[...slug]/page.tsx").segments;
+
+    expect(matchRouteParts(pathParts, segments)).toEqual(
+      matchRoute("/docs/guides/caf%C3%A9", segments),
+    );
+    expect(matchRoutePrefixParts(pathParts, segments)).toBe(
+      matchRoutePrefix("/docs/guides/caf%C3%A9", segments),
+    );
   });
 
   it("keeps malformed URL segments literal while matching", () => {

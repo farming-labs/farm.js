@@ -1,6 +1,6 @@
 {
   "name": "@farm.js/contentful",
-  "version": "0.1.1-beta.2",
+  "version": "0.1.73",
   "description": "Contentful content source for Farm.js",
   "license": "MIT",
   "repository": {
@@ -34,7 +34,8 @@
     "@farm.js/content": "workspace:*",
     "contentful": "^11.8.6",
     "typescript": "^5.3.3",
-    "vitest": "^3.2.7"
+    "vite": "8.3.4",
+    "vitest": "5.0.5"
   },
   "peerDependencies": {
     "@farm.js/content": "workspace:^",

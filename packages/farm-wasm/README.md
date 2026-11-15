@@ -15,7 +15,7 @@ export default defineConfig({
 });
 ```
 
-The plugin installs `vite-plugin-wasm` in both build pipelines, uses ES-module workers, and selects a browser target that supports native top-level await. The default is Chrome/Edge 89, Firefox 114, and Safari 15 unless your app supplies `vite.build.target`. Override it explicitly with `wasm({ target: ["chrome120", "firefox120", "safari17"] })`.
+The plugin installs `vite-plugin-wasm` in both build pipelines, uses ES-module workers, and selects a browser target that supports native top-level await. Production builds validate the final browser and worker targets explicitly, including with Vite 8/Rolldown; an incompatible target fails the build. The default is Chrome/Edge 89, Firefox 114, and Safari 15 unless your app supplies `vite.build.target`. Override it explicitly with `wasm({ target: ["chrome120", "firefox120", "safari17"] })`.
 
 This is a browser loading/build plugin, not a Rust compiler, worker pool, or universal server/edge adapter. Import the JavaScript entry point supplied by your Wasm package when it has one. Keep browser-only imports inside client event handlers or effects.
 

@@ -27,6 +27,121 @@ With Vue, the same routes use names such as `src/app/page.vue` and
 
 With Svelte, use `src/app/page.svelte` and `src/app/blog/[slug]/page.svelte`.
 
+## Programmatic routes
+
+File routes cover most apps. Define routes in code instead when a URL can't be a folder, or when a
+page and the endpoints it needs belong together. Export `defineRoutes` from `src/routes.ts` (or
+`routes.tsx`, `farm.routes.ts`, `farm.routes.tsx`, and their `.js`/`.jsx` forms):
+
+**src/routes.tsx**
+
+```tsx
+import { createEndpoint, defineRoutes } from "@farm.js/core";
+import { z } from "zod";
+import { ChangelogPage } from "./features/changelog/page";
+import { listReleases, renderReleasesFeed } from "./features/changelog/releases";
+
+export default defineRoutes(({ page, api }) => [
+  page("/changelog", { component: ChangelogPage }),
+  api("/changelog/feed.xml", {
+    GET: async () =>
+      new Response(renderReleasesFeed(await listReleases()), {
+        headers: { "content-type": "application/rss+xml" },
+      }),
+  }),
+  api("/changelog/releases.json", {
+    GET: createEndpoint(
+      {
+        method: "GET",
+        query: z.object({ limit: z.coerce.number().int().positive().default(20) }),
+      },
+      async ({ query }) => Response.json(await listReleases(query.limit)),
+    ),
+  }),
+]);
+```
+
+- `api()` takes the same handlers a `route.ts` exports, one per method (`GET`, `HEAD`, `QUERY`,
+  `POST`, `PUT`, `DELETE`, `PATCH`, `OPTIONS`): a plain `(request) => Response` or a
+  `createEndpoint(...)` with request validation.
+- Paths don't need the `/api` prefix that file API routes live under, and they can end in a file
+  extension such as `/feed.xml` or `/data.json`.
+- `page()` and `layout()` take a component plus the route options covered below: data, guards,
+  search params, pending, error and not-found UI, and [route runtime](/docs/route-runtime) settings.
+- Programmatic pages join the same route table as file routes, so generated route types,
+  `PageProps` and typed links include them. Programmatic API routes are not in the generated API
+  client types yet; use a file route under `src/app/api` when you need a typed client.
+
+Prefer a file route when the URL maps to a folder. Reach for `defineRoutes` for colocated
+features, URLs a folder can't express, and route lists generated from data or configuration.
+
+### Routes files never reach the browser
+
+A routes file holds server code: guards, `data` hooks, `staticPaths`, `generateMetadata`, API
+handlers, and the database clients and credentials they import. The browser never loads it. When
+a programmatic page or layout hydrates, its client copy imports only the module that defines its
+`component` (and its `pending` component), so give every component its own module and import it
+into the routes file:
+
+**src/features/admin/page.tsx**
+
+```tsx
+export function AdminPage({ data }: { data: { users: string[] } }) {
+  return (
+    <ul>
+      {data.users.map((user) => (
+        <li key={user}>{user}</li>
+      ))}
+    </ul>
+  );
+}
+```
+
+**src/routes.tsx**
+
+```tsx
+import { defineRoutes } from "@farm.js/core";
+import { AdminPage } from "./features/admin/page";
+import { db } from "./lib/db";
+import { requireAdmin } from "./lib/auth";
+
+export default defineRoutes(({ page }) => [
+  page("/admin", {
+    component: AdminPage,
+    guard: requireAdmin,
+    data: { main: async () => ({ users: await db.listUsers() }) },
+  }),
+]);
+```
+
+Farm finds each component's module from the routes it evaluates on the server, so the route list
+can be built any way you like: helpers, lists imported from other modules, definition objects, or
+options assigned after `page()` returns. Its params, search, guard, and data run on the server,
+and the page hydrates from the props the server resolved for the document.
+
+A client build fails when a hydrating page or layout's component has no module of its own: it is
+declared in the routes file or another module that defines routes, computed there
+(`component: memo(AdminPage)`), or imported straight from a package. A module defines routes when
+it holds route definitions in any shape (exported lists, objects or maps of routes, routes kept
+behind a function) or calls `page()`, `layout()`, `api()`, or `defineRoutes()`; a component module
+that imports one counts too. Move the component to its own module, or re-export the package
+component from one. Several unrelated modules exporting the same component also fail the build
+unless the routes file imports it from one of them. A client build also fails if any browser module
+imports a module that defines routes, or if a component's imports reach a Node builtin; import the
+component, server function, or helper from its own module instead. The one exception is the
+action-only proxy that [route actions](#route-actions) get with Server Actions enabled. Pages and
+layouts that don't hydrate ship no client code, so these rules don't apply to them.
+
+Farm can't trace a route written as a plain object literal that no module exports. While such a
+route exists, a component module is only accepted when neither it nor anything it imports could
+build a route definition (an object with a route `kind`, or an imported route factory). Build those
+routes with `page()` and `layout()`, or export them, if a component module is refused.
+
+> **Migration:** earlier releases loaded the routes file in the browser and stripped its server
+> options. Move components declared in a routes file into their own modules, and stop importing
+> route definitions from client components. Programmatic pages with `params` or `search` now
+> hydrate from server-resolved props, like pages with `guard` or `data`.
+
 ## Named slots and intercepted routes
 
 An `@name` directory gives its owning layout another rendered node alongside `children`. Use slots
@@ -121,6 +236,9 @@ or an empty array.
 Farm writes the route union into the consolidated `src/farm.d.ts` declaration file. Link hrefs and route component props accept real routes without widening everything to plain string. Link hrefs can also include query strings and hash fragments.
 Changing only the fragment preserves SPA state, honors push versus replace history, and does not
 request route data again.
+Relative navigation, prefetch, and shallow history URLs resolve against the current document in
+development and production. For example, `?tab=settings` from `/users/123?tab=profile` keeps
+`/users/123`, and `456` from `/users/123` resolves to `/users/456`.
 Native anchor behavior still takes precedence: for example, a `Link` with a `download` attribute is
 handled by the browser instead of Farm's SPA router. Absolute URI schemes such as `mailto:`, `tel:`,
 `sms:`, and same-origin `blob:` URLs are passed through unchanged and are never prefetched as app routes. Literal custom
@@ -128,10 +246,37 @@ schemes such as `customapp:open` are validated from their URI grammar and work w
 Viewport prefetch uses a short scroll guard and is cancelled if its link unmounts before the guard
 expires. Intent prefetches are deduplicated while active; after an attempt settles, a later hover,
 focus, or touch can retry while successful route data remains deduplicated by the router cache.
+In a production islands build, the client router loads when a viewport-prefetch link first nears
+the viewport, or on the first link hover, focus, tap, or navigation, and then prefetches.
+The development page-data router reuses a successfully decoded JSON prefetch response when
+navigation overlaps it with the same URL, interception origin, and active layout chain.
+Refreshes and different contexts fetch independently, and failed prefetches are retried by
+navigation. Cancelling a waiting
+navigation does not cancel its background prefetch. Deferred streaming responses keep independent
+requests and cancellation ownership; a waiting navigation starts its own request once the
+prefetch response headers identify a deferred stream.
+Production HTML navigation also reuses matching in-flight prefetches. Different interception
+contexts and deployment identities stay separate; failed prefetches are retried by navigation.
+Refresh bypasses pending prefetches, and clearing the cache prevents their late responses from
+repopulating it. Cancelling navigation does not abort a shared background prefetch.
+When a production HTML request redirects, Farm hands the original URL to a full document
+navigation so the browser preserves the redirect destination, fragments, and push/replace history.
+Prefetching a redirect never navigates the page or caches destination HTML under the original URL.
+When development page data redirects (a `redirect()` or thrown 3xx `Response` from the page, its
+layouts, metadata, or route data, or route middleware that redirects), the router continues the
+navigation at the target instead of reloading the document. The target takes the history entry
+the redirecting URL would have had and inherits its fragment unless the target has its own; a
+cross-origin target, or a chain of more than 20 redirects, becomes a document navigation.
+Prefetching such a link neither caches nor reports the redirect.
+A same-origin link whose response is not HTML, such as an RSS feed, JSON, or a file served by an API
+route, is handed to the browser the same way, so it opens as its own document. Prefetching such a
+link never caches it as page HTML.
 Internal `Link` hrefs stay app-relative: when `basePath: "/console"` is configured, `href="/about"`
 renders and navigates to `/console/about`. Do not add the base path to route hrefs yourself.
 For a reusable custom-scheme type, use ``ExternalHref<`customapp:${string}`>`` (or declaration-merge
 `LinkExternalUriSchemes` when the scheme should belong to the default `ExternalHref` union).
+A `Link` whose href is a `javascript:` URL renders without an `href`, and a click on it is ignored and
+logged, under React 18, React 19, and Preact alike, so an untrusted URL passed to `Link` cannot run script.
 
 **Client navigation**
 
@@ -147,6 +292,11 @@ export function Nav() {
   );
 }
 ```
+
+Same-page fragment links (such as `#settings`) and Back/Forward between those
+fragments keep the current page mounted without loading route data. Native
+anchor scrolling and `hashchange` listeners still work. A different pathname,
+query string, or intercepted-route context still performs route navigation.
 
 ## Lightweight router helpers
 
@@ -223,6 +373,12 @@ cross-origin URLs use normal document navigation instead of Farm's local page-da
 Internal router paths use the configured application `basePath`, matching `Link`; already-prefixed
 paths are preserved.
 
+Router navigation only leaves the page for `http:`, `https:`, `mailto:`, and `tel:` URLs. A
+`javascript:`, `data:`, `vbscript:`, or `blob:` target is ignored and logged as a console error,
+after the browser's own URL parsing, so leading spaces, mixed case, and embedded tabs are caught
+too. This makes `router.push(searchParams.get("next"))` safe against script URLs, but you should
+still check that a redirect target from the query string points somewhere you expect.
+
 ## Navigation blocking
 
 Use `useBlocker` when a client component needs to protect unsaved work before SPA navigation continues.
@@ -243,6 +399,50 @@ export function ProductForm({ isDirty }: { isDirty: boolean }) {
 ```
 
 Blockers apply to Farm SPA navigation and browser unload prompts. They improve UX, but they do not replace server-side validation or persistence checks.
+
+## Navigation delegates
+
+A host that shows each page on its own screen, such as a native mobile or desktop shell, can take
+in-app navigations instead of letting the router navigate in place. Register a delegate in the
+app's client entry; return `true` to take the navigation, anything else to let the router go ahead.
+
+```ts
+// src/client.ts
+import { defineClient } from "@farm.js/core/client/lifecycle";
+import { delegateNavigation } from "@farm.js/core/renderer-client";
+
+declare global {
+  interface Window {
+    nativeShell?: { postMessage(message: unknown): void };
+  }
+}
+
+export default defineClient({
+  setup() {
+    const shell = window.nativeShell;
+    if (!shell) return;
+    delegateNavigation(({ url, action }) => {
+      shell.postMessage({ type: "visit", url, action });
+      return true;
+    });
+  },
+});
+```
+
+The delegate gets the resolved absolute `url`, `from` and `to` paths as blockers see them, and
+`action` (`"push"`, or `"replace"` for `Link replace`, `router.replace()` and `{ replace: true }`).
+It runs after blockers, for `Link`, plain same-origin anchors, `navigateTo`, router `push` and
+`replace`, and redirects after an islands-mode server action. A taken navigation leaves the page,
+URL and navigation state untouched and fires no navigation events.
+
+These are not offered: back/forward (the host owns its own stack), `router.refresh()` and the
+refresh after a server action, same-page hash links, and document navigations (other origins,
+locale switches, routes that need a full page load), which a WebView's own navigation callback
+sees. A delegate that throws is logged and treated as declining. `delegateNavigation` returns a
+function that removes the delegate, and it is also exported from `@farm.js/core/client`. Apps
+on the RSC pipeline (`experimental.serverComponents: { mode: "rsc" }`) run the RSC router, which offers link clicks,
+router `push` and `replace`, and redirects after a server action; it has no client entry, so
+register the delegate from a client component.
 
 ## Page state
 
@@ -272,8 +472,9 @@ Page state is stored in `history.state`, so back/forward navigation restores the
 ## Scroll restoration
 
 Farm restores window scroll during SPA navigation. Register nested scroll areas when a layout owns its own scroll container.
-Locations with different query strings keep independent positions, so browser history restores the
-correct filtered, searched, or paginated view.
+Positions are saved per history entry, like the browser does: Back and Forward return to where you
+left each visit, even when the same URL is in history twice, and locations with different query
+strings keep independent positions. A link with `scroll={false}` keeps the current scroll.
 
 ```tsx
 "use client";
@@ -287,6 +488,31 @@ export function DocsSidebar() {
 ```
 
 Use stable keys per scroll container. If two elements share a key, the latest mounted element owns that stored position.
+
+## Route announcements
+
+A client navigation does not load a new document, so a screen reader has nothing to read on its
+own. Farm announces the page instead. After a navigation renders, Farm puts the page's title into a
+visually hidden live region (`aria-live="assertive"`, `aria-atomic="true"`) at the end of `<body>`.
+When the title is empty it reads the first `h1`, then the pathname.
+
+- The first load is not announced: the screen reader reads that document itself.
+- A navigation is announced when its pathname or title changed. Back and forward are announced.
+  A hash change, or a `router.refresh()` or search-param change that keeps the title, is not.
+- The region is created on the first client navigation, never in server HTML, so SSR output and
+  hydration are unchanged.
+- It works the same in every renderer, in islands mode, and with the RSC pipeline. There is no
+  option to configure.
+- Focus stays where it was. Farm does not move focus after a navigation.
+- Pages of the built-in docs engine navigate with their own runtime and are not announced yet.
+
+Give each page its own `metadata.title` so the announcement says where the user landed:
+
+```tsx
+export const metadata = { title: "Billing | Acme" };
+```
+
+End-to-end tests can read the announcement from `#farm-route-announcer`.
 
 ## Route data cache
 
@@ -324,7 +550,7 @@ export async function saveProduct(id: string, name: string) {
 
 `key` enables caching. When a cached entry is still fresh, Farm reuses the previous `data.main` result. `before` still runs for each request, and `after` still runs with the returned data, so setup and logging hooks keep their normal behavior.
 
-`staleTime` accepts a number of milliseconds or a duration string such as `"500ms"`, `"30s"`, `"5m"`, or `"1h"`. Omit `staleTime` when data should stay cached until invalidated.
+`staleTime` accepts a number of milliseconds or a duration string such as `"500ms"`, `"30s"`, `"5m"`, or `"1h"`. Omit `staleTime` when data should stay cached until invalidated. A `staleTime` of `0` (or `"0ms"`) means "always revalidate": `data.main` runs for every request and its result is never cached or shared, as with `createServerQuery`. Any other value, such as a negative number or `"5 minutes"`, throws when the route is defined.
 
 Farm also tags route data by the rendered path, so `revalidatePath("/products/123")` invalidates the matching route data entry. Use `tags` or `paths` when one mutation should refresh more than one route:
 
@@ -701,6 +927,10 @@ export const ProductRoute = createRoute("/products/[id]", {
 
 Redirects are not rendered through `error`; they escape so Farm can return a real redirect response.
 
+When a guard or data hook throws and Farm renders `error` or `notFound`, the route's
+`generateMetadata` does not run: the document keeps only layout and static metadata, so a refused
+request never carries the title or description of the resource it was refused.
+
 ## Nested segments
 
 Folders become URL segments. Use normal folders for visible path segments and dynamic folders when the value comes from the URL.
@@ -748,8 +978,26 @@ from the rendered React page automatically.
 
 Export `metadata` for static head tags or `generateMetadata` when the values depend on route params, search params, middleware data, or route data. Farm merges layout metadata from root to leaf, then applies the page metadata last.
 
+Export `viewport` (or `generateViewport`) for the viewport tag, as in Next.js. Layouts and the page
+merge from root to page over the default `width=device-width, initial-scale=1`; `themeColor` and
+`colorScheme` render their own tags. Every document starts its head with `<meta charset="utf-8">` and
+the viewport tag, including one a root layout renders itself, unless that layout writes the tag.
+
+```tsx
+import type { Viewport } from "@farm.js/core";
+
+export const viewport: Viewport = {
+  maximumScale: 1,
+  themeColor: [
+    { media: "(prefers-color-scheme: light)", color: "#ffffff" },
+    { media: "(prefers-color-scheme: dark)", color: "#0a0a0a" },
+  ],
+};
+```
+
 During HTML-based client navigation, Farm reconciles the destination document's title, meta tags,
-canonical and alternate links, icons, and manifest link. Tags omitted by the destination are removed,
+canonical and alternate links, icons, manifest link, and
+[page JSON-LD](/docs/configuration#agent-readiness). Tags omitted by the destination are removed,
 so metadata from the previous route cannot remain active.
 
 A layout can define a default title and a `%s` template for child segments. The layout itself uses
@@ -832,6 +1080,53 @@ export default function DocsLayout({ children }: LayoutProps) {
 
 Pair this layout with `opengraph-image.tsx` in the same `[...slug]` segment to generate a different PNG for each document. `generateMetadata` supplies the title, description, and social fields; the image file renders the PNG described below. Leave `openGraph.images` and `twitter.images` unset when Farm should attach the nearest generated image automatically. An explicit image value still takes precedence.
 
+### Article fields
+
+When `openGraph.type` is `"article"`, Farm also renders the Open Graph article properties:
+
+```tsx
+import type { MetadataProps } from "@farm.js/core";
+
+export async function generateMetadata({ params }: MetadataProps<"/blog/[slug]">) {
+  const post = await getPost(params.slug);
+
+  return {
+    openGraph: {
+      type: "article",
+      publishedTime: post.publishedAt,
+      modifiedTime: post.updatedAt,
+      authors: ["https://acme.test/team/ada"],
+      section: "Engineering",
+      tags: post.tags,
+    },
+  };
+}
+```
+
+`publishedTime` and `modifiedTime` take an ISO string or a `Date` and render
+`article:published_time` and `article:modified_time`. `authors` and `tags` take a string or an
+array and render one `article:author` or `article:tag` per item. `section` renders
+`article:section`. Other `openGraph.type` values ignore these fields.
+
+### Video previews
+
+`openGraph.videos` adds a short loop to the link preview in apps that play one, such as Messages and Discord. Other apps keep showing `openGraph.images`, so set both:
+
+**src/app/page.tsx**
+
+```tsx
+export const metadata = {
+  openGraph: {
+    type: "video.other",
+    videos: [{ url: "/og/home.mp4", type: "video/mp4", width: 2400, height: 1260 }],
+  },
+};
+```
+
+Each entry renders `og:video`, plus `og:video:secure_url`, `og:video:type`, `og:video:width`, and `og:video:height` when set. `url` and `secureUrl` resolve against `metadataBase` like image URLs, and a plain string is shorthand for `{ url }`. Point `url` at the media file itself, such as an MP4 in `public/`, not at a player page. Discord plays the video only when `openGraph.type` is `"video"` or starts with `"video."`.
+
+Open Graph merges one level, so `videos` set in a layout applies to every page under it. Set it on the page that owns the video, or set `videos: []` in a page that should not inherit it.
+
 ### Favicons
 
 Place favicon files in `public/`, then declare them through the root layout metadata. Files in `public/` are served from the application root, so `public/favicon.svg` is available at `/favicon.svg`.
@@ -862,6 +1157,30 @@ export const metadata: Metadata = {
 
 Root layout metadata applies the favicon to every route. Nested layouts and pages can override individual icon entries through their own metadata. Do not render a `<link rel="icon">` element from the layout component; declaring `metadata.icons` lets Farm place the tags in the document head in both development and production.
 
+### Site verification
+
+Search consoles confirm site ownership with a meta tag. Set the tokens once in the root layout:
+
+**src/app/layout.tsx**
+
+```tsx
+import type { Metadata } from "@farm.js/core";
+
+export const metadata: Metadata = {
+  verification: {
+    google: "google-token",
+    bing: "bing-token",
+    yandex: "yandex-token",
+    other: { "facebook-domain-verification": "facebook-token" },
+  },
+};
+```
+
+`google`, `bing`, and `yandex` render `google-site-verification`, `msvalidate.01`, and
+`yandex-verification`. `other` renders one `<meta name content>` per key. Every field accepts an
+array when a service needs more than one token. Like `openGraph`, `verification` merges one level
+deep, so a nested layout or page adds tokens and replaces the ones it repeats.
+
 ### Application metadata routes
 
 Use server-only metadata files when crawlers or browsers need an application-level document rather than an HTML `<meta>` tag. Farm discovers five conventions in `src/app` and route segments:
@@ -875,6 +1194,8 @@ Use server-only metadata files when crawlers or browsers need an application-lev
 | `llms-full.ts` | `/llms-full.txt`        | `MetadataRoute.LlmsTxt`  |
 
 The default export can be a literal value or a sync or async function. Functions receive the matched `params`, the current `Request`, its `URLSearchParams`, and the concrete route-segment `path`.
+
+Without a root `sitemap.ts`, Farm serves a generated `/sitemap.xml` of the app's static pages; see [`agent.sitemap`](/docs/configuration#sitemap). Add `sitemap.ts` when the sitemap should list dynamic pages such as products or posts.
 
 **src/app/sitemap.ts**
 
@@ -921,6 +1242,30 @@ export default function robots(): MetadataRoute.Robots {
   };
 }
 ```
+
+`robots.txt` controls crawling. Per-page indexing directives belong in `metadata.robots`, which
+renders a `<meta name="robots">` tag. Besides `index` and `follow`, it accepts `noarchive`,
+`nosnippet`, `noimageindex`, `max-snippet`, `max-image-preview`, `max-video-preview`, and
+`unavailable_after`. `googleBot` takes the same directives, or a string, for a separate
+`<meta name="googlebot">` tag:
+
+```tsx
+import type { Metadata } from "@farm.js/core";
+
+export const metadata: Metadata = {
+  robots: {
+    index: true,
+    follow: true,
+    "max-snippet": -1,
+    "max-image-preview": "large",
+    googleBot: { noimageindex: true },
+  },
+};
+```
+
+A root `robots.ts` replaces the robots.txt that [`agent.crawlers`](/docs/configuration#ai-crawlers)
+generates, and a `public/robots.txt` wins over both. All three take `/robots.txt` from the docs
+engine.
 
 **src/app/manifest.ts**
 
@@ -984,9 +1329,43 @@ export { default } from "./llms";
 
 Farm automatically adds the nearest discovered manifest to rendered page heads unless `metadata.manifest` already supplies an explicit URL. A nested file keeps its route prefix: `src/app/docs/sitemap.ts` is served at `/docs/sitemap.xml`, and a file under `[tenant]` receives the concrete tenant param.
 
+With the [docs engine](/docs/docs-engine) enabled, a root `sitemap.ts`, `robots.ts`, `llms.ts`, or `llms-full.ts` takes its path from the docs engine, which keeps serving the ones the app does not define. An app sitemap replaces the docs engine's instead of extending it, so list the docs pages in it when crawlers should find them there.
+
+[React Server Components](/docs/server-rendering#react-server-components) apps serve `sitemap.ts`,
+`robots.ts`, `manifest.ts`, `llms.ts`, and `llms-full.ts` the same way, after middleware and below
+a `basePath`, in place of the generated files, and add the nearest manifest to the page head. A
+production build bundles these files only when the app has one; `farm dev` serves a file added
+while it runs.
+
 Generated metadata routes accept `GET` and `HEAD` and return `405` for other methods. They revalidate by default. Export `revalidate = 300` for shared CDN caching or `revalidate = false` only for permanently immutable output. A returned `Response` is an escape hatch for custom XML, headers, or status codes.
 
 `feed.ts` is not reserved yet because feeds need an explicit RSS, Atom, or JSON Feed contract. Use an API or programmatic route for feeds until that format is defined.
+
+### Alternate representations
+
+Advertise other formats of a page, such as that feed route, with `alternates.types`. Each MIME
+type renders `<link rel="alternate" type href>`, with an optional `title`:
+
+```tsx
+import type { Metadata } from "@farm.js/core";
+
+export const metadata: Metadata = {
+  alternates: {
+    types: {
+      "application/rss+xml": [{ url: "/blog/feed.xml", title: "Acme blog" }],
+      "application/atom+xml": "/blog/atom.xml",
+    },
+  },
+};
+```
+
+Relative URLs resolve against `metadataBase`, the same as `alternates.languages`. A page that sets
+`alternates.types` replaces its layout's whole `types` object.
+
+When a page has a [Markdown mirror](/docs/markdown), Farm adds
+`<link rel="alternate" type="text/markdown" href="/blog/hello.md">` to its head next to the `Link`
+response header it already sends. Set `alternates.types["text/markdown"]` to advertise a different
+URL. Restricting `md.expose` or setting `md: false` removes the link along with the mirror.
 
 ### Static metadata images
 
@@ -1017,12 +1396,18 @@ Use `twitter-image.png` when X/Twitter needs a different image. Otherwise, socia
 
 Static images inside a dynamic segment are shared by every concrete route. Use a generated image when the preview must depend on route params.
 
+[React Server Components](/docs/server-rendering#react-server-components) apps serve static and
+generated `opengraph-image` and `twitter-image` files the same way, at the same URLs, with the same
+caching and head tags, after middleware and below a `basePath` and locale prefix. A production
+build inlines static images and bundles generated ones only when the app has them; `farm dev`
+serves a file added while it runs.
+
 ### Generated metadata images
 
 Generated JSX metadata images currently use the React image renderer. Every renderer can use static
 `opengraph-image.png`, `twitter-image.png`, and explicit metadata image URLs.
 
-Place `opengraph-image.tsx` or `twitter-image.tsx` next to a route segment when the image needs data or route params. Return ordinary stateless JSX: Farm owns the image endpoint and PNG renderer, so the component does not import `ImageResponse` or declare an API URL. Farm also adds the nearest matching image to the page head when `openGraph.images` or `twitter.images` is not already set.
+Place `opengraph-image.tsx` or `twitter-image.tsx` next to a route segment when the image needs data or route params. Return ordinary stateless JSX: Farm owns the image endpoint and PNG renderer, so the component does not import `ImageResponse` or declare an API URL. The renderer is `@vercel/og`, which the app installs with `pnpm add @vercel/og`; `farm build` fails with that command when a generated image exists and the package is missing. Farm also adds the nearest matching image to the page head when `openGraph.images` or `twitter.images` is not already set.
 
 **src/app/products/[id]/opengraph-image.tsx**
 
@@ -1074,6 +1459,64 @@ Generated images revalidate on every request by default. Export `revalidate = 30
 For advanced renderers, the default export may still return a `Response`, string, or bytes. To preserve the earlier React-to-SVG behavior, export `contentType = "image/svg+xml"` and return an SVG React element. A returned `Response` keeps its own status, headers, and body.
 
 Keep only one implementation for each image kind in a segment. For example, defining both `opengraph-image.png` and `opengraph-image.tsx` produces a build error. For broad social-platform compatibility, use 1200 by 630; generated JSX routes emit PNG automatically.
+
+### Image responses in API routes
+
+When an image needs its own URL, such as a share card per record or a badge another site embeds, return `ImageResponse` from an API route. `@farm.js/core/og` exports the same `@vercel/og` renderer that generated metadata images use. Install it once for both with `pnpm add @vercel/og`.
+
+**src/app/api/og/route.tsx**
+
+```tsx
+import { ImageResponse } from "@farm.js/core/og";
+
+export async function GET(request: Request) {
+  const title = new URL(request.url).searchParams.get("title") ?? "Acme";
+
+  return new ImageResponse(
+    <div
+      style={{
+        display: "flex",
+        width: "100%",
+        height: "100%",
+        alignItems: "center",
+        justifyContent: "center",
+        background: "#09090b",
+        color: "white",
+        fontSize: 72,
+      }}
+    >
+      {title}
+    </div>,
+    { width: 1200, height: 630 },
+  );
+}
+```
+
+`ImageResponse` is a standard `Response` with a PNG body. Its options take `width`, `height`, `fonts`, `emoji`, and `debug` alongside the usual `status` and `headers`. The element goes to the renderer as written, so style it with `style` or the `tw` prop; the `className` conversion described above applies only to metadata image files. Like generated metadata images, it takes React JSX.
+
+Outside development the response defaults to `cache-control: public, immutable, no-transform, max-age=31536000`. Pass a lowercase `cache-control` header when the image can change, for example `headers: { "cache-control": "public, max-age=300" }`.
+
+`@farm.js/core/og` is server-only. Importing it from a client component fails the build, and the development request, with an error that names the importing module. Importing it from server code without `@vercel/og` installed fails the same way and names the install command. On Node presets, including `node-server` and Vercel Functions, Farm copies `@vercel/og` and its wasm and font files into the server output whenever the server bundle imports it. On the Cloudflare Worker presets, `cloudflare-pages` and `cloudflare-module`, Farm bundles the `@vercel/og` edge build into the Worker, loads its wasm files as precompiled modules, and inlines its default font. On `netlify-edge`, Farm bundles the same edge build into the edge function and inlines its wasm files and default font, so Netlify does not bundle `@vercel/og` from `node_modules`. Other edge presets are not supported. Farm's Nitro version has no `vercel-edge` preset, so deploy to Vercel with the `vercel` preset, which runs Node functions.
+
+### Other meta tags
+
+Use `other` for a `<meta name>` tag that has no dedicated metadata field. Each key renders one tag,
+and an array value renders one tag per item:
+
+```tsx
+import type { Metadata } from "@farm.js/core";
+
+export const metadata: Metadata = {
+  other: {
+    "apple-itunes-app": "app-id=123456789",
+    "format-detection": "telephone=no",
+  },
+};
+```
+
+Names and values are escaped. `other` merges one level deep, so a page can replace a key its layout
+set and keep the rest. Client navigation removes the previous page's `other` tags before adding the
+next page's.
 
 ## File Route States
 
@@ -1154,6 +1597,10 @@ shows its built-in not-found page instead.
 
 With experimental RSC enabled, failures before the HTML shell is sent render the nearest
 `error.tsx` through RSC and SSR with status `500` and `Cache-Control: private, no-store`.
+`{ mode: "rsc" }` answers `notFound()` and unmatched URLs with a plain `404` for now, without the
+app's not-found page; `{ mode: "islands" }` renders it. A form posted without JavaScript whose
+action calls `redirect()` gets a `303`, so the browser loads the target with a `GET`; one whose action
+calls `notFound()` gets the same plain `404`.
 RSC loading and error boundaries follow the selected page's file ancestors, including route
 groups and catch-all folders. For example, `/users/[id]/error.tsx` does not handle a sibling
 `/users/new/page.tsx`. Failures before page selection, such as middleware errors, use only the
@@ -1178,6 +1625,12 @@ export default defineConfig({
   },
 });
 ```
+
+The not-found page renders inside the root layouts, and an `error.tsx` page inside its route's
+layouts. Neither streams: Farm sends each document whole, with its `404` or error status, after
+every lazy component, `use()` read, or other Suspense boundary in the page and its layouts has
+resolved, in development and production. A document that does not suspend renders in one
+synchronous pass.
 
 ## Catch-all routes
 
@@ -1212,6 +1665,10 @@ src/app/
 ```
 
 The group names are organizational. The URLs are still `/`, `/pricing`, and `/dashboard`.
+
+A group can have its own `layout.tsx`, `loading.tsx`, and `error.tsx`. They apply only to the pages
+inside the group, nested inside the parent layouts, so `(marketing)/layout.tsx` wraps `/` and
+`/pricing` but not `/dashboard`. See [route group layouts](/docs/layouts#route-group-layouts).
 
 ## Pending Navigation UI
 

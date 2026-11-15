@@ -45,8 +45,7 @@ delivers webhooks through Svix, and the prefix tells Farm to decode the key the 
 ### Let Farm construct Autumn
 
 The config-first example is the default path. When `instance` is omitted, Farm creates the Autumn
-SDK from `secretKey` and optional `serverURL`, supplied directly or through environment variables
-where supported.
+SDK from `secretKey` (or `AUTUMN_SECRET_KEY`) and the optional `serverURL` option.
 
 ### Provide an application-owned instance
 
@@ -66,8 +65,8 @@ export const billing = autumn({
 });
 ```
 
-The instance wins if a secret key is also supplied. Billing, webhook, route, product, meter, and
-storage settings remain integration options in either mode.
+The instance wins if a secret key is also supplied. Billing, webhook, route, product, and meter
+settings remain integration options in either mode.
 
 ## Usage
 
@@ -77,15 +76,14 @@ storage settings remain integration options in either mode.
 const checkout = await api.billing.checkout.post({
   body: {
     productId: "pro",
-    customerId: user.id,
     successPath: "/dashboard",
   },
 });
 ```
 
-## Database-backed billing
-
-The integration can persist customer, plan, entitlement, and usage records through `ctx.args.db`, so the app keeps the same integration surface when the database client changes. This schema-backed path is separate from KV storage.
+The Autumn customer always comes from `billing.resolveOwner`; a request body cannot choose it.
+Billing state lives in Autumn: the routes read it through the Autumn API, and Farm stores no billing
+records of its own.
 
 ## What Autumn adds
 
@@ -96,7 +94,7 @@ The integration can persist customer, plan, entitlement, and usage records throu
 | Checkout | Attach an Autumn product and redirect users when payment or confirmation is required. |
 | Portal   | Open the customer portal from a typed caller.                                         |
 | Usage    | Meter usage, report usage, check balance, and read current charges.                   |
-| Webhooks | Verify Autumn events and keep local billing state in sync.                            |
+| Webhooks | Verify Autumn events and pass them to your `onEvent` handlers.                        |
 
 ## Common callers
 
@@ -147,7 +145,7 @@ autumn({
         ? {
             id: organizationId,
             kind: "organization",
-            email: ctx.req.get<string>("user.email") ?? null,
+            email: ctx.req.get<string>("user.email"),
           }
         : null;
     },
@@ -155,10 +153,32 @@ autumn({
 });
 ```
 
+Farm names the owner's Autumn customer `<kind>_<id>` when the id only uses letters, digits, `_`,
+and `-` (and does not start or end with `-`), such as the random ids auth providers issue. Any other
+id, such as an email or a non-ASCII handle, is encoded as `<kind>_-<base64url of the id>` so no two
+owners share a customer. Return your own id from `billing.resolveExternalCustomerId(owner)` to
+choose it yourself.
+
+Before this, such ids were lossy: `a.b` and `a-b` both became `user_a-b`, and ids with no ASCII
+letters became `user_unknown`. If your owner ids are emails or handles, their owners now get new
+Autumn customers. To keep the existing ones while you move them, return
+`legacyAutumnExternalCustomerId(owner)` (from `@farm.js/autumn`) from
+`resolveExternalCustomerId`; owners that collided under it still share one customer.
+
 ## Production notes
 
 - Set `AUTUMN_SECRET_KEY`, `AUTUMN_WEBHOOK_SECRET`, and `APP_BASE_URL`.
 - Keep Farm product IDs separate from provider IDs when you want a stable app contract.
 - Use `check` before expensive operations and `reportUsage` after successful work.
+- `reportUsage` adds to Autumn's stored usage with `track`, so parallel reports all count. When a
+  meter `guard` sets a hard cap, a report that pushes usage past it is taken back out and answered
+  with `state: "hard_limit_reached"`. `last` meters set the reported value instead.
+- A meter whose feature is billed as a prepaid quantity is bought, not reported: `reportUsage`
+  answers `409` for it, and the quantity changes through checkout.
+- The billing POST routes act for the signed-in caller from its session cookie, so a request a
+  browser sends from another origin is refused with `403`: a page on another site cannot report
+  usage, start a checkout or open the portal for your visitor. Calls with no `Origin` (your own
+  server, a script) are unaffected. If your frontend runs on another origin, list it in
+  `allowedOrigins`, using the same syntax as `serverActions.allowedOrigins`.
 - Treat webhooks as the source of truth for subscription state.
 - Test free-plan reads, checkout redirects, portal redirects, usage limits, and webhook sync.

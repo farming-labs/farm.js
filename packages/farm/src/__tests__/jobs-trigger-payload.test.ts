@@ -172,4 +172,99 @@ describe("jobs trigger payload shapes", () => {
     expect(result.error).toBeNull();
     expect(sentPayload(fetchSpy, 0)).toEqual({ input: 5 });
   });
+
+  it("delivers an object input that carries $value alongside other fields whole", async () => {
+    const tasks = defineTasks({
+      charge: task({
+        description: "Object input with a $value field.",
+        async run(input: { amount: number; $value: string }) {
+          return input;
+        },
+      }),
+    });
+    const fetchSpy = vi
+      .spyOn(globalThis, "fetch")
+      .mockImplementation(async () => jsonResponse({ id: "run_7" }));
+    const api = createApi(tasks);
+
+    const result = await api.jobs.charge.trigger({ body: { amount: 5, $value: "x" } as never });
+
+    expect(result.error).toBeNull();
+    expect(sentPayload(fetchSpy, 0)).toEqual({ amount: 5, $value: "x" });
+  });
+
+  it("delivers an empty object input as {}", async () => {
+    const tasks = defineTasks({
+      reindex: task({
+        description: "Object input whose fields are all optional.",
+        async run(input: { full?: boolean }) {
+          return input;
+        },
+      }),
+    });
+    const fetchSpy = vi
+      .spyOn(globalThis, "fetch")
+      .mockImplementation(async () => jsonResponse({ id: "run_8" }));
+    const api = createApi(tasks);
+
+    const result = await api.jobs.reindex.trigger({ body: {} });
+
+    expect(result.error).toBeNull();
+    expect(sentPayload(fetchSpy, 0)).toEqual({});
+  });
+
+  it("delivers array inputs sent as the body or as batch items", async () => {
+    const tasks = defineTasks({
+      sumAll: task({
+        description: "Array input task.",
+        async run(input: number[]) {
+          return input.reduce((total, value) => total + value, 0);
+        },
+      }),
+    });
+    const fetchSpy = vi
+      .spyOn(globalThis, "fetch")
+      .mockImplementationOnce(async () => jsonResponse({ id: "run_9" }))
+      .mockImplementationOnce(async () => jsonResponse({ batchId: "batch_1", runs: ["run_10"] }));
+    const api = createApi(tasks);
+
+    const triggered = await api.jobs.sumAll.trigger({ body: [1, 2, 3] as never });
+    expect(triggered.error).toBeNull();
+    expect(sentPayload(fetchSpy, 0)).toEqual([1, 2, 3]);
+
+    const batched = await api.jobs.sumAll.batchTrigger({ body: { items: [[4, 5]] as never } });
+    expect(batched.error).toBeNull();
+    const init = fetchSpy.mock.calls[1]?.[1] as RequestInit | undefined;
+    expect(JSON.parse(String(init?.body)).items[0].payload).toEqual([4, 5]);
+  });
+
+  it("applies $options launch options when scheduling with the explicit envelope", async () => {
+    const tasks = defineTasks({
+      sendReport: task({
+        description: "Scheduled object input.",
+        async run(input: { reportId: string }) {
+          return input;
+        },
+      }),
+    });
+    const fetchSpy = vi
+      .spyOn(globalThis, "fetch")
+      .mockImplementation(async () => jsonResponse({ id: "run_11" }));
+    const api = createApi(tasks);
+
+    const result = await api.jobs.sendReport.schedule({
+      body: {
+        $input: { reportId: "rep_1" },
+        $options: { idempotencyKey: "report:rep_1", tags: ["reports"] },
+        $schedule: { after: "10m", tags: ["scheduled"] },
+      },
+    });
+
+    expect(result.error).toBeNull();
+    const init = fetchSpy.mock.calls[0]?.[1] as RequestInit | undefined;
+    const sent = JSON.parse(String(init?.body));
+    expect(sent.payload).toEqual({ reportId: "rep_1" });
+    expect(sent.options.idempotencyKey).toBe("report:rep_1");
+    expect(sent.options.tags).toEqual(["reports", "scheduled"]);
+  });
 });

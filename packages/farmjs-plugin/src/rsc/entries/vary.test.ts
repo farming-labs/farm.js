@@ -44,3 +44,48 @@ it("keeps action responses non-cacheable", () => {
   expect(headers.get("vary")).toBe("Accept");
   expect(headers.get("cache-control")).toBe("no-store");
 });
+
+it.each(["text/html", "text/x-component"])(
+  "keeps %s pages out of shared caches by default",
+  (accept) => {
+    const headers = new Headers();
+    apply(headers, new Request("https://farm.test/admin", { headers: { accept } }));
+    expect(headers.get("cache-control")).toBe("private, no-store");
+  },
+);
+
+it("keeps a Cache-Control that middleware set", () => {
+  const headers = new Headers({ "cache-control": "public, max-age=60" });
+  apply(headers, new Request("https://farm.test/", { headers: { accept: "text/x-component" } }));
+  expect(headers.get("cache-control")).toBe("public, max-age=60");
+});
+
+it("gives a static or revalidating page its own policy over middleware's, as core does", () => {
+  const headers = new Headers({ "cache-control": "public, max-age=60" });
+  apply(
+    headers,
+    new Request("https://farm.test/", { headers: { accept: "text/html" } }),
+    "public, s-maxage=300, stale-while-revalidate=300",
+  );
+  expect(headers.get("cache-control")).toBe("public, s-maxage=300, stale-while-revalidate=300");
+
+  const action = new Headers();
+  apply(
+    action,
+    new Request("https://farm.test/", { method: "POST" }),
+    "public, s-maxage=300, stale-while-revalidate=300",
+  );
+  expect(action.get("cache-control")).toBe("no-store");
+});
+
+it("applies the page headers, and one cache policy, to both the Flight and HTML responses", () => {
+  const flight = entry.indexOf("responseHeaders.set('content-type', 'text/x-component');");
+  const html = entry.indexOf("responseHeaders.set('content-type', 'text/html');", flight);
+  for (const site of [flight, html]) {
+    expect(site).toBeGreaterThan(-1);
+    const next = entry.slice(site, entry.indexOf("return new Response(", site));
+    expect(next).toContain(
+      "applyActionResponseHeaders(responseHeaders, request, farmPageCacheControl);",
+    );
+  }
+});

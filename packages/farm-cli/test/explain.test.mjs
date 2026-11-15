@@ -208,6 +208,24 @@ test("does not select a route-slot page as the canonical URL", async () => {
   }
 });
 
+test("explains routes from --root even when farm.config sets another root", async () => {
+  const root = await createExplainProject();
+  const elsewhere = await mkdtemp(path.join(os.tmpdir(), "farm-cli-explain-elsewhere-"));
+
+  try {
+    await writeFile(
+      path.join(root, "farm.config.mjs"),
+      `export default { root: ${JSON.stringify(elsewhere)} };\n`,
+    );
+    const explanation = await explainFarmRoute("/products/42", { root });
+    assert.equal(explanation.pattern, "/products/[id]");
+    assert.equal(explanation.filePath, "src/app/products/[id]/page.tsx");
+  } finally {
+    await rm(root, { recursive: true, force: true });
+    await rm(elsewhere, { recursive: true, force: true });
+  }
+});
+
 async function createExplainProject() {
   const root = await mkdtemp(path.join(os.tmpdir(), "farm-cli-explain-"));
   const productDirectory = path.join(root, "src/app/products/[id]");

@@ -150,10 +150,22 @@ The same app route serves every locale. A file such as `src/app/products/page.ts
 
 Farm canonicalizes locale paths. With `prefix-except-default`, a request for `/en/products` redirects to `/products`.
 
+Site-level files that crawlers and agents fetch at fixed URLs are not locale content, so they answer
+where they are asked for, with every `routing` value. These files are `robots.txt`, `sitemap.xml`,
+`manifest.webmanifest`, `llms.txt` and `llms-full.txt` (generated, or from a route file such as
+`sitemap.ts` at any depth), `/.well-known/*` URIs, and MCP server cards at `<endpoint>/server-card`.
+They are never redirected to a detected locale, set no locale cookie, and don't vary on
+`Cookie` or `Accept-Language`, so `/robots.txt` answers at the origin root under `prefix-always`.
+They render in `defaultLocale`; a locale URL such as `/fr/llms.txt` still selects its locale. The
+default MCP endpoint at `/mcp` takes `POST`, which is never redirected.
+
 When the application has a `basePath`, the locale prefix stays inside that mount path. For example,
 `basePath: "/store"` produces `/store/products` for the default locale and
 `/store/fr/products` for French. Server redirects, `Link`, locale switching, metadata alternates,
 static generation, and production routing all preserve the same order.
+
+Importing `Link` from `@farm.js/core/client` does not by itself load the ICU message formatter.
+Client translation APIs continue to include the formatter without an extra configuration flag.
 
 `Link` preserves the active locale automatically:
 
@@ -171,6 +183,11 @@ export function ProductLinks() {
   );
 }
 ```
+
+Relative links and query-only links resolve against the current document URL. For example,
+`?tab=2` on `/store/fr/products` keeps the French locale and `/store` mount path when
+prefetching or navigating. Links that actually change locale use document navigation and are
+not prefetched by the SPA router.
 
 Farm also strips the locale before route and middleware matching, keeps it in SPA page-data snapshots, and localizes internal `redirect()` destinations. Existing page, layout, loading, error, metadata image, and middleware files do not need locale wrappers.
 
@@ -307,7 +324,7 @@ const getNavigation = unstable_cache(async () => loadNavigation(getLocale()), ["
 
 The English and French results occupy different cache entries even though the application key is the same.
 
-Static routes with URL prefixes expand once per locale. `routing: "none"` keeps localized pages dynamic because one static URL cannot safely contain multiple languages. PPR shell keys also include the locale.
+Static routes with URL prefixes expand once per locale. `routing: "none"` keeps localized pages dynamic because one static URL cannot safely contain multiple languages. PPR shell keys also include the locale and, when URLs use prefixes, the request origin that the shell's `hreflang` links point at.
 
 ## Document language, direction, and SEO
 
@@ -315,7 +332,7 @@ Farm sets these values during server rendering:
 
 - `<html lang>` from the resolved locale.
 - `<html dir>` from the locale direction.
-- `hreflang` links for every configured locale plus `x-default` when URLs use prefixes.
+- `hreflang` links for every configured locale plus `x-default` when URLs use prefixes. Search engines only accept absolute alternate URLs, so Farm resolves them against the route's `metadataBase` when it is set and against the request origin otherwise. Forwarded host and protocol headers count only with `server.trustProxy`.
 - Locale-aware Open Graph and Twitter image URLs.
 - A serialized locale snapshot for hydration.
 
@@ -375,7 +392,9 @@ export default defineConfig({
 
 The locale cookie `path` must be a root-relative pathname; cookie attributes, URL queries and
 hashes, dot segments, backslashes, and encoded path separators are rejected. `sameSite` accepts
-`"lax"`, `"strict"`, or `"none"`.
+`"lax"`, `"strict"`, or `"none"`. `secure` defaults to `true` in production; with
+`sameSite: "none"` it defaults to `true` in every mode and cannot be `false`, because browsers
+discard a `SameSite=None` cookie without `Secure`.
 
 For a custom catalog layout, include `{locale}` in the path:
 
@@ -391,7 +410,7 @@ i18n: {
 
 1. Keep `strict: true` and run the application type check in CI.
 2. Use canonical locale names such as `en-US` and `pt-BR`.
-3. Confirm every locale URL renders the expected `lang`, `dir`, and `hreflang` values.
+3. Confirm every locale URL renders the expected `lang`, `dir`, and absolute `hreflang` values. Set `metadataBase` in the root layout when the app answers on more than one host, so the alternates always name the canonical one.
 4. Verify browser and cookie detection without caching the redirect response publicly.
 5. Use logical CSS properties and test at least one RTL locale when supported.
 6. Send the user's locale with background jobs, emails, and webhooks, then use `createTranslator(locale)` or `runWithLocale(locale, fn)`.

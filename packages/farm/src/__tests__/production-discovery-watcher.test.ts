@@ -66,7 +66,8 @@ it.each([false, true])(
         },
       });
       expect(discoveryServer).toBeDefined();
-      expect(injectedServerCalls).toBe(customVite ? 0 : 1);
+      // Discovery uses the build's own Vite runtime, custom configuration or not.
+      expect(injectedServerCalls).toBe(1);
       expect(discoveryServer!.config.server.hmr).toBe(false);
       expect(discoveryServer!.config.server.watch).toBeNull();
       expect(discoveryServer!.watcher.getWatched()).toEqual({});

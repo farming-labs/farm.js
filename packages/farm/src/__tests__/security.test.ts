@@ -6,12 +6,17 @@ import {
   applyFarmCspNonceToPolicy,
   applyFarmCspNonceToResponse,
   createFarmCspScriptHashes,
+  createFarmCspNonceRewriter,
   farmCspBlocksFrameworkInlineScripts,
+  filterFarmCspNonces,
   getFarmSecurityHeader,
   removeFarmCspNoncesFromScriptTags,
   resolveFarmSecurityConfig,
   serializeFarmCspDirectives,
+  stampFarmCspNonce,
 } from "../security";
+import { getCspNonce } from "../headers";
+import { _runWithFarmCspNonce } from "../server/request";
 
 describe("security.csp", () => {
   it("serializes camelCase directives without changing source expressions", () => {
@@ -180,15 +185,16 @@ describe("security.csp", () => {
     );
   });
 
-  it("hashes exact inline script contents and ignores external or script-like text", async () => {
+  it("hashes only nonce-carrying inline scripts and ignores external or script-like text", async () => {
     const first = "\n  one();\n";
     const html =
-      `<script nonce="old">${first}</script>` +
-      `<script>${first}</script>` +
-      '<script src="/app.js"></script>' +
+      `<script nonce="abc123">${first}</script>` +
+      `<script nonce="abc123">${first}</script>` +
+      '<script nonce="abc123" src="/app.js"></script>' +
       '<style>.example::after { content: "<script>ignored()</script>"; }</style>' +
       "<!-- <script>commented()</script> -->" +
-      "<script>two()</script>";
+      "<script>injected()</script>" +
+      '<script nonce="abc123">two()</script>';
     const expectedFirst = await sha256(first);
     const expectedSecond = await sha256("two()");
 
@@ -200,7 +206,8 @@ describe("security.csp", () => {
         csp: { policy: "script-src 'self'; object-src 'none'", nonce: true },
       }),
     );
-    expect(result?.html).not.toContain('nonce="old"');
+    expect(result?.html).not.toContain("nonce=");
+    expect(result?.html).toContain("<script>injected()</script>");
     expect(result?.header).toEqual({
       key: "Content-Security-Policy",
       value: `script-src 'self' '${expectedFirst}' '${expectedSecond}'; object-src 'none'`,
@@ -212,8 +219,11 @@ describe("security.csp", () => {
       start(controller) {
         const encoder = new TextEncoder();
         controller.enqueue(encoder.encode("<!doctype html><scr"));
-        controller.enqueue(encoder.encode('ipt type="module" src="/app.js"></script><script'));
-        controller.enqueue(encoder.encode(">inline()</script>"));
+        controller.enqueue(
+          encoder.encode('ipt nonce="abc123" type="module" src="/app.js"></script><script'),
+        );
+        controller.enqueue(encoder.encode(' nonce="abc1'));
+        controller.enqueue(encoder.encode('23">inline()</script><script>injected()</script>'));
         controller.close();
       },
     });
@@ -223,13 +233,185 @@ describe("security.csp", () => {
     const response = applyFarmCspNonceToResponse(
       new Response(stream, { headers: { "content-type": "text/html; charset=utf-8" } }),
       security,
+      "abc123",
     );
     const policy = response.headers.get("content-security-policy")!;
-    const nonce = policy.match(/'nonce-([^']+)'/)?.[1];
 
-    expect(nonce).toBeTruthy();
+    expect(policy).toBe("script-src 'self' 'nonce-abc123'");
     expect(await response.text()).toBe(
-      `<!doctype html><script nonce="${nonce}" type="module" src="/app.js"></script><script nonce="${nonce}">inline()</script>`,
+      '<!doctype html><script nonce="abc123" type="module" src="/app.js"></script><script nonce="abc123">inline()</script><script>injected()</script>',
+    );
+  });
+
+  it.each(["", "<p>İstanbul 🌱</p>"])(
+    "hashes exact Unicode script contents after %j",
+    async (prefix) => {
+      const contents = ['console.log("İİİİİİİİ 🌱")', "next()"];
+      const html =
+        prefix + contents.map((content) => `<script nonce="abc123">${content}</script>`).join("");
+      const hashes = await Promise.all(contents.map(sha256));
+      expect(await createFarmCspScriptHashes(html)).toEqual(hashes);
+      const result = await applyFarmCspHashesToHtml(
+        html,
+        resolveFarmSecurityConfig({ csp: { policy: "script-src 'self'", nonce: true } }),
+      );
+      expect(result?.html).toBe(
+        prefix + contents.map((content) => `<script>${content}</script>`).join(""),
+      );
+      expect(result?.header.value).toBe(`script-src 'self' '${hashes[0]}' '${hashes[1]}'`);
+    },
+  );
+
+  it.each(["script", "style", "textarea", "title", "iframe", "noembed", "noframes", "xmp"])(
+    "preserves Unicode in %s and finds following scripts across every chunk boundary",
+    (tag) => {
+      const content = `İİİİİİİİ 🌱 </${tag}x><script>not-a-tag`;
+      const opening = `<${tag} data-label="İ > text">`;
+      const closing = `</${tag.toUpperCase()} >`;
+      const tail = '<script nonce="old">next()</script><script nonce="abc123">own()</script>';
+      const html = opening + content + closing + tail;
+      expect(addFarmCspNonceToScriptTags(html, "abc123")).toBe(
+        (tag === "script" ? '<script nonce="abc123" data-label="İ > text">' : opening) +
+          content +
+          closing +
+          '<script nonce="abc123">next()</script><script nonce="abc123">own()</script>',
+      );
+      const expected =
+        opening +
+        content +
+        closing +
+        '<script>next()</script><script nonce="abc123">own()</script>';
+      expect(filterFarmCspNonces(html, "abc123")).toBe(expected);
+      expect(removeFarmCspNoncesFromScriptTags(html)).toBe(
+        opening + content + closing + "<script>next()</script><script>own()</script>",
+      );
+      for (let split = 0; split <= html.length; split++) {
+        const rewriter = createFarmCspNonceRewriter("abc123");
+        expect(rewriter.write(html.slice(0, split)) + rewriter.write(html.slice(split), true)).toBe(
+          expected,
+        );
+      }
+      const rewriter = createFarmCspNonceRewriter("abc123");
+      expect(
+        [...html].map((character) => rewriter.write(character)).join("") + rewriter.write("", true),
+      ).toBe(expected);
+    },
+  );
+
+  it("rewrites Unicode responses identically across every UTF-8 byte boundary", async () => {
+    const contents = ['console.log("İİİİİİİİ 🌱")', "next()"];
+    const html =
+      contents.map((content) => `<script nonce="abc123">${content}</script>`).join("") +
+      '<script nonce="İİ">injected()</script>';
+    const bytes = new TextEncoder().encode(html);
+    const security = resolveFarmSecurityConfig({
+      csp: { policy: "script-src 'self'", nonce: true },
+    });
+    for (let split = 0; split <= bytes.length; split++) {
+      const stream = new ReadableStream<Uint8Array>({
+        start(controller) {
+          controller.enqueue(bytes.slice(0, split));
+          controller.enqueue(bytes.slice(split));
+          controller.close();
+        },
+      });
+      const response = applyFarmCspNonceToResponse(
+        new Response(stream, {
+          headers: { "content-type": "text/html", "content-length": String(bytes.length) },
+        }),
+        security,
+        "abc123",
+      );
+      expect(response.headers.get("content-security-policy")).toContain("'nonce-abc123'");
+      expect(response.headers.has("content-length")).toBe(false);
+      expect(await response.text()).toBe(
+        contents.map((content) => `<script nonce="abc123">${content}</script>`).join("") +
+          "<script>injected()</script>",
+      );
+    }
+  });
+
+  it("leaves disabled CSP and non-HTML responses untouched", () => {
+    const html = new Response("<script>İstanbul</script>", {
+      headers: { "content-type": "text/html" },
+    });
+    expect(applyFarmCspNonceToResponse(html, resolveFarmSecurityConfig(undefined))).toBe(html);
+    const json = Response.json({ city: "İstanbul" });
+    expect(
+      applyFarmCspNonceToResponse(
+        json,
+        resolveFarmSecurityConfig({ csp: { policy: "script-src 'self'", nonce: true } }),
+      ),
+    ).toBe(json);
+  });
+
+  it("never gives the response nonce to a script that did not already carry it", () => {
+    const injected =
+      "<script>alert(1)</script>" +
+      '<script nonce="anything">alert(2)</script>' +
+      '<script nonce="">alert(3)</script>' +
+      "<script nonce>alert(4)</script>" +
+      '<script nonce="wrong" nonce="abc123">alert(5)</script>' +
+      '<script nonce="&#97;bc123">alert(6)</script>' +
+      '<script nonce="abc1234">alert(7)</script>' +
+      '<script src="//evil.test/x.js" a="<script" nonce="abc123"></script>' +
+      '<script src="//evil.test/y.js" data-x="<style>" nonce="abc123"></script>';
+    expect(filterFarmCspNonces(injected, "abc123")).toBe(
+      "<script>alert(1)</script>" +
+        "<script>alert(2)</script>" +
+        "<script>alert(3)</script>" +
+        "<script>alert(4)</script>" +
+        "<script>alert(5)</script>" +
+        "<script>alert(6)</script>" +
+        "<script>alert(7)</script>" +
+        '<script src="//evil.test/x.js" a="<script"></script>' +
+        '<script src="//evil.test/y.js" data-x="<style>"></script>',
+    );
+    expect(
+      filterFarmCspNonces(
+        '<script NONCE=abc123 type="module" src="/app.js"></script><script nonce=\'abc123\'>own()</script>',
+        "abc123",
+      ),
+    ).toBe(
+      '<script nonce="abc123" type="module" src="/app.js"></script><script nonce="abc123">own()</script>',
+    );
+  });
+
+  it("scopes the response nonce to the render for Farm markup and getCspNonce()", async () => {
+    expect(getCspNonce()).toBeUndefined();
+    expect(stampFarmCspNonce("<script>own()</script>")).toBe("<script>own()</script>");
+
+    const rendered = await _runWithFarmCspNonce("abc123", async () => {
+      await Promise.resolve();
+      return {
+        nonce: getCspNonce(),
+        farm: stampFarmCspNonce('<script nonce="stale">own()</script>'),
+        explicit: stampFarmCspNonce("<script>own()</script>", ""),
+      };
+    });
+    expect(rendered).toEqual({
+      nonce: "abc123",
+      farm: '<script nonce="abc123">own()</script>',
+      explicit: "<script>own()</script>",
+    });
+    expect(_runWithFarmCspNonce(undefined, () => getCspNonce())).toBeUndefined();
+    expect(getCspNonce()).toBeUndefined();
+  });
+
+  it("keeps closing-tag searches independent across interleaved responses", () => {
+    const first = createFarmCspNonceRewriter("first");
+    const second = createFarmCspNonceRewriter("second");
+    expect(first.write('<script nonce="first">İİİİİİİİ</SCR')).toBe(
+      '<script nonce="first">İİİİİİİİ',
+    );
+    expect(
+      second.write(
+        '<script nonce="second">two()</SCRIPT><script nonce="first">three()</script>',
+        true,
+      ),
+    ).toBe('<script nonce="second">two()</SCRIPT><script>three()</script>');
+    expect(first.write('IPT><script nonce="first">next()</script>', true)).toBe(
+      '</SCRIPT><script nonce="first">next()</script>',
     );
   });
 });

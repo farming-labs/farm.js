@@ -1,4 +1,4 @@
-import { logger } from "@farm.js/core";
+import { logger } from "@farm.js/core/internal/cli-runtime";
 import type { PreviewAgentExit, PreviewAgentSession } from "@farm.js/tunnel";
 import type { PreviewGatewayPlan } from "./preview-gateway";
 
@@ -39,6 +39,8 @@ export async function runNativePreviewTunnel(
 
   logger.success("Preview URL ready.");
   logger.info(`Public: ${session.publicUrl}`);
+  if (plan.dashboardUrl)
+    logger.info(`Dashboard: ${plan.dashboardUrl}/${encodeURIComponent(session.sessionId)}`);
   if (plan.expiresAt) {
     logger.info(`Expires: ${new Date(plan.expiresAt).toLocaleString()}`);
   }

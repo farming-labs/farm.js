@@ -18,14 +18,15 @@
     "better-call": "^1.0.19",
     "react": "19.2.8",
     "react-dom": "19.2.8",
-    "zod": "^3.22.4"
+    "zod": "^3.25.76"
   },
   "devDependencies": {
     "@farm.js/cli": "workspace:*",
+    "@tailwindcss/vite": "^4.3.3",
     "@types/react": "^18.2.45",
     "@types/react-dom": "^18.2.18",
     "tailwindcss": "^4.0.0",
     "typescript": "^5.5.3",
-    "vite": "^5.0.10"
+    "vite": "8.3.4"
   }
 }

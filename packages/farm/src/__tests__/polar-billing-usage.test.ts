@@ -77,6 +77,7 @@ async function callRoute(
   integration: ReturnType<typeof polar>,
   path: string,
   body: Record<string, unknown>,
+  headers: Record<string, string> = { "content-type": "application/json" },
 ): Promise<Response> {
   const route = integration.routes.find(
     (candidate) => candidate.path === path && candidate.method === "POST",
@@ -85,13 +86,42 @@ async function callRoute(
 
   const request = new Request(`http://example.com${path}`, {
     method: "POST",
-    headers: { "content-type": "application/json" },
+    headers,
     body: JSON.stringify(body),
   });
   return route!.handler(request, createContext(request, "POST", path, integration.instance));
 }
 
 describe("polar billing usage", () => {
+  it("refuses a cross-site POST before reporting usage for the signed-in caller", async () => {
+    const sdk = createFakeSdk({
+      id: "cus_csrf",
+      activeSubscriptions: [],
+      activeMeters: [{ meterId: "mtr_api", consumedUnits: 0, creditedUnits: 0, balance: 0 }],
+    });
+    const integration = polar({
+      instance: sdk as unknown as PolarIntegrationInstance,
+      billing: {
+        resolveOwner: () => ({ kind: "user", id: "csrf-user" }),
+        meters: { api: { aggregation: "sum", eventName: "api.called", meterId: "mtr_api" } },
+      },
+    });
+
+    // A text/plain form on another site, sent with the visitor's session cookie.
+    const response = await callRoute(
+      integration,
+      "/billing/report-usage",
+      { key: "api", quantity: 100000, idempotencyKey: "csrf-1" },
+      {
+        origin: "https://evil.example",
+        "content-type": "text/plain",
+        "sec-fetch-site": "cross-site",
+      },
+    );
+    expect(response.status).toBe(403);
+    expect(sdk.events.ingest).not.toHaveBeenCalled();
+  });
+
   it("lets a gauge (last) meter report a decrease without tripping the hard cap", async () => {
     const sdk = createFakeSdk({
       id: "cus_gauge",
@@ -127,6 +157,43 @@ describe("polar billing usage", () => {
       state: "ok",
     });
     expect(sdk.events.ingest).toHaveBeenCalledTimes(1);
+  });
+
+  it("keeps each customer's usage idempotency keys to that customer", async () => {
+    const sdk = createFakeSdk({
+      id: "cus_shared",
+      activeSubscriptions: [],
+      activeMeters: [{ meterId: "mtr_api", consumedUnits: 0, creditedUnits: 0, balance: 0 }],
+    });
+    let ownerId = "user-a";
+    const integration = polar({
+      instance: sdk as unknown as PolarIntegrationInstance,
+      billing: {
+        resolveOwner: () => ({ kind: "user", id: ownerId }),
+        meters: { api: { aggregation: "sum", eventName: "api.called", meterId: "mtr_api" } },
+      },
+    });
+
+    // Polar dedupes externalId organization-wide: user B choosing user A's
+    // key must not make Polar drop A's event, or B's.
+    for (const owner of ["user-a", "user-b"]) {
+      ownerId = owner;
+      const response = await callRoute(integration, "/billing/report-usage", {
+        key: "api",
+        quantity: 1,
+        idempotencyKey: "evt-shared",
+      });
+      expect(response.status).toBe(200);
+    }
+
+    const events = sdk.events.ingest.mock.calls.map(
+      (call) => (call as unknown as [{ events: Array<Record<string, string>> }])[0].events[0]!,
+    );
+    expect(events).toHaveLength(2);
+    for (const event of events) {
+      expect(event.externalId).toBe(`${event.externalCustomerId}:evt-shared`);
+    }
+    expect(events[0]!.externalId).not.toBe(events[1]!.externalId);
   });
 
   it("still blocks sum meters whose projection exceeds the hard cap", async () => {

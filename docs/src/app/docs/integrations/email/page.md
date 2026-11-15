@@ -15,11 +15,13 @@ Render React Email templates, send with Resend, schedule messages, preview templ
 ```tsx
 import { resend, template } from "@farm.js/email";
 
+function WelcomeEmail({ name }: { name: string }) {
+  return <p>Hello {name}</p>;
+}
+
 const templates = {
-  welcome: template({
-    subject: "Welcome to Farm",
-    component: ({ name }: { name: string }) => <p>Hello {name}</p>,
-  }),
+  // The component comes first, so `data` is typed from its props.
+  welcome: template(WelcomeEmail, { subject: "Welcome to Farm" }),
 };
 
 export const email = resend({
@@ -63,7 +65,7 @@ routes, and webhooks remain integration options in either mode.
 ```ts
 await apiClient.email.send.post({
   body: {
-    template: "welcome",
+    templateId: "welcome",
     to: "ada@example.com",
     data: { name: "Ada" },
   },
@@ -117,11 +119,14 @@ await api.email.schedule.post({
 Templates can supply their own `subject`, `previewText`, `from`, and `replyTo`. The integration also supports global defaults, which keeps common sender details out of every call.
 
 ```tsx
+function InviteEmail({ workspace }: { workspace: string }) {
+  return <p>Join {workspace}</p>;
+}
+
 const templates = {
-  invite: template({
-    subject: ({ workspace }: { workspace: string }) => `Join ${workspace}`,
+  invite: template(InviteEmail, {
+    subject: ({ workspace }) => `Join ${workspace}`,
     previewText: "You were invited to collaborate.",
-    component: ({ workspace }: { workspace: string }) => <p>Join {workspace}</p>,
   }),
 };
 ```
@@ -158,9 +163,18 @@ If the base path is already gated by your own middleware or at the edge, opt out
 resend({ templates, allowUnauthenticated: true });
 ```
 
-Recipients, sender, and template data still come from the request body, so `authorize` is where you
-decide who may address mail to whom. Email headers are not caller-controlled: they come from your
-template and `defaults` configuration.
+The recipient (`to`) and template data come from the request body, so `authorize` is where you
+decide who may address mail to whom. `to` may be an array, so check every recipient there, not
+only the first. The sender, copy, and attachment fields (`from`, `replyTo`, `cc`, `bcc`,
+`attachments`, `tags`, `topicId`) come from your template and `defaults` configuration: a request
+that sets any of them is rejected with `400`, so a caller allowed to send a template cannot send
+it as someone else, copy it to extra recipients, or attach files. Resend fetches an attachment's
+`path` URL itself, so a caller-chosen attachment can pull any URL into your mail. To let trusted
+callers choose these fields, opt in:
+
+```ts
+resend({ templates, authorize, allowCallerHeaders: true });
+```
 
 ## Production notes
 

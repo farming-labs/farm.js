@@ -13,6 +13,7 @@
     "@farm.js/preview-gateway": "workspace:*",
     "@farm.js/preview-tunnel": "workspace:*",
     "@vercel/blob": "^2.6.1",
+    "@vercel/functions": "3.9.11",
     "ioredis": "^5.9.3"
   },
   "devDependencies": {

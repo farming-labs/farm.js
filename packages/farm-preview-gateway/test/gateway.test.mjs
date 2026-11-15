@@ -5,9 +5,55 @@ import test from "node:test";
 import { gunzipSync, gzipSync } from "node:zlib";
 import { createNodePreviewGatewayHandler, MemoryPreviewGatewayStore } from "../dist/index.js";
 
+test("localhost preview origins preserve the port and serve root-relative scripts", async () => {
+  const store = new MemoryPreviewGatewayStore();
+  const gateway = await createGatewayServer(store, { domain: "localhost" });
+  try {
+    const registered = await fetch(`${gateway.url}/api/sessions`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ name: "browser-demo" }),
+    });
+    const session = await registered.json();
+    assert.equal(session.publicUrl, `http://browser-demo.localhost:${new URL(gateway.url).port}`);
+    const pending = requestWithHeaders(`${gateway.url}/@farm/client.js`, {
+      host: new URL(session.publicUrl).host,
+    });
+    const poll = await (
+      await fetch(
+        `${gateway.url}/api/sessions/${session.id}/requests?token=${session.token}&wait=1000`,
+      )
+    ).json();
+    assert.equal(poll.requests[0].path, "/@farm/client.js");
+    assert.equal(poll.requests[0].headers["x-forwarded-proto"], "http");
+    await store.saveResponse(session.id, poll.requests[0].id, {
+      status: 200,
+      headers: { "content-type": "text/javascript" },
+      body: Buffer.from("window.previewReady = true;").toString("base64"),
+      encoding: "base64",
+    });
+    const response = await pending;
+    assert.equal(response.headers["content-type"], "text/javascript");
+    assert.equal(response.body, "window.previewReady = true;");
+  } finally {
+    await gateway.close();
+  }
+});
+
 test("proxies a public preview request through the gateway queue", async () => {
   const store = new MemoryPreviewGatewayStore();
-  const gateway = await createGatewayServer(store);
+  const activity = [];
+  const gateway = await createGatewayServer(store, {
+    observer: {
+      session(event) {
+        assert.equal(event.token, undefined);
+      },
+      request(event) {
+        activity.push(event);
+        throw new Error("optional telemetry failed");
+      },
+    },
+  });
 
   try {
     const sessionResponse = await fetch(`${gateway.url}/api/sessions`, {
@@ -66,6 +112,73 @@ test("proxies a public preview request through the gateway queue", async () => {
     const response = await publicRequest;
     assert.equal(response.status, 202);
     assert.equal(await response.text(), "preview-ok");
+    assert.equal(activity.length, 1);
+    assert.equal(activity[0].path, "/docs");
+    assert.equal(activity[0].status, 202);
+    assert.equal(activity[0].headers, undefined);
+    assert.equal(activity[0].body, undefined);
+  } finally {
+    await gateway.close();
+  }
+});
+
+test("routes preview subdomains only by host, never by the path form", async () => {
+  const store = new MemoryPreviewGatewayStore();
+  const gateway = await createGatewayServer(store);
+  const register = async (name) =>
+    await (
+      await fetch(`${gateway.url}/api/sessions`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ name, localUrl: "http://localhost:4321" }),
+      })
+    ).json();
+  const poll = async (session) => {
+    const response = await fetch(
+      `${gateway.url}/api/sessions/${session.id}/requests?token=${session.token}&wait=200`,
+    );
+    return response.status === 204 ? [] : (await response.json()).requests;
+  };
+  const respond = (session, requestId) =>
+    store.saveResponse(session.id, requestId, {
+      status: 200,
+      headers: { "content-type": "text/plain" },
+      body: Buffer.from(session.name).toString("base64"),
+      encoding: "base64",
+    });
+
+  try {
+    const alice = await register("alice");
+    const bob = await register("bob");
+
+    // A tenant origin must not reach another tenant through the path form.
+    const crossTenant = requestWithHeaders(`${gateway.url}/__preview/bob/account`, {
+      host: "alice.preview.farmjs.dev",
+    });
+    const [aliceRequests, bobRequests] = await Promise.all([poll(alice), poll(bob)]);
+    assert.deepEqual(bobRequests, []);
+    assert.equal(aliceRequests.length, 1);
+    assert.equal(aliceRequests[0].path, "/__preview/bob/account");
+    await respond(alice, aliceRequests[0].id);
+    assert.equal((await crossTenant).body, "alice");
+
+    // Hostnames are case-insensitive.
+    const uppercase = requestWithHeaders(`${gateway.url}/upper`, {
+      host: "BOB.Preview.FarmJS.dev",
+    });
+    const [uppercaseRequest] = await poll(bob);
+    assert.equal(uppercaseRequest.path, "/upper");
+    await respond(bob, uppercaseRequest.id);
+    assert.equal((await uppercase).body, "bob");
+
+    // The apex domain keeps the path form.
+    const apex = requestWithHeaders(`${gateway.url}/__preview/bob/apex`, {
+      host: "preview.farmjs.dev",
+    });
+    const [apexRequest] = await poll(bob);
+    assert.equal(apexRequest.path, "/apex");
+    await respond(bob, apexRequest.id);
+    assert.equal((await apex).body, "bob");
   } finally {
     await gateway.close();
   }
@@ -131,7 +244,7 @@ test("does not resurrect a deleted session when a stale touch lands late", async
   assert.equal(await store.getSessionByName("late-touch"), undefined);
 });
 
-test("replays every Set-Cookie header to the public visitor", async () => {
+test("replays every Set-Cookie header to the public visitor, host-only", async () => {
   const store = new MemoryPreviewGatewayStore();
   const gateway = await createGatewayServer(store);
 
@@ -159,7 +272,12 @@ test("replays every Set-Cookie header to the public visitor", async () => {
           status: 200,
           headers: {
             "content-type": "text/plain",
-            "set-cookie": ["session=abc; Path=/; HttpOnly", "csrf=xyz; Path=/"],
+            "set-cookie": [
+              "session=abc; Path=/; HttpOnly",
+              "csrf=xyz; Path=/",
+              // Would reach every other preview under the gateway's domain.
+              "theme=dark; Domain=.example.test; Path=/",
+            ],
           },
           body: Buffer.from("ok").toString("base64"),
           encoding: "base64",
@@ -170,9 +288,10 @@ test("replays every Set-Cookie header to the public visitor", async () => {
     const response = await publicRequest;
     assert.equal(response.status, 200);
     const setCookie = response.headers.getSetCookie();
-    assert.equal(setCookie.length, 2);
+    assert.equal(setCookie.length, 3);
     assert.ok(setCookie.some((cookie) => cookie.startsWith("session=abc")));
     assert.ok(setCookie.some((cookie) => cookie.startsWith("csrf=xyz")));
+    assert.ok(setCookie.includes("theme=dark; Path=/"));
   } finally {
     await gateway.close();
   }
@@ -730,7 +849,13 @@ test("shows browser visitors a friendly expired preview page", async () => {
       headers: { accept: "text/html" },
     });
     assert.equal(response.status, 410);
-    assert.match(await response.text(), /This Farm preview has expired/);
+    const page = await response.text();
+    assert.match(page, /This Farm preview has expired/);
+    assert.match(page, /<a href="https:\/\/farmjs\.dev">Farm\.js<\/a>/);
+    assert.match(
+      page,
+      /<a class="start" href="https:\/\/farmjs\.dev\/docs\/preview">Try farm preview<\/a>/,
+    );
     assert.deepEqual(deletedSessionIds, [expiredSession.id]);
     assert.equal(await store.getSessionById(expiredSession.id), undefined);
   } finally {

@@ -1,4 +1,5 @@
 import { definePlugin } from "@farm.js/core/plugin";
+import { isFarmRendererDisabled } from "@farm.js/core/renderer";
 import {
   injectPartytownBootstrap,
   normalizeBasePath,
@@ -27,6 +28,14 @@ export function partytown(options: PartytownOptions = {}) {
     enforce: "pre",
 
     configure(config) {
+      // Partytown runs page scripts in a worker; a backend-only app has no pages to inject into.
+      if (isFarmRendererDisabled(config.renderer)) {
+        throw new Error(
+          "[farm:partytown] Partytown moves scripts off the main thread of rendered pages, but " +
+            "this app sets `renderer: false` and has no pages. Remove partytown(), or remove " +
+            "`renderer: false` to render pages.",
+        );
+      }
       configuredBasePath = normalizeBasePath(config.basePath);
       configuredOutputDir = `${config.root ?? "."}/.farm/.output`;
       const vitePlugin = createPartytownDevPlugin(configuredBasePath, resolved);
@@ -109,7 +118,13 @@ function createPartytownDevPlugin(
     }) {
       server.middlewares.use(async (request, response, next) => {
         if (request.method !== "GET" && request.method !== "HEAD") return next();
-        const pathname = new URL(request.url ?? "/", "http://farm.local").pathname;
+        let pathname: string;
+        try {
+          pathname = new URL(request.url ?? "/", "http://farm.local").pathname;
+        } catch {
+          // Not a Partytown asset; let Vite answer the malformed URL.
+          return next();
+        }
         try {
           const asset = await readPartytownDevAsset(pathname, basePath, options);
           if (!asset) return next();

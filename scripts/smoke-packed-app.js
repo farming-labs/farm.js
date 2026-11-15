@@ -1,5 +1,5 @@
 /**
- * Generate the default app from packed tarballs and prove it works as a user
+ * Generate an app from packed tarballs and prove it works as a user
  * would get it: install, type-check, build with the template's own target,
  * then build and serve a Node production server.
  *
@@ -12,11 +12,35 @@ const fs = require("node:fs");
 const net = require("node:net");
 const os = require("node:os");
 const path = require("node:path");
+const { parseArgs } = require("node:util");
 const { readPublicPackages } = require("./public-packages");
 
 const repositoryRoot = path.resolve(__dirname, "..");
 const pnpm = process.platform === "win32" ? "pnpm.cmd" : "pnpm";
-const template = "basic";
+
+function readSmokeOptions(args = []) {
+  const { values } = parseArgs({
+    args,
+    options: { template: { type: "string", default: "basic" } },
+    allowPositionals: false,
+  });
+  if (values.template !== "basic" && values.template !== "react-compiler") {
+    throw new Error(`Unsupported smoke template: ${values.template}. Use basic or react-compiler.`);
+  }
+  return { template: values.template };
+}
+
+function compilerBrowserPath() {
+  const executable =
+    process.env.FARM_EXPERIMENT_BROWSER_PATH ||
+    require("@playwright/test").chromium.executablePath();
+  if (!fs.existsSync(executable) || !fs.statSync(executable).isFile()) {
+    throw new Error(
+      "Install Chromium with `pnpm exec playwright install chromium` or set FARM_EXPERIMENT_BROWSER_PATH to an installed Chromium executable.",
+    );
+  }
+  return path.resolve(executable);
+}
 
 function packPackage(pkg, archiveDirectory) {
   const before = new Set(fs.readdirSync(archiveDirectory));
@@ -143,7 +167,34 @@ async function serveAndCheck(appDirectory) {
   }
 }
 
-async function runSmoke() {
+async function verifyCompilerStarter(appDirectory, browserPath) {
+  const screenshot = path.parse(
+    process.env.FARM_EXPERIMENT_SCREENSHOT ||
+      path.join(os.tmpdir(), "farm-packed-react-compiler.png"),
+  );
+  for (const enabled of [true, false]) {
+    console.log(`Building and checking the packed compiler starter (compiler: ${enabled})...`);
+    execFileSync(pnpm, ["run", "experiment"], {
+      cwd: appDirectory,
+      stdio: "inherit",
+      env: {
+        ...process.env,
+        FARM_REACT_COMPILER: String(enabled),
+        FARM_EXPERIMENT_BROWSER_PATH: browserPath,
+        FARM_EXPERIMENT_PORT: String(await freePort()),
+        FARM_EXPERIMENT_SCREENSHOT: path.join(
+          screenshot.dir,
+          `${screenshot.name}-${enabled ? "on" : "off"}${screenshot.ext || ".png"}`,
+        ),
+      },
+    });
+  }
+}
+
+async function runSmoke(args = process.argv.slice(2)) {
+  const { template } = readSmokeOptions(args);
+  // Fail before packing/installing anything if browser verification cannot run.
+  const browserPath = template === "react-compiler" ? compilerBrowserPath() : undefined;
   const publicPackages = new Map(readPublicPackages(repositoryRoot).map((pkg) => [pkg.name, pkg]));
   const temporaryRoot = fs.mkdtempSync(path.join(os.tmpdir(), "farm-packed-app-smoke-"));
   const archiveDirectory = path.join(temporaryRoot, "archives");
@@ -237,15 +288,19 @@ async function runSmoke() {
     console.log("Type-checking the generated app...");
     execFileSync(pnpm, ["run", "type-check"], { cwd: appDirectory, stdio: "inherit" });
 
-    console.log("Building with the template's configured target...");
-    execFileSync(pnpm, ["run", "build"], { cwd: appDirectory, stdio: "inherit" });
+    if (template === "react-compiler") {
+      await verifyCompilerStarter(appDirectory, browserPath);
+    } else {
+      console.log("Building with the template's configured target...");
+      execFileSync(pnpm, ["run", "build"], { cwd: appDirectory, stdio: "inherit" });
 
-    console.log("Building and serving a Node production server...");
-    execFileSync(pnpm, ["exec", "farm", "build", "--preset", "node-server"], {
-      cwd: appDirectory,
-      stdio: "inherit",
-    });
-    await serveAndCheck(appDirectory);
+      console.log("Building and serving a Node production server...");
+      execFileSync(pnpm, ["exec", "farm", "build", "--preset", "node-server"], {
+        cwd: appDirectory,
+        stdio: "inherit",
+      });
+      await serveAndCheck(appDirectory);
+    }
 
     console.log(`Packed ${template} app smoke passed (${archives.size} Farm packages).`);
   } finally {
@@ -260,4 +315,4 @@ if (require.main === module) {
   });
 }
 
-module.exports = { collectFarmPackages, pinToArchives, runSmoke };
+module.exports = { collectFarmPackages, packPackage, pinToArchives, readSmokeOptions, runSmoke };

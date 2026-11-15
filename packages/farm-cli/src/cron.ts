@@ -1,10 +1,5 @@
-import {
-  loadConfig,
-  logger,
-  resolveConfig,
-  type FarmCronJob,
-  type FarmCronResolvedConfig,
-} from "@farm.js/core";
+import { loadConfig, logger, resolveConfig } from "@farm.js/core/internal/cli-runtime";
+import type { FarmCronJob, FarmCronResolvedConfig } from "@farm.js/core";
 import { Cron } from "croner";
 import path from "node:path";
 import { createHttpLocalUrl } from "./local-url";
@@ -53,7 +48,7 @@ export async function loadFarmCronConfig(
     throw new Error("No Farm config found. Create farm.config.ts before configuring cron routes.");
   }
 
-  const resolvedConfig = await resolveConfig({ root, ...userConfig }, "development");
+  const resolvedConfig = await resolveConfig({ ...userConfig, root }, "development");
   return resolvedConfig.cron;
 }
 
@@ -63,7 +58,9 @@ export async function listFarmCronJobs(options: FarmCronCLIOptions = {}): Promis
 }
 
 export function formatFarmCronJobs(jobs: FarmCronJob[]): string {
-  if (jobs.length === 0) return "No cron routes configured in farm.config.ts.";
+  if (jobs.length === 0) {
+    return "No cron jobs configured. Add a `cron` entry in farm.config.ts or a `schedule` to a cronRoute().";
+  }
 
   const rows = jobs.map((job) => [
     job.name,
@@ -187,6 +184,7 @@ async function invokeFarmCronJob(
   const headers = new Headers({
     accept: "application/json",
     "x-farm-cron-name": job.name,
+    "x-farm-cron-scheduled-at": String(Date.now()),
     "x-farm-cron-trigger": options.trigger || "manual",
   });
   const secret = options.secret ?? process.env[cron.secretEnv];

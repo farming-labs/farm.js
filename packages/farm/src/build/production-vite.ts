@@ -4,7 +4,7 @@ import type {
   loadEnv as viteLoadEnv,
 } from "vite";
 
-export type FarmProductionViteBuilder = "rollup" | "rolldown";
+export type FarmProductionViteBuilder = "rolldown";
 
 export interface FarmProductionViteRuntime {
   build: typeof viteBuild;
@@ -13,63 +13,25 @@ export interface FarmProductionViteRuntime {
   builder: FarmProductionViteBuilder;
 }
 
-export function canUseRolldownForRouteDiscovery(viteConfig: object | undefined): boolean {
-  return !viteConfig || Object.keys(viteConfig).length === 0;
-}
-
-export function supportsRolldownVite(nodeVersion = process.versions.node): boolean {
-  const [major = 0, minor = 0] = nodeVersion.split(".").map(Number);
-  return major > 22 || (major === 22 && minor >= 12);
-}
-
-function requestedProductionViteBuilder(): FarmProductionViteBuilder | undefined {
+function assertRequestedProductionViteBuilder(): void {
   const requested = process.env.FARM_VITE_BUILDER?.trim().toLowerCase();
-  if (!requested) return undefined;
-  if (requested === "rollup" || requested === "rolldown") return requested;
-  throw new Error('FARM_VITE_BUILDER must be either "rolldown" or "rollup"');
+  if (!requested || requested === "rolldown") return;
+  if (requested === "rollup") {
+    throw new Error(
+      "FARM_VITE_BUILDER=rollup is no longer supported: Farm builds with Vite 8, which bundles with Rolldown. Remove FARM_VITE_BUILDER.",
+    );
+  }
+  throw new Error('FARM_VITE_BUILDER must be "rolldown" when set');
 }
 
-async function loadRollupVite(): Promise<FarmProductionViteRuntime> {
+/** Load the Vite runtime Farm uses for development, route discovery, and production bundles. */
+export async function loadFarmProductionVite(): Promise<FarmProductionViteRuntime> {
+  assertRequestedProductionViteBuilder();
   const runtime = await import("vite");
   return {
     build: runtime.build,
     createServer: runtime.createServer,
     loadEnv: runtime.loadEnv,
-    builder: "rollup",
+    builder: "rolldown",
   };
-}
-
-/**
- * Prefer Vite's Rolldown-powered production builder on supported Node releases.
- * Vite 5 remains the compatibility path for unsupported runtimes, --no-optional installs,
- * and projects that explicitly request Rollup.
- */
-export async function loadFarmProductionVite(
-  preferredBuilder?: FarmProductionViteBuilder,
-): Promise<FarmProductionViteRuntime> {
-  const requested = preferredBuilder ?? requestedProductionViteBuilder();
-  if (requested === "rollup" || !supportsRolldownVite()) {
-    if (requested === "rolldown") {
-      throw new Error("FARM_VITE_BUILDER=rolldown requires Node 22.12 or newer");
-    }
-    return loadRollupVite();
-  }
-
-  try {
-    const runtime = (await import("vite-rolldown")) as unknown as typeof import("vite");
-    return {
-      build: runtime.build,
-      createServer: runtime.createServer,
-      loadEnv: runtime.loadEnv,
-      builder: "rolldown",
-    };
-  } catch (error) {
-    if (requested === "rolldown") {
-      const detail = error instanceof Error ? `: ${error.message}` : "";
-      throw new Error(
-        `FARM_VITE_BUILDER=rolldown was requested, but the optional Vite Rolldown runtime could not be loaded${detail}`,
-      );
-    }
-    return loadRollupVite();
-  }
 }

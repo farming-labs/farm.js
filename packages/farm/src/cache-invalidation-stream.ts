@@ -2,6 +2,8 @@ import { encodeFarmCacheInvalidations, subscribeFarmCacheInvalidation } from "./
 
 const DEFAULT_HEARTBEAT_INTERVAL_MS = 15_000;
 const DEFAULT_RETRY_MS = 3_000;
+const MAX_BUFFERED_BYTES = 64 * 1024;
+const MAX_PENDING_KEYS = 1_024;
 const textEncoder = new TextEncoder();
 
 export interface FarmCacheInvalidationStreamOptions {
@@ -39,10 +41,17 @@ export function createFarmCacheInvalidationStream(
   let controller: ReadableStreamDefaultController<Uint8Array> | undefined;
   let closed = false;
   let flushScheduled = false;
-  let pending: string[] = [];
+  const pending = new Set<string>();
+  let pendingBytes = 0;
 
   const enqueue = (value: string) => {
-    if (!closed) controller?.enqueue(textEncoder.encode(value));
+    if (closed || !controller) return;
+    const chunk = textEncoder.encode(value);
+    if (chunk.byteLength > (controller.desiredSize ?? 0)) {
+      overflow();
+      return;
+    }
+    controller.enqueue(chunk);
   };
 
   const cleanup = () => {
@@ -51,7 +60,8 @@ export function createFarmCacheInvalidationStream(
     if (heartbeat !== undefined) clearInterval(heartbeat);
     heartbeat = undefined;
     options.signal?.removeEventListener("abort", abort);
-    pending = [];
+    pending.clear();
+    pendingBytes = 0;
   };
 
   const stop = (closeController: boolean) => {
@@ -63,40 +73,66 @@ export function createFarmCacheInvalidationStream(
 
   const abort = () => stop(true);
 
+  const overflow = () => {
+    if (closed) return;
+    stop(false);
+    // Erroring discards queued chunks as well as releasing the bus listener.
+    // A slow consumer must not retain unbounded output while disconnected.
+    controller?.error(new Error("Farm cache invalidation stream exceeded its buffer limit."));
+  };
+
   const flush = () => {
     flushScheduled = false;
-    if (closed || pending.length === 0) return;
-    const encoded = encodeFarmCacheInvalidations(pending);
-    pending = [];
+    if (closed || pending.size === 0) return;
+    const encoded = encodeFarmCacheInvalidations([...pending]);
+    pending.clear();
+    pendingBytes = 0;
     if (encoded !== null) enqueue(`data: ${encoded}\n\n`);
   };
 
-  const stream = new ReadableStream<Uint8Array>({
-    start(nextController) {
-      controller = nextController;
-      if (options.signal?.aborted) {
-        stop(true);
-        return;
-      }
-
-      enqueue(`: connected\nretry: ${retryMs}\n\n`);
-      unsubscribe = subscribeFarmCacheInvalidation((key) => {
-        if (closed || options.filter?.(key) === false) return;
-        pending.push(key);
-        if (!flushScheduled) {
-          flushScheduled = true;
-          queueMicrotask(flush);
+  const stream = new ReadableStream<Uint8Array>(
+    {
+      start(nextController) {
+        controller = nextController;
+        if (options.signal?.aborted) {
+          stop(true);
+          return;
         }
-      });
-      options.signal?.addEventListener("abort", abort, { once: true });
-      if (heartbeatIntervalMs !== false) {
-        heartbeat = setInterval(() => enqueue(": heartbeat\n\n"), heartbeatIntervalMs);
-      }
+
+        enqueue(`: connected\nretry: ${retryMs}\n\n`);
+        unsubscribe = subscribeFarmCacheInvalidation((key) => {
+          if (closed || options.filter?.(key) === false) return;
+          // A filter may abort its own request. Do not retain work after cleanup.
+          if (closed || pending.has(key)) return;
+          // Bound the raw UTF-16 strings before encoding or waiting for a microtask.
+          if (
+            pending.size >= MAX_PENDING_KEYS ||
+            pendingBytes + key.length * 2 > MAX_BUFFERED_BYTES
+          ) {
+            overflow();
+            return;
+          }
+          pending.add(key);
+          pendingBytes += key.length * 2;
+          if (!flushScheduled) {
+            flushScheduled = true;
+            queueMicrotask(flush);
+          }
+        });
+        options.signal?.addEventListener("abort", abort, { once: true });
+        if (heartbeatIntervalMs !== false) {
+          heartbeat = setInterval(() => {
+            // Heartbeats are keep-alives, not history to replay to a slow reader.
+            if (controller?.desiredSize === MAX_BUFFERED_BYTES) enqueue(": heartbeat\n\n");
+          }, heartbeatIntervalMs);
+        }
+      },
+      cancel() {
+        stop(false);
+      },
     },
-    cancel() {
-      stop(false);
-    },
-  });
+    { highWaterMark: MAX_BUFFERED_BYTES, size: (chunk) => chunk.byteLength },
+  );
 
   return new Response(stream, {
     headers: {

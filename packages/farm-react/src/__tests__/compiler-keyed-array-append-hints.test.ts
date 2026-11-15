@@ -33,7 +33,7 @@ describe("React AOT keyed-array append hints", () => {
     expect(result.diagnostics).toEqual([]);
     expect(result.optimizations.keyedArrayAppendHints).toBe(2);
     expect(result.code).toContain("createCompilerKeyedArrayAppend");
-    expect(result.code).toContain("keyedRowsHintedRuntimeFeature");
+    expect(result.code).toContain("keyedRowsAppendOnlyRuntimeFeature");
     await expect(
       transformWithEsbuild(result.code, "/app/KeyedArrayAppendHints.tsx", {
         loader: "tsx",
@@ -62,7 +62,7 @@ describe("React AOT keyed-array append hints", () => {
     expect(result.diagnostics).toEqual([]);
     expect(result.optimizations.keyedArrayAppendHints).toBe(1);
     expect(result.code).toContain("createCompilerKeyedArrayAppend");
-    expect(result.code).toContain("keyedRowsHintedRuntimeFeature");
+    expect(result.code).toContain("keyedRowsAppendOnlyRuntimeFeature");
     await expect(
       transformWithEsbuild(result.code, "/app/KeyedArrayAppendHints.tsx", {
         loader: "tsx",
@@ -96,6 +96,7 @@ describe("React AOT keyed-array append hints", () => {
     expect(result.optimizations.keyedArrayAppendHints).toBe(1);
     expect(result.code).toContain("createCompilerKeyedArrayAppend");
     expect(result.code).toContain("collectionDependency={0}");
+    expect(result.code).toContain("keyedRowsAppendOnlyRuntimeFeature");
   });
 
   it("emits composable filter and append hints for adjacent queued setters", async () => {

@@ -1,7 +1,13 @@
-import { getServerActionExecutionContext, getServerActionSignal } from "./server-action-security";
-import { _resolveCurrentRequest } from "./server/request-bridge";
+import {
+  getServerActionExecutionContext,
+  getServerActionSignal,
+  runWithServerActionRequest,
+} from "./server-action-security";
+import { _resolveCurrentRequestForApp, _toAppRequestView } from "./server/request-bridge";
 import { applyFarmCacheInvalidationTargets, type FarmCacheInvalidationTarget } from "./cache";
-import { ServerActionError, ServerFnFailure } from "./server-fn-error";
+import { ServerActionError, ServerFnFailure, isServerFnFailure } from "./server-fn-error";
+import { getFarmRedirectError } from "./navigation-errors";
+import type { EndpointMCPMetadata } from "./api/endpoint";
 
 export {
   FARM_SERVER_FN_FAILURE_SYMBOL,
@@ -71,6 +77,9 @@ export type ServerFnErrorHandler<TErrors extends ServerFnErrorDefinitions> = <
 ) => never;
 
 export type ServerFnFormInput = FormData;
+
+/** MCP tool metadata for a server function or query. Server functions have no path to derive a name from. */
+export type ServerFnMCPMetadata = EndpointMCPMetadata & { name: string };
 
 type Simplify<T> = { [TKey in keyof T]: T[TKey] } & {};
 type AssignContext<TCurrent extends object, TNext extends object> = Simplify<
@@ -186,6 +195,8 @@ export type ServerFnOptions<
   output?: undefined;
   middleware?: TMiddlewares;
   errors?: TErrors;
+  /** Expose this function as an MCP tool when it is listed in `mcp.tools`. `name` is required. */
+  mcp?: ServerFnMCPMetadata;
   invalidates?: ServerFnInvalidations<
     TSchema extends ServerFnSchema ? InferServerFnSchemaOutput<TSchema> : unknown,
     Awaited<TResult>,
@@ -209,6 +220,8 @@ export type ServerFnOutputOptions<
   output: TOutputSchema;
   middleware?: TMiddlewares;
   errors?: TErrors;
+  /** Expose this function as an MCP tool when it is listed in `mcp.tools`. `name` is required. */
+  mcp?: ServerFnMCPMetadata;
   invalidates?: ServerFnInvalidations<
     TInputSchema extends ServerFnSchema ? InferServerFnSchemaOutput<TInputSchema> : unknown,
     Awaited<InferServerFnSchemaOutput<TOutputSchema>>,
@@ -235,6 +248,140 @@ export type InferServerFnError<TServerFn> =
   TServerFn extends ServerFn<any, any, infer TError> ? TError : Error;
 
 export const FARM_SERVER_FN_SYMBOL = Symbol.for("farm.server-fn");
+
+const FARM_SERVER_FUNCTION_DESCRIPTOR = Symbol.for("farm.server-function.descriptor");
+
+/** @internal What a non-browser caller, such as an MCP tool, needs to know about a server function. */
+export interface ServerFunctionDescriptor {
+  /** Queries only read data; actions may change it. */
+  readonly kind: "action" | "query";
+  readonly input: ServerFnSchema | undefined;
+  readonly output: ServerFnSchema | undefined;
+  readonly mcp: Readonly<ServerFnMCPMetadata> | undefined;
+}
+
+interface ServerFunctionRunner extends ServerFunctionDescriptor {
+  /** Runs the full pipeline and labels input validation failures with ServerFnInputError. */
+  readonly run: (input: unknown) => Promise<unknown>;
+}
+
+const FARM_SERVER_FN_INPUT_ERROR = Symbol.for("farm.server-fn.input-error");
+
+/**
+ * Raised by the internal runner when the caller's input fails the function's input schema.
+ * Recognized by a `Symbol.for` brand rather than `instanceof`: in development the function can
+ * run under Vite's SSR runner, which loads its own copy of this module, while
+ * `_invokeServerFunction` runs on the dev server's copy.
+ */
+class ServerFnInputError extends Error {
+  constructor(readonly cause: unknown) {
+    super("Server function input is invalid");
+    Object.defineProperty(this, FARM_SERVER_FN_INPUT_ERROR, { value: true, enumerable: false });
+  }
+}
+
+function isServerFnInputError(error: unknown): error is ServerFnInputError {
+  return Boolean(
+    error &&
+    typeof error === "object" &&
+    (error as { [FARM_SERVER_FN_INPUT_ERROR]?: unknown })[FARM_SERVER_FN_INPUT_ERROR] === true,
+  );
+}
+
+/** @internal Shared by createServerFn and createServerQuery. */
+export function createServerFunctionDescriptor(
+  kind: ServerFunctionDescriptor["kind"],
+  options: { input?: ServerFnSchema; output?: ServerFnSchema; mcp?: ServerFnMCPMetadata },
+  run: ServerFunctionRunner["run"],
+): ServerFunctionRunner {
+  return Object.freeze({
+    kind,
+    input: options.input,
+    output: options.output,
+    mcp: options.mcp === undefined ? undefined : Object.freeze({ ...options.mcp }),
+    run,
+  });
+}
+
+/** @internal Attaches the descriptor that `_describeServerFunction` reads. */
+export function _attachServerFunctionDescriptor(target: object, descriptor: ServerFunctionRunner) {
+  Object.defineProperty(target, FARM_SERVER_FUNCTION_DESCRIPTOR, {
+    value: descriptor,
+    enumerable: false,
+  });
+}
+
+function getServerFunctionRunner(value: unknown): ServerFunctionRunner | undefined {
+  if (typeof value !== "function") return undefined;
+  return (value as { [FARM_SERVER_FUNCTION_DESCRIPTOR]?: ServerFunctionRunner })[
+    FARM_SERVER_FUNCTION_DESCRIPTOR
+  ];
+}
+
+/** @internal Runs a server function's pipeline with input failures labelled, for createServerQuery. */
+export function _runServerFunctionForCaller(value: unknown, input: unknown): Promise<unknown> {
+  const runner = getServerFunctionRunner(value);
+  if (!runner) throw new TypeError("Expected a function created with createServerFn");
+  return runner.run(input);
+}
+
+/**
+ * @internal Describes a createServerFn or createServerQuery function, or returns undefined for
+ * anything else. Exposes schemas and metadata, never the handler.
+ */
+export function _describeServerFunction(value: unknown): ServerFunctionDescriptor | undefined {
+  const runner = getServerFunctionRunner(value);
+  if (!runner) return undefined;
+  const { kind, input, output, mcp } = runner;
+  return Object.freeze({ kind, input, output, mcp });
+}
+
+/** @internal How a server function call ended, for callers that are not the browser action transport. */
+export type ServerFunctionInvocation =
+  | { readonly ok: true; readonly data: unknown }
+  /** The caller's input failed the input schema. The validator's error describes the caller's own data. */
+  | { readonly ok: false; readonly reason: "input"; readonly error: unknown }
+  /** A failure declared in `errors`, public by design. */
+  | { readonly ok: false; readonly reason: "failure"; readonly failure: ServerFnFailure }
+  | {
+      readonly ok: false;
+      readonly reason: "redirect";
+      readonly url: string;
+      readonly status: number;
+    }
+  /** Anything else. Can contain private data, so callers must not expose it. */
+  | { readonly ok: false; readonly reason: "error"; readonly error: unknown };
+
+/**
+ * @internal Runs a server function or query on behalf of a non-browser caller, such as an MCP
+ * tool call. Runs the same pipeline as a browser action (input schema, middleware, handler,
+ * output schema, invalidations) with `request` as the action request, so middleware reads the
+ * caller's headers. A query resolves to its data rather than the client cache envelope.
+ */
+export async function _invokeServerFunction(
+  value: unknown,
+  input: unknown,
+  request: Request,
+): Promise<ServerFunctionInvocation> {
+  const runner = getServerFunctionRunner(value);
+  if (!runner) {
+    throw new TypeError("Expected a function created with createServerFn or createServerQuery");
+  }
+  try {
+    const data = await runWithServerActionRequest(request, () => runner.run(input));
+    return { ok: true, data };
+  } catch (error) {
+    if (isServerFnInputError(error)) {
+      return { ok: false, reason: "input", error: error.cause };
+    }
+    if (isServerFnFailure(error)) return { ok: false, reason: "failure", failure: error };
+    const redirect = getFarmRedirectError(error);
+    if (redirect) {
+      return { ok: false, reason: "redirect", url: redirect.url, status: redirect.status };
+    }
+    return { ok: false, reason: "error", error };
+  }
+}
 
 const UNSAFE_FORM_KEYS = new Set(["__proto__", "constructor", "prototype"]);
 
@@ -304,6 +451,7 @@ export function createServerFn(options: {
   middleware?: readonly AnyServerFnMiddleware[];
   errors?: ServerFnErrorDefinitions;
   invalidates?: ServerFnInvalidations<any, any, any>;
+  mcp?: ServerFnMCPMetadata;
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   handler: ServerFnHandler<any, any, any, any>;
 }) {
@@ -314,12 +462,25 @@ export function createServerFn(options: {
   const middleware = resolveServerFnMiddleware(options.middleware);
   const errors = normalizeServerFnErrors(options.errors);
   const error = createServerFnErrorHandler(errors);
-  const serverFn = async (value: unknown) => {
+  const run = async (value: unknown, labelInputErrors: boolean) => {
     const formData = isFormData(value) ? value : undefined;
     const rawInput = formData ? formDataToObject(formData) : value;
-    const input = await _parseServerFnSchema(options.input, rawInput, "input");
+    let input: unknown;
+    try {
+      input = await _parseServerFnSchema(options.input, rawInput, "input");
+    } catch (cause) {
+      // Only a validation result describes the caller's input. Anything else thrown while
+      // parsing, such as an exception inside a refinement or transform, is an application error.
+      throw labelInputErrors && isSchemaValidationFailure(cause)
+        ? new ServerFnInputError(cause)
+        : cause;
+    }
     const executionContext = getServerActionExecutionContext();
-    const request = executionContext?.request ?? _resolveCurrentRequest();
+    // An action's request carries the caller's cookies too, so it gets the
+    // same guarded view a render does.
+    const request = executionContext
+      ? _toAppRequestView(executionContext.request)
+      : _resolveCurrentRequestForApp();
     const signal = executionContext?.signal ?? request?.signal ?? getServerActionSignal();
     const handlerContext = {
       input,
@@ -349,6 +510,7 @@ export function createServerFn(options: {
 
     return parsedResult;
   };
+  const serverFn = (value: unknown) => run(value, false);
 
   Object.defineProperties(serverFn, {
     [FARM_SERVER_FN_SYMBOL]: {
@@ -380,6 +542,11 @@ export function createServerFn(options: {
       enumerable: false,
     },
   });
+
+  _attachServerFunctionDescriptor(
+    serverFn,
+    createServerFunctionDescriptor("action", options, (value) => run(value, true)),
+  );
 
   return serverFn as ServerFn<unknown, unknown, Error>;
 }
@@ -597,6 +764,16 @@ export async function _parseServerFnSchema(
   throw new TypeError(`${owner} ${contract} must provide parse, parseAsync, or safeParse`);
 }
 
+// Errors a safeParse result reported as a validation failure, as opposed to exceptions it threw.
+const schemaValidationFailures = new WeakSet<object>();
+
+function isSchemaValidationFailure(error: unknown): boolean {
+  if (!error || typeof error !== "object") return false;
+  return (
+    schemaValidationFailures.has(error) || Array.isArray((error as { issues?: unknown }).issues)
+  );
+}
+
 function unwrapSafeParseResult(result: unknown) {
   if (
     result &&
@@ -604,7 +781,9 @@ function unwrapSafeParseResult(result: unknown) {
     "success" in result &&
     (result as { success: boolean }).success === false
   ) {
-    throw (result as { error?: unknown }).error;
+    const error = (result as { error?: unknown }).error;
+    if (error && typeof error === "object") schemaValidationFailures.add(error);
+    throw error;
   }
 
   if (

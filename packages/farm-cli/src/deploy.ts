@@ -11,8 +11,9 @@ import {
   resolveConfig,
   resolveDeployConfig,
   resolveDeployOutputPath,
-} from "@farm.js/core";
+} from "@farm.js/core/internal/cli-runtime";
 import { buildFarm } from "./build";
+import { createSpawnCommand, type SpawnCommand } from "./windows-command";
 
 export interface DeployFarmOptions {
   root?: string;
@@ -134,7 +135,7 @@ async function resolveFarmDeployContext(options: DeployFarmOptions) {
   const root = path.resolve(options.root || process.cwd());
   const mode = "production";
   const userConfig = await loadConfig(root, undefined, mode);
-  const config = await resolveConfig({ root, ...userConfig }, mode);
+  const config = await resolveConfig({ ...userConfig, root }, mode);
 
   // Determine platform and preset
   const cliTarget = options.vercel
@@ -271,12 +272,20 @@ function createDeployCommand(
 }
 
 function createNetlifyDeployArgs(root: string, outputDir: string, site?: string): string[] {
+  // The Netlify CLI always deploys its internal functions directory, Farm's default
+  // Netlify output. Only a custom output directory needs an explicit functions path.
+  const usesInternalFunctionsDir =
+    path.resolve(root, outputDir) === path.resolve(root, ".netlify", "functions-internal");
   return [
     "deploy",
     "--prod",
     "--no-build",
     "--dir=dist",
-    `--functions=${path.relative(root, path.join(outputDir, "server")).split(path.sep).join(path.posix.sep)}`,
+    ...(usesInternalFunctionsDir
+      ? []
+      : [
+          `--functions=${path.relative(root, path.join(outputDir, "server")).split(path.sep).join(path.posix.sep)}`,
+        ]),
     ...(site ? [`--site=${site}`] : []),
   ];
 }
@@ -734,15 +743,29 @@ export function resolveDeployCliExecutable(
   return existsSync(local) ? local : `${command}${suffix}`;
 }
 
+/**
+ * The process that runs a deployment CLI. On Windows the CLI is a .cmd shim, which runs only
+ * through cmd.exe, so the shim path and arguments (an absolute config path) are quoted for it.
+ */
+export function resolveDeployCliCommand(
+  command: string,
+  args: string[],
+  root: string,
+  platform: NodeJS.Platform = process.platform,
+): SpawnCommand {
+  return createSpawnCommand(resolveDeployCliExecutable(command, root, platform), args, platform);
+}
+
 function runDeployCli(
   command: string,
   args: string[],
   root: string,
   options: Parameters<typeof execFileSync>[2] = {},
 ) {
-  return execFileSync(resolveDeployCliExecutable(command, root), args, {
+  const cli = resolveDeployCliCommand(command, args, root);
+  return execFileSync(cli.file, cli.args, {
     ...options,
-    shell: process.platform === "win32",
+    shell: cli.shell,
   });
 }
 

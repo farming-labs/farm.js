@@ -1732,13 +1732,19 @@ describe("Named request middleware", () => {
       const server = {
         config: { root },
         hot: undefined,
-        ssrLoadModule: vi.fn().mockResolvedValue({
-          config: { matcher: "/dashboard/:path*" },
-          middleware(request: Request, context: RequestMiddlewareContext<DashboardContext>) {
-            context.set("requestPath", new URL(request.url).pathname);
-            context.set("session", { userId: "vite-user" });
+        environments: {
+          ssr: {
+            runner: {
+              import: vi.fn().mockResolvedValue({
+                config: { matcher: "/dashboard/:path*" },
+                middleware(request: Request, context: RequestMiddlewareContext<DashboardContext>) {
+                  context.set("requestPath", new URL(request.url).pathname);
+                  context.set("session", { userId: "vite-user" });
+                },
+              }),
+            },
           },
-        }),
+        },
         moduleGraph: { invalidateModule: vi.fn() },
         ws: { send: vi.fn() },
       };
@@ -1769,10 +1775,16 @@ describe("Named request middleware", () => {
     await fs.writeFile(middlewareFile, "export {};\n");
     const handler = vi.fn();
     const viteServer = {
-      ssrLoadModule: vi
-        .fn()
-        .mockResolvedValueOnce({ default: handler })
-        .mockRejectedValueOnce(new SyntaxError("Unexpected token")),
+      environments: {
+        ssr: {
+          runner: {
+            import: vi
+              .fn()
+              .mockResolvedValueOnce({ default: handler })
+              .mockRejectedValueOnce(new SyntaxError("Unexpected token")),
+          },
+        },
+      },
     };
 
     try {
@@ -1795,7 +1807,9 @@ describe("Named request middleware", () => {
     await fs.mkdir(appDir, { recursive: true });
     await fs.writeFile(middlewareFile, "export {};\n");
     const viteServer = {
-      ssrLoadModule: vi.fn().mockRejectedValue(new SyntaxError("Unexpected token")),
+      environments: {
+        ssr: { runner: { import: vi.fn().mockRejectedValue(new SyntaxError("Unexpected token")) } },
+      },
     };
 
     try {
@@ -1816,7 +1830,7 @@ describe("Named request middleware", () => {
     const loadError = new SyntaxError("Unexpected token");
     const server = {
       config: { root },
-      ssrLoadModule: vi.fn().mockRejectedValue(loadError),
+      environments: { ssr: { runner: { import: vi.fn().mockRejectedValue(loadError) } } },
       moduleGraph: { invalidateModule: vi.fn() },
       ws: { send: vi.fn() },
     };

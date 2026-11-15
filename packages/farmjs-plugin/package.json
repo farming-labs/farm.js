@@ -1,6 +1,6 @@
 {
   "name": "@farm.js/plugin",
-  "version": "0.1.1-beta.2",
+  "version": "0.1.73",
   "description": "Official plugins for Farm.js framework",
   "license": "MIT",
   "author": "Farm.js Team",
@@ -65,13 +65,14 @@
     "@farming-labs/strata": "0.1.2",
     "better-call": "^1.0.19",
     "es-module-lexer": "2.0.0",
-    "h3": "2.0.1-rc.32",
+    "h3": "2.0.8",
+    "nf3": "0.3.24",
     "nitro": "3.0.260903-beta",
     "picocolors": "^1.0.0",
     "rsc-html-stream": "^0.0.4"
   },
   "devDependencies": {
-    "@types/node": "^20.19.21",
+    "@types/node": "^22.20.5",
     "@types/react": "^19.0.0",
     "@types/react-dom": "^19.0.0",
     "@vitejs/plugin-rsc": "0.5.32",
@@ -80,8 +81,8 @@
     "react-server-dom-webpack": "19.2.8",
     "tsdown": "^0.15.7",
     "typescript": "^5.5.3",
-    "vite": "^6.0.0",
-    "vitest": "^3.2.7"
+    "vite": "8.3.4",
+    "vitest": "5.0.5"
   },
   "peerDependencies": {
     "@farm.js/core": "workspace:*",

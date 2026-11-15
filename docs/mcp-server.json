@@ -1,0 +1,19 @@
+{
+  "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
+  "name": "dev.farmjs/docs",
+  "title": "Farm.js Docs",
+  "description": "Search and read the Farm.js docs: pages, sections, code examples and config options.",
+  "version": "0.1.28",
+  "websiteUrl": "https://farmjs.dev",
+  "repository": {
+    "url": "https://github.com/farming-labs/farm.js",
+    "source": "github",
+    "subfolder": "docs"
+  },
+  "remotes": [
+    {
+      "type": "streamable-http",
+      "url": "https://mcp.farmjs.dev/mcp"
+    }
+  ]
+}

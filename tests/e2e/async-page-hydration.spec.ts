@@ -31,15 +31,23 @@ test.describe("Async server pages importing client components", () => {
 
   test("client components of an async page hydrate as islands", async ({ page }) => {
     await page.goto("/async-client-import");
-    const island = page.locator("farm-client-boundary[data-farm-client-boundary]");
+    const island = page.locator("f-island[src]");
     await expect(island).toHaveCount(1);
-    await expect(island).toHaveAttribute("data-farm-hydrated", "true");
+    // Islands mode hydrates a click-only island on its first interaction and replays that
+    // click (RFC 0003 §11); the classic pipeline hydrates it on load.
+    const onInteraction = (await island.getAttribute("strategy")) === "interaction";
+    if (onInteraction) {
+      await expect(island).not.toHaveAttribute("data-farm-hydrated", "true");
+    } else {
+      await expect(island).toHaveAttribute("data-farm-hydrated", "true");
+    }
 
     const button = page.getByTestId("star-button");
     await expect(button).toHaveText("Stars: 42");
     await button.click();
     await button.click();
     await expect(button).toHaveText("Stars: 44");
+    await expect(island).toHaveAttribute("data-farm-hydrated", "true");
     await expect(page.getByTestId("async-page-title")).toHaveText("Async server page");
   });
 

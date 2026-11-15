@@ -111,7 +111,9 @@ import {
 Actions remain normal typed RPC calls. Solid exposes action state through reactive properties, Vue
 through refs, and Svelte through the callable action's readable-store subscription. Server queries
 share FARMJS's existing browser cache, invalidation, deduplication, stale-while-revalidate, focus,
-and reconnect behavior across all bindings.
+and reconnect behavior across all bindings. During server rendering a query binding returns an
+idle snapshot and starts no read, matching React's `useServerQuery`; the browser loads it after
+hydration.
 
 ## Renderer capability contract
 
@@ -206,8 +208,11 @@ compiler. FARMJS gates integration provider components on this capability.
 
 All official renderers support synchronous plain function components. React and Preact handle them
 through their native element model, while Vue and Solid materialize their returned element tree in
-the adapter. A compile-time renderer such as Svelte also needs its adapter to distinguish a plain
-function from one of its own compiled components, because both are functions at runtime.
+the adapter. Vue and Svelte also need their adapters to distinguish a plain function from one of
+their own components, because both are functions at runtime: a native Vue functional component
+takes `(props, { slots, attrs, emit })` and returns VNodes, and a compiled Svelte component is a
+function too. Their adapters call only the functions FARMJS marked and render every other function
+as a native component, so Vue functional components keep their slots, attrs, and emit.
 
 FARMJS resolves the ambiguity at build time rather than guessing. A provider component in a
 production build must be an importable module reference, so the module's extension answers the
@@ -238,6 +243,12 @@ the resolved descriptor can be selected. This keeps the declaration and runtime 
 agreement instead of treating an accidental export as support. FARMJS uses buffered
 `renderToString()` when neither capability is enabled. Descriptors without a `capabilities` field
 remain buffered for compatibility.
+
+Farm also uses `renderToString()` for documents it sends whole, such as the not-found and error
+pages with their layouts, so it may return a promise and should wait for the renderer's own async
+content instead of throwing: the official Preact renderer uses `renderToStringAsync()`, Solid uses
+`renderToStringAsync()`, and Vue's `renderToString()` is already async. React renders a document
+that suspends with its streaming renderer and waits for every boundary before sending it.
 
 ## Renderer-neutral server code
 

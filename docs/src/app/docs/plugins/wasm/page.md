@@ -42,7 +42,7 @@ Version one uses **native top-level await and module workers**, not a compatibil
 wasm({ target: ["chrome120", "firefox120", "safari17"] });
 ```
 
-An explicit plugin target takes precedence over `vite.build.target`. The plugin does not change the server build target. These defaults describe the required module syntax and worker support, not every feature a third-party Wasm library might use. Targeting an older environment such as `es2020` produces a build error when top-level await is needed. `worker.format: "iife"` is rejected with an actionable error.
+An explicit plugin target takes precedence over `vite.build.target`. The plugin does not change the server build target. These defaults describe the required module syntax and worker support, not every feature a third-party Wasm library might use. Targeting an older environment such as `es2020` produces a build error when top-level await is needed. Farm validates direct Wasm imports in both browser and worker production builds, including with Vite 8/Rolldown. Explicit `?init` and `?url` imports do not require this top-level-await validation. `worker.format: "iife"` is rejected with an actionable error.
 
 Test your actual library in the browsers you support. For example, older Safari versions have a [known limitation with multiple modules importing the same top-level-await module](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Operators/await#browser_compatibility). A compilation target is not a runtime compatibility polyfill.
 
@@ -132,6 +132,7 @@ Also terminate the worker when its owner unmounts or cancels. The [runnable exam
 ## Deployment and limits
 
 - Production emits Wasm and worker assets through Vite. Farm serves hashed assets at the origin root even when page routes use `basePath`; the example tests a page at `/lab/` loading those assets. Deploy the complete client output, not just JavaScript files.
+- A binary that only server code imports, such as one an API route loads, stays with the server output: Farm does not publish it with the client assets, so it is never served publicly. Node targets (`node-server`, `bun`, `vercel`, `netlify`) deploy it beside the server code; edge presets such as Cloudflare cannot load it, so their build fails. See [files server code reads](/docs/deployment#files-server-code-reads).
 - This plugin's supported scope is browser code and browser workers. It is renderer-neutral; the maintained example uses React. Server, edge, WASI, and Node-native package compatibility require separate testing and are not promised by this plugin.
 - Loading, compilation, linking, and runtime errors still need application error handling. A missing binary, unsupported Wasm feature, or library-specific requirement is not silently ignored.
 - A strict Content Security Policy may need `wasm-unsafe-eval` in `script-src` and an appropriate `worker-src`. The plugin never relaxes your security headers automatically.

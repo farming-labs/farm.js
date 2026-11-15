@@ -12,6 +12,12 @@ import {
   Wrench,
 } from "lucide-react";
 import { AgentArtwork } from "../../components/agents/artwork";
+import {
+  CodebaseFigure,
+  DevFigure,
+  PermissionsFigure,
+  ReadinessFigure,
+} from "../../components/agents/iso-figures";
 import { AgentWaitlist } from "../../components/agents/waitlist";
 import { SelectionWire } from "../../components/home/selection-wire";
 import { BlogFigure } from "../../components/blog/figures";
@@ -22,14 +28,16 @@ import {
   SiteFooter,
   SiteHeader,
 } from "../../components/site-chrome";
+import "../../components/agents/iso-figures.css";
 import "../../components/agents/waitlist.css";
 import "../../components/blog/figures.css";
 import "./agents.css";
 
 export const metadata = {
+  openGraph: { title: "Agent infrastructure — Farm.js", url: "/agents" },
   title: "Agent infrastructure — Farm.js",
   description:
-    "Farm.js apps are agent-native by default: agent runtimes, Markdown mirrors, MCP tools, and WebMCP. Plus upcoming infrastructure for deploying agents and MCP servers.",
+    "Farm.js apps serve Markdown versions of every page, llms.txt and JSON-LD by default, and config turns on MCP tools, WebMCP, and agent runtimes. Plus upcoming infrastructure for deploying agents and MCP servers.",
 } satisfies Metadata;
 
 // What ships in v0.1.0, as opposed to the upcoming infrastructure further down the page.
@@ -54,7 +62,7 @@ const availableNow = [
     title: "Every page in Markdown.",
     code: 'curl -H "Accept: text/markdown" /pricing',
     description:
-      "Pages answer agents with a Markdown mirror, by .md suffix or Accept header. Turn on OpenAPI and llms.txt with ordinary config.",
+      "Pages answer agents with a Markdown mirror, by .md suffix or Accept header, listed in llms.txt and sitemap.xml and described with JSON-LD by default. OpenAPI stays off until you turn it on in config.",
     href: "/docs/markdown",
     link: "Markdown mirrors",
   },
@@ -183,7 +191,12 @@ export default function AgentsPage() {
                   />
                 </div>
               </div>
-              <AgentArtwork />
+              <div className="agents-iso-row farm-full-rule">
+                <CodebaseFigure />
+                <ReadinessFigure />
+                <DevFigure />
+                <PermissionsFigure />
+              </div>
             </section>
 
             <section aria-labelledby="agents-now-title">
@@ -191,15 +204,15 @@ export default function AgentsPage() {
                 <div>
                   <IndexedLabel index="06.1" label="Available today" />
                   <h2 id="agents-now-title" className="font-geist-pixel">
-                    Agent-native
+                    Agent-ready.
                     <br />
-                    by default.
+                    One config block.
                   </h2>
                 </div>
                 <p>
-                  Every Farm.js v0.1.0 app can run an agent, answer agents in Markdown, and expose
-                  the tools you choose. Discovery never grants permission; your app still authorizes
-                  every action.
+                  Pages answer agents in Markdown by default, with llms.txt, JSON-LD and Open Graph
+                  built from your metadata. An mcp block exposes the tools you choose. Discovery
+                  never grants permission; your app still authorizes every action.
                 </p>
               </div>
               <div className="agents-now farm-full-rule">
@@ -220,6 +233,7 @@ export default function AgentsPage() {
                   ),
                 )}
               </div>
+              <AgentArtwork />
             </section>
 
             <section aria-labelledby="agents-capabilities-title">
@@ -274,6 +288,9 @@ export default function AgentsPage() {
                   </a>
                   <a href="/blog/0.1.0#agent-infrastructure">
                     Read the announcement <ArrowRight size={14} aria-hidden />
+                  </a>
+                  <a href="/agents/check">
+                    Check your site <ArrowRight size={14} aria-hidden />
                   </a>
                 </div>
               </div>

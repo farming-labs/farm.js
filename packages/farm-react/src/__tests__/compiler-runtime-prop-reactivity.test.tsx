@@ -407,10 +407,16 @@ describe("compiled primitive prop reactivity", () => {
     await act(async () => root.render(<Parent />));
 
     await act(async () => {
+      setValue("updated");
+      await flushCompilerUpdates();
+    });
+    expect(container.textContent).toBe("updated");
+
+    await act(async () => {
       startTransition(() => setValue({ label: "abandoned" }));
       await Promise.resolve();
     });
-    expect(container.textContent).toBe("before");
+    expect(container.textContent).toBe("updated");
 
     await act(async () => {
       setValue("after");

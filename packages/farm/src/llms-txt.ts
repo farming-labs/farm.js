@@ -9,13 +9,16 @@
  * renderer and the generated production server both call into this module, so
  * the two serve the same file.
  */
+import { FARM_INTERNAL_READ_HEADER } from "./agent-identity";
 import { applyFarmBasePath } from "./base-path";
+import { localizeFarmPathname, type FarmLocalePathConfig } from "./i18n/routing";
 import {
   getFarmMarkdownMirrorPath,
   isFarmMarkdownMirrorExposed,
   matchesFarmMarkdownRoutePattern,
   type FarmMarkdownResolvedConfig,
 } from "./markdown";
+import { normalizeFarmTrailingSlashPathname } from "./trailing-slash";
 
 export interface FarmLlmsTxtLink {
   title: string;
@@ -68,8 +71,9 @@ export interface FarmLlmsTxtUserConfig {
    */
   full?: boolean;
   /**
-   * Seconds a CDN may cache the generated files. Rendering llms-full.txt renders
-   * every listed page, so cache it on busy sites. Defaults to no caching.
+   * Seconds a CDN may cache the generated files, and the production server may
+   * reuse an llms-full.txt render, which renders every listed page. Defaults to
+   * no caching; concurrent llms-full.txt requests still share one render.
    */
   revalidate?: number;
 }
@@ -153,6 +157,10 @@ export function collectFarmLlmsTxtPages(
     markdown?: FarmMarkdownResolvedConfig;
     include?: string[];
     exclude?: string[];
+    /** The app's `trailingSlash`: a page without a mirror is linked at `/about/`. */
+    trailingSlash?: boolean;
+    /** The app's resolved i18n config: pages are linked in the default locale's URL. */
+    i18n?: FarmAgentPageI18n;
   },
 ): FarmLlmsTxtPage[] {
   const include = options.include ?? [];
@@ -170,16 +178,22 @@ export function collectFarmLlmsTxtPages(
       continue;
     }
     if (exclude.some((pattern) => matchesFarmMarkdownRoutePattern(pattern, path))) continue;
+    // A page its author keeps out of search stays out of the agent index too.
+    if (isFarmMetadataNoIndex(source.metadata)) continue;
 
-    // llmstxt.org prefers links to Markdown; use the page's mirror when it has one.
+    // llmstxt.org prefers links to Markdown; use the page's mirror when it has one, and
+    // otherwise the URL the page answers at, so the link does not redirect.
     const target = isFarmMarkdownMirrorExposed(options.markdown, path)
-      ? getFarmMarkdownMirrorPath(path)
-      : path;
+      ? getFarmAgentPagePublicPath(getFarmMarkdownMirrorPath(path), options)
+      : normalizeFarmTrailingSlashPathname(
+          getFarmAgentPagePublicPath(path, options),
+          options.trailingSlash === true,
+        );
     const description = readMetadataString(source.metadata, "description");
     pages.set(path, {
       path,
       title: readMetadataTitle(source.metadata) ?? fallbackPageTitle(path),
-      url: `${options.origin}${applyFarmBasePath(target, options.basePath)}`,
+      url: `${options.origin}${target}`,
       ...(description ? { description } : {}),
     });
   }
@@ -187,13 +201,103 @@ export function collectFarmLlmsTxtPages(
   return [...pages.values()].sort((left, right) => left.path.localeCompare(right.path));
 }
 
+/** The app's resolved i18n config (`config.i18n`); ignored when `enabled` is false. */
+export type FarmAgentPageI18n = FarmLocalePathConfig & { enabled?: boolean };
+
+/**
+ * The public path of a static page or its mirror in generated agent files: below the base
+ * path and, with i18n, in the default locale. Under `routing: "prefix-always"` a path without
+ * a locale answers with a redirect to one; the default `"prefix-except-default"` leaves the
+ * default locale unprefixed, and routing `"none"` adds no prefix, so those paths are unchanged.
+ */
+export function getFarmAgentPagePublicPath(
+  pathname: string,
+  options: { basePath?: string; i18n?: FarmAgentPageI18n },
+): string {
+  const { i18n } = options;
+  if (!i18n || i18n.enabled === false) return applyFarmBasePath(pathname, options.basePath);
+  return localizeFarmPathname(pathname, i18n.defaultLocale, {
+    ...i18n,
+    basePath: options.basePath ?? i18n.basePath,
+  });
+}
+
+/**
+ * The origin generated agent files (llms.txt, llms-full.txt, sitemap.xml) link to: the root
+ * layout's `metadataBase` when it is an absolute http(s) URL, else the request's origin. The
+ * request's host is client input, so a configured base keeps it out of files CDNs may cache.
+ */
+export function resolveFarmAgentOrigin(metadataBase: unknown, requestOrigin: string): string {
+  if (typeof metadataBase !== "string" && !(metadataBase instanceof URL)) return requestOrigin;
+  try {
+    const url = new URL(String(metadataBase));
+    return url.protocol === "https:" || url.protocol === "http:" ? url.origin : requestOrigin;
+  } catch {
+    return requestOrigin;
+  }
+}
+
+/**
+ * Reads pages linked on `origin` (a configured `metadataBase`) from `readOrigin`, the origin
+ * this server was reached at, so llms-full.txt reads stay on this server whatever the links name.
+ */
+export function readFarmLlmsMarkdownFrom(
+  readOrigin: string,
+  origin: string,
+  read: (url: string) => Promise<string | null>,
+): (url: string) => Promise<string | null> {
+  if (readOrigin === origin) return read;
+  return (url) => {
+    let target: URL;
+    try {
+      target = new URL(url);
+    } catch {
+      return read(url);
+    }
+    return read(target.origin === origin ? `${readOrigin}${target.pathname}${target.search}` : url);
+  };
+}
+
+/** True when page metadata asks search engines not to index the page. */
+export function isFarmMetadataNoIndex(metadata: unknown): boolean {
+  if (!metadata || typeof metadata !== "object") return false;
+  const robots = (metadata as { robots?: unknown }).robots;
+  if (typeof robots === "string") {
+    return robots
+      .split(",")
+      .map((directive) => directive.trim().toLowerCase())
+      .some((directive) => directive === "noindex" || directive === "none");
+  }
+  return Boolean(
+    robots && typeof robots === "object" && (robots as { index?: unknown }).index === false,
+  );
+}
+
+/**
+ * True when a page renders with noindex. Page metadata merges over its layouts' (root first)
+ * and `robots` is replaced whole, so the page's own `robots` decides, else the nearest
+ * layout's. `layoutMetadata` is the wrapping layouts' metadata, root first.
+ */
+export function isFarmPageNoIndex(
+  pageMetadata: unknown,
+  layoutMetadata: readonly unknown[] = [],
+): boolean {
+  for (const metadata of [pageMetadata, ...[...layoutMetadata].reverse()]) {
+    if (isRecord(metadata) && "robots" in metadata) return isFarmMetadataNoIndex(metadata);
+  }
+  return false;
+}
+
 export function createFarmDefaultLlmsTxt(options: {
   origin: string;
   pages: FarmLlmsTxtPage[];
   config: ResolvedFarmLlmsTxtConfig;
   rootMetadata?: unknown;
+  /** The app's MCP endpoints and AI catalog, listed in an "MCP" section. */
+  mcp?: FarmLlmsTxtLink[];
 }): FarmLlmsTxt {
   const { config, pages } = options;
+  const mcp = options.mcp ?? [];
   const summary = config.summary ?? readMetadataString(options.rootMetadata, "description");
 
   return {
@@ -204,18 +308,21 @@ export function createFarmDefaultLlmsTxt(options: {
       new URL(options.origin).host,
     ...(summary ? { summary } : {}),
     ...(config.details ? { details: config.details } : {}),
-    sections: pages.length
-      ? [
-          {
-            title: "Pages",
-            links: pages.map(({ title, url, description }) => ({
-              title,
-              url,
-              ...(description ? { description } : {}),
-            })),
-          },
-        ]
-      : [],
+    sections: [
+      ...(pages.length
+        ? [
+            {
+              title: "Pages",
+              links: pages.map(({ title, url, description }) => ({
+                title,
+                url,
+                ...(description ? { description } : {}),
+              })),
+            },
+          ]
+        : []),
+      ...(mcp.length ? [{ title: "MCP", links: mcp }] : []),
+    ],
   };
 }
 
@@ -278,7 +385,9 @@ export function createFarmLlmsMarkdownReader(
   return async (url) => {
     try {
       const response = await fetchMarkdown(
-        new Request(url, { headers: { accept: "text/markdown" } }),
+        new Request(url, {
+          headers: { accept: "text/markdown", [FARM_INTERNAL_READ_HEADER]: "llms-full" },
+        }),
       );
       const type = response.headers.get("content-type") ?? "";
       if (!response.ok || !type.toLowerCase().startsWith("text/markdown")) {
@@ -293,6 +402,16 @@ export function createFarmLlmsMarkdownReader(
 }
 
 /**
+ * How long llms-full.txt waits for one page's Markdown. Farm has no per-render
+ * timeout to reuse, so this is a conservative bound: a page that never finishes
+ * is left out instead of holding the response, and the shared render queue,
+ * open forever.
+ */
+export const FARM_LLMS_FULL_PAGE_TIMEOUT_MS = 30_000;
+
+const LLMS_PAGE_TIMED_OUT = Symbol("farm.llms.pageTimedOut");
+
+/**
  * Renders llms-full.txt: the llms.txt header, then one block per linked page with
  * its Markdown inlined, in the layout the docs engine uses. A string passes
  * through unchanged. Only same-origin links are fetched.
@@ -303,6 +422,10 @@ export async function renderFarmLlmsFullTxt(
     origin: string;
     readMarkdown: (url: string) => Promise<string | null>;
     concurrency?: number;
+    /** Milliseconds to wait for one page's Markdown before leaving it out. */
+    pageTimeout?: number;
+    /** Called when a page is left out because it did not answer in time. */
+    onIncomplete?: () => void;
   },
 ): Promise<string> {
   // Validates the value, and returns strings unchanged apart from the final newline.
@@ -320,8 +443,24 @@ export async function renderFarmLlmsFullTxt(
     }
   }
 
+  const pageTimeout = options.pageTimeout ?? FARM_LLMS_FULL_PAGE_TIMEOUT_MS;
+  const readWithinTimeout = async (url: string) => {
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const timedOut = new Promise<typeof LLMS_PAGE_TIMED_OUT>((resolve) => {
+      timer = setTimeout(resolve, pageTimeout, LLMS_PAGE_TIMED_OUT);
+    });
+    try {
+      const content = await Promise.race([options.readMarkdown(url), timedOut]);
+      if (content !== LLMS_PAGE_TIMED_OUT) return content;
+      // Listed without its content, like a page that needs sign-in.
+      options.onIncomplete?.();
+      return null;
+    } finally {
+      clearTimeout(timer);
+    }
+  };
   const contents = await mapWithConcurrency(links, options.concurrency ?? 4, (link) =>
-    shouldInlineLlmsLink(link.url, options.origin) ? options.readMarkdown(link.url) : null,
+    shouldInlineLlmsLink(link.url, options.origin) ? readWithinTimeout(link.url) : null,
   );
 
   const blocks = [`# ${toSingleLine(llms.title)}`];
@@ -336,6 +475,71 @@ export async function renderFarmLlmsFullTxt(
   });
   if (pages.length) blocks.push(pages.join("\n\n---\n\n"));
   return `${blocks.join("\n\n")}\n`;
+}
+
+/**
+ * Shares llms-full.txt renders, which read every listed page. Requests for the
+ * same origin while a render runs, or within `revalidate` seconds after it, get
+ * that result; renders run one at a time, so a burst of requests, even with
+ * varied Host headers, cannot multiply page renders. The content is the same for
+ * every caller: pages are read with fresh requests that carry no credentials.
+ * A render that calls `incomplete()`, because a page timed out, is answered but
+ * not reused, so the next request tries that page again.
+ */
+export function createFarmLlmsFullRenderer(
+  options: { revalidate?: number; now?: () => number; maxEntries?: number } = {},
+): (
+  origin: string,
+  render: (shared: { incomplete: () => void }) => Promise<string>,
+  onSettled?: (complete: boolean) => void,
+) => Promise<string> {
+  const now = options.now ?? Date.now;
+  const ttl = (options.revalidate ?? 0) * 1000;
+  const maxEntries = options.maxEntries ?? 16;
+  const entries = new Map<
+    string,
+    { body: Promise<string>; expires: number; complete: () => boolean }
+  >();
+  let queue: Promise<unknown> = Promise.resolve();
+
+  // Callers learn whether the body they get is complete, including callers
+  // that joined another request's render, so a partial body is not cached.
+  const settle = (
+    body: Promise<string>,
+    complete: () => boolean,
+    onSettled?: (c: boolean) => void,
+  ) => (onSettled ? body.then((value) => (onSettled(complete()), value)) : body);
+
+  return (origin, render, onSettled) => {
+    const entry = entries.get(origin);
+    if (entry && entry.expires > now()) return settle(entry.body, entry.complete, onSettled);
+    entries.delete(origin);
+
+    let complete = true;
+    const body = queue.then(() =>
+      render({
+        incomplete: () => {
+          complete = false;
+        },
+      }),
+    );
+    queue = body.catch(() => {});
+    const pending = { body, expires: Number.POSITIVE_INFINITY, complete: () => complete };
+    entries.set(origin, pending);
+    // Map order is insertion order, so the first key is the oldest entry.
+    if (entries.size > maxEntries) entries.delete(entries.keys().next().value!);
+    body.then(
+      () => {
+        if (entries.get(origin) !== pending) return;
+        if (ttl > 0 && complete) pending.expires = now() + ttl;
+        else entries.delete(origin);
+      },
+      () => {
+        if (entries.get(origin) === pending) entries.delete(origin);
+      },
+    );
+    return settle(body, pending.complete, onSettled);
+  };
 }
 
 // Markdown sources keep their YAML frontmatter, whose --- lines would read as page

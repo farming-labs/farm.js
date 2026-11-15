@@ -25,6 +25,21 @@ describe("hints Farm plugin", () => {
     });
   });
 
+  it("pre-bundles its lazily imported browser runtime in development", async () => {
+    const plugin = hints();
+    const configured = (await plugin.configure?.(
+      {
+        plugins: [plugin],
+        vite: { optimizeDeps: { include: ["react"], exclude: ["x"] } },
+      } as never,
+      context(true),
+    )) as { plugins: unknown[]; vite: { optimizeDeps: { include: string[]; exclude: string[] } } };
+
+    expect(configured.plugins).toEqual([plugin]);
+    expect(configured.vite.optimizeDeps.include).toEqual(["react", "@farm.js/hints/client"]);
+    expect(configured.vite.optimizeDeps.exclude).toEqual(["x"]);
+  });
+
   it("removes itself before production bundles are generated", async () => {
     const plugin = hints();
     const other = { name: "other" };

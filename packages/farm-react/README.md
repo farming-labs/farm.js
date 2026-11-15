@@ -3,7 +3,7 @@
 React renderer integration for FARMJS, including the experimental AOT compiler.
 
 React remains the default renderer and needs no package or configuration. Install this package only
-when opting into the compiler experiment:
+when opting into the compiler:
 
 ```bash
 pnpm add @farm.js/react
@@ -15,15 +15,32 @@ import { react } from "@farm.js/react";
 
 export default defineConfig({
   renderer: react({
-    experimental: {
-      compiler: true,
-    },
+    compiler: true,
   }),
 });
 ```
 
 `compiler: true` uses inference: every application TSX/JSX component is considered, eligible
 components are compiled with hybrid reactivity, and everything else keeps the normal React path.
+
+The compiler is experimental and stays off when this option is omitted or `false`. The former
+`react({ experimental: { compiler } })` spelling remains a deprecated alias with the same options
+and a one-time warning. Do not configure both spellings, even when one is `false`.
+
+### Compatibility and upgrades
+
+`react({ compiler })`, `ReactCompilerOptions`, and `List` from `@farm.js/react/list` are the
+application-facing API. Both inference and annotation mode, static and hybrid reactivity, fallback
+diagnostics, and coverage reporting remain supported. Annotation and static mode are advanced
+options, not separate experimental APIs. The package is independently versioned; a prerelease
+version remains a beta until its stable release is published.
+
+The compiler and `@farm.js/react/compiler-runtime` ship together. Generated definitions must use
+the runtime from the same installed package version; they are not a cross-version interchange
+format. Upgrade the package and rebuild the complete app, including SSR and browser output,
+together. Do not copy generated compiler output between package versions or deploy a new server
+with an old browser build. Existing runtime exports remain available, but prefer ordinary React
+source over hand-authored compiler definitions.
 
 Hybrid reactivity starts from the compiler's proven state-to-binding dependency lists, then marks
 only multi-state short-circuit bindings for runtime read tracking. For
@@ -40,6 +57,15 @@ automatic and does not add a configuration option or asynchronous runtime loadin
 `createCompiledComponent` export remains a complete compatibility entry for hand-authored
 definitions, while generated code uses the tree-shakable feature entry.
 
+Generated code also selects refresh support through `import.meta.hot`. Production bundles can
+remove the development refresh registry and compatibility checks; development retains
+state-preserving refresh. Both entries share the same component runtime, including SSR, hydration,
+DOM ownership, and fallback behavior. Existing hand-authored runtime entries retain refresh support.
+
+Plain keyed lists with filter hints and only identity-based selection also use the single-kind
+target runtime. Filtering keeps its existing native-method checks and fallback; mixed Set/Map
+targets, conditional rows, and nested host blocks keep their existing runtime capabilities.
+
 The persisted production-size fixtures and regression gate live in
 [`RUNTIME_SIZE_RESULTS.md`](./RUNTIME_SIZE_RESULTS.md). The recorded compiler-selected core runtime
 premium is 85.4% smaller than the complete compatibility runtime premium; the feature-heavy keyed
@@ -49,13 +75,11 @@ For selective adoption, use annotation mode:
 
 ```ts
 renderer: react({
-  experimental: {
-    compiler: {
-      mode: "annotation",
-      directive: "use compiler",
-      onUnsupported: "warn",
-      reactivity: "hybrid",
-    },
+  compiler: {
+    mode: "annotation",
+    directive: "use compiler",
+    onUnsupported: "warn",
+    reactivity: "hybrid",
   },
 }),
 ```
@@ -95,6 +119,11 @@ The current compiler handles components that it can prove have:
 - React-managed event handlers; and
 - no refs, effects, or unsupported dynamic child structures.
 
+State-dependent event handler selection, such as `onClick={active ? save : cancel}`, keeps the
+component on React's normal rendering path so replacing, adding, or removing a callback updates
+React's event props. Direct inline handlers that read state when invoked, such as
+`onClick={() => save(active)}`, retain the existing compiled path when otherwise eligible.
+
 The generated component preserves React ownership of initial placement, parent update commits,
 identity-bearing props, events, SSR, and hydration. Local state cells batch updates into a
 microtask; eligible flat destructured primitive props join the same dependency index after React
@@ -108,6 +137,10 @@ conditional Fibers, and structural reconciliation, while Farm patches same-key b
 refreshes only changed React-owned row-local branches. React still creates or hydrates all initial
 DOM. Anything outside those narrow contracts uses a small React-owned boundary or the complete
 original component.
+
+Compiler-owned structural updates stay disabled inside SVG and MathML, including shared
+HTML/SVG tag names such as `a` and `title`. React retains namespace-sensitive element creation
+when rows are appended or conditional branches change; ordinary HTML rows remain eligible.
 
 For a common dedicated conditional, no new component or annotation is required:
 
@@ -270,6 +303,18 @@ itself, and failed runtime checks use complete keyed reconciliation. A key that 
 collection prevents hint emission entirely. The compiler report exposes the emitted-site count as
 `keyedArrayAppendHints`.
 
+When all keyed-row plans in a component are plain, target-free rows and the only emitted update
+hints are appends, the compiler selects a smaller append-only runtime. This omits unused map-update
+and keyed-target fast paths, not support for other state changes: opaque updates and rejected hints
+still use complete keyed reconciliation. Mixed hints, targeted bindings, conditional rows, and host
+blocks keep their existing runtime. No additional option is required.
+
+The same component-wide proof selects a smaller removal-only runtime when the only emitted
+update hints are `filter()` and/or `slice()`. It omits unused append, map-update, and keyed-target
+fast paths while retaining complete keyed reconciliation for opaque updates or rejected hints.
+A sibling list requiring broader hints, targeted bindings, conditional rows, or host blocks keeps
+the existing combined runtime. This changes bundle selection, not native array or React semantics.
+
 Adjacent removal and append setters can share the same committed-row proof:
 
 ```tsx
@@ -354,6 +399,13 @@ When an adjacent filter or bounded slice runs first, the compiler also carries t
 positions into the prepend. The runtime removes only rejected rows, preserves every surviving DOM
 node, and creates only the final prefix instead of rescanning and rebinding the whole result.
 Multiple adjacent prepends share the same proof.
+
+When every keyed list in a component is plain and has no targeted bindings, and prepend is
+the only emitted update hint, Farm selects a smaller prepend-only runtime. It omits unused
+target and map/append fast paths, but keeps the same prepend validation and complete keyed
+reconciliation for opaque or rejected updates. Mixed hints, conditional/host rows, and targeted
+bindings on any sibling list keep their existing runtime. This changes bundle size, not the
+supported update semantics or the prepend algorithm.
 
 The setter may be concise or use a block containing exactly one direct value-returning `return`.
 Extra statements, conditional returns, and missing returns keep complete keyed reconciliation.
@@ -479,6 +531,13 @@ setItems((current) => {
 setItems((current) => current.toSpliced(firstIndex, 25, ...firstRefresh));
 setItems((current) => current.toSpliced(secondIndex, 25, ...secondRefresh));
 ```
+
+When every keyed list in a component is plain and has no identity, `Set` membership, or `Map`
+lookup targets, single-item position hints (including range removal) select a smaller runtime
+without target tracking. Ordinary map and append updates and complete reconciliation remain
+available. Any sibling with targets, conditional content, host scopes, or broader structural hints
+retains the corresponding full-capability runtime. Batch insertion and window replacement keep
+their existing runtimes. This changes payload size, not array-method or React behavior.
 
 The compiler recognizes a concise functional setter or a setter block containing exactly one direct
 `return`. Its position must be either a safe-integer literal or a compiler-safe runtime expression,
@@ -921,6 +980,12 @@ components, fragments, refs, SVG, spreads, dangerous HTML, and index keys keep t
 row on React's fallback. Additional keyed levels that satisfy the same host-only contract are
 analyzed recursively instead of using a fixed nesting limit.
 
+When every inner key stays in the same order, the nested scope reuses its row table and skips
+position-map construction and LIS planning. It still validates all keys and updates every child
+scope and binding. Insertions, removals, and reorders keep the existing structural reconciliation;
+duplicate keys or an invalid child scope keep the existing React fallback. This also applies to
+keyed ranges next to host-only conditions inside a nested mixed range.
+
 For example, `boards → columns → cards → tags` becomes a tree of keyed scopes. Each stable parent
 key owns its child key table and LIS pass. Moving a board carries its column, card, and tag scopes;
 reordering cards reconciles only the selected column. Block IDs stay globally unique while runtime
@@ -1058,8 +1123,27 @@ Generated callback refs give directly patched host elements stable private targe
 React-owned component may therefore return `null`, a fragment, or multiple host nodes without
 shifting an unrelated compiler binding. These refs do not add attributes to SSR output.
 
+Custom element tags and customized built-ins using `is` remain React-owned rather than receiving
+compiler attribute writes or host descriptors. React controls property setters, attributes, events,
+and element creation according to the installed React version, including during hydration.
+
+State-dependent `contentEditable` bindings and non-literal `contentEditable` values in host
+descriptors remain React-owned. This preserves the difference between explicit `false` (not editable)
+and an absent value (inherit from the parent). Literal strings on ordinary direct hosts remain
+eligible for compilation.
+
+`title` and `meta` elements inside conditional, keyed, or recursive host descriptors remain
+React-owned. React decides their document placement and cleanup, including React 19 head placement
+and the `itemProp` exception. The compiler does not implement a separate metadata manager.
+
 Conditional blocks have three safe ownership levels. One or more proven host-only direct branches
 may become compiler-owned ranges among static host siblings, including at the exact component root.
+Script elements in conditional branches or keyed rows remain React-owned, including nested and
+non-executable scripts. React retains responsibility for inert script creation on insertion and
+reinsertion; the compiler does not create these elements through its host descriptors.
+The production browser control is
+`NODE_ENV=production node packages/farm-react/scripts/test-script-ownership-browser.mjs` from the
+workspace root. Set `CHROME_PATH` to use an installed Chrome instead of Playwright's browser.
 A dedicated container with exactly one conditional child uses the smaller compiler-owned branch
 boundary. The more general React-owned conditional path accepts supported events, nested host
 conditionals, keyed lists, and component islands. A compiler-owned host branch may now recursively
@@ -1137,6 +1221,26 @@ The runtime test compares the same counter interaction on both paths: ordinary R
 second component render and commit, while the compiled component remains at one render and one
 commit and updates its two bindings directly. This is a deterministic structural performance
 assertion; it is not presented as a cross-machine timing benchmark.
+
+`pnpm --filter @farm.js/react test:runtime-size` checks both gzip and Brotli compiler premiums
+against `RUNTIME_SIZE_RESULTS.json`, including plain keyed lists and the isolated core runtime.
+Missing or non-finite budget inputs and fixtures without an explicit budget policy fail the check.
+When intentionally adding or changing a baseline, generate it with
+`pnpm --filter @farm.js/react benchmark:runtime-size` and review the byte changes before committing;
+do not regenerate baselines just to hide a regression. These checks do not change application output.
+
+Both runtime-size and keyed-target measurements compress each emitted JavaScript file independently,
+then sum the bytes. Multi-chunk builds also report per-file bytes and the union of entry chunks plus
+their static imports (`initial`), reachable dynamic imports and their dependencies (`deferred`), and
+any remaining emitted chunks (`unreferenced`). Shared chunks count once; deferred totals include all
+reachable lazy chunks, not a claim that every navigation downloads them. CSS, other assets, external
+dependencies and HTTP overhead are outside these JavaScript-only measurements. Existing single-chunk
+measurements are unchanged; concatenated code is used only for structural-marker checks.
+
+Plain keyed-row features also omit conditional-boundary subscriptions, render adapters, and
+snapshot-update loops. Conditional features retain their per-block ownership and React fallback.
+The size suite checks a combined create/append/update/select/swap/remove/clear table as well as
+isolated operations, so an isolated fixture cannot hide retained conditional machinery.
 
 Application and prototype calls, dynamic style objects, handlers outside JSX events, nested,
 computed, and rest props patterns, async handlers, unkeyed or index-keyed lists, unsupported map

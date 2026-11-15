@@ -7,7 +7,8 @@ import type {
   TunnelResponseMessage,
 } from "./protocol.js";
 import { isRelayToAgentMessage } from "./protocol.js";
-import { getHopByHopHeaderNames, getRecordHeader } from "./headers.js";
+import { getHopByHopHeaderNames, getRecordHeader, PREVIEW_REQUEST_HEADER } from "./headers.js";
+import { closeWebSocket } from "./websocket.js";
 
 export interface TypeScriptPreviewAgentOptions {
   relayUrl: string;
@@ -91,7 +92,7 @@ export async function startTypeScriptPreviewAgent(
     async close() {
       stopWatchingTarget();
       abortInFlight();
-      await closeSocket(socket);
+      await closeWebSocket(socket, 1000, "Preview agent stopped");
     },
   };
 }
@@ -211,6 +212,9 @@ async function forwardRequest(
     for (const [name, value] of Object.entries(request.headers)) {
       if (!requestHopByHopHeaders.has(name.toLowerCase())) headers.set(name, value);
     }
+    // The relay sets this too; setting it here keeps the dev server's preview checks on with an
+    // older relay.
+    headers.set(PREVIEW_REQUEST_HEADER, "1");
     const method = request.method.toUpperCase();
     const result = await fetch(resolveTargetUrl(options.targetUrl, request.path), {
       method,
@@ -336,14 +340,6 @@ class PreviewResponseLimitError extends Error {
     super(`The local preview response exceeded the ${maxBytes} byte limit.`);
     this.name = "PreviewResponseLimitError";
   }
-}
-
-function closeSocket(socket: WebSocket) {
-  if (socket.readyState === socket.CLOSED) return Promise.resolve();
-  return new Promise<void>((resolve) => {
-    socket.once("close", () => resolve());
-    socket.close(1000, "Preview agent stopped");
-  });
 }
 
 function terminateSocket(socket: WebSocket) {

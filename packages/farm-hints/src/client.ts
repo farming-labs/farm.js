@@ -8,6 +8,9 @@ import type { FarmHintsRuntime, HintIssue, HintMetric, HintsSnapshot } from "./t
 
 export type { FarmHintsRuntime, HintCategory, HintIssue, HintMetric } from "./types.js";
 
+const SCAN_DEBOUNCE_MS = 120;
+const SCAN_MAX_WAIT_MS = 1_000;
+
 /** Start the development-only hints scanner and route-aware overlay. */
 export function startHintsRuntime(
   options: ResolvedHintsOptions,
@@ -22,6 +25,7 @@ export function startHintsRuntime(
   let closed = false;
   let scanSequence = 0;
   let scanTimer: ReturnType<typeof setTimeout> | undefined;
+  let scanDeadline: number | undefined;
   let resourceObserver: PerformanceObserver | undefined;
   let overlay: HintsOverlay | undefined;
   let lastConsoleFingerprint = "";
@@ -63,6 +67,7 @@ export function startHintsRuntime(
       clearTimeout(scanTimer);
       scanTimer = undefined;
     }
+    scanDeadline = undefined;
     const sequence = ++scanSequence;
     pathname = nextPathname;
     scanning = true;
@@ -86,7 +91,13 @@ export function startHintsRuntime(
   function scheduleScan(reason: string): void {
     if (closed) return;
     if (scanTimer) clearTimeout(scanTimer);
-    scanTimer = setTimeout(() => void scan(reason), 120);
+    // Debounce bursts, but never let constant mutations postpone the scan forever.
+    const now = Date.now();
+    scanDeadline ??= now + SCAN_MAX_WAIT_MS;
+    scanTimer = setTimeout(
+      () => void scan(reason),
+      Math.max(0, Math.min(SCAN_DEBOUNCE_MS, scanDeadline - now)),
+    );
   }
 
   function recordTiming(

@@ -1,0 +1,934 @@
+import type { FarmSchema, FarmSchemaConfig } from "./schema";
+import { collectSchemaDependencies, orderSchemaOwners } from "./schema-dependencies";
+import { describeForeignKeyApproval, planCrossOwnerReferences } from "./schema-foreign-keys";
+import type { FarmSchemaMigrationStep } from "./schema-step-types";
+import {
+  planOwnerSchemaSteps,
+  withoutRenameTargets,
+  type FarmSchemaStepPlan,
+} from "./schema-steps";
+import {
+  createSchemaSnapshot,
+  diffSchemaSnapshots,
+  hasSchemaChanges,
+  readSchemaState,
+} from "./schema-state";
+import {
+  collectSchemaExtensions,
+  describeSchemaExtensionApproval,
+  isSchemaExtensionAllowed,
+  type FarmSchemaExtension,
+} from "./schema-extend";
+import { getIntegrationSchemas } from "./integrations";
+import { resolveIntegrationOrmRuntimeClient } from "./integration-orm";
+import { resolveSchemaModels, type ResolvedSchemaField } from "./schema-resolve";
+import {
+  columnTypeFamily,
+  createSchemaExecutor,
+  describeSchemaTable,
+  planSchemaMigration,
+  type FarmSchemaExecutor,
+  type FarmSchemaTableDescription,
+} from "./schema-migrate";
+import {
+  collectSchemaModels,
+  getSqlColumnType,
+  type CollectedSchemaModel,
+  type FarmSqlDialect,
+} from "./schema-sql";
+import {
+  findSchemaTableOwners,
+  readSchemaTables,
+  type FarmSchemaOwnerConfig,
+} from "./schema-tables";
+
+/**
+ * Read-only checks of every schema owner against the real database.
+ *
+ * Owners are integrations that declare a `schema` and plugins that declare
+ * tables. Their tables are compared with what the database holds, and every
+ * reference to a table someone else owns (the app's ORM, an auth library,
+ * another plugin) is checked too: the table must exist and the referenced
+ * column must have a type a foreign key can use. Nothing is written.
+ */
+
+export type FarmSchemaCheckSeverity = "error" | "warning";
+
+export type FarmSchemaCheckCode =
+  | "schema-invalid"
+  | "owner-conflict"
+  | "table-conflict"
+  | "client-missing"
+  | "client-unavailable"
+  | "client-unsupported"
+  | "table-missing"
+  | "column-missing"
+  | "column-type"
+  | "column-definition"
+  | "index-missing"
+  | "foreign-key-missing"
+  | "reference-table-missing"
+  | "reference-column-missing"
+  | "reference-type"
+  | "extend-invalid"
+  | "extend-table-missing"
+  | "extend-column-missing"
+  | "extend-column-type"
+  | "extend-column-shared"
+  | "schema-upgrade"
+  | "migration-step-pending"
+  | "migration-step-blocked"
+  | "migration-step-edited";
+
+export interface FarmSchemaCheckIssue {
+  severity: FarmSchemaCheckSeverity;
+  code: FarmSchemaCheckCode;
+  /** The integration key or plugin name that declares the schema. */
+  owner: string;
+  table?: string;
+  column?: string;
+  message: string;
+  /** What to do about it. */
+  hint?: string;
+}
+
+export interface FarmSchemaCheckOwner {
+  name: string;
+  kind: "integration" | "plugin";
+  dialect?: FarmSqlDialect;
+  /** False when the owner stores data in a key/value mount, which has no tables. */
+  relational: boolean;
+  tables: string[];
+  /** Owners whose tables this one needs, declared or implied by its schema. */
+  dependsOn: string[];
+}
+
+export interface FarmSchemaCheckReport {
+  owners: FarmSchemaCheckOwner[];
+  issues: FarmSchemaCheckIssue[];
+  /** True when there are no errors. Warnings do not fail a check. */
+  ok: boolean;
+}
+
+export type FarmSchemaCheckConfig = FarmSchemaOwnerConfig & {
+  plugins?: readonly unknown[];
+};
+
+export interface FarmSchemaCheckOptions {
+  /**
+   * How long connecting, and each query, may take before the owner is
+   * reported unreachable. A pg client has no connect timeout of its own, so
+   * an unreachable host would otherwise hang the check. Default 10 seconds.
+   */
+  timeoutMs?: number;
+}
+
+const DEFAULT_TIMEOUT_MS = 10_000;
+
+/** Reject when `work` has not settled in time. The work itself is abandoned. */
+async function withTimeout<T>(work: () => Promise<T>, timeoutMs: number): Promise<T> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const timeout = new Promise<never>((_, reject) => {
+    timer = setTimeout(
+      () => reject(new Error(`no answer within ${formatSeconds(timeoutMs)}`)),
+      timeoutMs,
+    );
+    // An abandoned connection attempt must not keep the process alive.
+    (timer as { unref?: () => void }).unref?.();
+  });
+  try {
+    return await Promise.race([Promise.resolve().then(work), timeout]);
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+const formatSeconds = (ms: number) =>
+  ms < 1000 ? `${ms}ms` : `${Number((ms / 1000).toFixed(1))}s`;
+
+type SchemaOwner = {
+  name: string;
+  kind: "integration" | "plugin";
+  schema: FarmSchema;
+  models?: readonly string[];
+  dialect?: FarmSqlDialect;
+  dependsOn?: readonly string[];
+  version?: string;
+  migrations?: readonly FarmSchemaMigrationStep[];
+  resolveClient(config: FarmSchemaCheckConfig): Promise<unknown>;
+};
+
+/**
+ * Every owner of database tables in an app: integrations that declare a
+ * `schema` and plugins that declare tables. An integration that also
+ * contributes a table-owning plugin under the same name is listed once.
+ */
+export function collectSchemaOwners(config: FarmSchemaCheckConfig): SchemaOwner[] {
+  const owners: SchemaOwner[] = [];
+  const integrationSchemas = getIntegrationSchemas(config.integrations as never);
+  // Every integration reads `storage.client`. A factory there would open a
+  // new connection per integration, so it is resolved once and shared.
+  let integrationClient: Promise<unknown> | undefined;
+  for (const [name, schema] of Object.entries(integrationSchemas)) {
+    owners.push({
+      name,
+      kind: "integration",
+      schema: schema as FarmSchema,
+      resolveClient: (resolved) =>
+        (integrationClient ??= resolveIntegrationOrmRuntimeClient({ config: resolved as never })),
+    });
+  }
+  for (const declaration of findSchemaTableOwners(config)) {
+    if (owners.some((owner) => owner.name === declaration.name)) continue;
+    owners.push({
+      name: declaration.name,
+      kind: "plugin",
+      schema: declaration.schema,
+      models: declaration.models,
+      dialect: declaration.dialect,
+      dependsOn: declaration.dependsOn,
+      version: declaration.version,
+      migrations: declaration.migrations,
+      resolveClient: (resolved) => declaration.resolveClient(resolved),
+    });
+  }
+  return owners;
+}
+
+/** Driver errors can echo a connection string; never print its password. */
+const errorMessage = (error: unknown) =>
+  (error instanceof Error ? error.message : String(error)).replace(
+    /(\/\/[^/\s:@]+):[^@\s]+@/gu,
+    "$1:***@",
+  );
+
+function migrateHint(owner: SchemaOwner): string {
+  return owner.kind === "plugin"
+    ? `Run \`farm ${owner.name} migrate\` to see the SQL, then \`--apply\` it.`
+    : "Create it with your migration tool: `farm generate` writes the integration's tables into your Prisma or Drizzle schema.";
+}
+
+/** Where an owner's tables live. */
+type OwnerDatabase = {
+  /** The driver connection, to tell owners sharing one database apart. */
+  client: unknown;
+  executor: FarmSchemaExecutor;
+  dialect: FarmSqlDialect;
+};
+
+/**
+ * A SQL executor for a client, null for a key/value mount, or undefined for a
+ * client Farm cannot read, such as a Prisma client. A Drizzle database keeps
+ * its driver on `$client`, which is used instead.
+ */
+function resolveSchemaExecutor(
+  client: unknown,
+  owner: string,
+  timeoutMs: number,
+): (ReturnType<typeof createSchemaExecutor> & { client: unknown }) | null | undefined {
+  for (const candidate of [client, (client as { $client?: unknown }).$client]) {
+    if (candidate === undefined || candidate === null) continue;
+    let adapter: ReturnType<typeof createSchemaExecutor>;
+    try {
+      adapter = createSchemaExecutor(candidate, owner);
+    } catch {
+      continue; // Not a driver Farm can read; try the next shape.
+    }
+    if (!adapter) return null;
+    const { executor } = adapter;
+    return {
+      ...adapter,
+      client: candidate,
+      // Each query is bounded, not the whole check, so a large schema on a
+      // slow link still finishes while a dead connection fails fast.
+      executor: {
+        execute: (sql) => withTimeout(() => executor.execute(sql), timeoutMs),
+        query: (sql, params) => withTimeout(() => executor.query(sql, params), timeoutMs),
+      },
+    };
+  }
+  return undefined;
+}
+
+const describeReferencedTable = (database: OwnerDatabase, table: string) =>
+  describeSchemaTable(database.executor, database.dialect, table);
+
+/** Physical table and column a reference points at, and who owns them. */
+type ReferenceTarget = {
+  table: string;
+  column: string;
+  /** Another Farm owner, or undefined for tables Farm does not manage. */
+  owner?: string;
+};
+
+export async function checkSchema(
+  config: FarmSchemaCheckConfig,
+  options: FarmSchemaCheckOptions = {},
+): Promise<FarmSchemaCheckReport> {
+  const timeoutMs = options.timeoutMs ?? DEFAULT_TIMEOUT_MS;
+  if (!Number.isFinite(timeoutMs) || timeoutMs <= 0) {
+    throw new TypeError("timeoutMs must be a positive number of milliseconds.");
+  }
+  const timeoutHint = `Check that the database is reachable from here, or allow longer than ${formatSeconds(timeoutMs)} with \`--timeout <ms>\`.`;
+  // Dependencies first, so the report reads in the order things get created.
+  const dependencies = collectSchemaDependencies(collectSchemaOwners(config));
+  const owners = orderSchemaOwners(collectSchemaOwners(config), dependencies);
+  const issues: FarmSchemaCheckIssue[] = [];
+
+  // Owners are found by name, so a second plugin declaring tables under a
+  // name already taken is invisible to migrate and to this check.
+  const declared = new Map<string, unknown[]>();
+  for (const candidate of config.plugins ?? []) {
+    const declaration = readSchemaTables(candidate);
+    if (!declaration) continue;
+    const schemas = declared.get(declaration.name) ?? [];
+    if (!schemas.includes(declaration.schema)) schemas.push(declaration.schema);
+    declared.set(declaration.name, schemas);
+  }
+  for (const [name, schemas] of declared) {
+    if (schemas.length < 2) continue;
+    issues.push({
+      severity: "error",
+      code: "owner-conflict",
+      owner: name,
+      message: `${schemas.length} plugins declare tables under the name "${name}", so \`farm ${name} migrate\` and this check only see the first.`,
+      hint: "Rename one of the plugins: the part of its name after the last `:` or `/` is its migrate command.",
+    });
+  }
+  const summaries: FarmSchemaCheckOwner[] = [];
+
+  // Every model key each owner knows about, claimed or not, with its
+  // physical names, so a reference can be resolved to a real table.
+  const knownModels = new Map<string, ReturnType<typeof resolveSchemaModels>>();
+  const ownedModels = new Map<string, CollectedSchemaModel[]>();
+  for (const owner of owners) {
+    try {
+      knownModels.set(owner.name, resolveSchemaModels(owner.name, owner.schema));
+      ownedModels.set(owner.name, collectSchemaModels([[owner.name, owner.schema, owner.models]]));
+    } catch (error) {
+      issues.push({
+        severity: "error",
+        code: "schema-invalid",
+        owner: owner.name,
+        message: errorMessage(error),
+      });
+    }
+  }
+
+  const resolveTarget = (
+    ownerName: string,
+    field: ResolvedSchemaField,
+  ): ReferenceTarget | undefined => {
+    const reference = field.reference;
+    if (!reference) return undefined;
+    // The owner's own schema first, claimed or not: it describes the tables
+    // this owner works with. Then a model another owner creates. Another
+    // owner's unclaimed models are only its description of someone else's
+    // table, so they are not used to reinterpret this owner's reference.
+    const own = knownModels.get(ownerName)?.[reference.model];
+    const other = own
+      ? undefined
+      : owners.find(
+          (owner) =>
+            owner.name !== ownerName &&
+            (ownedModels.get(owner.name) ?? []).some((entry) => entry.modelKey === reference.model),
+        );
+    const model = own ?? (other && knownModels.get(other.name)?.[reference.model]);
+    if (model) {
+      const claimedBy = [...ownedModels].find(([, models]) =>
+        models.some((entry) => entry.modelName === model.name),
+      )?.[0];
+      return {
+        table: model.name,
+        column: model.fields[reference.field]?.name ?? reference.field,
+        owner: claimedBy,
+      };
+    }
+    // A table Farm does not manage: the app's ORM, an auth library, a migration.
+    return { table: reference.model, column: reference.field };
+  };
+
+  // Each owner's database, resolved before any check so a reference into
+  // another owner's table is looked up where that owner keeps it.
+  const databases = new Map<string, OwnerDatabase>();
+  for (const owner of owners) {
+    const models = ownedModels.get(owner.name);
+    if (!models) continue;
+    const summary: FarmSchemaCheckOwner = {
+      name: owner.name,
+      kind: owner.kind,
+      relational: true,
+      tables: models.map((model) => model.modelName),
+      dependsOn: [...(dependencies.get(owner.name) ?? [])],
+    };
+    summaries.push(summary);
+
+    let client: unknown;
+    try {
+      client = await withTimeout(() => owner.resolveClient(config), timeoutMs);
+    } catch (error) {
+      issues.push({
+        severity: "error",
+        code: "client-unavailable",
+        owner: owner.name,
+        message: `Could not connect to ${owner.name}'s database: ${errorMessage(error)}`,
+        hint: timeoutHint,
+      });
+      continue;
+    }
+    if (client === undefined || client === null) {
+      issues.push({
+        severity: "error",
+        code: "client-missing",
+        owner: owner.name,
+        message: `${owner.name} declares tables but has no database client.`,
+        hint:
+          owner.kind === "integration"
+            ? "Set `storage.client` in farm.config to your database client."
+            : `Pass a database client to the ${owner.name} plugin.`,
+      });
+      continue;
+    }
+
+    const adapter = resolveSchemaExecutor(client, owner.name, timeoutMs);
+    if (adapter === null) {
+      // A key/value mount has no tables to check.
+      summary.relational = false;
+      continue;
+    }
+    if (adapter === undefined) {
+      // Not a failure: an ORM client means that ORM's migrations own the
+      // tables, and the check must not block a deploy it cannot inspect.
+      issues.push({
+        severity: "warning",
+        code: "client-unsupported",
+        owner: owner.name,
+        message: `${owner.name}'s database client cannot be inspected, so its tables were not checked.`,
+        hint: "Farm reads pg, mysql2, and sqlite connections, and Drizzle databases built on them. Check these tables with your ORM's migration status instead.",
+      });
+      continue;
+    }
+    const dialect = owner.dialect ?? adapter.dialect;
+    summary.dialect = dialect;
+    databases.set(owner.name, { client: adapter.client, executor: adapter.executor, dialect });
+  }
+
+  // Two owners must not claim the same table in the same database.
+  const claims = new Map<string, string>();
+  for (const [ownerName, models] of ownedModels) {
+    for (const model of models) {
+      const key = model.modelName.toLowerCase();
+      const previous = claims.get(key);
+      if (!previous || previous === ownerName) {
+        claims.set(key, ownerName);
+        continue;
+      }
+      const mine = databases.get(ownerName);
+      const theirs = databases.get(previous);
+      // Different dialects are different databases. Different client objects
+      // may still be one database (a factory opens a new connection per call).
+      if (mine && theirs && mine.dialect !== theirs.dialect) continue;
+      if (
+        mine?.dialect === "postgres" &&
+        theirs?.dialect === "postgres" &&
+        !(ownedModels.get(previous) ?? []).some((entry) => entry.modelName === model.modelName)
+      ) {
+        continue; // Postgres names are case-sensitive: "User" and "user" are two tables.
+      }
+      const shared = Boolean(mine && theirs && mine.client === theirs.client);
+      issues.push({
+        severity: shared ? "error" : "warning",
+        code: "table-conflict",
+        owner: ownerName,
+        table: model.modelName,
+        message: shared
+          ? `"${model.modelName}" is claimed by both ${previous} and ${ownerName}.`
+          : `"${model.modelName}" is claimed by both ${previous} and ${ownerName}. If they share a database, they write to the same table.`,
+        hint: "Give one of the models a different table name with `name`, or narrow one owner's `models`.",
+      });
+    }
+  }
+
+  // Columns owners add to tables they do not own, and which database each
+  // table is in: the owner that creates it, or the extending owner's own.
+  const allowExtend = (config.schema as FarmSchemaConfig | undefined)?.allowExtend;
+  const extensions = new Map<string, FarmSchemaExtension[]>();
+  const addedColumns = new Map<string, string>();
+  for (const owner of owners) {
+    if (!ownedModels.has(owner.name)) continue;
+    try {
+      const owned = collectSchemaExtensions(owner.name, owner.schema, owner.models);
+      extensions.set(owner.name, owned);
+      for (const extension of owned) {
+        for (const { field } of extension.fields) {
+          const key = `${extension.table}.${field.name}`.toLowerCase();
+          const other = addedColumns.get(key);
+          if (other && other !== owner.name) {
+            issues.push({
+              severity: "warning",
+              code: "extend-column-shared",
+              owner: owner.name,
+              table: extension.table,
+              column: field.name,
+              message: `${other} and ${owner.name} both add "${extension.table}.${field.name}", so they will share one column.`,
+            });
+          } else {
+            addedColumns.set(key, owner.name);
+          }
+        }
+      }
+    } catch (error) {
+      issues.push({
+        severity: "error",
+        code: "extend-invalid",
+        owner: owner.name,
+        message: errorMessage(error),
+      });
+    }
+  }
+  const databaseForTable = (table: string): OwnerDatabase | undefined => {
+    const creator = [...ownedModels].find(([, models]) =>
+      models.some((model) => model.modelName === table),
+    )?.[0];
+    return creator ? databases.get(creator) : undefined;
+  };
+
+  for (const owner of owners) {
+    const models = ownedModels.get(owner.name);
+    const database = databases.get(owner.name);
+    if (!models || !database) continue;
+    try {
+      // The same foreign keys migrate would create, so a missing one can be named.
+      const crossOwner = await planCrossOwnerReferences(
+        owner,
+        findSchemaTableOwners(config),
+        database.dialect,
+        database.executor,
+      );
+      for (const reference of crossOwner.eligible) {
+        const model = models.find((candidate) => candidate.modelKey === reference.modelKey);
+        if (!model) continue;
+        (model.foreignKeys ??= {})[reference.fieldKey] = {
+          table: reference.referencedTable,
+          column: reference.referencedColumn,
+          onDelete: reference.onDelete,
+        };
+      }
+      // Migration steps, read the way migrate reads them.
+      const stepPlan = owner.migrations?.length
+        ? await planOwnerSchemaSteps({
+            owner: owner.name,
+            schema: owner.schema,
+            steps: owner.migrations,
+            tables: models.map((model) => model.modelName),
+            dialect: database.dialect,
+            executor: database.executor,
+            othersTables: new Set(
+              [...ownedModels]
+                .filter(([name]) => name !== owner.name)
+                .flatMap(([, entries]) => entries.map((entry) => entry.modelName)),
+            ),
+          })
+        : undefined;
+      checkSteps(owner, stepPlan, issues);
+      const plan = await checkOwnerTables(
+        owner,
+        // What a pending rename will produce is not missing yet.
+        withoutRenameTargets(models, stepPlan),
+        database.dialect,
+        database.executor,
+        issues,
+      );
+      // An installed version whose changes have not been applied here yet.
+      const pending = plan.statements.length + (plan.upgrades?.length ?? 0);
+      const state =
+        pending > 0
+          ? await readSchemaState(database.executor, database.dialect, owner.name)
+          : undefined;
+      const changes = state
+        ? diffSchemaSnapshots(state.snapshot, createSchemaSnapshot(models))
+        : undefined;
+      if (state && changes && hasSchemaChanges(changes)) {
+        const versions =
+          state.version && owner.version && state.version !== owner.version
+            ? `upgraded ${state.version} → ${owner.version}`
+            : "changed since it was last migrated";
+        issues.push({
+          severity: "warning",
+          code: "schema-upgrade",
+          owner: owner.name,
+          message: `${owner.name} ${versions}, and ${pending} change(s) are not applied yet.`,
+          hint:
+            owner.kind === "plugin"
+              ? `Run \`farm ${owner.name} migrate\` to review and apply them.`
+              : "Apply them with your migration tool.",
+        });
+      }
+      await checkReferences(owner, models, database, databases, resolveTarget, issues);
+      await checkExtensions(
+        owner,
+        extensions.get(owner.name) ?? [],
+        databaseForTable,
+        database,
+        allowExtend,
+        issues,
+      );
+    } catch (error) {
+      issues.push({
+        severity: "error",
+        code: "client-unavailable",
+        owner: owner.name,
+        message: `Could not read ${owner.name}'s tables: ${errorMessage(error)}`,
+        hint: timeoutHint,
+      });
+    }
+  }
+
+  return {
+    owners: summaries,
+    issues,
+    ok: !issues.some((issue) => issue.severity === "error"),
+  };
+}
+
+async function checkOwnerTables(
+  owner: SchemaOwner,
+  models: readonly CollectedSchemaModel[],
+  dialect: FarmSqlDialect,
+  executor: FarmSchemaExecutor,
+  issues: FarmSchemaCheckIssue[],
+) {
+  const plan = await planSchemaMigration(models, dialect, executor);
+  const present = new Set([
+    ...plan.upToDate,
+    ...plan.drift.map((drift) => drift.table),
+    ...(plan.upgrades ?? []).map((upgrade) => upgrade.table),
+  ]);
+  const command =
+    owner.kind === "plugin" ? `\`farm ${owner.name} migrate\`` : "your migration tool";
+
+  // Additions migrate can make: still missing, so a missing column is an error.
+  for (const upgrade of plan.upgrades ?? []) {
+    const column =
+      upgrade.kind === "column" ? upgrade.target.slice(upgrade.table.length + 1) : undefined;
+    issues.push({
+      severity: column ? "error" : "warning",
+      code: column ? "column-missing" : "index-missing",
+      owner: owner.name,
+      table: upgrade.table,
+      ...(column ? { column } : {}),
+      message: column
+        ? `"${upgrade.table}" has no column "${column}".`
+        : `"${upgrade.table}" is missing the index ${upgrade.target}.`,
+      hint: `Add it with ${command}.`,
+    });
+  }
+
+  for (const model of models) {
+    if (present.has(model.modelName)) continue;
+    issues.push({
+      severity: "error",
+      code: "table-missing",
+      owner: owner.name,
+      table: model.modelName,
+      message: `Table "${model.modelName}" does not exist.`,
+      hint: migrateHint(owner),
+    });
+  }
+
+  for (const drift of plan.drift) {
+    for (const column of drift.missingColumns) {
+      issues.push({
+        severity: "error",
+        code: "column-missing",
+        owner: owner.name,
+        table: drift.table,
+        column,
+        message: `"${drift.table}" has no column "${column}".`,
+        hint: "It is required with no default, so Farm cannot add it to a table that may have rows. Add it with a migration step or your migration tool.",
+      });
+    }
+    for (const change of drift.changedColumns) {
+      const typeChanged = change.differences.includes("type");
+      issues.push({
+        severity: typeChanged ? "error" : "warning",
+        code: typeChanged ? "column-type" : "column-definition",
+        owner: owner.name,
+        table: drift.table,
+        column: change.column,
+        message: typeChanged
+          ? `"${drift.table}.${change.column}" is ${change.actual.type}; the schema expects ${change.expected.type}.`
+          : `"${drift.table}.${change.column}" differs from the schema (${change.differences.join(", ")}).`,
+      });
+    }
+    for (const index of drift.missingIndexes) {
+      issues.push({
+        severity: "warning",
+        code: "index-missing",
+        owner: owner.name,
+        table: drift.table,
+        message: `"${drift.table}" is missing the ${index.unique ? "unique " : ""}index on (${index.columns.join(", ")}).`,
+      });
+    }
+    for (const reference of drift.missingReferences ?? []) {
+      issues.push({
+        severity: "warning",
+        code: "foreign-key-missing",
+        owner: owner.name,
+        table: drift.table,
+        column: reference.column,
+        message: `"${drift.table}.${reference.column}" has no foreign key to "${reference.referencedTable}.${reference.referencedColumn}".`,
+      });
+    }
+  }
+  for (const key of plan.addableForeignKeys ?? []) {
+    issues.push({
+      severity: "warning",
+      code: "foreign-key-missing",
+      owner: owner.name,
+      table: key.table,
+      column: key.column,
+      message: `"${key.table}.${key.column}" has no foreign key to "${key.referencedTable}.${key.referencedColumn}", which ${owner.name} could have.`,
+      hint:
+        dialect === "sqlite"
+          ? "SQLite can only add a foreign key when it creates the table."
+          : `Allow it with \`${describeForeignKeyApproval({ owner: owner.name, modelKey: key.modelKey })}\` in farm.config, then run \`farm ${owner.name} migrate --apply\`. Rows that point at nothing are checked first.`,
+    });
+  }
+  return plan;
+}
+
+function checkSteps(
+  owner: SchemaOwner,
+  stepPlan: FarmSchemaStepPlan | undefined,
+  issues: FarmSchemaCheckIssue[],
+) {
+  if (!stepPlan) return;
+  const command = `\`farm ${owner.name} migrate\``;
+  const blockedAt = stepPlan.steps.findIndex((planned) => planned.state === "blocked");
+  const pending = stepPlan.steps
+    .slice(0, blockedAt === -1 ? undefined : blockedAt)
+    .filter((planned) => planned.state === "run");
+  if (pending.length > 0) {
+    issues.push({
+      severity: "warning",
+      code: "migration-step-pending",
+      owner: owner.name,
+      message: `${owner.name} has ${pending.length} migration step(s) not run yet: ${pending.map((planned) => `${planned.summary}${planned.destructive ? " (deletes data)" : ""}`).join("; ")}.`,
+      hint: `Run ${command} to review and apply them.`,
+    });
+  }
+  if (blockedAt !== -1) {
+    const blocked = stepPlan.steps[blockedAt]!;
+    issues.push({
+      severity: "error",
+      code: "migration-step-blocked",
+      owner: owner.name,
+      message: `${owner.name}'s migration step "${blocked.step.id}" (${blocked.summary}) cannot run: ${blocked.reason}`,
+      hint: "Later steps wait for it. Fix the database, then run migrate again.",
+    });
+  }
+  for (const id of stepPlan.edited) {
+    issues.push({
+      severity: "warning",
+      code: "migration-step-edited",
+      owner: owner.name,
+      message: `${owner.name}'s migration step "${id}" changed after it ran here; it will not run again.`,
+    });
+  }
+}
+
+async function checkReferences(
+  owner: SchemaOwner,
+  models: readonly CollectedSchemaModel[],
+  database: OwnerDatabase,
+  databases: ReadonlyMap<string, OwnerDatabase>,
+  resolveTarget: (owner: string, field: ResolvedSchemaField) => ReferenceTarget | undefined,
+  issues: FarmSchemaCheckIssue[],
+) {
+  const ownTables = new Set(models.map((model) => model.modelName));
+  const described = new Map<string, FarmSchemaTableDescription | undefined>();
+
+  for (const model of models) {
+    for (const field of Object.values(model.model.fields)) {
+      const target = resolveTarget(owner.name, field);
+      // References inside the owner's own tables are covered by the table check.
+      if (!target || ownTables.has(target.table)) continue;
+
+      // Another owner's table lives in that owner's database. When it could
+      // not be reached or inspected, its own issue already says so.
+      const targetDatabase = target.owner ? databases.get(target.owner) : database;
+      if (!targetDatabase) continue;
+      const key = `${target.owner ?? ""}\u0000${target.table}`;
+      if (!described.has(key)) {
+        described.set(key, await describeReferencedTable(targetDatabase, target.table));
+      }
+      const table = described.get(key);
+      const dialect = targetDatabase.dialect;
+      const where = `"${model.modelName}.${field.name}" references "${target.table}.${target.column}"`;
+
+      if (!table) {
+        issues.push({
+          severity: "error",
+          code: "reference-table-missing",
+          owner: owner.name,
+          table: model.modelName,
+          column: field.name,
+          message: `${where}, but "${target.table}" does not exist.`,
+          hint: target.owner
+            ? `It belongs to ${target.owner}; migrate it first.`
+            : "Farm does not manage that table. Run the migration that creates it (your ORM's, or a library's such as Better Auth) first.",
+        });
+        continue;
+      }
+
+      // Postgres column names are case-sensitive once quoted, as Farm quotes them.
+      const column = table.columns.find((candidate) =>
+        dialect === "postgres"
+          ? candidate.name === target.column
+          : candidate.name.toLowerCase() === target.column.toLowerCase(),
+      );
+      if (!column) {
+        issues.push({
+          severity: "error",
+          code: "reference-column-missing",
+          owner: owner.name,
+          table: model.modelName,
+          column: field.name,
+          message: `${where}, but "${target.table}" has no column "${target.column}".`,
+          hint: `Columns there: ${table.columns.map((candidate) => candidate.name).join(", ")}.`,
+        });
+        continue;
+      }
+
+      // SQLite converts by affinity when it compares, so any pairing joins.
+      if (database.dialect === "sqlite" || dialect === "sqlite") continue;
+      const expected = getSqlColumnType(field, database.dialect);
+      const mine = columnTypeFamily(expected);
+      const theirs = columnTypeFamily(column.type);
+      if (mine && theirs && mine !== theirs) {
+        // A warning, not an error: lookups by value still work, and Farm only
+        // creates a foreign key across owners when the types match, so this
+        // reference simply stays without one. Joins in SQL need a cast.
+        issues.push({
+          severity: "warning",
+          code: "reference-type",
+          owner: owner.name,
+          table: model.modelName,
+          column: field.name,
+          message: `${where}, but the types differ: ${expected.toLowerCase()} here, ${column.type} there. Lookups by value work; a SQL join needs a cast and a foreign key is not possible.`,
+          hint:
+            theirs === "uuid" && mine === "text"
+              ? 'Farm stores "uuid" fields as text in Postgres. Cast in joins, for example "users"."id"::text.'
+              : `Change "${field.name}" to match "${target.table}.${target.column}" if you join on it.`,
+        });
+      }
+    }
+  }
+}
+
+async function checkExtensions(
+  owner: SchemaOwner,
+  extensions: readonly FarmSchemaExtension[],
+  databaseForTable: (table: string) => OwnerDatabase | undefined,
+  ownDatabase: OwnerDatabase,
+  allowExtend: Record<string, readonly string[]> | undefined,
+  issues: FarmSchemaCheckIssue[],
+) {
+  for (const extension of extensions) {
+    const database = databaseForTable(extension.table) ?? ownDatabase;
+    const table = await describeSchemaTable(database.executor, database.dialect, extension.table);
+    const columns = extension.fields.map(({ field }) => field.name);
+    if (!table) {
+      issues.push({
+        severity: "error",
+        code: "extend-table-missing",
+        owner: owner.name,
+        table: extension.table,
+        message: `${owner.name} adds ${columns.map((column) => `"${column}"`).join(", ")} to "${extension.table}", which does not exist.`,
+        hint: "Run the migration that creates it (your ORM's, or a library's such as Better Auth) first.",
+      });
+      continue;
+    }
+
+    const allowed = isSchemaExtensionAllowed(allowExtend, extension);
+    for (const { field } of extension.fields) {
+      const existing = table.columns.find((column) =>
+        database.dialect === "postgres"
+          ? column.name === field.name
+          : column.name.toLowerCase() === field.name.toLowerCase(),
+      );
+      if (!existing) {
+        const command =
+          owner.kind === "plugin"
+            ? `\`farm ${owner.name} migrate --apply\``
+            : "your migration tool";
+        issues.push({
+          severity: "error",
+          code: "extend-column-missing",
+          owner: owner.name,
+          table: extension.table,
+          column: field.name,
+          message: `${owner.name} needs "${extension.table}.${field.name}", which does not exist.`,
+          hint: allowed
+            ? `Add it with ${command}. If your ORM owns "${extension.table}", add the column to its schema instead.`
+            : `Allow it in farm.config with \`${describeSchemaExtensionApproval(extension)}\`, then add it with ${command}. If your ORM owns "${extension.table}", add the column to its schema instead.`,
+        });
+        continue;
+      }
+      if (database.dialect === "sqlite") continue;
+      const expected = getSqlColumnType(field, database.dialect);
+      const mine = columnTypeFamily(expected);
+      const theirs = columnTypeFamily(existing.type);
+      if (mine && theirs && mine !== theirs) {
+        issues.push({
+          severity: "warning",
+          code: "extend-column-type",
+          owner: owner.name,
+          table: extension.table,
+          column: field.name,
+          message: `"${extension.table}.${field.name}" is ${existing.type}; ${owner.name} expects ${expected.toLowerCase()}.`,
+        });
+      }
+    }
+  }
+}
+
+/** Human-readable report, grouped by owner. */
+export function formatSchemaCheck(report: FarmSchemaCheckReport): string {
+  if (report.owners.length === 0) {
+    return "No integration or plugin declares database tables.";
+  }
+  const lines: string[] = [];
+  for (const owner of report.owners) {
+    const ownIssues = report.issues.filter((issue) => issue.owner === owner.name);
+    const details = [
+      owner.kind,
+      ...(owner.dialect ? [owner.dialect] : []),
+      ...(owner.dependsOn?.length ? [`needs ${owner.dependsOn.join(", ")}`] : []),
+    ];
+    const label = `${owner.name} (${details.join(", ")})`;
+    if (!owner.relational) {
+      lines.push(`- ${label}: stores data in a key/value mount, nothing to check`);
+      continue;
+    }
+    lines.push(
+      ownIssues.length === 0
+        ? `✓ ${label}: ${owner.tables.length} table(s) match`
+        : `${ownIssues.some((issue) => issue.severity === "error") ? "✗" : "!"} ${label}`,
+    );
+    for (const issue of ownIssues) {
+      lines.push(`    ${issue.severity === "error" ? "error  " : "warning"} ${issue.message}`);
+      if (issue.hint) lines.push(`            ${issue.hint}`);
+    }
+  }
+  for (const issue of report.issues.filter(
+    (candidate) => !report.owners.some((owner) => owner.name === candidate.owner),
+  )) {
+    lines.push(`✗ ${issue.owner}: ${issue.message}`);
+  }
+  const errors = report.issues.filter((issue) => issue.severity === "error").length;
+  const warnings = report.issues.length - errors;
+  lines.push("", `${errors} error(s), ${warnings} warning(s)`);
+  return lines.join("\n");
+}

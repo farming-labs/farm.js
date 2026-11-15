@@ -198,8 +198,35 @@ describe("navigation state and blocking", () => {
       expect.objectContaining({
         modulePath: "/src/app/page.tsx",
       }),
+      { refresh: false },
     );
     expect(window.location.pathname).toBe("/gallery");
+  });
+
+  it("tells the navigation handler when a navigation refreshes the page", async () => {
+    vi.mocked(fetch).mockResolvedValueOnce(
+      new Response(
+        JSON.stringify({
+          props: {},
+          modulePath: "/src/app/server/page.tsx",
+          isClientComponent: false,
+          fragment: { html: '<div id="__farm_page__"><h1>Again</h1></div>', layoutPatterns: ["/"] },
+        }),
+        { status: 200, headers: { "Content-Type": "application/json" } },
+      ),
+    );
+    vi.spyOn(window, "scrollTo").mockImplementation(() => {});
+    const router = new SPARouter({ scrollRestoration: false });
+    const onNavigate = vi.fn(async () => undefined);
+    router.setNavigationHandler(onNavigate);
+
+    // After a server action, the page refreshes; islands still on it keep their state.
+    await router.refresh();
+
+    expect(onNavigate).toHaveBeenCalledWith(
+      expect.objectContaining({ modulePath: "/src/app/server/page.tsx" }),
+      { refresh: true },
+    );
   });
 
   it("commits server HTML routes through the navigation handler without reloading", async () => {
@@ -237,6 +264,7 @@ describe("navigation state and blocking", () => {
         isClientComponent: false,
         fragment: expect.objectContaining({ layoutPatterns: ["/"] }),
       }),
+      { refresh: false },
     );
     expect(window.location.pathname).toBe("/server");
   });
@@ -327,25 +355,35 @@ describe("navigation state and blocking", () => {
 
   it("restores registered nested scroll containers by key", () => {
     vi.useFakeTimers();
-    sessionStorage.setItem("farm-scroll-/:sidebar", JSON.stringify({ x: 4, y: 120 }));
+    // Positions are saved per history entry. A router started on this entry reads its key.
+    window.history.replaceState({ __farmHistoryIndex: 0, __farmHistoryKey: "entry-1" }, "", "/");
+    sessionStorage.setItem("farm-scroll-entry-1:sidebar", JSON.stringify({ x: 4, y: 120 }));
+    const router = new SPARouter();
+    const scope = window as Window & { __FARM_SPA_ROUTER__?: SPARouter };
+    scope.__FARM_SPA_ROUTER__ = router;
 
-    function App() {
-      const ref = useScrollRestoration<HTMLDivElement>("sidebar");
-      return createElement("div", { ref });
+    try {
+      function App() {
+        const ref = useScrollRestoration<HTMLDivElement>("sidebar");
+        return createElement("div", { ref });
+      }
+
+      root = createRoot(container);
+      act(() => {
+        root?.render(createElement(App));
+      });
+
+      const panel = container.querySelector("div") as HTMLDivElement;
+      act(() => {
+        vi.runOnlyPendingTimers();
+      });
+
+      expect(panel.scrollLeft).toBe(4);
+      expect(panel.scrollTop).toBe(120);
+    } finally {
+      delete scope.__FARM_SPA_ROUTER__;
+      router.destroy();
     }
-
-    root = createRoot(container);
-    act(() => {
-      root?.render(createElement(App));
-    });
-
-    const panel = container.querySelector("div") as HTMLDivElement;
-    act(() => {
-      vi.runOnlyPendingTimers();
-    });
-
-    expect(panel.scrollLeft).toBe(4);
-    expect(panel.scrollTop).toBe(120);
   });
 });
 

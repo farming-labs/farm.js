@@ -12,7 +12,4 @@ export default defineConfig({
   docs: {
     enabled: true,
   },
-  deploy: {
-    target: "vercel",
-  },
 });

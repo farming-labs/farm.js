@@ -1,3 +1,9 @@
+/**
+ * Present on every request a preview agent sends to the local app. Farm's dev server refuses
+ * developer-only files and tools for requests that carry it.
+ */
+export const PREVIEW_REQUEST_HEADER = "x-farm-preview";
+
 const STANDARD_HOP_BY_HOP_HEADERS = [
   "connection",
   "content-length",

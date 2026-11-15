@@ -1,5 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
+import type { Socket } from "node:net";
 import { WebSocketServer, type WebSocket } from "ws";
 
 import {
@@ -10,15 +11,22 @@ import {
   type TunnelRequestMessage,
   type TunnelResponseMessage,
 } from "./protocol.js";
-import { getHopByHopHeaderNames, getRecordHeader } from "./headers.js";
+import { getHopByHopHeaderNames, getRecordHeader, PREVIEW_REQUEST_HEADER } from "./headers.js";
+import { closeWebSocket } from "./websocket.js";
 
 const MAX_TIMER_DELAY_MS = 2_147_483_647;
+const DEFAULT_NAME_RESERVATION_MS = 5 * 60_000;
 
 /**
  * Compare a presented credential without leaking its length or content through
  * timing. `node:crypto`'s timingSafeEqual needs equal-length buffers, so the
  * length is folded in instead of being an early return.
  */
+function withoutCookieDomain(setCookie: string): string {
+  const [pair, ...attributes] = setCookie.split(";");
+  return [pair, ...attributes.filter((part) => !/^\s*domain\s*(=|$)/i.test(part))].join(";");
+}
+
 function secretsMatch(presented: string, expected: string): boolean {
   if (!expected) return false;
   let mismatch = presented.length === expected.length ? 0 : 1;
@@ -65,6 +73,10 @@ function isAllowedAgentOrigin(
 }
 
 export interface PersistentPreviewRelayOptions {
+  /** Recheck verified metadata before registration/forwarding, and every 5s while idle. Errors fail closed. */
+  authorizeSession?: (session: PersistentPreviewSessionAccess) => Promise<boolean>;
+  /** Optional metadata-only telemetry. Failures never interrupt a preview. */
+  observer?: PersistentPreviewRelayObserver;
   host?: string;
   port?: number;
   publicBaseUrl?: string;
@@ -98,11 +110,19 @@ export interface PersistentPreviewRelayOptions {
     | PersistentPreviewRelayAgentAuthorizationResult
     | Promise<boolean | PersistentPreviewRelayAgentAuthorizationResult>;
   /**
-   * Whether another preview transport already owns this name. The relay and
-   * the polling gateway serve the same hostnames from separate namespaces, so
-   * a claim has to be refused when the other side is live.
+   * Whether another preview transport already owns this name: it serves the
+   * name live, or keeps it reserved for an owner other than `ownerId`. The
+   * relay and the polling gateway serve the same hostnames from separate
+   * namespaces, so a claim has to be refused when the other side holds it.
    */
-  isPreviewNameClaimed?: (name: string) => boolean | Promise<boolean>;
+  isPreviewNameClaimed?: (name: string, ownerId?: string) => boolean | Promise<boolean>;
+  /**
+   * How long a name stays bound to its owner after that owner's agent
+   * disconnects. Another owner cannot claim it in that window, so a dropped
+   * socket can reconnect before anyone else takes the hostname (and the
+   * visitors' cookies). Defaults to 5 minutes.
+   */
+  nameReservationMs?: number;
   /** Origins allowed to open the agent socket. Defaults to same-origin only. */
   allowedAgentOrigins?: readonly string[];
 }
@@ -113,7 +133,44 @@ export interface PersistentPreviewRelayAgentAuthorization {
 }
 
 export interface PersistentPreviewRelayAgentAuthorizationResult {
+  grantId?: string;
+  project?: string;
+  keyId?: string;
   expiresAt?: number;
+  /** Server-verified identity, never read from agent registration payloads. */
+  ownerId?: string;
+}
+
+export interface PersistentPreviewRelayObserver {
+  session?(event: {
+    grantId?: string;
+    project?: string;
+    keyId?: string;
+    id: string;
+    name: string;
+    ownerId?: string;
+    publicUrl: string;
+    expiresAt?: number;
+    state: "connected" | "disconnected";
+    at: number;
+  }): void | Promise<void>;
+  request?(event: {
+    sessionId: string;
+    method: string;
+    path: string;
+    status: number;
+    durationMs: number;
+    at: number;
+  }): void | Promise<void>;
+}
+
+function observe(callback: (() => void | Promise<void>) | undefined) {
+  if (!callback) return;
+  try {
+    void Promise.resolve(callback()).catch(() => undefined);
+  } catch {
+    /* Optional telemetry. */
+  }
 }
 
 export type PersistentPreviewRelayFallbackHandler = (
@@ -124,10 +181,19 @@ export type PersistentPreviewRelayFallbackHandler = (
 export interface PersistentPreviewRelayCoordinatorSession {
   id: string;
   name: string;
+  /** Server-verified owner of the session, when the relay authorizer returned one. */
+  ownerId?: string;
 }
 
 export interface PersistentPreviewRelayCoordinator {
   claimSession(session: PersistentPreviewRelayCoordinatorSession, ttlMs: number): Promise<boolean>;
+  /**
+   * Binds a name to an owner for `ttlMs`, across relay instances. Optional:
+   * without it the binding only holds on the instance that saw the session.
+   */
+  reserveName?(name: string, ownerId: string, ttlMs: number): Promise<void>;
+  /** The owner a name is currently bound to, if any. */
+  findNameOwner?(name: string): Promise<string | undefined>;
   findSession(name: string): Promise<PersistentPreviewRelayCoordinatorSession | undefined>;
   touchSession(session: PersistentPreviewRelayCoordinatorSession, ttlMs: number): Promise<boolean>;
   releaseSession(session: PersistentPreviewRelayCoordinatorSession): Promise<void>;
@@ -154,11 +220,20 @@ export interface PersistentPreviewRelayAddress {
   websocketUrl: string;
 }
 
+export interface PersistentPreviewSessionAccess extends PersistentPreviewRelayAgentAuthorizationResult {
+  id: string;
+  name: string;
+}
+
 interface AgentSession {
+  grantId?: string;
+  project?: string;
+  keyId?: string;
   id: string;
   name: string;
   socket: WebSocket;
   expiresAt?: number;
+  ownerId?: string;
 }
 
 interface PendingRequest {
@@ -182,7 +257,113 @@ export function createPersistentPreviewRelay(options: PersistentPreviewRelayOpti
   const coordinatorSessionTtlMs = options.coordinatorSessionTtlMs ?? 60_000;
   const requestTimeoutMs = options.requestTimeoutMs ?? 30_000;
   const maxBodyBytes = options.maxBodyBytes ?? 5 * 1024 * 1024;
+  const nameReservationMs = options.nameReservationMs ?? DEFAULT_NAME_RESERVATION_MS;
+  // name -> the owner it stays bound to after that owner's agent disconnects.
+  const reservations = new Map<string, { ownerId: string; until: number }>();
+  // Names between the coordinator claim and registration, with their owner.
+  const pendingClaims = new Map<string, string | undefined>();
   let address: PersistentPreviewRelayAddress | undefined;
+  const reserveName = async (session: AgentSession, ttlMs: number) => {
+    if (!session.ownerId || nameReservationMs <= 0) return;
+    const now = Date.now();
+    for (const [name, reservation] of reservations) {
+      if (reservation.until <= now) reservations.delete(name);
+    }
+    reservations.set(session.name, { ownerId: session.ownerId, until: now + ttlMs });
+    await options.coordinator?.reserveName?.(session.name, session.ownerId, ttlMs);
+  };
+  // A name stays bound to its owner while held and for nameReservationMs after,
+  // so a different account cannot take a hostname whose visitors (and their
+  // cookies) still belong to someone else.
+  const isNameHeldByAnotherOwner = async (name: string, ownerId: string | undefined) => {
+    const local = agents.get(name);
+    if (local?.ownerId && local.ownerId !== ownerId) return true;
+    const reservation = reservations.get(name);
+    if (reservation && reservation.until <= Date.now()) reservations.delete(name);
+    else if (reservation && reservation.ownerId !== ownerId) return true;
+    const coordinatedOwner = await options.coordinator?.findNameOwner?.(name);
+    return coordinatedOwner !== undefined && coordinatedOwner !== ownerId;
+  };
+  // A live holder blocks the other transport unless both sides are the same
+  // verified owner: that is the CLI falling back to polling, which is harmless.
+  const isPreviewNameClaimed = async (value: string, ownerId?: string) => {
+    const name = normalizePreviewName(value);
+    if (!name) return false;
+    const blocks = (holder: string | undefined) => !ownerId || holder !== ownerId;
+    const local = agents.get(name);
+    if (local && local.socket.readyState === local.socket.OPEN && blocks(local.ownerId)) {
+      return true;
+    }
+    if (pendingClaims.has(name) && blocks(pendingClaims.get(name))) return true;
+    if (
+      (await options.coordinator?.findSession(name)) &&
+      blocks(await options.coordinator?.findNameOwner?.(name))
+    ) {
+      return true;
+    }
+    return await isNameHeldByAnotherOwner(name, ownerId);
+  };
+  const reportSession = (session: AgentSession, state: "connected" | "disconnected") => {
+    if (!options.observer?.session) return;
+    const baseUrl = trimTrailingSlash(options.publicBaseUrl || address?.httpUrl || "");
+    if (!baseUrl) return;
+    observe(() =>
+      options.observer!.session!({
+        id: session.id,
+        grantId: session.grantId,
+        name: session.name,
+        ownerId: session.ownerId,
+        project: session.project,
+        keyId: session.keyId,
+        expiresAt: session.expiresAt,
+        publicUrl: createPublicUrl(baseUrl, publicDomain, session.name),
+        state,
+        at: Date.now(),
+      }),
+    );
+  };
+  const activityTimer = options.observer?.session
+    ? setInterval(() => {
+        for (const session of agents.values()) {
+          if (session.socket.readyState === session.socket.OPEN)
+            reportSession(session, "connected");
+        }
+      }, 30_000)
+    : undefined;
+  activityTimer?.unref();
+  const accessChecks = new Map<string, Promise<boolean>>();
+  const checkAccess = (session: AgentSession): Promise<boolean> => {
+    if (!options.authorizeSession) return Promise.resolve(true);
+    const existing = accessChecks.get(session.id);
+    if (existing) return existing;
+    const { id, name, ownerId, project, keyId, grantId, expiresAt } = session;
+    const work = Promise.resolve()
+      .then(() =>
+        options.authorizeSession!({ id, name, ownerId, project, keyId, grantId, expiresAt }),
+      )
+      .then(
+        (allowed) => allowed === true,
+        () => false,
+      )
+      .then((allowed) => {
+        if (!allowed) {
+          failPendingRequestsForSession(session.id, pending);
+          session.socket.close(1008, "Preview access denied or unavailable");
+        }
+        return allowed;
+      })
+      .finally(() => {
+        accessChecks.delete(session.id);
+      });
+    accessChecks.set(session.id, work);
+    return work;
+  };
+  const accessTimer = options.authorizeSession
+    ? setInterval(() => {
+        for (const session of agents.values()) void checkAccess(session);
+      }, 5000)
+    : undefined;
+  accessTimer?.unref();
 
   const server = createServer(async (request, response) => {
     try {
@@ -213,6 +394,30 @@ export function createPersistentPreviewRelay(options: PersistentPreviewRelayOpti
         );
       }
 
+      if (activeLocalSession && !(await checkAccess(activeLocalSession))) {
+        return sendText(response, 403, "This preview is no longer authorized.");
+      }
+
+      if (options.observer?.request) {
+        const startedAt = Date.now();
+        let reported = false;
+        const report = () => {
+          if (reported) return;
+          reported = true;
+          observe(() =>
+            options.observer!.request!({
+              sessionId: (activeLocalSession || coordinatedSession)!.id,
+              method: request.method || "GET",
+              path: route.path.split(/[?#]/, 1)[0].slice(0, 2048),
+              status: response.writableFinished ? response.statusCode : 499,
+              durationMs: Date.now() - startedAt,
+              at: Date.now(),
+            }),
+          );
+        };
+        response.once("finish", report);
+        response.once("close", report);
+      }
       await forwardPublicRequest({
         request,
         response,
@@ -233,7 +438,25 @@ export function createPersistentPreviewRelay(options: PersistentPreviewRelayOpti
     }
   });
 
+  // server.close() only reaps keep-alive sockets between requests. Track the
+  // rest so shutdown can release sockets that never sent a complete request
+  // (browser preconnects, stalled headers) without cutting off active responses.
+  let closing = false;
+  const connections = new Set<Socket>();
+  const responses = new Set<ServerResponse>();
+  server.on("connection", (socket) => {
+    connections.add(socket);
+    socket.once("close", () => connections.delete(socket));
+  });
+  server.on("request", (_request, response) => {
+    if (closing) response.setHeader("connection", "close");
+    responses.add(response);
+    response.once("close", () => responses.delete(response));
+  });
+
   server.on("upgrade", (request, socket, head) => {
+    // Upgraded sockets are closed through the WebSocket handshake instead.
+    connections.delete(socket as Socket);
     const url = new URL(request.url || "/", "http://localhost");
     if (url.pathname !== "/agent") {
       socket.destroy();
@@ -263,11 +486,20 @@ export function createPersistentPreviewRelay(options: PersistentPreviewRelayOpti
     const detachSession = () => {
       if (!session || detached) return;
       detached = true;
-      if (agents.get(session.name)?.id === session.id) {
-        agents.delete(session.name);
-        failPendingRequestsForSession(session.id, pending);
+      reportSession(session, "disconnected");
+      const released = session;
+      if (agents.get(released.name)?.id === released.id) {
+        agents.delete(released.name);
+        failPendingRequestsForSession(released.id, pending);
       }
-      void options.coordinator?.releaseSession(session).catch(() => undefined);
+      // Reserve before releasing so the name is never unowned in between. A
+      // newer session that already holds the name keeps its own binding.
+      void (
+        agents.has(released.name) ? Promise.resolve() : reserveName(released, nameReservationMs)
+      )
+        .catch(() => undefined)
+        .then(() => options.coordinator?.releaseSession(released))
+        .catch(() => undefined);
     };
 
     socket.on("message", (data) => {
@@ -340,11 +572,8 @@ export function createPersistentPreviewRelay(options: PersistentPreviewRelayOpti
               rejectPreviewName(socket, name);
               return;
             }
-
-            // The polling gateway keeps its own name namespace and this route
-            // takes precedence over it, so claiming a name it already serves
-            // would silently replace an authenticated session.
-            if (await options.isPreviewNameClaimed?.(name)) {
+            const ownerId = authorization?.ownerId;
+            if (await isNameHeldByAnotherOwner(name, ownerId)) {
               rejectPreviewName(socket, name);
               return;
             }
@@ -353,12 +582,17 @@ export function createPersistentPreviewRelay(options: PersistentPreviewRelayOpti
               id: randomUUID(),
               name,
               socket,
+              ...(authorization?.ownerId ? { ownerId: authorization.ownerId } : {}),
+              ...(authorization?.project ? { project: authorization.project } : {}),
+              ...(authorization?.keyId ? { keyId: authorization.keyId } : {}),
+              ...(authorization?.grantId ? { grantId: authorization.grantId } : {}),
               ...(expiresAt !== undefined ? { expiresAt } : {}),
             };
             const coordinatorTtlMs = remainingCoordinatorSessionTtl(
               nextSession,
               coordinatorSessionTtlMs,
             );
+            if (!(await checkAccess(nextSession))) return;
             if (coordinatorTtlMs <= 0) {
               rejectAgentCredential(socket, "The preview tunnel grant has expired or is invalid.");
               return;
@@ -370,13 +604,33 @@ export function createPersistentPreviewRelay(options: PersistentPreviewRelayOpti
               rejectPreviewName(socket, name);
               return;
             }
-            if (socket.readyState !== socket.OPEN) {
-              await options.coordinator?.releaseSession(nextSession);
-              return;
+            // The polling gateway keeps its own name namespace and this route
+            // takes precedence over it, so claiming a name it already serves
+            // would silently replace an authenticated session. The claim is
+            // visible to the gateway (pendingClaims or the coordinator) before
+            // asking, and the gateway does the same, so two concurrent claims
+            // cannot both win.
+            pendingClaims.set(name, ownerId);
+            try {
+              const claimedElsewhere =
+                socket.readyState !== socket.OPEN ||
+                // An unavailable check fails closed, like the access check.
+                (await Promise.resolve()
+                  .then(() => options.isPreviewNameClaimed?.(name, ownerId))
+                  .catch(() => true));
+              if (claimedElsewhere) {
+                await options.coordinator?.releaseSession(nextSession);
+                rejectPreviewName(socket, name);
+                return;
+              }
+              session = nextSession;
+              agents.set(name, session);
+            } finally {
+              pendingClaims.delete(name);
             }
-
-            session = nextSession;
-            agents.set(name, session);
+            await reserveName(nextSession, coordinatorTtlMs + nameReservationMs).catch(
+              () => undefined,
+            );
             const baseUrl = trimTrailingSlash(options.publicBaseUrl || address?.httpUrl || "");
             if (!baseUrl) {
               socket.close(1011, "Relay is not listening");
@@ -390,6 +644,7 @@ export function createPersistentPreviewRelay(options: PersistentPreviewRelayOpti
               maxResponseBodyBytes,
             };
             socket.send(JSON.stringify(ready));
+            reportSession(session, "connected");
             if (session.expiresAt) {
               const scheduleExpiration = () => {
                 if (!session?.expiresAt) return;
@@ -414,6 +669,8 @@ export function createPersistentPreviewRelay(options: PersistentPreviewRelayOpti
                 options.coordinator,
                 coordinatorSessionTtlMs,
                 detachSession,
+                checkAccess,
+                (ttlMs) => reserveName(nextSession, ttlMs + nameReservationMs),
               );
             }
           } finally {
@@ -427,6 +684,7 @@ export function createPersistentPreviewRelay(options: PersistentPreviewRelayOpti
             rejectSocketMessage(socket, "Register the preview agent before sending responses.");
             return;
           }
+          if (!(await checkAccess(session))) return;
           if (getEncodedBodySize(message.body) > maxResponseBodyBytes) {
             rejectOversizedResponse(message.id, session.id, pending, maxResponseBodyBytes);
             return;
@@ -446,6 +704,12 @@ export function createPersistentPreviewRelay(options: PersistentPreviewRelayOpti
 
   return {
     server,
+    /**
+     * Whether this relay serves the name live, or keeps it reserved for an
+     * owner other than `ownerId`. The polling gateway asks this before it
+     * creates a session or grant for the same public hostname.
+     */
+    isPreviewNameClaimed,
     async listen(): Promise<PersistentPreviewRelayAddress> {
       if (address) return address;
       await listen(server, options.port ?? 0, host);
@@ -465,16 +729,31 @@ export function createPersistentPreviewRelay(options: PersistentPreviewRelayOpti
       return address;
     },
     async close() {
-      for (const session of agents.values()) session.socket.close(1001, "Relay shutting down");
+      closing = true;
+      if (accessTimer) clearInterval(accessTimer);
+      if (activityTimer) clearInterval(activityTimer);
+      const serverClosed = closeServer(server);
+      for (const response of responses) {
+        if (!response.headersSent) response.setHeader("connection", "close");
+      }
       for (const { response, timeout, cleanup } of pending.values()) {
         clearTimeout(timeout);
         cleanup();
-        if (!response.headersSent)
-          sendText(response, 503, "Persistent preview relay is shutting down.");
+        sendText(response, 503, "Persistent preview relay is shutting down.");
       }
       pending.clear();
+      const busy = new Set<Socket>();
+      for (const response of responses) busy.add(response.socket as Socket);
+      for (const socket of connections) {
+        if (!busy.has(socket)) socket.destroy();
+      }
+      await Promise.all(
+        Array.from(websocketServer.clients, (socket) =>
+          closeWebSocket(socket, 1001, "Relay shutting down"),
+        ),
+      );
       await closeWebSocketServer(websocketServer);
-      await closeServer(server);
+      await serverClosed;
       address = undefined;
     },
   };
@@ -630,6 +909,8 @@ async function pumpCoordinatedRequests(
   coordinator: PersistentPreviewRelayCoordinator,
   sessionTtlMs: number,
   detachSession: () => void,
+  checkAccess: (session: AgentSession) => Promise<boolean>,
+  refreshReservation: (ttlMs: number) => Promise<void>,
 ) {
   const waitMs = Math.max(50, Math.min(15_000, Math.floor(sessionTtlMs / 3)));
   try {
@@ -647,8 +928,12 @@ async function pumpCoordinatedRequests(
         session.socket.close(1011, "Preview session ownership was lost");
         return;
       }
+      await refreshReservation(ttlMs);
       const request = await coordinator.takeRequest(session.id, waitMs);
       if (!request) continue;
+      // The owning relay checks access too: a request received by a different
+      // replica must not bypass authorization through the coordinator.
+      if (!(await checkAccess(session))) return;
       if (
         agents.get(session.name)?.id !== session.id ||
         session.socket.readyState !== session.socket.OPEN
@@ -670,22 +955,24 @@ function remainingCoordinatorSessionTtl(session: AgentSession, sessionTtlMs: num
 
 function resolvePublicRoute(request: IncomingMessage, publicDomain: string | undefined) {
   const url = new URL(request.url || "/", "http://localhost");
-  const match = url.pathname.match(/^\/preview\/([^/]+)(\/.*)?$/);
-  if (match) {
-    const name = normalizePreviewName(match[1]);
-    const path = `${match[2] || "/"}${url.search}`;
-    return name ? { name, path } : undefined;
+  const host = normalizeHost(request.headers.host);
+  const suffix = publicDomain ? `.${publicDomain}` : undefined;
+
+  // Every preview subdomain is its own origin. Honoring the path form there
+  // would let `alice.<domain>/preview/bob` serve bob's app, cookies, and
+  // scripts on alice's origin, so tenant hosts route only by subdomain.
+  if (suffix && host?.endsWith(suffix)) {
+    const subdomain = host.slice(0, -suffix.length);
+    const name = normalizePreviewName(subdomain);
+    if (!name || name !== subdomain || subdomain.includes(".")) return undefined;
+    return { name, path: `${url.pathname || "/"}${url.search}` };
   }
 
-  if (!publicDomain) return undefined;
-  const host = normalizeHost(request.headers.host);
-  const suffix = `.${publicDomain}`;
-  if (!host?.endsWith(suffix)) return undefined;
-
-  const subdomain = host.slice(0, -suffix.length);
-  const name = normalizePreviewName(subdomain);
-  if (!name || name !== subdomain || subdomain.includes(".")) return undefined;
-  return { name, path: `${url.pathname || "/"}${url.search}` };
+  const match = url.pathname.match(/^\/preview\/([^/]+)(\/.*)?$/);
+  if (!match) return undefined;
+  const name = normalizePreviewName(match[1]);
+  const path = `${match[2] || "/"}${url.search}`;
+  return name ? { name, path } : undefined;
 }
 
 async function handleFallback(
@@ -701,7 +988,8 @@ async function handleFallback(
 function createPublicUrl(baseUrl: string, publicDomain: string | undefined, name: string) {
   if (!publicDomain) return `${baseUrl}/preview/${name}`;
   const url = new URL(baseUrl);
-  return `${url.protocol}//${name}.${publicDomain}`;
+  url.hostname = `${name}.${publicDomain}`;
+  return url.origin;
 }
 
 function normalizeDomain(value: string | undefined) {
@@ -757,9 +1045,16 @@ function getEncodedBodySize(body: string | undefined) {
 function writeTunnelResponse(response: ServerResponse, message: TunnelResponseMessage) {
   const hopByHopHeaders = getHopByHopHeaderNames(getRecordHeader(message.headers, "connection"));
   for (const [name, value] of Object.entries(message.headers)) {
-    if (!hopByHopHeaders.has(name.toLowerCase())) {
-      response.setHeader(name, value);
-    }
+    if (hopByHopHeaders.has(name.toLowerCase())) continue;
+    // Every preview is a sibling host under the relay's domain. A tenant cookie
+    // with `Domain=<domain>` would reach every other preview, so a proxied
+    // cookie stays host-only.
+    response.setHeader(
+      name,
+      name.toLowerCase() === "set-cookie"
+        ? (Array.isArray(value) ? value : [value]).map(withoutCookieDomain)
+        : value,
+    );
   }
   response.setHeader("cache-control", "no-store");
   response.setHeader("x-farm-preview-transport", "websocket");
@@ -849,12 +1144,17 @@ function normalizeIncomingHeaders(
       value === undefined ||
       hopByHopHeaders.has(lowerName) ||
       lowerName === "forwarded" ||
-      lowerName.startsWith("x-forwarded-")
+      lowerName.startsWith("x-forwarded-") ||
+      lowerName === PREVIEW_REQUEST_HEADER
     ) {
       continue;
     }
     normalized[name] = Array.isArray(value) ? value.join(", ") : value;
   }
+
+  // Marks the request as tunnelled so the dev server can keep developer-only files and tools off
+  // the public URL. Set here, not trusted from the visitor, so it can be neither forged nor removed.
+  normalized[PREVIEW_REQUEST_HEADER] = "1";
 
   const publicUrl = new URL(publicBaseUrl);
   normalized["x-forwarded-host"] = publicDomain

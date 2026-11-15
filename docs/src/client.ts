@@ -1,76 +1,58 @@
 import { defineClient } from "@farm.js/core/client/lifecycle";
-import { enhanceArtwork } from "./components/blog/artwork-motion";
-import { enhanceCodeBlocks } from "./components/blog/code-copy";
-import { enhanceContents } from "./components/blog/contents-navigation";
-import { enhanceFigures } from "./components/blog/figure-player";
-import { enhanceAgentWaitlist } from "./components/agents/waitlist-client";
 import { mountDocsAnnouncement } from "./components/docs-announcement";
+import { mountDocsLlmsLink } from "./components/docs-llms-link";
 
 export default defineClient({
   setup() {
-    const mounted = new Map<HTMLElement, () => void>();
-    // React hydrates the home page, so its figures wait for hydration before replaying. That
-    // hook can run before a concurrent hydration commits, so figures also keep every slot the
-    // player writes out of React's hydrated text (see BlogFigure). Blog Markdown is not hydrated.
-    let hydrated = false;
-    function refresh(afterRender = false) {
-      if (afterRender) hydrated = true;
-      for (const [element, dispose] of mounted) {
-        if (!element.isConnected) {
-          dispose();
-          mounted.delete(element);
-        }
+    let dispose: (() => void) | undefined;
+    let docsRoot: HTMLElement | null = null;
+    function refresh() {
+      const next = document.getElementById("farm-docs-root");
+      if (next === docsRoot) return;
+      dispose?.();
+      docsRoot = next;
+      if (!docsRoot) {
+        dispose = undefined;
+        return;
       }
-      for (const element of document.querySelectorAll<HTMLElement>(
-        ".farm-blog .blog-release-art, .farm-blog .blog-reading-grid, .agent-artwork, [data-agent-waitlist-root], .farm-home .blog-figure",
-      )) {
-        if (mounted.has(element)) continue;
-        if (!hydrated && element.matches(".farm-home .blog-figure")) continue;
-        if (element.matches(".blog-release-art, .agent-artwork")) {
-          mounted.set(element, enhanceArtwork(element));
-        } else if (element.matches(".farm-home .blog-figure")) {
-          mounted.set(element, enhanceFigures(element));
-        } else if (element.matches("[data-agent-waitlist-root]")) {
-          mounted.set(element, enhanceAgentWaitlist(element));
-        } else {
-          const disposeContents = enhanceContents(element);
-          const disposeCode = enhanceCodeBlocks(element);
-          const disposeFigures = enhanceFigures(element);
-          mounted.set(element, () => {
-            disposeContents?.();
-            disposeCode();
-            disposeFigures();
-          });
-        }
-      }
-    }
-    function refreshDocs() {
-      const docsRoot = document.getElementById("farm-docs-root");
-      if (docsRoot && !mounted.has(docsRoot))
-        mounted.set(docsRoot, mountDocsAnnouncement(docsRoot));
+      const disposers = [mountDocsAnnouncement(docsRoot), mountDocsLlmsLink(docsRoot)];
+      dispose = () => disposers.forEach((remove) => remove());
     }
     // Setup covers initial HTML; rendered covers route entry and history.
     refresh();
-    refreshDocs();
+    // Browsers with a model context get the docs search as a WebMCP tool on every page, docs
+    // pages included, through the runtime webmcp() starts. Other browsers never download it.
+    let stopSearchTool: (() => void) | undefined;
+    let closed = false;
+    if ("modelContext" in document || "modelContext" in navigator) {
+      import("./lib/webmcp-docs-search")
+        .then(({ startDocsSearchTool }) => startDocsSearchTool())
+        .then((stop) => {
+          if (closed) stop();
+          else stopSearchTool = stop;
+        })
+        .catch((error: unknown) => console.warn("[farmjs.dev] WebMCP docs search failed", error));
+    }
     return {
-      refresh(afterRender = false) {
-        refresh(afterRender);
-        refreshDocs();
-      },
+      refresh,
       dispose() {
-        for (const dispose of mounted.values()) dispose();
-        mounted.clear();
+        closed = true;
+        stopSearchTool?.();
+        stopSearchTool = undefined;
+        dispose?.();
+        dispose = undefined;
+        docsRoot = null;
       },
     };
   },
   hydration: {
     after({ state }) {
-      state.refresh(true);
+      state.refresh();
     },
   },
   navigation: {
     rendered({ state }) {
-      state.refresh(true);
+      state.refresh();
     },
   },
   close({ state }) {

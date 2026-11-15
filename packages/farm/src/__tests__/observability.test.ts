@@ -1,9 +1,11 @@
 // @vitest-environment node
 
+import { createRequire } from "node:module";
 import { NodeSDK } from "@opentelemetry/sdk-node";
 import { SpanStatusCode } from "@opentelemetry/api";
 import { InMemorySpanExporter, SimpleSpanProcessor } from "@opentelemetry/sdk-trace-base";
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from "vitest";
+import { _runWithFarmRequestSpan } from "../tracing";
 import {
   configureFarmObservability,
   emitFarmEvent,
@@ -26,6 +28,7 @@ describe("observability", () => {
     resetFarmObservability();
     exporter.reset();
     vi.restoreAllMocks();
+    vi.unstubAllGlobals();
   });
 
   afterAll(async () => {
@@ -45,6 +48,151 @@ describe("observability", () => {
 
     expect(configEvents.map((event) => event.type)).toEqual(["cache.hit", "cache.miss"]);
     expect(runtimeEvents.map((event) => event.type)).toEqual(["cache.hit"]);
+  });
+
+  it("shares listeners, filters and trace configuration across source, ESM and CJS entries", async () => {
+    const esm = await import(
+      /* @vite-ignore */ new URL("../../dist/observability.mjs", import.meta.url).href
+    );
+    const cjs = createRequire(import.meta.url)("../../dist/observability.cjs");
+    const events: FarmEvent[] = [];
+    const listener = vi.fn();
+    const unfiltered = vi.fn();
+    configureFarmObservability({
+      tracing: true,
+      events: ["mcp.tool.complete"],
+      onEvent: (event) => {
+        events.push(event);
+      },
+    });
+    const dispose = esm.onFarmEvent(listener);
+    cjs.onFarmEvent(unfiltered, { unfiltered: true });
+    const input = {
+      type: "mcp.tool.complete" as const,
+      route: "/api/mcp",
+      server: "tools",
+      tool: "search",
+      outcome: "error" as const,
+      durationMs: 1,
+    };
+    await runWithFarmRequestSpan(new Request("https://farm.test/api/mcp"), () => {
+      cjs.emitFarmEvent(input);
+      return new Response("ok");
+    });
+    expect(events).toHaveLength(1);
+    expect(events[0]).toMatchObject({ ...input, traceId: expect.stringMatching(/^[0-9a-f]{32}$/) });
+    expect(listener).toHaveBeenCalledTimes(1);
+    expect(unfiltered).toHaveBeenCalledTimes(3);
+    await processor.forceFlush();
+    const spans = exporter.getFinishedSpans();
+    expect(spans).toHaveLength(1);
+    expect(spans[0].events.find((event) => event.name === input.type)?.attributes).toMatchObject({
+      "farm.tool": "search",
+      "farm.outcome": "error",
+    });
+    dispose();
+    emitFarmEvent(input);
+    expect(listener).toHaveBeenCalledTimes(1);
+    expect(events).toHaveLength(2);
+    cjs.resetFarmObservability();
+    esm.emitFarmEvent(input);
+    expect(events).toHaveLength(2);
+    expect(unfiltered).toHaveBeenCalledTimes(4);
+    await runWithFarmRequestSpan(
+      new Request("https://farm.test/after-reset"),
+      () => new Response("ok"),
+    );
+    await processor.forceFlush();
+    expect(exporter.getFinishedSpans()).toHaveLength(1);
+    const afterReset = vi.fn();
+    onFarmEvent(afterReset);
+    cjs.emitFarmEvent({ type: "cache.hit", key: "safe" });
+    expect(afterReset).toHaveBeenCalledTimes(1);
+  });
+
+  it.each([false, { spans: ["render"] }] as const)(
+    "does not parse a tracing URL when request spans are disabled: %j",
+    async (tracing) => {
+      configureFarmObservability({ tracing });
+      const request = new Request("https://farm.test/path?x=1");
+      const response = new Response("ok", { status: 201 });
+      const NativeURL = globalThis.URL;
+      const construct = vi.fn((target, args, newTarget) =>
+        Reflect.construct(target, args, newTarget),
+      );
+      vi.stubGlobal("URL", new Proxy(NativeURL, { construct }));
+      const onStart = vi.fn(),
+        onComplete = vi.fn(),
+        onError = vi.fn();
+      const result = await _runWithFarmRequestSpan(request, async () => response, {
+        onStart,
+        onComplete,
+        onError,
+      });
+      expect(result).toBe(response);
+      expect(construct).not.toHaveBeenCalled();
+      expect(onStart).toHaveBeenCalledOnce();
+      expect(onComplete).toHaveBeenCalledWith(201, expect.any(Number));
+      expect(onError).not.toHaveBeenCalled();
+      const failure = new Error("handler failure");
+      await expect(
+        _runWithFarmRequestSpan(
+          request,
+          () => {
+            throw failure;
+          },
+          { onError },
+        ),
+      ).rejects.toBe(failure);
+      expect(onError).toHaveBeenCalledWith(failure, expect.any(Number));
+      expect(construct).not.toHaveBeenCalled();
+    },
+  );
+
+  it("retains request lifecycle events and status resolution when tracing is off", async () => {
+    const events: FarmEvent[] = [];
+    configureFarmObservability({ tracing: false, onEvent: (event) => events.push(event) });
+    const response = new Response("accepted");
+    await runWithFarmRequestSpan(new Request("https://farm.test/rewritten?q=1"), () => response, {
+      getStatusCode: () => 202,
+    });
+    expect(events.map(({ type }) => type)).toEqual(["request.start", "request.complete"]);
+    expect(events[1]).toMatchObject({ pathname: "/rewritten", status: 200, method: "GET" });
+    await runWithFarmRequestSpan(new Request("https://farm.test/adapter"), () => undefined, {
+      getStatusCode: () => 202,
+    });
+    expect(events[3]).toMatchObject({ pathname: "/adapter", status: 202, method: "GET" });
+  });
+
+  it("honors ignored paths and fresh request URLs after tracing is re-enabled", async () => {
+    configureFarmObservability({ tracing: false });
+    await runWithFarmRequestSpan(new Request("https://farm.test/old"), () => new Response("ok"));
+    configureFarmObservability({ tracing: { ignorePaths: ["/ignored"] } });
+    await Promise.all([
+      runWithFarmRequestSpan(
+        new Request("https://farm.test/ignored/path"),
+        () => new Response("ignored"),
+      ),
+      runWithFarmRequestSpan(
+        new Request("https://one.test:8443/rewritten?q=1"),
+        async () => new Response("one"),
+      ),
+      runWithFarmRequestSpan(new Request("http://two.test/other"), async () => new Response("two")),
+    ]);
+    await processor.forceFlush();
+    const spans = exporter.getFinishedSpans();
+    expect(spans.map(({ name }) => name).sort()).toEqual(["GET /other", "GET /rewritten"]);
+    expect(spans.find(({ name }) => name === "GET /rewritten")?.attributes).toMatchObject({
+      "url.path": "/rewritten",
+      "url.scheme": "https",
+      "server.address": "one.test",
+      "server.port": 8443,
+    });
+    expect(spans.find(({ name }) => name === "GET /other")?.attributes).toMatchObject({
+      "url.path": "/other",
+      "url.scheme": "http",
+      "server.address": "two.test",
+    });
   });
 
   it("filters events when event types are configured", () => {
@@ -100,6 +248,70 @@ describe("observability", () => {
     expect(log).toHaveBeenCalledWith(
       "[farm:info] render.complete route=/dashboard pathname=/dashboard status=200 durationMs=12",
     );
+  });
+
+  it("logs a digest of cache and PPR shell keys, never the raw key", () => {
+    const log = vi.spyOn(console, "log").mockImplementation(() => {});
+    configureFarmObservability({ logs: true });
+    const key = 'unstable_cache:["getUser",["alice@example.com"]]';
+    emitFarmEvent({ type: "cache.miss", key });
+    emitFarmEvent({ type: "ppr.shell.hit", route: "/p", key: "/p?email=bob@example.com" });
+
+    const lines = log.mock.calls.map(([line]) => String(line));
+    expect(lines).toHaveLength(2);
+    expect(lines.join("\n")).not.toMatch(/alice@example\.com|bob@example\.com/);
+    expect(lines[0]).toMatch(/^\[farm:debug\] cache\.miss key_hash=[0-9a-f]{8}$/);
+    expect(lines[1]).toMatch(/^\[farm:debug\] ppr\.shell\.hit route=\/p key_hash=[0-9a-f]{8}$/);
+    // Same key, same digest: events stay correlatable.
+    emitFarmEvent({ type: "cache.dedupe", key });
+    expect(String(log.mock.calls[2]?.[0])).toContain(lines[0]!.split(" ").pop());
+  });
+
+  it("drops the query and fragment from redirect targets", async () => {
+    const events: FarmEvent[] = [];
+    configureFarmObservability({ tracing: true, onEvent: (event) => events.push(event) });
+    await runWithFarmRequestSpan(new Request("https://farm.test/old"), async () => {
+      emitFarmEvent({
+        type: "route.redirect",
+        from: "/old",
+        to: "https://farm.test/verify?token=s3cret#t=1",
+        status: 307,
+      });
+      emitFarmEvent({ type: "route.redirect", from: "/a", to: "/login?next=%2Fme", status: 302 });
+      return new Response("ok");
+    });
+    await processor.forceFlush();
+
+    const redirects = events.filter((event) => event.type === "route.redirect");
+    expect(redirects.map((event) => (event as { to?: string }).to)).toEqual([
+      "https://farm.test/verify",
+      "/login",
+    ]);
+    const exported = exporter
+      .getFinishedSpans()
+      .flatMap((span) => span.events)
+      .filter((event) => event.name === "route.redirect");
+    expect(exported.map((event) => event.attributes?.["farm.to"])).toEqual([
+      "https://farm.test/verify",
+      "/login",
+    ]);
+    expect(JSON.stringify(exported)).not.toContain("s3cret");
+  });
+
+  it("redacts PPR shell keys from exported span events", async () => {
+    configureFarmObservability({ tracing: true });
+    await runWithFarmRequestSpan(new Request("https://farm.test/p"), async () => {
+      emitFarmEvent({ type: "ppr.shell.miss", route: "/p", key: "/p?email=bob@example.com" });
+      return new Response("ok");
+    });
+    await processor.forceFlush();
+
+    const shellEvent = exporter
+      .getFinishedSpans()
+      .flatMap((span) => span.events)
+      .find((event) => event.name === "ppr.shell.miss");
+    expect(shellEvent?.attributes).not.toHaveProperty("farm.key");
+    expect(typeof shellEvent?.attributes?.["farm.key_hash"]).toBe("string");
   });
 
   it("creates correlated request and lifecycle spans with propagated trace context", async () => {

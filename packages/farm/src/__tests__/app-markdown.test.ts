@@ -2,6 +2,7 @@ import React from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
 import {
+  FARM_MARKDOWN_CONTENT_TYPE,
   createFarmMarkdownErrorBody,
   createFarmMarkdownRouteModule,
   createFarmMarkdownSourceResponse,
@@ -9,8 +10,26 @@ import {
   parseMarkdownFrontmatter,
   resolveMdxConfig,
 } from "../app-markdown";
+import * as markdown from "../markdown";
+import {
+  FARM_MARKDOWN_PAGE_CHECK_HEADER,
+  _getFarmMarkdownPageCheckToken,
+  _isFarmMarkdownPageCheck,
+} from "../markdown";
+import * as appMarkdownRuntime from "../app-markdown-runtime";
 
 describe("markdown request negotiation and errors", () => {
+  it("preserves the response helpers through both existing entry points", () => {
+    expect(FARM_MARKDOWN_CONTENT_TYPE).toBe(markdown.FARM_MARKDOWN_CONTENT_TYPE);
+    expect(createFarmMarkdownErrorBody).toBe(markdown.createFarmMarkdownErrorBody);
+    expect(farmRequestWantsMarkdown).toBe(markdown.farmRequestWantsMarkdown);
+    expect(appMarkdownRuntime.FARM_MARKDOWN_CONTENT_TYPE).toBe(markdown.FARM_MARKDOWN_CONTENT_TYPE);
+    expect(appMarkdownRuntime.createFarmMarkdownErrorBody).toBe(
+      markdown.createFarmMarkdownErrorBody,
+    );
+    expect(appMarkdownRuntime.farmRequestWantsMarkdown).toBe(markdown.farmRequestWantsMarkdown);
+  });
+
   it("detects Markdown requests by extension or Accept header", () => {
     expect(farmRequestWantsMarkdown("/guide.md", null)).toBe(true);
     expect(farmRequestWantsMarkdown("/guide", "text/markdown")).toBe(true);
@@ -81,6 +100,62 @@ describe("app markdown pages", () => {
     expect(html).toContain('<aside class="callout">Markdown-first pages</aside>');
   });
 
+  it("reads literal route config exports, not ones in a code sample", async () => {
+    const source = [
+      "---",
+      "title: Installation",
+      "---",
+      'export const dynamic = "force-static";',
+      "export const revalidate = 120;",
+      "export const ssg = true",
+      "",
+      "# Installation",
+      "",
+      "```tsx",
+      'export const dynamic = "force-dynamic";',
+      "```",
+      "",
+      "~~~~",
+      "export const revalidate = 1;",
+      "~~~~",
+    ].join("\n");
+    const mod = createFarmMarkdownRouteModule({ filePath: "/app/install/page.mdx", source });
+
+    expect(mod).toMatchObject({ dynamic: "force-static", revalidate: 120, ssg: true });
+    // The exports stay part of the page's MDX module.
+    expect(renderToStaticMarkup(await (mod.default as any)({}))).toContain("<h1>Installation</h1>");
+
+    const computed = createFarmMarkdownRouteModule({
+      filePath: "/app/about/page.mdx",
+      source: "export const revalidate = 60 * 60;\n\n# About\n",
+    });
+    expect(computed.revalidate).toBeUndefined();
+    expect(computed.dynamic).toBeUndefined();
+  });
+
+  it("loads lazily configured components once, on the first render, and retries a failure", async () => {
+    let loads = 0;
+    const mod = createFarmMarkdownRouteModule({
+      filePath: "/app/about/page.mdx",
+      source: ["---", "title: About Farm", "---", "<Callout>Lazy</Callout>"].join("\n"),
+      components: async () => {
+        loads += 1;
+        if (loads === 1) throw new Error("components failed to load");
+        return {
+          Callout: (props) => React.createElement("aside", null, props.children),
+        };
+      },
+    });
+
+    expect(mod.metadata).toMatchObject({ title: "About Farm" });
+    expect(loads).toBe(0);
+    await expect((mod.default as any)({})).rejects.toThrow("components failed to load");
+    for (let render = 0; render < 2; render++) {
+      expect(renderToStaticMarkup(await (mod.default as any)({}))).toContain("<aside>Lazy</aside>");
+    }
+    expect(loads).toBe(2);
+  });
+
   it("serves raw source at the markdown route", async () => {
     const response = await createFarmMarkdownSourceResponse({
       request: new Request("https://farm.test/about.md"),
@@ -120,6 +195,117 @@ describe("app markdown pages", () => {
     expect(response?.headers.get("content-location")).toBe("/index.md");
     expect(response?.headers.get("vary")).toBe("Accept");
     await expect(response?.text()).resolves.toBe("# Curated home");
+  });
+
+  it("checks the page as an outsider for a caller with a client address", async () => {
+    const seen: Array<{ headers: string[] }> = [];
+    const source = { filePath: "/app/office/page.md", source: "# Office" };
+    const respond = (request: Request, clientAddress?: string) =>
+      appMarkdownRuntime.createFarmMarkdownSourceResponse({
+        request,
+        config: resolveMdxConfig(undefined),
+        clientAddress,
+        resolveSource: () => source,
+        renderPage(pageRequest) {
+          seen.push({ headers: [...pageRequest.headers.keys()].sort() });
+          // Stands in for an office IP allowlist: the anonymous check is refused.
+          return new Response("office network only", { status: 403 });
+        },
+      });
+    const negotiated = (headers: Record<string, string> = {}) =>
+      new Request("https://farm.test/office", { headers: { accept: "text/markdown", ...headers } });
+
+    for (const [request, clientAddress] of [
+      [negotiated({ "x-real-ip": "10.0.0.5" }), undefined],
+      [negotiated({ "x-forwarded-for": "10.0.0.5", forwarded: "for=10.0.0.5" }), undefined],
+      [negotiated({ via: "1.1 office-proxy" }), undefined],
+      [negotiated(), "10.0.0.5"],
+    ] as const) {
+      expect(await respond(request, clientAddress)).toBeNull();
+    }
+    expect(
+      await (await respond(new Request("https://farm.test/office.md"), "10.0.0.5"))!.status,
+    ).toBe(404);
+    // Only the anonymous visitor's own headers reach the check.
+    expect(seen.map((entry) => entry.headers)).toEqual(Array(5).fill(["accept"]));
+
+    // The check's own request is already the anonymous visitor's: it renders the page's HTML
+    // as that visitor, and the allowlist refuses it.
+    seen.length = 0;
+    const inner = await respond(
+      negotiated(),
+      appMarkdownRuntime.FARM_MARKDOWN_ANONYMOUS_CLIENT_ADDRESS,
+    );
+    expect(inner).toBeNull();
+    expect(seen).toEqual([{ headers: ["accept", "x-farm-markdown-page-check"] }]);
+  });
+
+  it("serves an anonymous visitor the source only when the page itself renders", async () => {
+    const source = { filePath: "/app/staff/page.md", source: "# Staff" };
+    const pages: Request[] = [];
+    const respond = (request: Request, page: Response) =>
+      appMarkdownRuntime.createFarmMarkdownSourceResponse({
+        request,
+        config: resolveMdxConfig(undefined),
+        clientAddress: appMarkdownRuntime.FARM_MARKDOWN_ANONYMOUS_CLIENT_ADDRESS,
+        resolveSource: () => source,
+        renderPage(pageRequest) {
+          pages.push(pageRequest);
+          return page;
+        },
+      });
+    const negotiated = () =>
+      new Request("https://farm.test/staff", {
+        headers: { accept: "text/markdown", "if-none-match": '"v1"', range: "bytes=0-1" },
+      });
+
+    // A guard in page.tsx or layout.tsx answers the render with a redirect, a refusal or an
+    // error; none of them is the page.
+    for (const page of [
+      new Response(null, { status: 307, headers: { location: "/sign-in" } }),
+      new Response("denied", { status: 403 }),
+      new Response("<h1>Error</h1>", { status: 500, headers: { "content-type": "text/html" } }),
+      new Response("{}", { headers: { "content-type": "application/json" } }),
+      // A layout that shows a sign-in prompt instead of its children answers 200, but
+      // the page segment never renders.
+      new Response("<main><p>Please sign in</p></main>", {
+        headers: { "content-type": "text/html" },
+      }),
+    ]) {
+      expect(await respond(negotiated(), page)).toBeNull();
+    }
+    const served = await respond(
+      negotiated(),
+      new Response(
+        '<main><div id="__farm_page__" data-farm-segment="page"><h1>Staff</h1></div></main>',
+        {
+          headers: { "content-type": "text/html" },
+        },
+      ),
+    );
+    expect(served?.headers.get("cache-control")).toContain("public");
+    await expect(served!.text()).resolves.toBe("# Staff");
+    // The page's whole HTML, unredirected, without the caller's validators or range.
+    for (const request of pages) {
+      expect(new URL(request.url).pathname).toBe("/staff");
+      expect(request.method).toBe("GET");
+      expect(request.redirect).toBe("manual");
+      // Rendered to the end: only Farm's own check carries this process's token.
+      expect([...request.headers]).toEqual([
+        ["accept", "text/html"],
+        [FARM_MARKDOWN_PAGE_CHECK_HEADER, _getFarmMarkdownPageCheckToken()],
+      ]);
+      expect(_isFarmMarkdownPageCheck(request.headers.get(FARM_MARKDOWN_PAGE_CHECK_HEADER))).toBe(
+        true,
+      );
+    }
+  });
+
+  it("ignores a page-check header a client sends", () => {
+    for (const value of [undefined, null, "", "1", "true", ["a", "b"]]) {
+      expect(_isFarmMarkdownPageCheck(value as never)).toBe(false);
+    }
+    expect(_isFarmMarkdownPageCheck(`${_getFarmMarkdownPageCheckToken()}x`)).toBe(false);
   });
 
   it("ignores content negotiation when markdown has zero preference", async () => {

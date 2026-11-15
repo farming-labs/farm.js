@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { execFile } from "node:child_process";
-import { mkdtemp, mkdir, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, mkdir, readdir, readFile, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { createRequire } from "node:module";
@@ -399,7 +399,7 @@ test("scaffolds a working Better Auth starter with its UI dependencies", async (
     const env = await readFile(path.join(root, ".env.example"), "utf8");
     const gitignore = await readFile(path.join(root, ".gitignore"), "utf8");
 
-    assert.equal(packageJson.dependencies["better-auth"], "^1.5.5");
+    assert.equal(packageJson.dependencies["better-auth"], "^1.6.22");
     assert.equal(packageJson.dependencies["better-sqlite3"], "^12.6.2");
     assert.equal(packageJson.devDependencies["@types/better-sqlite3"], "^7.6.13");
     assert.match(auth, /emailAndPassword:/);
@@ -411,7 +411,9 @@ test("scaffolds a working Better Auth starter with its UI dependencies", async (
     assert.match(panel, /authClient\.signUp\.email/);
     assert.match(panel, /authClient\.getSession/);
     assert.match(panel, /authClient\.signOut/);
-    assert.match(env, /BETTER_AUTH_SECRET=/);
+    // Empty: a placeholder long enough for Better Auth would be accepted as-is.
+    assert.match(env, /^BETTER_AUTH_SECRET=$/m);
+    assert.match(env, /^# Generate with: openssl rand -base64 32$/m);
     assert.match(env, /EXISTING_VALUE=kept/);
     assert.match(gitignore, /node_modules/);
     assert.match(gitignore, /better-auth\.sqlite/);
@@ -445,10 +447,12 @@ test("scaffolds a complete Auth.js instance with matching dependencies", async (
     const auth = await readFile(path.join(root, "src/lib/auth.ts"), "utf8");
 
     assert.equal(packageJson.dependencies["@farm.js/authjs"], "0.1.0-beta.23");
-    assert.equal(packageJson.dependencies["@auth/core"], "0.34.3");
+    assert.equal(packageJson.dependencies["@auth/core"], "^0.41.3");
     assert.match(auth, /import \{ Auth \} from "@auth\/core"/);
     assert.match(auth, /GitHub\(\{/);
     assert.match(auth, /handlers:\s*\{\s*GET: handler,\s*POST: handler/s);
+    // The route @farm.js/authjs mounts; Auth.js otherwise only answers under /auth.
+    assert.match(auth, /basePath: "\/api\/auth"/);
     assert.deepEqual(result.env, ["AUTH_SECRET", "AUTH_GITHUB_ID", "AUTH_GITHUB_SECRET"]);
   } finally {
     await rm(root, { recursive: true, force: true });
@@ -518,8 +522,64 @@ test("adds a Vercel AI SDK chat route template", async () => {
     assert.match(route, /import \{ aiChatRoute \} from "@farm.js\/ai"/);
     assert.match(route, /export const POST = aiChatRoute/);
     assert.match(route, /model: "openai\/gpt-4o-mini"/);
+    // Fails closed in production until the app checks a session.
+    assert.match(route, /authorize: \(\) => process\.env\.NODE_ENV === "development"/);
+    assert.doesNotMatch(route, /allowUnauthenticated/);
     await assert.rejects(() => readFile(path.join(root, "src/lib/integrations.ts"), "utf8"));
     await assert.rejects(() => readFile(path.join(root, "farm.config.ts"), "utf8"));
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("imports the generated auth instance relative to a custom registry file", async () => {
+  for (const provider of ["better-auth", "authjs"]) {
+    const root = await createTempProject({ packageJson: { type: "module", dependencies: {} } });
+
+    try {
+      const result = await addFarmIntegration({
+        root,
+        provider,
+        integrationsFile: "src/integrations.ts",
+        skipConfig: true,
+      });
+      const source = await readFile(result.integrationFile, "utf8");
+      const specifier = source.match(/import \{ auth \} from "([^"]+)"/)?.[1];
+      assert.equal(specifier, "../lib/auth.ts", provider);
+      assert.equal(
+        path.resolve(path.dirname(result.integrationFile), specifier),
+        path.join(root, "src/lib/auth.ts"),
+      );
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  }
+});
+
+test("keeps the default registry's auth import", async () => {
+  const root = await createTempProject({ packageJson: { type: "module", dependencies: {} } });
+
+  try {
+    const result = await addFarmIntegration({ root, provider: "better-auth", skipConfig: true });
+    assert.match(await readFile(result.integrationFile, "utf8"), /from "\.\.\/auth\.ts"/);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("rejects an unreadable package.json before writing any file", async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "farm-cli-add-integration-"));
+
+  try {
+    await writeFile(path.join(root, "package.json"), "{ broken", "utf8");
+    await assert.rejects(
+      () => addFarmIntegration({ root, provider: "better-auth" }),
+      (error) => {
+        assert.ok(error.message.includes(path.join(root, "package.json")), error.message);
+        return true;
+      },
+    );
+    assert.deepEqual(await readdir(root), ["package.json"]);
   } finally {
     await rm(root, { recursive: true, force: true });
   }

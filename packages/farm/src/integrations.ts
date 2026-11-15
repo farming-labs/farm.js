@@ -37,6 +37,10 @@ export {
   type IntegrationOriginRejection,
   type IntegrationOriginResult,
 } from "./integration-request-security";
+import {
+  rejectCrossSiteNonJSONBody,
+  validateIntegrationRequestOrigin,
+} from "./integration-request-security";
 
 import type { ComponentType, ReactNode } from "react";
 import { api as integrationApi, defineIntegrationAPIOperation } from "./integration-api";
@@ -51,7 +55,22 @@ import type {
 } from "./integration-api";
 import type { InferFarmIntegrationOrmClient } from "./integration-orm";
 import { setFarmPluginIntegrationContext } from "./plugin-integration-context";
-import { canonicalizeRequestPathname, canonicalizeRequestPathSegments } from "./utils/decode";
+import { canonicalizeRequestPathSegments } from "./utils/decode";
+import { toPublicValidationIssues } from "./api/route-schema";
+import { assertSupportedMiddlewareMatcher } from "./middleware/matcher";
+import {
+  isFarmIntegration,
+  matchPathSegments,
+  resolveIntegrationMiddlewareParams,
+  resolveMatcherParams,
+  splitPath,
+} from "./integration-middleware-matcher";
+
+export {
+  FARM_INTEGRATION_API_BASE_PATH_KEY,
+  integrationMiddlewareMayHandlePath,
+  isFarmIntegration,
+} from "./integration-middleware-matcher";
 import {
   assertTerminalCatchAll,
   assertUniqueRouteParameters,
@@ -76,9 +95,11 @@ import { applyWebResponseHeaders, sendWebResponse } from "./server/response";
 import type { FarmRequest } from "./types";
 import {
   bufferFarmRequestBody,
+  cloneFarmRequest,
   createFarmRequestBodyErrorResponse,
   readNodeRequestBody,
   resolveFarmServerConfig,
+  withFarmRequestClientAddress,
 } from "./server-http";
 
 export { api, defineIntegrationAPI, defineIntegrationAPIOperation } from "./integration-api";
@@ -570,6 +591,22 @@ export interface FarmIntegration<
   documentNavigations?: readonly FarmIntegrationDocumentNavigation[];
   /** Additional Farm plugins owned and configured by this integration. */
   plugins?: readonly FarmIntegrationContributedPlugin<NoInfer<TInstance>>[];
+  /**
+   * Auth integrations: the signed-in session of a request, read from its cookies, or null when
+   * nobody is signed in. Mobile session tokens (`/__farm/mobile/session`) use it to check that a
+   * device's cookies still sign someone in when they are issued and refreshed.
+   */
+  session?: (
+    request: Request,
+  ) => FarmIntegrationSession | null | Promise<FarmIntegrationSession | null>;
+}
+
+/** What an auth integration's `session()` returns for a signed-in request. */
+export interface FarmIntegrationSession {
+  /** Stable for the life of the session: a new sign-in is a new id. */
+  id: string;
+  userId?: string;
+  expiresAt?: Date | string | number;
 }
 
 export type FarmIntegrationsUserConfig = Record<string, FarmIntegration<any, any, any> | undefined>;
@@ -1203,12 +1240,6 @@ export function defineIntegration<
   } as unknown as DefinedIntegration<TIntegration, TSchema>;
 }
 
-export function isFarmIntegration(value: unknown): value is FarmIntegration {
-  return (
-    !!value && typeof value === "object" && (value as FarmIntegration).kind === "farm-integration"
-  );
-}
-
 export function resolveIntegrationPlugins(
   integrations: FarmIntegrationsUserConfig | undefined,
 ): FarmPlugin[] {
@@ -1220,6 +1251,16 @@ export function resolveIntegrationPlugins(
   for (const [key, integration] of Object.entries(integrations)) {
     if (!integration || !isFarmIntegration(integration)) {
       continue;
+    }
+
+    for (const entry of integration.middleware || []) {
+      if (!entry.matcher) continue;
+      const matchers = Array.isArray(entry.matcher) ? entry.matcher : [entry.matcher];
+      try {
+        matchers.forEach(assertSupportedMiddlewareMatcher);
+      } catch (error) {
+        throw new Error(`Integration "${key}": ${(error as Error).message}`);
+      }
     }
 
     const owner = createIntegrationPluginOwner(key, integration, "lifecycle");
@@ -1431,6 +1472,12 @@ export function matchIntegrationRoute(
     return null;
   }
 
+  const method = normalizeIntegrationRequestMethod(input.method);
+  if (!method) {
+    return null;
+  }
+  const pathSegments = canonicalizeRequestPathSegments(input.pathname);
+
   for (const [key, integration] of Object.entries(integrations)) {
     if (!integration || !isFarmIntegration(integration)) {
       continue;
@@ -1439,11 +1486,11 @@ export function matchIntegrationRoute(
     const routes = normalizeIntegrationRoutes(integration.routes || []);
 
     for (const route of routes) {
-      if (!matchesMethod(route.methods, input.method)) {
+      if (!matchesMethod(route.methods, method)) {
         continue;
       }
 
-      const params = extractPathParams(route.path, input.pathname);
+      const params = matchPathSegments(route[INTEGRATION_ROUTE_SEGMENTS], pathSegments);
       if (!params) {
         continue;
       }
@@ -1941,9 +1988,13 @@ function createIntegrationPlugin(integrationKey: string, integration: FarmIntegr
     },
 
     async beforeRequest(req, res, context) {
+      // A rewrite to another origin leaves the app; no integration route serves it.
+      if (req.url && !req.url.startsWith("/")) return;
       const fullUrl = `http://${req.headers.host || "localhost"}${req.url || "/"}`;
       const url = new URL(fullUrl);
       const pathname = url.pathname;
+      const pathSegments = canonicalizeRequestPathSegments(pathname);
+      const method = normalizeIntegrationRequestMethod(req.method);
       const requestId = getRequestId(req);
       let bodyLoaded = false;
       let requestBody: Buffer | undefined;
@@ -1964,7 +2015,11 @@ function createIntegrationPlugin(integrationKey: string, integration: FarmIntegr
 
       const createHandlerRequest = async (): Promise<Request | null> => {
         try {
-          return createWebRequest(req, fullUrl, await getRequestBody());
+          return withFarmRequestClientAddress(
+            createWebRequest(req, fullUrl, await getRequestBody()),
+            resolveFarmServerConfig(context.config.server).trustProxy,
+            req.socket?.remoteAddress,
+          );
         } catch (error) {
           const response = createFarmRequestBodyErrorResponse(error);
           if (!response) throw error;
@@ -1974,7 +2029,7 @@ function createIntegrationPlugin(integrationKey: string, integration: FarmIntegr
       };
 
       for (const entry of middleware) {
-        const params = resolveMatcherParams(entry.matcher, pathname);
+        const params = resolveIntegrationMiddlewareParams(entry, pathname, context.config);
         if (!params) {
           continue;
         }
@@ -2088,9 +2143,10 @@ function createIntegrationPlugin(integrationKey: string, integration: FarmIntegr
       }
 
       for (const route of routes) {
-        const params = matchesMethod(route.methods, req.method)
-          ? extractPathParams(route.path, pathname)
-          : null;
+        const params =
+          method && matchesMethod(route.methods, method)
+            ? matchPathSegments(route[INTEGRATION_ROUTE_SEGMENTS], pathSegments)
+            : null;
         if (!params) {
           continue;
         }
@@ -2309,12 +2365,29 @@ function createIntegrationHandlerContext(input: {
 type NormalizedIntegrationRoute = Omit<FarmIntegrationRoute, "method" | "methods"> & {
   methods: readonly string[];
   __operation?: FarmIntegrationAPIOperation<any, any, any, any, any>;
+  [INTEGRATION_ROUTE_SEGMENTS]: readonly string[];
 };
+
+const INTEGRATION_ROUTE_SEGMENTS = Symbol("farm.integrationRouteSegments");
+const EMPTY_NORMALIZED_INTEGRATION_ROUTES: NormalizedIntegrationRoute[] = [];
+const normalizedIntegrationRoutesCache = new WeakMap<
+  readonly FarmIntegrationRoute[],
+  NormalizedIntegrationRoute[]
+>();
 
 function normalizeIntegrationRoutes(
   routes: readonly FarmIntegrationRoute[],
 ): NormalizedIntegrationRoute[] {
-  return routes
+  if (routes.length === 0) {
+    return EMPTY_NORMALIZED_INTEGRATION_ROUTES;
+  }
+
+  const cached = normalizedIntegrationRoutesCache.get(routes);
+  if (cached) {
+    return cached;
+  }
+
+  const normalized = routes
     .map((route, index) => {
       // Raw FarmIntegration objects and direct dispatch also pass through here.
       assertUniqueRouteParameters(route.path, "api");
@@ -2324,6 +2397,7 @@ function normalizeIntegrationRoutes(
           ...route,
           methods: normalizeIntegrationRouteMethods(route),
           input: normalizeIntegrationRouteInputSchemas(route),
+          [INTEGRATION_ROUTE_SEGMENTS]: splitPath(route.path),
         },
         specificity: getRoutePatternSpecificity(route.path, "api"),
       };
@@ -2333,6 +2407,9 @@ function normalizeIntegrationRoutes(
         compareRouteSpecificity(left.specificity, right.specificity) || left.index - right.index,
     )
     .map(({ route }) => route);
+
+  normalizedIntegrationRoutesCache.set(routes, normalized);
+  return normalized;
 }
 
 function normalizeIntegrationRouteMethods(route: Pick<FarmIntegrationRoute, "method" | "methods">) {
@@ -2374,6 +2451,11 @@ type IntegrationRouteInputValidationResult =
       response: Response;
     };
 
+const CROSS_SITE_JSON_ROUTE_BODY_MESSAGE =
+  "This integration route reads a JSON body, so a request from another origin must send " +
+  'Content-Type: application/json. To accept form posts from other origins, set bodyFormat: "form" ' +
+  "on the route.";
+
 async function validateIntegrationRouteInput(
   route: NormalizedIntegrationRoute,
   request: Request,
@@ -2400,6 +2482,17 @@ async function validateIntegrationRouteInput(
     };
   }
 
+  const bodyFormat = getIntegrationRouteBodyFormat(route);
+  if (
+    schemas.body &&
+    bodyFormat === "json" &&
+    request.method !== "GET" &&
+    request.method !== "HEAD"
+  ) {
+    const rejection = rejectCrossSiteNonJSONBody(request, CROSS_SITE_JSON_ROUTE_BODY_MESSAGE);
+    if (rejection) return { success: false, response: rejection };
+  }
+
   const input: FarmIntegrationRouteInput = {};
   const issues: FarmIntegrationValidationIssue[] = [];
 
@@ -2417,10 +2510,7 @@ async function validateIntegrationRouteInput(
   }
 
   if (schemas.body) {
-    const bodyInput = await readIntegrationValidationBody(
-      request,
-      getIntegrationRouteBodyFormat(route),
-    );
+    const bodyInput = await readIntegrationValidationBody(request, bodyFormat);
 
     if (bodyInput.success) {
       const bodyResult = await parseIntegrationInputSchema("body", schemas.body, bodyInput.data);
@@ -2539,20 +2629,16 @@ function normalizeIntegrationValidationIssues(
   source: FarmIntegrationRouteInputSource,
   error: FarmIntegrationValidationErrorLike,
 ): FarmIntegrationValidationIssue[] {
+  // Like API routes, never echo validator messages, which can quote secrets.
   if (Array.isArray(error.issues) && error.issues.length > 0) {
-    return error.issues.map((issue) => ({
-      source,
-      path: normalizeIntegrationValidationPath(issue.path),
-      code: issue.code,
-      message: issue.message || "Invalid input",
-    }));
+    return toPublicValidationIssues(error).map((issue) => ({ source, ...issue }));
   }
 
   return [
     {
       source,
       path: [],
-      message: error.message || "Invalid input",
+      message: "Invalid input",
     },
   ];
 }
@@ -2601,12 +2687,25 @@ async function readIntegrationValidationBody(
     if (format === "form") {
       return {
         success: true,
-        data: createFormInput(await request.clone().formData()),
+        data: createFormInput(await cloneFarmRequest(request).formData()),
       };
     }
 
-    const text = await request.clone().text();
+    const text = await cloneFarmRequest(request).text();
     if (text.trim().length === 0) {
+      return {
+        success: true,
+        data: undefined,
+      };
+    }
+
+    // A browser sends a Blob or byte body with no content type, and a page on another site can
+    // do so in a no-cors fetch with the visitor's cookies, so such a body is not read as JSON,
+    // the same rule API routes follow.
+    if (
+      !request.headers.get("content-type")?.trim() &&
+      !validateIntegrationRequestOrigin(request, { requireOriginMetadata: false }).ok
+    ) {
       return {
         success: true,
         data: undefined,
@@ -2831,18 +2930,27 @@ export async function dispatchIntegrationRequest(
      * already had the forwarded cookies appended.
      */
     onForwardedCookies?: (cookies: string[]) => void;
+    /**
+     * Middleware entries that already ran for this request, shared across dispatches. A
+     * `ctx.rewrite()` target is guarded by a second dispatch, which skips these so each guard runs
+     * at most once per request, as app middleware does.
+     */
+    ranMiddleware?: Set<object>;
+    /** The peer address the server adapter reports, used unless `server.trustProxy` applies. */
+    clientAddress?: string;
   } = {},
 ): Promise<Response | null> {
+  const serverConfig = resolveFarmServerConfig(runtime.config.server);
   try {
-    request = await bufferFarmRequestBody(
-      request,
-      resolveFarmServerConfig(runtime.config.server).bodySizeLimit,
-    );
+    request = await bufferFarmRequestBody(request, serverConfig.bodySizeLimit);
   } catch (error) {
     const response = createFarmRequestBodyErrorResponse(error);
     if (response) return response;
     throw error;
   }
+  // Handlers such as Farm Auth key rate limits on the caller, so they get the
+  // address Farm resolved rather than a client-supplied header.
+  request = withFarmRequestClientAddress(request, serverConfig.trustProxy, options.clientAddress);
 
   const integration = runtime.integration;
   const url = new URL(request.url);
@@ -2852,6 +2960,8 @@ export async function dispatchIntegrationRequest(
     options.currentRequest?.headers.get("x-request-id") ||
     String(Date.now());
   const routes = normalizeIntegrationRoutes(integration.routes || []);
+  const pathSegments = canonicalizeRequestPathSegments(pathname);
+  const method = normalizeIntegrationRequestMethod(request.method);
   const middleware = [...(integration.middleware || [])];
 
   // Cookies an integration middleware forwards via forwardIntegrationSetCookies
@@ -2863,10 +2973,12 @@ export async function dispatchIntegrationRequest(
   const forwardedSetCookies: string[] = [];
 
   for (const entry of middleware) {
-    const params = resolveMatcherParams(entry.matcher, pathname);
+    if (options.ranMiddleware?.has(entry)) continue;
+    const params = resolveIntegrationMiddlewareParams(entry, pathname, runtime.config);
     if (!params) {
       continue;
     }
+    options.ranMiddleware?.add(entry);
 
     const handlerContext = createServerIntegrationHandlerContext({
       runtime,
@@ -2960,9 +3072,10 @@ export async function dispatchIntegrationRequest(
   }
 
   for (const route of routes) {
-    const params = matchesMethod(route.methods, request.method)
-      ? extractPathParams(route.path, pathname)
-      : null;
+    const params =
+      method && matchesMethod(route.methods, method)
+        ? matchPathSegments(route[INTEGRATION_ROUTE_SEGMENTS], pathSegments)
+        : null;
     if (!params) {
       continue;
     }
@@ -3148,7 +3261,7 @@ export async function dispatchIntegrationRequests(
   integrations: FarmIntegrationsUserConfig | undefined,
   runtime: Omit<RegisteredIntegrationRuntime, "integration">,
   request: Request,
-  options: { currentRequest?: Request } = {},
+  options: { currentRequest?: Request; ranMiddleware?: Set<object>; clientAddress?: string } = {},
 ): Promise<{ response: Response | null; setCookies: string[] }> {
   const setCookies: string[] = [];
   if (!integrations) {
@@ -3172,9 +3285,11 @@ export async function dispatchIntegrationRequests(
       { ...runtime, integration },
       // Each dispatch buffers the body it is given, so hand every integration
       // its own clone rather than a Request another dispatch already read.
-      request.clone(),
+      cloneFarmRequest(request),
       {
         currentRequest: options.currentRequest,
+        ranMiddleware: options.ranMiddleware,
+        clientAddress: options.clientAddress,
         onForwardedCookies: (cookies) => setCookies.push(...cookies),
       },
     );
@@ -3359,16 +3474,12 @@ function createWebRequest(req: FarmRequest, fullUrl: string, body?: Buffer): Req
   });
 }
 
-function matchesMethod(methods: readonly string[], method: string | undefined): boolean {
-  if (!method) {
-    return false;
-  }
+function normalizeIntegrationRequestMethod(method: string | undefined): string | undefined {
+  return method ? method.toUpperCase() : undefined;
+}
 
-  const normalizedMethod = method.toUpperCase();
-  return methods.some((item) => {
-    const candidate = item.toUpperCase();
-    return candidate === "ALL" || candidate === normalizedMethod;
-  });
+function matchesMethod(methods: readonly string[], normalizedMethod: string): boolean {
+  return methods.some((candidate) => candidate === "ALL" || candidate === normalizedMethod);
 }
 
 function matchesMatcher(
@@ -3376,125 +3487,6 @@ function matchesMatcher(
   pathname: string,
 ): boolean {
   return resolveMatcherParams(matcher, pathname) !== null;
-}
-
-function resolveMatcherParams(
-  matcher: string | readonly string[] | undefined,
-  pathname: string,
-): FarmIntegrationRouteParams | null {
-  if (!matcher) {
-    return {};
-  }
-
-  const list = Array.isArray(matcher) ? matcher : [matcher];
-  // An integration matcher is a guard (`protectedRoutes` compiles straight into
-  // one), so it has to see the same pathname the route matchers do. Comparing
-  // the raw pathname let `/%64ashboard` miss a `/dashboard` matcher while the
-  // page router still served the protected page. Resolved on first use so a
-  // match-everything matcher stays allocation free.
-  let canonicalPathname: string | undefined;
-  let canonicalSegments: string[] | undefined;
-
-  for (const item of list) {
-    if (item === "/(.*)" || item === "*") {
-      return {};
-    }
-    if (item.endsWith("(.*)")) {
-      canonicalPathname ??= canonicalizeRequestPathname(pathname);
-      const prefix = item.slice(0, -4);
-      if (canonicalPathname === prefix || canonicalPathname.startsWith(`${prefix}/`)) {
-        return {};
-      }
-      continue;
-    }
-    canonicalSegments ??= canonicalizeRequestPathSegments(pathname);
-    const params = matchPathSegments(splitPath(item), canonicalSegments);
-    if (params) {
-      return params;
-    }
-  }
-
-  return null;
-}
-
-function matchesPath(pattern: string, pathname: string): boolean {
-  return extractPathParams(pattern, pathname) !== null;
-}
-
-function extractPathParams(pattern: string, pathname: string): FarmIntegrationRouteParams | null {
-  return matchPathSegments(splitPath(pattern), canonicalizeRequestPathSegments(pathname));
-}
-
-/**
- * Walk an integration route pattern against already-canonical request segments.
- *
- * `pathSegments` arrive decoded exactly once, so nothing here decodes again: a
- * second pass would turn a literal `%2541BC` segment into `ABC` and resolve a
- * record the request never asked for.
- */
-function matchPathSegments(
-  routeSegments: string[],
-  pathSegments: string[],
-): FarmIntegrationRouteParams | null {
-  const params: FarmIntegrationRouteParams = {};
-
-  let routeIndex = 0;
-  let pathIndex = 0;
-
-  while (routeIndex < routeSegments.length && pathIndex < pathSegments.length) {
-    const routeSegment = routeSegments[routeIndex];
-    const pathSegment = pathSegments[pathIndex];
-
-    if (isCatchAllSegment(routeSegment)) {
-      params[getSegmentParamName(routeSegment)] = pathSegments.slice(pathIndex);
-      return params;
-    }
-
-    if (isDynamicSegment(routeSegment)) {
-      params[getSegmentParamName(routeSegment)] = pathSegment;
-      routeIndex += 1;
-      pathIndex += 1;
-      continue;
-    }
-
-    if (routeSegment !== pathSegment) {
-      return null;
-    }
-
-    routeIndex += 1;
-    pathIndex += 1;
-  }
-
-  if (routeIndex === routeSegments.length && pathIndex === pathSegments.length) {
-    return params;
-  }
-
-  if (routeIndex === routeSegments.length - 1 && isCatchAllSegment(routeSegments[routeIndex])) {
-    params[getSegmentParamName(routeSegments[routeIndex])] = [];
-    return params;
-  }
-
-  return null;
-}
-
-function splitPath(value: string): string[] {
-  return value.split("/").filter(Boolean);
-}
-
-function isDynamicSegment(segment: string): boolean {
-  return segment.startsWith("[") && segment.endsWith("]");
-}
-
-function isCatchAllSegment(segment: string): boolean {
-  return segment.startsWith("[...") && segment.endsWith("]");
-}
-
-function getSegmentParamName(segment: string): string {
-  if (isCatchAllSegment(segment)) {
-    return segment.slice(4, -1);
-  }
-
-  return segment.slice(1, -1);
 }
 
 function getRequestId(req: FarmRequest): string {

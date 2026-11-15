@@ -1,10 +1,10 @@
-import { renderMetadataHead, resolveMetadataTitle } from "../metadata";
+import { FARM_METADATA_ATTRIBUTE, renderMetadataHead, resolveMetadataTitle } from "../metadata";
 import type { Metadata } from "../types";
 
 export type NavigationMetadata = (Metadata & Record<string, any>) | undefined;
 
 /** Marks head elements this reconciler inserted, so they can be replaced. */
-const MANAGED_ATTRIBUTE = "data-farm-metadata";
+const MANAGED_ATTRIBUTE = FARM_METADATA_ATTRIBUTE;
 
 /**
  * Head tags the metadata system owns outright. These are swept on every
@@ -16,14 +16,21 @@ const OWNED_SELECTORS = [
   'meta[name="description"]',
   'meta[name="keywords"]',
   'meta[name="author"]',
+  'meta[name="google-site-verification"]',
+  'meta[name="msvalidate.01"]',
+  'meta[name="yandex-verification"]',
   'meta[name="creator"]',
   'meta[name="publisher"]',
   'meta[name="robots"]',
+  'meta[name="googlebot"]',
   'link[rel="author"]',
   'link[rel="canonical"]',
   'link[rel="alternate"]',
   'meta[property^="og:"]',
+  'meta[property^="article:"]',
   'meta[name^="twitter:"]',
+  // Meta tags named by the app carry the marker, since no fixed name matches them.
+  `meta[${MANAGED_ATTRIBUTE}]`,
 ].join(", ");
 
 /**
@@ -39,6 +46,8 @@ const ICON_SELECTORS = [
 ].join(", ");
 const MANIFEST_SELECTOR = 'link[rel="manifest"]';
 
+const PAGE_JSON_LD_SELECTOR = `script[type="application/ld+json"][${MANAGED_ATTRIBUTE}]`;
+
 function removeAll(selector: string): void {
   for (const element of Array.from(document.head.querySelectorAll(selector))) {
     element.remove();
@@ -50,9 +59,10 @@ function removeAll(selector: string): void {
  * load of the target route renders: same title resolution and the same managed
  * tag set, produced by the same `renderMetadataHead` the server uses.
  *
- * JSON-LD is deliberately untouched: the agent JSON-LD script is site identity
- * rather than page metadata, and sweeping ld+json scripts could remove ones the
- * application authored itself.
+ * Only page and layout JSON-LD (`metadata.jsonLd`) is swapped, matched by its
+ * marker. The agent JSON-LD script is site identity rather than page metadata,
+ * and ld+json scripts the application authored itself carry no marker, so
+ * both stay untouched.
  */
 export function applyFarmMetadataToDocument(metadata: NavigationMetadata, pathname: string): void {
   document.title = resolveMetadataTitle(metadata?.title) || "Farm.js App";
@@ -60,8 +70,22 @@ export function applyFarmMetadataToDocument(metadata: NavigationMetadata, pathna
   const rendered = renderMetadataHead(metadata, { pathname });
   const template = document.createElement("template");
   template.innerHTML = rendered.tags;
+  const viewport = document.createElement("template");
+  viewport.innerHTML = rendered.viewport;
 
+  // OWNED_SELECTORS takes the previous page's viewport tags too: Farm marks the ones it renders.
   removeAll(OWNED_SELECTORS);
+  // Back where a page load renders them, after <meta charset>, except where the app's own document
+  // writes that tag itself.
+  const charset = document.head.querySelector("meta[charset]");
+  for (const element of Array.from(viewport.content.children).reverse()) {
+    const name = element.getAttribute("name");
+    if (name && document.head.querySelector(`meta[name="${name}"]:not([${MANAGED_ATTRIBUTE}])`)) {
+      continue;
+    }
+    document.head.insertBefore(element, charset ? charset.nextSibling : document.head.firstChild);
+  }
+  removeAll(PAGE_JSON_LD_SELECTOR);
   if (metadata?.icons) removeAll(ICON_SELECTORS);
   if (metadata?.manifest) removeAll(MANIFEST_SELECTOR);
 

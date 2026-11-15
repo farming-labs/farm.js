@@ -114,6 +114,12 @@ export function ProductPrice({ id }: { id: string }) {
 
 The hook returns `data`, `error`, `status`, `pending`, `fetching`, `stale`, and `refetch`. Stale data remains visible while Farm refreshes it in the background. Stale queries also refresh on window focus and reconnect unless those options are disabled.
 
+The browser cache lives only in the browser. During server rendering, `useServerQuery` (and the
+Solid, Vue, and Svelte bindings) returns an idle snapshot and starts no read; the browser loads the
+query after hydration. `fetchServerQuery` and `prefetchServerQuery` called on the server run the
+query directly for that request, so the query's own `key` and `staleTime` decide what is shared
+between requests. One visitor's result never reaches another visitor through the browser cache.
+
 Set `enabled: false` to pause automatic reads, invalidation refetches, and focus/reconnect refresh.
 An already-running read is not cancelled. Switching back to `enabled: true` checks the cache again:
 missing or stale data refreshes, fresh data is reused, and pending work is deduplicated. This does
@@ -128,6 +134,9 @@ timestamp is newer than the invalidation or its canonical key is learned only on
 The original caller still receives its result. Enabled mounted consumers refresh after the old
 work settles; an imperative read with `swr: false` waits for fresh data on the next call.
 Unrelated invalidations and invalidations before a read starts do not invalidate that read.
+Broadcast invalidations for keys a client cache does not own are retained only by active
+request-lifetime trackers, not indefinitely by every cache. Cached, subscribed, and pending keys
+still receive invalidations, including keys reached through provisional aliases.
 
 Use `fetchServerQuery(productQuery, input)` for an imperative browser read that should participate in deduplication and SWR. Calling the generated `productQuery(input)` reference directly still returns plain typed data, but the fetch helper supplies the browser cache lifecycle.
 
@@ -229,6 +238,10 @@ canonical key, a late older response cannot replace a newer request's cached res
 still receives its own result. Once both references' keys are known, newer pending and error states
 are protected too. A key cannot be associated with a previously unknown reference until a Farm
 transport returns its cache metadata; plain-data transports remain scoped to the function and input.
+
+Expired shared-cache entries keep their aliases and invalidation marks while a related subscription
+or request is active. Releasing an owner rechecks that key without scanning unrelated pending
+entries. Retargeting an alias also releases the previous target's metadata once it has no owner.
 
 ### Share optimistic updates
 

@@ -339,6 +339,32 @@ describe("Farm test API harness", () => {
     expect(response.status).toBe(200);
     await expect(response.json()).resolves.toEqual({ id: "guide", mode: "raw" });
   });
+
+  it("sends a body to a path-inferred endpoint created without a method", async () => {
+    const farm = createFarmTestHarness();
+    // File routes take the method from the export name, so the endpoint has none of its own.
+    const POST = createEndpoint({ body: z.object({ name: z.string() }) }, async (ctx) => ({
+      method: ctx.request?.method,
+      name: ctx.body.name,
+    }));
+
+    const response = await farm.endpoint(POST, { json: { name: "Farm" } });
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toEqual({ method: "POST", name: "Farm" });
+
+    const PUT = createEndpoint({ body: z.object({ name: z.string() }) }, async (ctx) => ({
+      method: ctx.request?.method,
+    }));
+    const put = await farm.endpoint(PUT, { method: "PUT", json: { name: "Farm" } });
+    await expect(put.json()).resolves.toEqual({ method: "PUT" });
+  });
+
+  it("keeps GET for explicit-path endpoints created without a method", async () => {
+    const endpoint = createEndpoint("/api/health", {}, async () => ({ ok: true }));
+    expect((endpoint as { __method?: string }).__method).toBe("GET");
+    const response = await createFarmTestHarness().endpoint(endpoint);
+    await expect(response.json()).resolves.toEqual({ ok: true });
+  });
 });
 
 describe("Farm test server function harness", () => {

@@ -1,10 +1,14 @@
 // @vitest-environment node
 
+import React, { createElement, Suspense } from "react";
+import { renderToReadableStream } from "react-dom/server";
 import { describe, expect, it } from "vitest";
 import { resolveConfig } from "../config";
+import { stripFarmLocaleFromPathname } from "../i18n/routing";
 import {
   applyMarkdownNegotiationHeaders,
   createMarkdownMirrorResponse,
+  getFarmMarkdownAlternatePath,
   htmlToMarkdown,
   resolveMarkdownConfig,
   resolveMarkdownMirrorTarget,
@@ -196,6 +200,65 @@ describe("createMarkdownMirrorResponse", () => {
     await expect(response?.text()).resolves.toContain("# Pricing");
   });
 
+  it("keeps a private page private and varies on what the page varies on", async () => {
+    const config = resolveMarkdownConfig({ expose: ["/account"], cache: 60 });
+    const renderPage = () =>
+      new Response("<html><body><main><h1>Account</h1></main></body></html>", {
+        headers: {
+          "content-type": "text/html; charset=utf-8",
+          "cache-control": "private, no-store",
+          vary: "Cookie, Accept",
+        },
+      });
+
+    const negotiated = await createMarkdownMirrorResponse({
+      request: new Request("http://farm.test/account", {
+        headers: { Accept: "text/markdown", Cookie: "session=a" },
+      }),
+      config,
+      routeExists: () => true,
+      renderPage,
+    });
+    expect(negotiated?.headers.get("cache-control")).toBe("private, no-store");
+    expect(negotiated?.headers.get("vary")).toBe("Accept, Cookie");
+
+    const explicit = await createMarkdownMirrorResponse({
+      request: new Request("http://farm.test/account.md", { headers: { Cookie: "session=a" } }),
+      config,
+      routeExists: () => true,
+      renderPage,
+    });
+    expect(explicit?.headers.get("cache-control")).toBe("private, no-store");
+    expect(explicit?.headers.get("vary")).toBe("Cookie");
+  });
+
+  it("keeps a credentialed caller's mirror private when the page sets no cache policy", async () => {
+    // RSC pages answer a signed-in caller without Cache-Control; md.cache must not make
+    // that reader's copy public.
+    const config = resolveMarkdownConfig({ expose: ["/account"], cache: 60 });
+    const renderPage = (request: Request) =>
+      new Response(
+        `<html><body><main><h1>${request.headers.get("cookie") ? "Ada's account" : "Account"}</h1></main></body></html>`,
+        { headers: { "content-type": "text/html; charset=utf-8" } },
+      );
+    for (const headers of [{ Cookie: "session=a" }, { Authorization: "Bearer a" }]) {
+      const mirror = await createMarkdownMirrorResponse({
+        request: new Request("http://farm.test/account.md", { headers }),
+        config,
+        routeExists: () => true,
+        renderPage,
+      });
+      expect(mirror?.headers.get("cache-control")).toBe("private, no-store");
+    }
+    const anonymous = await createMarkdownMirrorResponse({
+      request: new Request("http://farm.test/account.md"),
+      config,
+      routeExists: () => true,
+      renderPage,
+    });
+    expect(anonymous?.headers.get("cache-control")).toBe("public, max-age=60, s-maxage=60");
+  });
+
   it("returns null when the target page route does not exist", async () => {
     const config = resolveMarkdownConfig({
       expose: ["/pricing"],
@@ -288,6 +351,108 @@ describe("applyMarkdownNegotiationHeaders", () => {
   });
 });
 
+describe("getFarmMarkdownAlternatePath", () => {
+  it("returns the .md URL a page advertises, or null when it has no mirror", () => {
+    const everyPage = resolveMarkdownConfig(undefined);
+    expect(getFarmMarkdownAlternatePath(everyPage, "/")).toBe("/index.md");
+    expect(getFarmMarkdownAlternatePath(everyPage, "/docs/intro/")).toBe("/docs/intro.md");
+
+    const pricingOnly = resolveMarkdownConfig({ expose: ["/pricing"] });
+    expect(getFarmMarkdownAlternatePath(pricingOnly, "/pricing")).toBe("/pricing.md");
+    expect(getFarmMarkdownAlternatePath(pricingOnly, "/account")).toBeNull();
+    expect(getFarmMarkdownAlternatePath(resolveMarkdownConfig(false), "/pricing")).toBeNull();
+  });
+});
+
+describe("Markdown under a basePath and locale prefix", () => {
+  // Routes see /console/fr/about as /about, as the route manager and production strip it.
+  const routePathname = (pathname: string) =>
+    stripFarmLocaleFromPathname(pathname, {
+      locales: ["en", "fr"],
+      defaultLocale: "en",
+      routing: "prefix-except-default",
+      basePath: "/console",
+    });
+
+  it("advertises a home page's Markdown at <prefix>/index.md, as llms.txt links it", () => {
+    const everyPage = resolveMarkdownConfig(undefined);
+    const advertised = (pathname: string) =>
+      getFarmMarkdownAlternatePath(everyPage, pathname, { routePathname });
+
+    expect(advertised("/console")).toBe("/console/index.md");
+    expect(advertised("/console/fr")).toBe("/console/fr/index.md");
+    expect(advertised("/console/fr/about")).toBe("/console/fr/about.md");
+    expect(advertised("/console/about")).toBe("/console/about.md");
+    // Without a prefix, the home page keeps /index.md.
+    expect(getFarmMarkdownAlternatePath(everyPage, "/")).toBe("/index.md");
+  });
+
+  it("serves <prefix>/index.md and <prefix>.md as that prefix's home page", () => {
+    const everyPage = resolveMarkdownConfig(undefined);
+    const target = (pathname: string) =>
+      resolveMarkdownMirrorTarget(everyPage, pathname, { routePathname });
+
+    for (const pathname of ["/console/fr/index.md", "/console/fr.md"]) {
+      expect(target(pathname), pathname).toMatchObject({
+        pathname: "/console/fr",
+        markdownPath: "/console/fr/index.md",
+      });
+    }
+    for (const pathname of ["/console/index.md", "/console.md"]) {
+      expect(target(pathname), pathname).toMatchObject({
+        pathname: "/console",
+        markdownPath: "/console/index.md",
+      });
+    }
+    // Only a home page has an index alias.
+    expect(target("/console/about/index.md")).toMatchObject({
+      pathname: "/console/about/index",
+      markdownPath: "/console/about/index.md",
+    });
+  });
+
+  it("matches md.expose against route paths, as llms.txt does", () => {
+    const config = resolveMarkdownConfig({ expose: ["/", { route: "/about", title: "About" }] });
+    const target = (pathname: string) =>
+      resolveMarkdownMirrorTarget(config, pathname, { routePathname });
+
+    expect(target("/console/about.md")).toMatchObject({
+      pathname: "/console/about",
+      route: { route: "/about", title: "About" },
+    });
+    expect(target("/console/fr/about.md")).toMatchObject({ route: { route: "/about" } });
+    expect(target("/console/fr/index.md")).toMatchObject({
+      pathname: "/console/fr",
+      route: { route: "/" },
+    });
+    expect(target("/console/secret.md")).toBeNull();
+    expect(getFarmMarkdownAlternatePath(config, "/console/about", { routePathname })).toBe(
+      "/console/about.md",
+    );
+    expect(getFarmMarkdownAlternatePath(config, "/console/secret", { routePathname })).toBeNull();
+  });
+
+  it("names the home page itself in the actions view of <prefix>/index.md", async () => {
+    const response = await createMarkdownMirrorResponse({
+      request: new Request("http://farm.test/console/fr/index.md?actions"),
+      config: resolveMarkdownConfig(undefined),
+      routePathname,
+      renderPage: (request) => {
+        expect(new URL(request.url).pathname).toBe("/console/fr");
+        return new Response('<main><form method="post"><button>Go</button></form></main>', {
+          headers: { "content-type": "text/html" },
+        });
+      },
+    });
+
+    expect(response?.headers.get("content-location")).toBe("/console/fr/index.md");
+    expect(await response?.json()).toMatchObject({
+      page: "/console/fr",
+      markdown: "/console/fr/index.md",
+    });
+  });
+});
+
 describe("htmlToMarkdown", () => {
   it("converts common page HTML into readable markdown", () => {
     expect(
@@ -334,8 +499,84 @@ describe("htmlToMarkdown", () => {
       "<main><table><tr><th>Target</th><th>Status</th></tr><tr><td>node</td><td>ready</td></tr></table></main>",
       { includeMetadata: false },
     );
+    expect(table).toBe("| Target | Status |\n| --- | --- |\n| node | ready |\n");
+  });
+
+  it("renders tables as GFM tables", () => {
+    expect(
+      htmlToMarkdown(
+        [
+          "<main><p>Plans</p><table><thead><tr><th>Plan</th><th>Price</th><th>Notes</th></tr></thead>",
+          '<tbody><tr><td><a href="/pro">Pro</a></td><td>Q&amp;A | month</td><td><code>a&lt;b</code></td></tr>',
+          '<tr><td colspan="2">Enterprise</td><td>Talk<br>to us</td></tr>',
+          "<tr><td>Free</td></tr></tbody></table></main>",
+        ].join(""),
+        { includeMetadata: false },
+      ),
+    ).toBe(
+      [
+        "Plans",
+        "",
+        "| Plan | Price | Notes |",
+        "| --- | --- | --- |",
+        "| [Pro](/pro) | Q&A \\| month | `a<b` |",
+        "| Enterprise | | Talk to us |",
+        "| Free | | |",
+        "",
+      ].join("\n"),
+    );
+  });
+
+  it("keeps the plain-text fallback for tables with no GFM form", () => {
     // Rows stay separate paragraphs; a single newline would render as one line.
-    expect(table).toBe("Target Status\n\nnode ready\n");
+    expect(
+      htmlToMarkdown(
+        "<main><table><tr><td>outer</td><td><table><tr><td>inner</td></tr></table></td></tr></table></main>",
+        { includeMetadata: false },
+      ),
+    ).toBe("outer\n\ninner\n");
+    expect(
+      htmlToMarkdown(
+        "<main><table><tr><td><pre><code>run()</code></pre></td></tr></table></main>",
+        { includeMetadata: false },
+      ),
+    ).toBe("```\nrun()\n```\n");
+  });
+
+  it("quotes a table inside a blockquote", () => {
+    expect(
+      htmlToMarkdown(
+        "<main><blockquote><table><tr><th>A</th></tr><tr><td>1</td></tr></table></blockquote></main>",
+        { includeMetadata: false },
+      ),
+    ).toBe("> | A |\n> | --- |\n> | 1 |\n");
+  });
+
+  it("keeps the language of a highlighted code block", () => {
+    const convert = (html: string) =>
+      htmlToMarkdown(`<main>${html}</main>`, { includeMetadata: false });
+    expect(convert('<pre><code class="hljs language-ts">let a = 1;</code></pre>')).toBe(
+      "```ts\nlet a = 1;\n```\n",
+    );
+    expect(
+      convert('<pre class="shiki" data-language="tsx"><code><span>x</span></code></pre>'),
+    ).toBe("```tsx\nx\n```\n");
+    expect(convert('<pre class="lang-bash">pnpm dev</pre>')).toBe("```bash\npnpm dev\n```\n");
+    // An info string that could break out of the fence line is dropped.
+    expect(convert('<pre><code data-language="ts\nx">y</code></pre>')).toBe("```\ny\n```\n");
+  });
+
+  it("numbers ordered list items", () => {
+    const convert = (html: string) =>
+      htmlToMarkdown(`<main>${html}</main>`, { includeMetadata: false });
+    expect(convert("<ol><li>Install</li><li>Run <code>farm dev</code></li></ol>")).toBe(
+      "1. Install\n2. Run `farm dev`\n",
+    );
+    expect(convert('<ol start="3"><li>Deploy</li></ol><ul><li>Note</li></ul>')).toBe(
+      "3. Deploy\n\n- Note\n",
+    );
+    // A nested list keeps the bullet fallback rather than mixing up the numbering.
+    expect(convert("<ol><li>One<ul><li>a</li></ul></li></ol>")).toContain("- ");
   });
 
   it("keeps indentation inside code blocks while tidying spacing around them", () => {
@@ -433,6 +674,93 @@ describe("htmlToMarkdown", () => {
     ).toBe("Kept\n");
   });
 
+  it("reads streamed Suspense content in place of its fallback", async () => {
+    const resolved = new Set<string>();
+    function Slow({ id, ms, children }: { id: string; ms: number; children: React.ReactNode }) {
+      if (!resolved.has(id)) {
+        throw new Promise<void>((resolve) =>
+          setTimeout(() => {
+            resolved.add(id);
+            resolve();
+          }, ms),
+        );
+      }
+      return createElement("section", null, children);
+    }
+    const page = createElement(
+      "html",
+      null,
+      createElement(
+        "body",
+        null,
+        createElement(
+          "main",
+          null,
+          createElement("h1", null, "Title"),
+          createElement(
+            Suspense,
+            { fallback: createElement("p", null, "Loading outer...") },
+            createElement(
+              Slow,
+              { id: "outer", ms: 5 },
+              createElement("p", null, "Outer content"),
+              createElement(
+                Suspense,
+                { fallback: createElement("p", null, "Loading inner...") },
+                createElement(Slow, { id: "inner", ms: 30 }, createElement("p", null, "Inner")),
+              ),
+            ),
+          ),
+          createElement("p", null, "After"),
+        ),
+      ),
+    );
+    const html = await new Response(await renderToReadableStream(page)).text();
+    expect(html).toContain('<div hidden id="S:');
+
+    expect(htmlToMarkdown(html, { includeMetadata: false })).toBe(
+      "# Title\n\nOuter content\n\nInner\n\nAfter\n",
+    );
+  });
+
+  it("pairs streamed segments by React's instructions, not by matching numbers", () => {
+    const html =
+      '<main><!--$?--><template id="B:0"></template><p>Loading</p><!--/$--><p>Tail</p></main>' +
+      '<div hidden id="S:0"><p>Wrong segment</p></div>' +
+      '<div hidden id="S:1"><p>Ready <template id="P:2"></template></p></div>' +
+      '<div hidden id="S:2">now</div>' +
+      '<script>$RS("S:2","P:2")</script><script>$RC("B:0","S:1")</script>';
+
+    expect(htmlToMarkdown(html, { includeMetadata: false })).toBe("Ready now\n\nTail\n");
+    // Without an instruction, the fallback stays and hidden segments stay out.
+    expect(
+      htmlToMarkdown(html.replace(/<script>[^<]*<\/script>/g, ""), { includeMetadata: false }),
+    ).toBe("Loading\n\nTail\n");
+  });
+
+  it("removes many hidden elements in work that grows linearly with the page", () => {
+    const regexpExec = RegExp.prototype.exec;
+    const countExecs = (count: number) => {
+      const html = `<main>${Array.from({ length: count }, (_, index) => `<div hidden><p>v${index}</p>`).join("")}</main>`;
+      let calls = 0;
+      RegExp.prototype.exec = function (this: RegExp, input: string) {
+        calls += 1;
+        return regexpExec.call(this, input);
+      };
+      try {
+        htmlToMarkdown(html, { includeMetadata: false });
+      } finally {
+        RegExp.prototype.exec = regexpExec;
+      }
+      return calls;
+    };
+
+    const small = countExecs(500);
+    const large = countExecs(2000);
+    // Four times the elements: about four times the regex steps, not sixteen.
+    expect(large / small).toBeLessThan(5);
+  });
+
   it("keeps content that is only described as hidden, or can be revealed", () => {
     const markdown = (html: string) =>
       htmlToMarkdown(`<main>${html}</main>`, { includeMetadata: false });
@@ -477,6 +805,35 @@ describe("htmlToMarkdown", () => {
     ).toBe("Hello ex**am**ple\n");
   });
 
+  it("separates items in a layout row that has no text of its own", () => {
+    // JSX drops the line breaks between siblings, so a flex row of a label and
+    // a value renders as `<span>00</span><span>Basic starter</span>`.
+    expect(
+      htmlToMarkdown(
+        '<main><div class="eyebrow"><span>00</span><span>FARMJS / Basic starter</span></div>' +
+          '<div class="command"><span>01</span><code>npm run dev</code></div>' +
+          '<nav><span><a href="/docs"><span>Docs</span></a></span>' +
+          '<span><span aria-hidden="true">/</span><a href="/gh"><span>GitHub</span></a></span></nav></main>',
+        { includeMetadata: false },
+      ),
+    ).toBe("00 FARMJS / Basic starter\n\n01 npm run dev\n\nDocs GitHub\n");
+  });
+
+  it("keeps a letter-split word joined in a layout container", () => {
+    expect(
+      htmlToMarkdown(
+        "<main><div><span>a</span><span>g</span><span>e</span><span>n</span><span>t</span><span>s</span></div></main>",
+        { includeMetadata: false },
+      ),
+    ).toBe("agents\n");
+    // Text of the container's own means it is prose, not a row of items.
+    expect(
+      htmlToMarkdown("<main><div>ex<span>am</span><span>ple</span></div></main>", {
+        includeMetadata: false,
+      }),
+    ).toBe("example\n");
+  });
+
   it("prefers page content over layout chrome", () => {
     expect(
       htmlToMarkdown(
@@ -510,5 +867,139 @@ describe("resolveConfig markdown mirrors", () => {
       expose: [{ route: "/pricing" }],
       cache: 60,
     });
+  });
+});
+
+describe("htmlToMarkdown images", () => {
+  const convert = (body: string) =>
+    htmlToMarkdown(`<html><body><main>${body}</main></body></html>`, { includeMetadata: false });
+
+  it("keeps images whatever order alt and src come in", () => {
+    // Farm's <Image> renders alt before src.
+    expect(convert('<p><img alt="Revenue chart" src="/chart.png" width="640"></p>')).toBe(
+      "![Revenue chart](/chart.png)\n",
+    );
+    expect(convert("<p><img src='/logo.svg' alt='Farm logo' /></p>")).toBe(
+      "![Farm logo](/logo.svg)\n",
+    );
+  });
+
+  it("keeps an image without alt text and ignores srcset and data-src", () => {
+    expect(
+      convert('<p><img data-src="/lazy.png" srcset="/a.png 1x, /b.png 2x" src="/photo.jpg"></p>'),
+    ).toBe("![](/photo.jpg)\n");
+  });
+
+  it("keeps only the description of an inline data URL", () => {
+    expect(
+      convert('<p>Before <img alt="Placeholder" src="data:image/png;base64,AAAA"> after</p>'),
+    ).toBe("Before Placeholder after\n");
+  });
+});
+
+describe("Markdown mirror indexing headers", () => {
+  const mirror = (head: string, pageHeaders: Record<string, string> = {}) =>
+    createMarkdownMirrorResponse({
+      request: new Request("https://acme.test/drafts.md"),
+      config: resolveMarkdownConfig({ expose: ["/drafts"] }),
+      renderPage: async () =>
+        new Response(`<html><head>${head}</head><body><main><p>Draft</p></main></body></html>`, {
+          headers: { "Content-Type": "text/html; charset=utf-8", ...pageHeaders },
+        }),
+    });
+
+  it("keeps the page's robots rules and points at its canonical URL", async () => {
+    const response = await mirror(
+      '<meta content="noindex, nofollow" name="robots"><link href="/drafts" rel="canonical">',
+      { "X-Robots-Tag": "noarchive" },
+    );
+    expect(response?.headers.get("x-robots-tag")).toBe("noarchive, noindex, nofollow");
+    expect(response?.headers.get("link")).toBe('<https://acme.test/drafts>; rel="canonical"');
+  });
+
+  it("adds neither header for a page without robots rules or a canonical link", async () => {
+    const response = await mirror("<title>Drafts</title>");
+    expect(response?.headers.get("x-robots-tag")).toBeNull();
+    expect(response?.headers.get("link")).toBeNull();
+  });
+});
+
+describe("htmlToMarkdown page content", () => {
+  it("keeps every item of an index page that has several articles and no main", () => {
+    const markdown = htmlToMarkdown(
+      "<html><body><h1>Blog</h1><p>Latest posts.</p><article><h2>First</h2><p>One</p></article><article><h2>Second</h2><p>Two</p></article></body></html>",
+      { includeMetadata: false },
+    );
+    expect(markdown).toBe("# Blog\n\nLatest posts.\n\n## First\n\nOne\n\n## Second\n\nTwo\n");
+  });
+
+  it("still reads a single article as the page content", () => {
+    expect(
+      htmlToMarkdown(
+        "<html><body><nav><a href='/'>Home</a></nav><article><h1>Post</h1><p>Body.</p></article></body></html>",
+        { includeMetadata: false },
+      ),
+    ).toBe("# Post\n\nBody.\n");
+  });
+});
+
+describe("Markdown mirrors of protected pages", () => {
+  const mirror = (page: Response, method = "GET") =>
+    createMarkdownMirrorResponse({
+      request: new Request("https://acme.test/account.md", { method }),
+      config: resolveMarkdownConfig({ expose: ["/account"] }),
+      renderPage: async () => page,
+    });
+
+  it("answers a sign-in redirect with the same status and a Markdown link", async () => {
+    const response = await mirror(
+      new Response(null, { status: 307, headers: { Location: "/login?next=%2Faccount" } }),
+    );
+    expect(response?.status).toBe(307);
+    expect(response?.headers.get("location")).toBe("/login?next=%2Faccount");
+    expect(response?.headers.get("content-type")).toBe("text/markdown; charset=utf-8");
+    expect(response?.headers.get("cache-control")).toBe("no-store");
+    expect(await response?.text()).toBe(
+      "# Redirected\n\n`/account` redirects to [https://acme.test/login?next=%2Faccount](https://acme.test/login?next=%2Faccount). The page may require signing in.\n",
+    );
+  });
+
+  it("answers a redirect that carries an HTML body with the redirect", async () => {
+    const response = await mirror(
+      new Response("<html><body>Redirecting</body></html>", {
+        status: 307,
+        headers: { Location: "/login", "Content-Type": "text/html; charset=utf-8" },
+      }),
+    );
+    expect(response?.status).toBe(307);
+    expect(response?.headers.get("location")).toBe("/login");
+    expect(await response?.text()).toContain("redirects to [https://acme.test/login]");
+  });
+
+  it("explains 401 and 403 without a page body", async () => {
+    const unauthorized = await mirror(
+      new Response(null, { status: 401, headers: { "WWW-Authenticate": 'Bearer realm="acme"' } }),
+    );
+    expect(unauthorized?.status).toBe(401);
+    expect(unauthorized?.headers.get("www-authenticate")).toBe('Bearer realm="acme"');
+    expect(await unauthorized?.text()).toBe(
+      "# Sign-in required\n\n`/account` requires signing in.\n",
+    );
+
+    const forbidden = await mirror(new Response(null, { status: 403 }));
+    expect(forbidden?.status).toBe(403);
+    expect(await forbidden?.text()).toContain("# Access denied");
+  });
+
+  it("keeps HEAD bodiless and leaves other non-HTML responses alone", async () => {
+    const head = await mirror(
+      new Response(null, { status: 302, headers: { Location: "/login" } }),
+      "HEAD",
+    );
+    expect(head?.status).toBe(302);
+    expect(await head?.text()).toBe("");
+    const failure = new Response("oops", { status: 500 });
+    expect(await mirror(failure)).toBe(failure);
+    expect(await failure.text()).toBe("oops");
   });
 });

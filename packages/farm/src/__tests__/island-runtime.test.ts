@@ -34,6 +34,7 @@ describe("scheduleFarmIslandHydration", () => {
           notifyVisibility = callback;
         }
         observe() {}
+        unobserve() {}
         disconnect() {
           disconnect();
         }
@@ -49,7 +50,7 @@ describe("scheduleFarmIslandHydration", () => {
 
     expect(hydrate).not.toHaveBeenCalled();
     notifyVisibility?.(
-      [{ isIntersecting: true } as IntersectionObserverEntry],
+      [{ isIntersecting: true, target: container.firstElementChild } as IntersectionObserverEntry],
       {} as IntersectionObserver,
     );
 
@@ -71,11 +72,12 @@ describe("scheduleFarmIslandHydration", () => {
         observe(target: Element) {
           observed.push(target);
         }
+        unobserve() {}
         disconnect() {}
       },
     );
     document.body.innerHTML =
-      '<farm-client-boundary id="boundary" style="display:contents"><button type="button">Reveal</button></farm-client-boundary>';
+      '<f-island id="boundary" style="display:contents"><button type="button">Reveal</button></farm-client-boundary>';
     const container = document.getElementById("boundary")!;
     const hydrate = vi.fn(() => "visible");
     const scheduled = scheduleFarmIslandHydration({
@@ -87,7 +89,7 @@ describe("scheduleFarmIslandHydration", () => {
     expect(observed).toEqual([container.querySelector("button")]);
     expect(hydrate).not.toHaveBeenCalled();
     notifyVisibility?.(
-      [{ isIntersecting: true } as IntersectionObserverEntry],
+      [{ isIntersecting: true, target: container.firstElementChild } as IntersectionObserverEntry],
       {} as IntersectionObserver,
     );
     await expect(scheduled).resolves.toBe("visible");
@@ -98,11 +100,12 @@ describe("scheduleFarmIslandHydration", () => {
       "IntersectionObserver",
       class {
         observe() {}
+        unobserve() {}
         disconnect() {}
       },
     );
     document.body.innerHTML =
-      '<farm-client-boundary id="boundary" style="display:contents"></farm-client-boundary>';
+      '<f-island id="boundary" style="display:contents"></farm-client-boundary>';
     const container = document.getElementById("boundary")!;
     const hydrate = vi.fn(() => "visible");
 
@@ -133,6 +136,100 @@ describe("scheduleFarmIslandHydration", () => {
 
     await vi.runAllTimersAsync();
     expect(handledClicks).toBe(1);
+  });
+
+  it("replays every click made while an interaction boundary hydrates, in order", async () => {
+    vi.useFakeTimers();
+    document.body.innerHTML =
+      '<div id="island"><button type="button" id="add">Add</button><button type="button" id="undo">Undo</button></div>';
+    const container = document.getElementById("island")!;
+    const add = document.getElementById("add")!;
+    const undo = document.getElementById("undo")!;
+    const handled: string[] = [];
+    let finishHydrate!: () => void;
+    const scheduled = scheduleFarmIslandHydration({
+      container,
+      strategy: "interaction",
+      hydrate: () =>
+        new Promise<void>((resolve) => {
+          finishHydrate = () => {
+            add.addEventListener("click", () => handled.push("add"));
+            undo.addEventListener("click", () => handled.push("undo"));
+            resolve();
+          };
+        }),
+    });
+
+    add.click();
+    add.click();
+    undo.click();
+    await vi.advanceTimersByTimeAsync(0);
+    finishHydrate();
+    await scheduled;
+    await vi.runAllTimersAsync();
+    expect(handled).toEqual(["add", "add", "undo"]);
+  });
+
+  it("submits a form once when its submit button is clicked twice before hydration", async () => {
+    vi.useFakeTimers();
+    document.body.innerHTML =
+      '<div id="island"><form><button type="submit">Save</button></form></div>';
+    const container = document.getElementById("island")!;
+    const button = container.querySelector("button")!;
+    let finishHydrate!: () => void;
+    const scheduled = scheduleFarmIslandHydration({
+      container,
+      strategy: "interaction",
+      hydrate: () => new Promise<void>((resolve) => (finishHydrate = resolve)),
+    });
+    let submits = 0;
+    container.querySelector("form")!.addEventListener("submit", (event) => {
+      event.preventDefault();
+      submits++;
+    });
+
+    button.click();
+    button.click();
+    await vi.advanceTimersByTimeAsync(0);
+    expect(submits).toBe(0);
+    finishHydrate();
+    await scheduled;
+    await vi.runAllTimersAsync();
+    expect(submits).toBe(1);
+  });
+
+  it("replays a click the boot script queued and announced once, not once per record", async () => {
+    vi.useFakeTimers();
+    const container = document.getElementById("island")!;
+    const button = container.querySelector("button")!;
+    const queue: Array<{ target: Element; kind: string }> = [];
+    Object.assign(window, { __FARM_PREHYDRATION_CLICK_QUEUE__: queue });
+    let handledClicks = 0;
+    let finishHydrate!: () => void;
+    const scheduled = scheduleFarmIslandHydration({
+      container,
+      strategy: "interaction",
+      hydrate: () =>
+        new Promise<void>((resolve) => {
+          finishHydrate = () => {
+            button.addEventListener("click", () => handledClicks++);
+            resolve();
+          };
+        }),
+    });
+
+    // What the boot script does for each click it holds: queue it, then announce it.
+    for (let index = 0; index < 2; index++) {
+      queue.push({ target: button, kind: "click" });
+      document.dispatchEvent(
+        new CustomEvent("farm:island-interaction", { detail: { target: button, kind: "click" } }),
+      );
+    }
+    await vi.advanceTimersByTimeAsync(0);
+    finishHydrate();
+    await scheduled;
+    await vi.runAllTimersAsync();
+    expect(handledClicks).toBe(2);
   });
 
   it("keeps sibling interaction queues and replay boundary-local", async () => {
@@ -315,6 +412,7 @@ describe("scheduleFarmIslandHydration", () => {
           notifyVisibility = callback;
         }
         observe() {}
+        unobserve() {}
         disconnect() {
           disconnect();
         }
@@ -368,7 +466,7 @@ describe("scheduleFarmIslandHydration", () => {
     for (const controller of controllers) controller.abort();
     await Promise.all(scheduled);
     notifyVisibility?.(
-      [{ isIntersecting: true } as IntersectionObserverEntry],
+      [{ isIntersecting: true, target: visible.firstElementChild } as IntersectionObserverEntry],
       {} as IntersectionObserver,
     );
     notifyIdle?.();

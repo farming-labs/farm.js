@@ -55,7 +55,7 @@ describe("React AOT interactive keyed-row compiler", () => {
 
     expect(result.compiled).toEqual(["Tasks"]);
     expect(result.diagnostics).toEqual([]);
-    expect(result.code).toContain("keyedRowsRuntimeFeature");
+    expect(result.code).toContain("keyedRowsIdentityRuntimeFeature");
     expect(result.code).not.toContain("keyedRowsConditionalRuntimeFeature");
     expect(result.code).not.toContain("keyedRowsHostRuntimeFeature");
     expect(result.code).toContain("farmBlocks.KeyedRows");
@@ -234,8 +234,38 @@ describe("React AOT interactive keyed-row compiler", () => {
     expect(result.compiled).toEqual(["Tasks"]);
     expect(result.diagnostics).toEqual([]);
     expect(result.code).toContain("farmBlocks.KeyedRows");
-    expect(result.code).toContain("delegateEvents={true}");
+    // React derives onChange from the target's fiber, so these rows keep React-owned events
+    // under React DOM; only a root without React DOM delegates them.
+    expect(result.code).not.toContain("delegateEvents={true}");
+    expect(result.code).toContain("delegateEventsWithoutReact={true}");
     expect(result.code).toContain("_farmRowEvent(item, 0, 0)");
+  });
+
+  it("delegates row clicks but not row onChange, which React derives from row fibers", async () => {
+    const rows = (control: string) =>
+      compile(`
+        import { useState } from "react";
+        export function Rows() {
+          const [items, setItems] = useState([{ id: "a", done: false }]);
+          return (
+            <section><ul>{items.map((item) => <li key={item.id}><span>{item.id}</span>${control}</li>)}</ul></section>
+          );
+        }
+      `);
+    const clicks = await rows(
+      `<button onClick={() => setItems(items.filter((row) => row.id !== item.id))}>x</button>`,
+    );
+    const changes = await rows(
+      `<input type="checkbox" checked={item.done} onChange={() => setItems(items.map((row) => row.id === item.id ? { ...row, done: !row.done } : row))} />`,
+    );
+
+    for (const result of [clicks, changes]) {
+      expect(result.compiled).toEqual(["Rows"]);
+      expect(result.code).toContain("farmBlocks.KeyedRows");
+    }
+    expect(clicks.code).toContain("delegateEvents={true}");
+    expect(changes.code).not.toContain("delegateEvents={true}");
+    expect(changes.code).toContain("delegateEventsWithoutReact={true}");
   });
 
   it("keeps non-bubbling enter events on the React-owned row path", async () => {
@@ -285,7 +315,7 @@ describe("React AOT interactive keyed-row compiler", () => {
         const [items, setItems] = useState([{ id: "a", label: "Alpha", type: "text" }]);
         return (
           <section>
-            <ul>{items.map((item) => <li key={item.id}>${control}</li>)}</ul>
+            <section><ul>{items.map((item) => <li key={item.id}><span>{item.id}</span>${control}</li>)}</ul></section>
           </section>
         );
       }

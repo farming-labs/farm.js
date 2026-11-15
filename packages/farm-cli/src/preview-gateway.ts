@@ -1,9 +1,11 @@
 import { setTimeout as delay } from "node:timers/promises";
-import { logger } from "@farm.js/core";
+import { logger } from "@farm.js/core/internal/cli-runtime";
 import type { PreviewFarmOptions, PreviewTarget } from "./preview";
 import { formatCompactPreviewDuration } from "./preview-duration";
 
 export interface PreviewGatewayPlan {
+  project?: string;
+  dashboardUrl?: string;
   provider: "farm-gateway";
   gatewayUrl: string;
   relayUrl: string;
@@ -65,7 +67,8 @@ export interface ForwardGatewayRequestOptions {
   maxResponseBodyBytes?: number;
 }
 
-const DEFAULT_GATEWAY_URL = "https://preview.farmjs.dev";
+/** The hosted gateway Farming Labs runs, and the only one trusted with an API key by default. */
+export const DEFAULT_GATEWAY_URL = "https://preview.farmjs.dev";
 const DEFAULT_PREVIEW_DOMAIN = "preview.farmjs.dev";
 const DEFAULT_POLL_TIMEOUT_MS = 15000;
 const DEFAULT_LOCAL_PROBE_INTERVAL_MS = 2000;
@@ -110,9 +113,7 @@ export function createPreviewGatewayPlan(
 ): PreviewGatewayPlan {
   const requestedName =
     sanitizePreviewName(options.name || process.env.FARM_PREVIEW_NAME) || randomPreviewName();
-  const gatewayUrl = normalizeGatewayUrl(
-    options.gatewayUrl || process.env.FARM_PREVIEW_GATEWAY_URL || DEFAULT_GATEWAY_URL,
-  );
+  const gatewayUrl = resolvePreviewGatewayUrl(options.gatewayUrl);
   const relayUrl = normalizeRelayUrl(process.env.FARM_PREVIEW_RELAY_URL || gatewayUrl);
   const domain = normalizePreviewDomain(process.env.FARM_PREVIEW_DOMAIN || DEFAULT_PREVIEW_DOMAIN);
   const requestedHostname = `${requestedName}.${domain}`;
@@ -155,6 +156,8 @@ export async function runPreviewGateway(
 
   logger.success("Preview URL ready.");
   logger.info(`Public: ${session.publicUrl}`);
+  if (plan.dashboardUrl)
+    logger.info(`Dashboard: ${plan.dashboardUrl}/${encodeURIComponent(session.id)}`);
   if (session.expiresAt) {
     logger.info(`Expires: ${new Date(session.expiresAt).toLocaleString()}`);
   }
@@ -548,6 +551,7 @@ export function formatGatewayPlan(plan: PreviewGatewayPlan) {
     `Gateway: ${plan.gatewayUrl}`,
     `Relay:   ${plan.relayUrl}`,
     `Local:   ${plan.target.localUrl}`,
+    ...(plan.project ? [`Project: ${plan.project}`] : []),
     `Public:  ${plan.requestedPublicUrl}`,
     ...(plan.expiresInMs
       ? [`Expires: after ${formatCompactPreviewDuration(plan.expiresInMs)}`]
@@ -573,7 +577,24 @@ function createGatewayErrorResponse(error: unknown): PreviewGatewayResponse {
   };
 }
 
+/** The gateway farm preview uses: --gateway, then FARM_PREVIEW_GATEWAY_URL, then the hosted one. */
+export function resolvePreviewGatewayUrl(gatewayUrl?: string) {
+  return normalizeGatewayUrl(
+    gatewayUrl || process.env.FARM_PREVIEW_GATEWAY_URL || DEFAULT_GATEWAY_URL,
+  );
+}
+
 function normalizeGatewayUrl(value: string) {
+  const url = new URL(value);
+  // Credentials and grants travel to the gateway, so it needs TLS unless it is this machine.
+  if (
+    url.protocol !== "https:" &&
+    !(url.protocol === "http:" && ["localhost", "127.0.0.1", "[::1]"].includes(url.hostname))
+  ) {
+    throw new Error(
+      `The Farm Preview gateway must use https (plain http only on localhost), received ${url.protocol}//${url.host}`,
+    );
+  }
   return value.replace(/\/+$/, "");
 }
 

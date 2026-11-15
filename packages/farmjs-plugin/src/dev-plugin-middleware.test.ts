@@ -43,9 +43,15 @@ async function setup(order: "middleware-first" | "api-first", handler: Middlewar
     config: { root, publicDir: path.join(root, "public") },
     hot: undefined,
     middlewares: { use: (fn: Handler) => handlers.push(fn) },
-    ssrLoadModule: vi.fn(async (file: string) =>
-      file === path.join(root, ROUTE_DIR, "route.ts") ? { GET: endpoint } : {},
-    ),
+    environments: {
+      ssr: {
+        runner: {
+          import: vi.fn(async (file: string) =>
+            file === path.join(root, ROUTE_DIR, "route.ts") ? { GET: endpoint } : {},
+          ),
+        },
+      },
+    },
     moduleGraph: { invalidateModule: vi.fn() },
   };
 
@@ -71,11 +77,15 @@ async function setup(order: "middleware-first" | "api-first", handler: Middlewar
     middlewarePost();
   }
 
-  async function request(url: string) {
+  async function request(
+    url: string,
+    init: { originalUrl?: string; headers?: Record<string, string>; setCookie?: string[] } = {},
+  ) {
     const req = Object.assign(Readable.from([Buffer.alloc(0)]), {
       method: "GET",
       url,
-      headers: { host: "localhost:5173" },
+      originalUrl: init.originalUrl ?? url,
+      headers: init.headers ?? { host: "localhost:5173" },
     });
     const res = Object.assign(new EventEmitter(), {
       statusCode: 200,
@@ -83,7 +93,9 @@ async function setup(order: "middleware-first" | "api-first", handler: Middlewar
       destroyed: false,
       headersSent: false,
       setHeader: vi.fn(),
-      getHeader: vi.fn(),
+      getHeader: vi.fn((name: string) =>
+        name.toLowerCase() === "set-cookie" ? init.setCookie : undefined,
+      ),
       removeHeader: vi.fn(),
       writeHead: vi.fn(),
       write: vi.fn(() => true),
@@ -110,7 +122,7 @@ async function setup(order: "middleware-first" | "api-first", handler: Middlewar
     await vi.waitFor(() =>
       expect(res.writableEnded || reachedEnd || error !== undefined).toBe(true),
     );
-    return { res, reachedEnd, error };
+    return { req, res, reachedEnd, error };
   }
 
   return { request, endpoint };
@@ -157,5 +169,112 @@ describe("farmMiddleware() with farmApi() on one dev server", () => {
     expect(result.reachedEnd).toBe(false);
     expect(result.error).toBeInstanceOf(Error);
     expect((result.error as Error).message).toBe("auth backend down");
+    // Vite's error page is kept out of shared caches, as core's is.
+    expect(result.res.setHeader).toHaveBeenCalledWith("Cache-Control", "private, no-store");
+  });
+
+  // Vite's default appType "spa" runs its HTML fallback before plugin post
+  // middleware and rewrites a GET that accepts any type or text/html to /index.html.
+  for (const order of ["middleware-first", "api-first"] as const) {
+    it(`serves an API GET that Vite's SPA fallback rewrote (${order})`, async () => {
+      const calls: string[] = [];
+      const { request, endpoint } = await setup(order, async (ctx, next) => {
+        calls.push(ctx.pathname);
+        await next();
+      });
+
+      const result = await request("/index.html", { originalUrl: "/api/users/1" });
+
+      expect(result.reachedEnd).toBe(false);
+      expect(calls).toEqual(["/api/users/1"]);
+      expect(endpoint).toHaveBeenCalledTimes(1);
+      const dispatched = endpoint.mock.calls[0]![0] as Request;
+      expect(new URL(dispatched.url).pathname).toBe("/api/users/1");
+    });
+  }
+
+  it("runs page middleware for the navigated path and leaves Vite its shell", async () => {
+    const calls: string[] = [];
+    const { request } = await setup("middleware-first", async (ctx, next) => {
+      calls.push(ctx.pathname);
+      await next();
+    });
+
+    const result = await request("/index.html", { originalUrl: "/dashboard?tab=1" });
+
+    expect(calls).toEqual(["/dashboard"]);
+    expect(result.reachedEnd).toBe(true);
+    expect(result.req.url).toBe("/index.html");
+  });
+
+  it("guards a page navigation that Vite's SPA fallback rewrote", async () => {
+    const { request } = await setup("middleware-first", async (ctx) => {
+      if (ctx.pathname === "/dashboard") ctx.redirect("/login");
+    });
+
+    const result = await request("/index.html", { originalUrl: "/dashboard" });
+
+    expect(result.reachedEnd).toBe(false);
+    expect(result.res.writeHead).toHaveBeenCalledWith(
+      307,
+      expect.objectContaining({ Location: "/login" }),
+    );
+  });
+
+  it("serves an HTTP/2 API request whose headers include pseudo-headers", async () => {
+    const { request, endpoint } = await setup("api-first", async (_ctx, next) => {
+      await next();
+    });
+
+    const result = await request("/api/users/1", {
+      headers: {
+        ":method": "GET",
+        ":path": "/api/users/1",
+        ":scheme": "https",
+        ":authority": "farm.test:5173",
+        accept: "application/json",
+      },
+    });
+
+    expect(result.res.statusCode).toBe(200);
+    expect(endpoint).toHaveBeenCalledTimes(1);
+    const dispatched = endpoint.mock.calls[0]![0] as Request;
+    expect(dispatched.headers.get("host")).toBe("farm.test:5173");
+    expect(dispatched.headers.get("accept")).toBe("application/json");
+    expect(new URL(dispatched.url).host).toBe("farm.test:5173");
+  });
+
+  for (const order of ["middleware-first", "api-first"] as const) {
+    it(`dispatches the path middleware matched, whatever the Host header says (${order})`, async () => {
+      const calls: string[] = [];
+      const { request, endpoint } = await setup(order, async (ctx, next) => {
+        calls.push(ctx.pathname);
+        await next();
+      });
+
+      await request("/api/users/1", { headers: { host: "localhost:5173/api/users/2#" } });
+
+      expect(calls).toEqual(["/api/users/1"]);
+      expect(endpoint).toHaveBeenCalledTimes(1);
+      const dispatched = endpoint.mock.calls[0]![0] as Request;
+      expect(new URL(dispatched.url).pathname).toBe("/api/users/1");
+    });
+  }
+});
+
+describe("farmMiddleware() cookie jar", () => {
+  it("deletes with the cookie's path and keeps Set-Cookie written earlier", async () => {
+    const { request } = await setup("middleware-first", async (ctx, next) => {
+      ctx.cookies.delete("sid", { path: "/admin" });
+      await next();
+    });
+
+    const { res } = await request("/api/users/1", { setCookie: ["prior=1; Path=/"] });
+
+    const setCookie = res.setHeader.mock.calls.findLast(
+      ([name]) => String(name).toLowerCase() === "set-cookie",
+    )?.[1] as string[];
+    expect(setCookie[0]).toBe("prior=1; Path=/");
+    expect(setCookie[1]).toMatch(/^sid=; Max-Age=0; .*Path=\/admin/);
   });
 });

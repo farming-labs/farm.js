@@ -12,15 +12,12 @@ export default defineConfig({
   // of time into direct DOM updates; everything else keeps the normal React
   // path. See src/components/counter.tsx for the opt-in.
   renderer: react({
-    experimental: {
-      compiler: {
-        mode: "annotation",
-        onUnsupported: "warn",
-      },
+    compiler: {
+      mode: "annotation",
+      onUnsupported: "warn",
     },
   }),
   experimental: {
     serverComponents: true,
-    serverActions: true,
   },
 });

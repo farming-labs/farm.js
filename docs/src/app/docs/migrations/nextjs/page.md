@@ -1,126 +1,242 @@
 ---
 title: "Migrate from Next.js"
-description: "Move a Next.js App Router project to Farm with the built-in dry-run-first migrator."
+description: "Move a Next.js App Router project to Farm: routes, server actions, route handlers, middleware, metadata, and Next.js modules."
 section: "Migrations"
 ---
 
 # Migrate from Next.js
 
-Farm's Next.js migrator focuses on App Router projects. Farm uses the same route-file shape for
-pages, layouts, loading states, errors, not-found pages, and API route handlers, so those files can
-move without redesigning the route tree.
+Farm uses the same App Router file shape for pages, layouts, loading states, errors, not-found
+pages, and route handlers, so most of the route tree moves without redesign. The work is in the
+pieces around it: Next.js modules, server actions, middleware, and `next.config`.
 
-## Inspect the project
+> **Using a coding agent?**
+>
+> Point it at [`/docs/migrations/nextjs.md`](/docs/migrations/nextjs.md). That version maps every
+> App Router feature to its Farm equivalent, with before and after code, failure symptoms, and a
+> verification checklist.
 
-Run the inspection from the Next.js project root:
+## Set up Farm
 
-```bash
-farm migrate inspect
-```
-
-Next.js detection uses the `next` dependency, `app` or `src/app`, `next.config.*`, and the legacy
-`pages` directory as evidence. Inspection does not change the project.
-
-## Preview the migration
-
-Prepare a dry-run plan:
+Work on a branch and keep the Next.js app runnable until the Farm build matches it. React is Farm's
+default renderer, so no renderer package is needed:
 
 ```bash
-farm migrate next
+pnpm add @farm.js/core
+pnpm add -D @farm.js/cli
 ```
 
-The plan lists every file it would write, changes to `package.json`, skipped targets, and APIs that
-need manual review. Apply it only after reviewing that output:
+Pin exact versions in `package.json`. Package managers with a minimum release age, such as pnpm 11
+and later, can resolve `latest` to an older Farm release for a day after a publish.
 
-```bash
-farm migrate next --write
+Create `farm.config.ts`:
+
+```ts
+import { defineConfig } from "@farm.js/core";
+
+export default defineConfig({});
 ```
 
-Use `--force` only when you intentionally want generated files to overwrite existing Farm targets.
+Point the scripts at Farm:
 
-## What moves automatically
+```json
+{
+  "scripts": {
+    "dev": "farm dev",
+    "build": "farm build",
+    "start": "node .farm/.output/server/index.mjs"
+  }
+}
+```
 
-The migrator copies `app` or `src/app` into Farm's `src/app` and moves root middleware into the app
-directory.
+## Move files
 
-| Next.js source           | Farm output                                               |
-| ------------------------ | --------------------------------------------------------- |
-| `app/page.tsx`           | `src/app/page.tsx`                                        |
-| `app/about/page.tsx`     | `src/app/about/page.tsx`                                  |
-| `app/api/hello/route.ts` | `src/app/api/hello/route.ts`                              |
-| `middleware.ts`          | `src/app/middleware.ts`                                   |
-| package scripts          | `farm dev`, `farm build`, `node .output/server/index.mjs` |
+Farm's app directory is `src/app`, and the `@/` alias resolves to `src`.
 
-It also:
+| Next.js                                 | Farm                                        |
+| --------------------------------------- | ------------------------------------------- |
+| `app/**`                                | `src/app/**`                                |
+| `components/`, `lib/`, `hooks/` at root | `src/components/`, `src/lib/`, `src/hooks/` |
+| `app/api/**/route.ts`                   | `src/app/api/**/route.ts`                   |
+| `route.ts` outside `app/api`            | `defineRoutes` in `src/routes.ts`           |
+| `middleware.ts` or `proxy.ts` (Next 16) | `src/app/middleware.ts`                     |
+| `public/`                               | `public/`                                   |
+| tsconfig `"@/*": ["./*"]`               | `"@/*": ["./src/*"]`                        |
 
-- creates `farm.config.ts` when one does not exist
-- creates a minimal root layout when one is missing
-- adds `@farm.js/core` and `@farm.js/cli`
-- rewrites supported imports to Farm compatibility entries
+Farm writes `src/lib/api.generated.ts` once the app has API routes, so merge an existing `lib/`
+folder into `src/lib` rather than nesting it.
 
-## Supported import rewrites
+## Replace Next.js modules
 
-| Next.js import    | Farm import                |
-| ----------------- | -------------------------- |
-| `next/link`       | `@farm.js/core/client`     |
-| `next/navigation` | `@farm.js/core/navigation` |
-| `next/headers`    | `@farm.js/core/headers`    |
+Rewrite these imports in every file, not only in `app/`. A shared component that still imports
+`next/link` or `next/navigation` throws `invariant expected app router to be mounted`.
 
-For example:
+| Next.js            | Farm                                                                    |
+| ------------------ | ----------------------------------------------------------------------- |
+| `next/link`        | `import { Link } from "@farm.js/core/client"`                           |
+| `next/navigation`  | `@farm.js/core/navigation`                                              |
+| `next/headers`     | `@farm.js/core/headers`                                                 |
+| `next/cache`       | `@farm.js/core/cache`                                                   |
+| `next/image`       | `import Image from "@farm.js/core/image"`                               |
+| `next/font/local`  | `localFont` from `@farm.js/core/font`                                   |
+| `next/font/google` | a font package with `localFont`, or `@fontsource*` CSS imports          |
+| `next/script`      | the [scripts plugin](/docs/plugins/scripts) or a `<script>` in a layout |
+| `next/dynamic`     | `React.lazy` with `<Suspense>`                                          |
+| `next/og`          | `ImageResponse` from `@farm.js/core/og` (install `@vercel/og`)          |
+| `next/server`      | standard `Request` and `Response`                                       |
+
+Replace `next/font`, `next/image`, and `next/server` before the first run. `next/font/google` makes
+every page fail in development, and a route handler that still imports `next/server` works in
+development but crashes the production server at startup.
 
 ```tsx
 import { Link } from "@farm.js/core/client";
 import { cookies } from "@farm.js/core/headers";
 import { redirect } from "@farm.js/core/navigation";
 
-export default function Page() {
-  if (!cookies().has("session")) redirect("/sign-in");
+export default async function Page() {
+  if (!(await cookies()).has("session")) redirect("/sign-in");
   return <Link href="/docs">Docs</Link>;
 }
 ```
 
-## Compatibility APIs
+## Server actions
 
-Farm provides a deliberately small compatibility surface for common App Router behavior:
+Farm supports two ways to run a mutation on the server.
 
-| API                   | Farm behavior                                                    |
-| --------------------- | ---------------------------------------------------------------- |
-| `redirect()`          | Produces a redirect response through Farm's redirect signal.     |
-| `permanentRedirect()` | Produces the same signal with status 308.                        |
-| `notFound()`          | Produces a not-found signal that Farm renders as a 404.          |
-| `useRouter()`         | Uses Farm's client router for navigation, refresh, and prefetch. |
-| `usePathname()`       | Reads the current pathname on the client.                        |
-| `useSearchParams()`   | Reads the current URL search parameters on the client.           |
-| `headers()`           | Reads the current request headers on the server.                 |
-| `cookies()`           | Reads the current request cookies on the server.                 |
+| Approach               | Status       | Use it when                                                                 |
+| ---------------------- | ------------ | --------------------------------------------------------------------------- |
+| API routes as actions  | Stable       | Most apps. Each action becomes a typed endpoint.                            |
+| Server functions (RSC) | Experimental | The app is built around `"use server"` actions and React Server Components. |
 
-If a request carries duplicate cookie names, `cookies().get(name)` returns the first value in
-header order and `cookies().getAll(name)` preserves every value in that order. This matches browser
-cookie path precedence and the cookie behavior used by Farm's integrations.
+### API routes as actions
 
-## Manual review
+Move each action into a typed endpoint and call it through the generated client. React's form
+hooks keep working with a client function as the action.
 
-The migration report calls out code that Farm cannot convert safely:
+```ts
+// src/app/api/todos/route.ts
+import { createEndpoint } from "@farm.js/core/api";
+import { revalidatePath } from "@farm.js/core/cache";
+import { z } from "zod";
 
-- `next/image`, `next/font`, `next/server`, and other remaining `next/*` imports
-- `getServerSideProps`, `getStaticProps`, and `getInitialProps`
-- Pages Router files under `pages`
-- `next.config.*` settings
-- middleware that uses `next/server`
-- non-code assets that need to be copied or reviewed
+export const POST = createEndpoint(
+  { body: z.object({ title: z.string().trim().min(1) }) },
+  async ({ body }) => {
+    const todo = await db.todo.create({ data: { title: body.title } });
+    await revalidatePath("/todos");
+    return todo;
+  },
+);
+```
 
-Move equivalent configuration into `farm.config.ts` or Vite config. Convert Pages Router data
-functions into Farm page props, server queries, API routes, middleware, or integrations according
-to where the work belongs.
+```tsx
+"use client";
+import { useActionState } from "react";
+import { useRouter } from "@farm.js/core/navigation";
+import { apiClient } from "@/lib/api";
+
+export function TodoForm() {
+  const router = useRouter();
+  const [state, formAction, pending] = useActionState(
+    async (_prev: { error?: string }, formData: FormData) => {
+      const { error } = await apiClient.todos.post({
+        body: { title: String(formData.get("title") ?? "") },
+      });
+      if (error) return { error: error.message };
+      router.refresh();
+      return {};
+    },
+    {},
+  );
+
+  return (
+    <form action={formAction}>
+      <input name="title" />
+      <button disabled={pending}>Add</button>
+      {state.error ? <p role="alert">{state.error}</p> : null}
+    </form>
+  );
+}
+```
+
+See [API Routes](/docs/api-routes) and [API Client](/docs/api-client) for validation, middleware,
+and `src/lib/api.ts`.
+
+### Server functions
+
+Server functions are the closest match to Next.js server actions. A `"use server"` module ports
+with only import changes, and `createServerFn` from `@farm.js/core/server-fn` adds input
+validation, typed errors, and cache invalidation:
+
+```ts
+// src/actions/todos.ts
+import { createServerFn } from "@farm.js/core/server-fn";
+import { z } from "zod";
+
+export const createTodo = createServerFn({
+  input: z.object({ title: z.string().trim().min(1) }),
+  async handler({ input }) {
+    return db.todo.create({ data: { title: input.title } });
+  },
+});
+```
+
+Client components call it directly or through `useAction` from `@farm.js/core/client`, which also
+works as a form action. This path runs on React Server Components, which are experimental: set
+`experimental.serverComponents` and `experimental.serverActions` in `farm.config.ts` (see
+[React Server Components](/docs/server-rendering#react-server-components)), then see
+[Route actions](/docs/routing#route-actions) and
+[Server action security](/docs/configuration#server-action-security).
+
+Setting `experimental.serverActions` without `experimental.serverComponents` does not enable server
+functions in the browser.
+
+## Route handlers and middleware
+
+Route handlers under `src/app/api` keep their exported HTTP methods. Replace `NextRequest` with
+`Request` and `NextResponse.json()` with `Response.json()`.
+
+Middleware moves to `src/app/middleware.ts`:
+
+```ts
+export function middleware(request: Request) {
+  if (!request.headers.get("cookie")?.includes("session=")) {
+    return Response.redirect(new URL("/sign-in", request.url), 307);
+  }
+}
+```
+
+Returning nothing continues the request, like `NextResponse.next()`. See
+[Middleware](/docs/middleware) for matchers, rewrites, and request data.
+
+## Behavior to review
+
+- Pages are rendered on each request by default. Mark routes static explicitly where Next.js
+  rendered them statically. See [Cache and PPR](/docs/cache-ppr).
+- `params` is a plain object. `await params` keeps working, but `use(params)` does not.
+- Page catch-all params such as `[...slug]` arrive as a single string joined with `/`.
+- Public environment values are declared under `env` in `farm.config.ts` instead of relying on
+  the `NEXT_PUBLIC_` prefix. See [Configuration](/docs/configuration).
+- Tailwind CSS v4: run `pnpm add -D @tailwindcss/vite`, keep `tailwindcss` and
+  `@import "tailwindcss";`, then delete `postcss.config.*`, `@tailwindcss/postcss`, and any Tailwind
+  loader in `next.config`. Farm loads `@tailwindcss/vite` from the app; without it the build still
+  succeeds but styles are not processed by Tailwind.
+- Move `redirects`, `rewrites`, and `headers` from `next.config` into `farm.config.ts`. See
+  [Configuration](/docs/configuration).
+- Next's `LayoutProps` and `PageProps` globals do not exist in Farm. Import `LayoutProps` and
+  `PageProps` from `@farm.js/core`; they take the same route literal, such as `PageProps<"/blog/[slug]">`.
 
 ## Finish the migration
 
 ```bash
-pnpm install
 pnpm dev
 pnpm build
+pnpm start
+pnpm exec tsc --noEmit
 ```
 
-Verify every route and API handler, then remove unused Next.js dependencies and configuration only
-after the Farm app is working. The migrator leaves the original source files in place so you can
-compare behavior during the transition.
+Check every route in development and production, confirm client components hydrate and keep state
+across client navigation, and exercise each action and API route. Remove `next`,
+`eslint-config-next`, `next.config.*`, `next-env.d.ts`, and `.next/` only after the Farm build
+behaves the same in production.

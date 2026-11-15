@@ -1,3 +1,4 @@
+import { observeWeakMapSets } from "./observe-weak-map-sets";
 import React, { StrictMode, useState } from "react";
 import { act } from "react";
 import { createRoot, hydrateRoot, type Root } from "react-dom/client";
@@ -68,8 +69,13 @@ function rowDescriptor(item: Item): CompilerKeyedRowElement {
   };
 }
 
-function createWindowHarness(initialItems: Item[], reactivity?: "static" | "hybrid") {
+function createWindowHarness(
+  initialItems: Item[],
+  reactivity?: "static" | "hybrid",
+  delegateEvents = false,
+) {
   const counters = { executions: 0, renders: 0, keys: 0, descriptors: 0, bindings: 0 };
+  const calls: string[] = [];
   let bindingFailure: string | undefined;
   let descriptorFailure: string | undefined;
   let bindingTrace: string[] | undefined;
@@ -146,17 +152,33 @@ function createWindowHarness(initialItems: Item[], reactivity?: "static" | "hybr
           <section>
             <blocks.KeyedRows
               collectionDependency={0}
+              delegateEvents={delegateEvents}
               dependencies={[0]}
+              events={
+                delegateEvents
+                  ? [
+                      {
+                        name: "onClick",
+                        path: [],
+                        invoke: (item, index) => calls.push(`${(item as Item).label}:${index}`),
+                      },
+                    ]
+                  : undefined
+              }
               id={0}
               items={items}
               positionIndexIndependent
               structureDependencies={[0]}
-              render={() => {
+              render={(event) => {
                 counters.renders += 1;
                 return (
                   <ul>
-                    {items().map((item) => (
-                      <li data-key={item.id} key={item.id}>
+                    {items().map((item, index) => (
+                      <li
+                        data-key={item.id}
+                        key={item.id}
+                        onClick={delegateEvents ? event(item, index, 0) : undefined}
+                      >
                         {item.label}
                       </li>
                     ))}
@@ -203,6 +225,7 @@ function createWindowHarness(initialItems: Item[], reactivity?: "static" | "hybr
   );
   return {
     Table,
+    calls,
     counters,
     customReplace: (items: readonly Item[]) => customReplace(items),
     failNextBindingFor: (key: string) => {
@@ -242,6 +265,22 @@ function createWindowHarness(initialItems: Item[], reactivity?: "static" | "hybr
       bindingTrace = trace;
     },
   };
+}
+
+// Retained rows should move the minimum number of times; each fresh row is
+// inserted once.
+function rowInsertions(
+  spy: { mock: { calls: unknown[][] } },
+  existing: Iterable<Element>,
+): { moves: number; created: number } {
+  const before = new Set<unknown>(existing);
+  let moves = 0;
+  let created = 0;
+  for (const [node] of spy.mock.calls) {
+    if (before.has(node)) moves += 1;
+    else created += 1;
+  }
+  return { moves, created };
 }
 
 describe("compiled keyed-array window replacement hints", () => {
@@ -607,7 +646,7 @@ describe("compiled keyed-array window replacement hints", () => {
           { length: 256 },
           (_, index): Item => ({ id: `row-${index}`, label: `Row ${index}` }),
         );
-        const harness = createWindowHarness(initialItems, reactivity);
+        const harness = createWindowHarness(initialItems, reactivity, true);
         const container = document.createElement("div");
         document.body.append(container);
         const root = createRoot(container);
@@ -628,12 +667,7 @@ describe("compiled keyed-array window replacement hints", () => {
             return originalKeys.call(this);
           },
         );
-        const originalSet = WeakMap.prototype.set;
-        vi.spyOn(WeakMap.prototype, "set").mockImplementation(function (
-          this: WeakMap<object, unknown>,
-          key: object,
-          value: unknown,
-        ) {
+        observeWeakMapSets((key, value) => {
           if (
             value !== null &&
             typeof value === "object" &&
@@ -642,7 +676,6 @@ describe("compiled keyed-array window replacement hints", () => {
           ) {
             indexWrites += 1;
           }
-          return originalSet.call(this, key, value);
         });
 
         let expected = initialItems;
@@ -695,7 +728,7 @@ describe("compiled keyed-array window replacement hints", () => {
           await flushCompilerUpdates();
         });
         expect(indexWrites).toBe(initialItems.length);
-        expect(keyEnumerations).toBe(1);
+        expect(keyEnumerations).toBe(0);
         expect(initialRows[32].isConnected).toBe(false);
         const freshRow = container.querySelector('[data-key="fresh"]');
         expect(freshRow?.textContent).toBe("Fresh row");
@@ -711,11 +744,13 @@ describe("compiled keyed-array window replacement hints", () => {
         expect(harness.counters.keys).toBe(1);
         expect(container.querySelector('[data-key="fresh"]')).toBe(freshRow);
         expect(freshRow?.textContent).toBe("Fresh row updated");
+        await act(async () => (freshRow as HTMLElement).click());
+        expect(harness.calls.at(-1)).toBe("Fresh row updated:32");
       },
     );
 
     it.each(["disjoint", "overlapping", "mixed"] as const)(
-      `enumerates only the committed result for %s queued replacements in ${reactivity}`,
+      `avoids key enumeration for %s queued replacements in ${reactivity}`,
       async (mode) => {
         const initialItems = Array.from(
           { length: 256 },
@@ -765,9 +800,8 @@ describe("compiled keyed-array window replacement hints", () => {
             await flushCompilerUpdates();
           });
 
-          // Structural commits still enumerate the new map for listener pruning.
-          // Preparation must not also copy every old key into a temporary set.
-          expect(keyEnumerations).toBe(1);
+          // Both preparation and cleanup use the owned maps for membership.
+          expect(keyEnumerations).toBe(0);
           const rows = [...container.querySelectorAll("li")];
           expect(rows.map((row) => row.textContent)).toEqual(expected.map((item) => item.label));
           expect(rows.map((row) => row.getAttribute("data-key"))).toEqual(
@@ -1147,7 +1181,7 @@ describe("compiled keyed-array window replacement hints", () => {
       expect(rows[position + offset]?.isConnected).toBe(false);
       expect(nextRows[position + offset]?.getAttribute("data-key")).toBe(`fresh-${offset - 48}`);
     }
-    expect(insertBefore).toHaveBeenCalledTimes(48);
+    expect(rowInsertions(insertBefore, rows)).toEqual({ moves: 47, created: fresh.length });
     expect(harness.counters).toEqual({
       executions: 1,
       renders: 1,
@@ -1201,7 +1235,10 @@ describe("compiled keyed-array window replacement hints", () => {
     initialRows.slice(position + 48, position + 64).forEach((row) => {
       expect(row.isConnected).toBe(false);
     });
-    expect(insertBefore).toHaveBeenCalledTimes(48);
+    expect(rowInsertions(insertBefore, initialRows)).toEqual({
+      moves: 47,
+      created: freshForGrowth.length,
+    });
     expect(harness.counters).toEqual({
       executions: 1,
       renders: 1,
@@ -1242,7 +1279,10 @@ describe("compiled keyed-array window replacement hints", () => {
     rowsBeforeShrink.slice(position + 32, position + 80).forEach((row) => {
       expect(row.isConnected).toBe(false);
     });
-    expect(insertBefore).toHaveBeenCalledTimes(32);
+    expect(rowInsertions(insertBefore, rowsBeforeShrink)).toEqual({
+      moves: 31,
+      created: freshForShrink.length,
+    });
     expect(harness.counters).toEqual({
       executions: 1,
       renders: 1,
@@ -1281,6 +1321,7 @@ describe("compiled keyed-array window replacement hints", () => {
       (_, offset): Item => ({ id: `second-${offset}`, label: `Second ${offset}` }),
     );
     const list = container.querySelector("ul")!;
+    const rowsBeforeQueue = [...container.querySelectorAll("li")];
     const insertBefore = vi.spyOn(list, "insertBefore");
     harness.counters.keys = 0;
     harness.counters.descriptors = 0;
@@ -1326,7 +1367,10 @@ describe("compiled keyed-array window replacement hints", () => {
     initialRows
       .slice(secondSourcePosition + 16, secondSourcePosition + 32)
       .forEach((row) => expect(row.isConnected).toBe(false));
-    expect(insertBefore).toHaveBeenCalledTimes(40);
+    expect(rowInsertions(insertBefore, rowsBeforeQueue)).toEqual({
+      moves: 38,
+      created: firstFresh.length + secondFresh.length,
+    });
     expect(harness.counters).toEqual({
       executions: 1,
       renders: 1,

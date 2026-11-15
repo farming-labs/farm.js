@@ -41,7 +41,7 @@ async function createHMRHarness(options: { withRootPost?: boolean } = {}) {
   const plugin = farmApiPlugin() as any;
   const server: any = {
     config: { root },
-    ssrLoadModule,
+    environments: { ssr: { runner: { import: ssrLoadModule } } },
     moduleGraph: { invalidateModule: vi.fn() },
     middlewares: { use() {} },
     watcher: { on() {} },

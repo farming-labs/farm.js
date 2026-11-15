@@ -1,6 +1,7 @@
 import {
   createNodePreviewGatewayHandler,
   verifyPreviewTunnelGrant,
+  type PreviewGatewayCreateSessionOptions,
   type PreviewManagedAuthOptions,
   type PreviewGatewayRequest,
   type PreviewGatewayResponse,
@@ -8,7 +9,9 @@ import {
   type PreviewGatewayStore,
 } from "@farm.js/preview-gateway";
 import { createPersistentPreviewRelay } from "@farm.js/preview-tunnel";
-import { del, get, list, put } from "@vercel/blob";
+import { waitUntil } from "@vercel/functions";
+import { createInfraPreviewIntegration } from "../lib/infra.js";
+import { BlobPreconditionFailedError, del, get, list, put } from "@vercel/blob";
 
 import { createRedisPreviewAuthExchangeRateLimiter } from "../lib/redis-auth-rate-limiter.js";
 import { createRedisPreviewRelayCoordinator } from "../lib/redis-coordinator.js";
@@ -22,11 +25,28 @@ const BLOB_PREFIX = "farm-preview";
 const BLOB_ACCESS = "private";
 
 class VercelBlobPreviewGatewayStore implements PreviewGatewayStore {
-  async createSession(session: PreviewGatewaySession, ttlMs: number): Promise<void> {
-    await Promise.all([
-      this.write(this.sessionKey(session.id), session, ttlMs),
-      this.write(this.nameKey(session.name), session.id, ttlMs),
-    ]);
+  async createSession(
+    session: PreviewGatewaySession,
+    ttlMs: number,
+    options: PreviewGatewayCreateSessionOptions = {},
+  ): Promise<boolean> {
+    // The session record is written before the name is claimed, so a name
+    // that points at a missing session always belongs to a dead one.
+    await this.write(this.sessionKey(session.id), session, ttlMs);
+    const claimed = await this.claimName(session, ttlMs, async (owner) => {
+      if (owner === session.id || owner === options.replaceSessionId) return true;
+      return !(await this.getSessionById(owner));
+    });
+    if (!claimed) await this.deletePath(this.sessionKey(session.id));
+    return claimed;
+  }
+
+  async reserveName(name: string, ownerId: string, ttlMs: number): Promise<void> {
+    await this.write(this.reservationKey(name), ownerId, ttlMs);
+  }
+
+  async getNameReservation(name: string): Promise<string | undefined> {
+    return await this.read<string>(this.reservationKey(name));
   }
 
   async getSessionByName(name: string): Promise<PreviewGatewaySession | undefined> {
@@ -43,7 +63,9 @@ class VercelBlobPreviewGatewayStore implements PreviewGatewayStore {
     const remainingTtlMs = Math.max(1, Math.min(ttlMs, session.expiresAt - Date.now()));
     await Promise.all([
       this.write(this.sessionKey(session.id), nextSession, remainingTtlMs),
-      this.write(this.nameKey(session.name), session.id, remainingTtlMs),
+      // Only refresh a name this session still owns: a late poll from a
+      // replaced session must not take the name back.
+      this.claimName(session, remainingTtlMs, async (owner) => owner === session.id),
     ]);
   }
 
@@ -107,15 +129,49 @@ class VercelBlobPreviewGatewayStore implements PreviewGatewayStore {
   }
 
   async deleteSession(session: PreviewGatewaySession): Promise<void> {
+    // The name may have been taken over by a newer session; only remove the
+    // mapping if it still points at the session being deleted.
+    const owner = await this.readEntry<string>(this.nameKey(session.name));
     await Promise.all([
       this.deletePath(this.sessionKey(session.id)),
-      this.deletePath(this.nameKey(session.name)),
+      owner?.value === session.id ? this.deletePath(this.nameKey(session.name)) : undefined,
       this.deletePrefix(this.queuePrefix(session.id)),
       this.deletePrefix(this.responsesPrefix(session.id)),
     ]);
   }
 
-  private async write<T>(pathname: string, value: T, ttlMs: number) {
+  /**
+   * Claims a session's name with a compare-and-swap on the name blob's ETag
+   * (or a create-only write when there is none), so two concurrent claims
+   * cannot both win. An expired name is always free.
+   */
+  private async claimName(
+    session: PreviewGatewaySession,
+    ttlMs: number,
+    canReplace: (owner: string) => Promise<boolean>,
+  ): Promise<boolean> {
+    const current = await this.readEntry<string>(this.nameKey(session.name));
+    if (current && !current.expired && !(await canReplace(current.value))) return false;
+    try {
+      await this.write(
+        this.nameKey(session.name),
+        session.id,
+        ttlMs,
+        current ? { ifMatch: current.etag } : { allowOverwrite: false },
+      );
+      return true;
+    } catch (error) {
+      if (isBlobWriteConflict(error)) return false;
+      throw error;
+    }
+  }
+
+  private async write<T>(
+    pathname: string,
+    value: T,
+    ttlMs: number,
+    condition: { ifMatch?: string; allowOverwrite?: boolean } = {},
+  ) {
     const payload: ExpiringValue<T> = {
       expiresAt: Date.now() + ttlMs,
       value,
@@ -124,10 +180,23 @@ class VercelBlobPreviewGatewayStore implements PreviewGatewayStore {
       access: BLOB_ACCESS,
       allowOverwrite: true,
       contentType: "application/json",
+      ...condition,
     });
   }
 
   private async read<T>(pathname: string): Promise<T | undefined> {
+    const entry = await this.readEntry<T>(pathname);
+    if (!entry) return undefined;
+    if (entry.expired) {
+      await this.deletePath(pathname);
+      return undefined;
+    }
+    return entry.value;
+  }
+
+  private async readEntry<T>(
+    pathname: string,
+  ): Promise<{ value: T; etag: string; expired: boolean } | undefined> {
     const blob = await get(pathname, {
       access: BLOB_ACCESS,
       useCache: false,
@@ -138,11 +207,11 @@ class VercelBlobPreviewGatewayStore implements PreviewGatewayStore {
     if (!blob || blob.statusCode !== 200 || !blob.stream) return undefined;
 
     const payload = JSON.parse(await new Response(blob.stream).text()) as ExpiringValue<T>;
-    if (payload.expiresAt <= Date.now()) {
-      await this.deletePath(pathname);
-      return undefined;
-    }
-    return payload.value;
+    return {
+      value: payload.value,
+      etag: blob.blob.etag,
+      expired: payload.expiresAt <= Date.now(),
+    };
   }
 
   private async deletePath(pathname: string) {
@@ -163,6 +232,10 @@ class VercelBlobPreviewGatewayStore implements PreviewGatewayStore {
 
   private key(path: string) {
     return `${BLOB_PREFIX}/${path}`;
+  }
+
+  private reservationKey(name: string) {
+    return this.key(`reserved/${name}.json`);
   }
 
   private sessionKey(id: string) {
@@ -195,6 +268,13 @@ function createVercelBlobStore() {
   return new VercelBlobPreviewGatewayStore();
 }
 
+function isBlobWriteConflict(error: unknown) {
+  return (
+    error instanceof BlobPreconditionFailedError ||
+    (error instanceof Error && /already exists/i.test(error.message))
+  );
+}
+
 function isMissingBlobError(error: unknown) {
   if (!(error instanceof Error)) return false;
   return (
@@ -210,6 +290,10 @@ export const config = {
 
 const domain = process.env.FARM_PREVIEW_DOMAIN || "preview.farmjs.dev";
 const coordinator = createRedisPreviewRelayCoordinator();
+// Managed sign-in is Farm.js Infrastructure: developers sign in there and preview with an API key.
+const infra = process.env.FARM_PREVIEW_AUTH_SECRET
+  ? createInfraPreviewIntegration(process.env, fetch, waitUntil)
+  : undefined;
 const auth = createManagedPreviewAuth();
 const pollingGateway = createNodePreviewGatewayHandler({
   domain,
@@ -217,9 +301,17 @@ const pollingGateway = createNodePreviewGatewayHandler({
   clientHeartbeatTimeoutMs: 1000 * 60 * 30,
   store: createVercelBlobStore(),
   auth,
+  observer: infra?.observer("polling"),
+  authorizeSession: infra?.authorizeSession,
+  // The relay route wins over polling for the same hostname, so a name the
+  // relay serves (or keeps reserved for another account) gets no polling
+  // session or grant. Called per request, after the relay below exists.
+  isPreviewNameClaimed: (name, ownerId) => persistentRelay.isPreviewNameClaimed(name, ownerId),
 });
 
 const persistentRelay = createPersistentPreviewRelay({
+  observer: infra?.observer("websocket"),
+  authorizeSession: infra?.authorizeSession,
   publicBaseUrl: process.env.FARM_PREVIEW_GATEWAY_URL || `https://${domain}`,
   publicDomain: domain,
   publicWebSocketUrl: `wss://${domain}/agent`,
@@ -239,7 +331,13 @@ const persistentRelay = createPersistentPreviewRelay({
               signingSecret: auth.signingSecret,
               name,
             });
-            return { expiresAt: grant.expiresAt };
+            return {
+              expiresAt: grant.expiresAt,
+              ownerId: `${grant.provider || "github"}:${grant.subject}`,
+              project: grant.project ?? grant.name,
+              keyId: grant.keyId,
+              grantId: grant.nonce,
+            };
           } catch {
             return false;
           }
@@ -253,13 +351,7 @@ const persistentRelay = createPersistentPreviewRelay({
 
 function createManagedPreviewAuth(): PreviewManagedAuthOptions | undefined {
   const signingSecret = process.env.FARM_PREVIEW_AUTH_SECRET;
-  const githubClientId = process.env.FARM_PREVIEW_GITHUB_CLIENT_ID;
-  if (!signingSecret && !githubClientId) return undefined;
-  if (!signingSecret || !githubClientId) {
-    throw new Error(
-      "Managed preview auth requires FARM_PREVIEW_AUTH_SECRET and FARM_PREVIEW_GITHUB_CLIENT_ID.",
-    );
-  }
+  if (!signingSecret || !infra) return undefined;
   const rateLimitExchange = createRedisPreviewAuthExchangeRateLimiter();
   if (!rateLimitExchange && process.env.VERCEL_ENV === "production") {
     throw new Error(
@@ -268,7 +360,8 @@ function createManagedPreviewAuth(): PreviewManagedAuthOptions | undefined {
   }
   return {
     signingSecret,
-    githubClientId,
+    deviceAuth: infra.deviceAuth,
+    dashboardUrl: infra.dashboardUrl,
     rateLimitExchange,
     defaultSessionTtlMs: readDuration("FARM_PREVIEW_DEFAULT_TTL_MS", 1000 * 60 * 60),
     maxSessionTtlMs: readDuration("FARM_PREVIEW_MAX_TTL_MS", 1000 * 60 * 60 * 24),

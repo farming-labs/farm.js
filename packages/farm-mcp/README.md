@@ -1,6 +1,6 @@
 # @farm.js/mcp
 
-Experimental Streamable HTTP MCP servers with typed Farm API routes and standalone tools.
+Experimental Streamable HTTP MCP servers with typed Farm API routes, server functions, and standalone tools.
 
 ```ts
 import { defineConfig } from "@farm.js/core/config";
@@ -72,12 +72,17 @@ Config references need an explicit path, for example
 `createEndpoint("/api/projects", { method: "GET" }, handler)`, matching a mounted app route.
 `mcp.tools` replaces automatic discovery; omit it to keep route-owned opt-ins. Bare references
 such as `tools: [listProjects]` preserve route metadata. `authorize` receives a frozen catalog
-with each tool's name and kind (`endpoint` or `standalone`), plus method/path for endpoints and
+with each tool's name and kind (`endpoint`, `serverFunction` or `standalone`), plus method/path for endpoints and
 the resolved server identity. Its optional returned
 `tools` list controls both discovery and invocation: omitted means all configured tools; `[]`
 means none. Scopes and annotations alone never grant or restrict access. Keep endpoint middleware
 for direct HTTP and argument-level permissions; standalone tools use `authorization` in `execute`
 for argument-level checks.
+
+A `createServerFn` or `createServerQuery` function with `mcp: { name }` metadata can be listed in
+`mcp.tools` directly. The call runs the function's own input schema, middleware, handler, output
+schema and invalidations once, with the MCP request as its `request`. Queries are read-only tools
+that return their data. See the [server functions section of the docs](https://farmjs.dev/docs/plugins/mcp).
 
 Standalone tools need no separate HTTP route and can be the only tools in a server. Their
 arguments match `inputSchema` directly (for example `{ query: "farm" }`, without a `query` or

@@ -10,9 +10,8 @@ import {
   resolveFarmRouteRuntimeConfig,
   resolveRouteRenderingConfig,
   scanProgrammaticPagePaths,
-  type FarmRouteRule,
-  type FarmRouteRuntimeConfig,
-} from "@farm.js/core";
+} from "@farm.js/core/internal/cli-runtime";
+import type { FarmRouteRule, FarmRouteRuntimeConfig } from "@farm.js/core";
 import { existsSync, readFileSync, readdirSync, realpathSync } from "node:fs";
 import path from "node:path";
 import pc from "picocolors";
@@ -95,7 +94,7 @@ export async function explainFarmRoute(
 ): Promise<FarmRouteExplanation> {
   const root = path.resolve(options.root || process.cwd());
   const userConfig = await loadConfig(root, options.configPath, "production");
-  const config = await resolveConfig({ root, ...userConfig }, "production");
+  const config = await resolveConfig({ ...userConfig, root }, "production");
   const normalizedPathname = normalizePathname(pathname, config.basePath || "/");
   const candidates = discoverMatchingPages(config, normalizedPathname);
   const page = candidates.sort(
@@ -156,7 +155,7 @@ export async function explainFarmRoute(
       `The route requires ${runtime.runtime}, but the ${preset} preset emits ${presetRuntime} functions.`,
     );
   }
-  if (runtime.regions?.length && preset !== "vercel" && preset !== "vercel-edge") {
+  if (runtime.regions?.length && preset !== "vercel") {
     warnings.push(`${preset} does not map Farm per-route region hints.`);
   }
   if (runtime.maxDuration && preset !== "vercel") {

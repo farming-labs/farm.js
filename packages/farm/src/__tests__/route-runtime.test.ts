@@ -37,6 +37,9 @@ describe("route runtime controls", () => {
       maxDuration: 30,
     });
 
+    expect(normalizeFarmRouteRuntimeConfig({ runtime: "nodejs" as any })).toEqual({
+      runtime: "node",
+    });
     expect(() => normalizeFarmRouteRuntimeConfig({ runtime: "worker" as any })).toThrow(
       'runtime must be "auto", "node", or "edge"',
     );
@@ -192,6 +195,8 @@ function createConfig(
 function createModuleServer(root: string, modules: Map<string, Record<string, unknown>>) {
   return {
     config: { root },
-    ssrLoadModule: async (filePath: string) => modules.get(filePath) || {},
+    environments: {
+      ssr: { runner: { import: async (filePath: string) => modules.get(filePath) || {} } },
+    },
   } as any;
 }

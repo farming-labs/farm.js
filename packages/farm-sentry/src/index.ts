@@ -75,7 +75,7 @@ export interface SentryPluginOptions {
    * not upload anything to Sentry, so stack traces stay minified until the maps
    * are uploaded separately.
    *
-   * Farm only uses its fast esbuild minifier while `sourceMap` is false, so
+   * Farm only uses its fast Oxc minifier while `sourceMap` is false, so
    * turning this on moves minification to Nitro's terser. Install
    * `@rollup/plugin-terser` alongside it, otherwise the build fails with
    * `Cannot find module '@rollup/plugin-terser'`.
@@ -447,7 +447,7 @@ export function sentryPlugin(options: SentryPluginOptions = {}) {
     build: {
       configure(buildConfig: Record<string, unknown>, { state }) {
         if (!state.options.sourceMaps) return;
-        // Generating maps moves minification from Farm's esbuild pass to
+        // Generating maps moves minification from Farm's Oxc pass to
         // Nitro's terser, so the application needs `@rollup/plugin-terser`.
         return { ...buildConfig, sourceMap: true };
       },

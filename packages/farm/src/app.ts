@@ -38,7 +38,11 @@ import { resolveFarmSecurityConfig, type ResolvedFarmSecurityConfig } from "./se
 import { resolveFarmThemeConfig } from "./theme/config";
 import { _setDefaultFarmThemeConfig } from "./theme/server";
 import type { ResolvedFarmThemeConfig } from "./theme/types";
-import { getFarmRendererComponentExtensions, resolveFarmRenderer } from "./renderer";
+import {
+  getFarmRendererComponentExtensions,
+  isFarmRendererDisabled,
+  resolveFarmRenderer,
+} from "./renderer";
 import type { FarmRenderer } from "./renderer";
 import { normalizeFarmAPIConfig, type ResolvedFarmAPIConfig } from "./api/config";
 
@@ -118,6 +122,7 @@ export class FarmApp {
 
     // Discover and register routes
     await this.routeManager.discoverRoutes();
+    if (isFarmRendererDisabled(this.config.renderer)) this.assertNoPageRoutes();
 
     // Compile hydration and island decisions once during startup. Navigation
     // requests only read this manifest; HMR invalidates it when route code changes.
@@ -160,6 +165,7 @@ export class FarmApp {
       preset: config.preset ?? "node-server",
       deploy: config.deploy || {},
       storage: config.storage || {},
+      schema: config.schema || {},
       cache: config.cache || {},
       auth: isResolvedAuthConfig(config.auth) ? config.auth : resolveFarmAuthConfig(config.auth),
       integrations: config.integrations || {},
@@ -174,7 +180,10 @@ export class FarmApp {
       server: resolveFarmServerConfig(config.server),
       serverActions: resolveServerActionsConfig(config.serverActions),
       security: resolveFarmSecurityConfig(config.security),
-      images: resolveFarmImageConfig(config.images),
+      images: resolveFarmImageConfig(
+        config.images,
+        isFarmRendererDisabled(config.renderer) ? "none" : undefined,
+      ),
       performance: resolveFarmPerformanceConfig(config.performance),
       theme: resolveFarmThemeConfig(config.theme, basePath),
       i18n: isResolvedI18nConfig(config.i18n)
@@ -193,6 +202,7 @@ export class FarmApp {
       mdx: resolveMdxConfig(config.mdx),
       observability: config.observability ?? false,
       telemetry: config.telemetry !== false,
+      analytics: config.analytics !== false,
       devtools: resolveFarmDevtoolsConfig(
         config.devtools,
         process.env.NODE_ENV === "production" ? "production" : "development",
@@ -213,6 +223,20 @@ export class FarmApp {
       agent: config.agent ?? {},
       vite: config.vite || {},
     };
+  }
+
+  /** `renderer: false` serves no pages, so a page or layout file would silently never answer. */
+  private assertNoPageRoutes(): void {
+    const files = [
+      ...this.routeManager.getRoutes().values(),
+      ...this.routeManager.getLayouts().values(),
+    ].map((entry) => path.relative(this.config.root, entry.modulePath).split(path.sep).join("/"));
+    if (files.length === 0) return;
+    throw new Error(
+      `This app sets \`renderer: false\`, which serves API routes only, but it has pages or layouts:\n` +
+        [...new Set(files)].map((file) => `  - ${file}`).join("\n") +
+        "\nRemove these files, or remove `renderer: false` to render pages.",
+    );
   }
 
   private async verifyAppStructure(): Promise<void> {
@@ -246,7 +270,8 @@ export class FarmApp {
       (results) => results.some(Boolean),
     );
 
-    if (!hasRootLayout) {
+    // A backend-only app (`renderer: false`) has no layouts by design.
+    if (!hasRootLayout && !isFarmRendererDisabled(this.config.renderer)) {
       logger.warn(
         `No root layout found. Consider creating src/app/layout${componentExtensions[0]} for consistent page structure.`,
       );

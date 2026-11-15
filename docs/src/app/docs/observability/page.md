@@ -113,13 +113,14 @@ Use `getFarmTraceContext()` when a log or provider call needs the current trace 
 
 Metric attributes are deliberately bounded. A cache `key` embeds the serialized arguments of the cached call, a tag is authored at runtime, and the `route` on cache, PPR, and streaming events is the request pathname rather than a route pattern, so none of them becomes a metric attribute. That detail is recorded as an event on the active span instead, where per-request cardinality is free and a stale serve stays attributable to the request that caused it. When `observability.tracing` is enabled Farm already writes those span events itself, so `@farm.js/otel` does not add a second copy.
 
-Metrics need a metric reader, and Farm registers one only when you ask for it. Name an exporter with `OTEL_METRICS_EXPORTER`, or pass `metricReaders` to `registerOTel`:
+Metrics need a metric reader, and Farm registers one only when the app points metrics somewhere: an OTLP endpoint in `OTEL_EXPORTER_OTLP_ENDPOINT` or `OTEL_EXPORTER_OTLP_METRICS_ENDPOINT`, an exporter named in `OTEL_METRICS_EXPORTER`, or `metricReaders` passed to `registerOTel`. `OTEL_METRICS_EXPORTER=none` turns metrics off even when an endpoint is set:
 
 ```bash
+OTEL_EXPORTER_OTLP_ENDPOINT=https://collector.example.com # traces and metrics
 OTEL_METRICS_EXPORTER=otlp # otlp, console, prometheus, or none
 ```
 
-Without it there is no meter provider, the instruments are no-ops, and the span events still work. That opt-in is deliberate: left to its own defaults the Node SDK exports metrics to `localhost:4318` whether or not an app configured metrics, and with nothing listening there every recorded metric turns graceful shutdown into the exporter's retry window, around eight seconds. Traces are unaffected and keep using the OTLP trace endpoint.
+Without any of these there is no meter provider, the instruments are no-ops, and the span events still work. That opt-in is deliberate: left to its own defaults the Node SDK exports metrics to `localhost:4318` whether or not an app configured metrics, and with nothing listening there every recorded metric turns graceful shutdown into the exporter's retry window, around eight seconds. Traces are unaffected and keep using the OTLP trace endpoint.
 
 Pass `farmEvents` to narrow or disable the mapping:
 
@@ -179,6 +180,8 @@ onFarmEvent((event) => {
 | PPR                  | ppr.shell.hit, ppr.shell.cached, ppr.shell.invalidated                           |
 | Middleware           | middleware.start, middleware.complete, middleware.shortCircuit, middleware.error |
 | Integrations         | integration.ready, integration.api.call.start, integration.webhook.verified      |
+| MCP                  | mcp.tool.complete (registered callback outcome, not an agent run)                |
+| Agents               | agent.read (Markdown mirror, llms.txt, or API catalog read)                      |
 | Integration database | storage.query.start, storage.schema.ready                                        |
 | Build                | build.start, routes.generated, types.generated, manifest.generated               |
 
@@ -207,6 +210,8 @@ export default defineConfig({
 
 `events` is optional. Leave it out to receive every emitted event. Filtering event delivery does not disable span creation, the events recorded on active spans, or the `@farm.js/otel` metrics; use `farmEvents: false` for those.
 
+Cache and PPR shell keys can contain call arguments and query strings, so built-in logs print `key_hash=<digest>` and exported spans carry `farm.key_hash` instead of the key; `onEvent` handlers still receive `event.key`. `route.redirect` carries the redirect target without its query string or fragment.
+
 ## Runtime subscription
 
 Use `onFarmEvent` for tests, local debugging, or integration packages that want to register listeners without owning app config.
@@ -230,11 +235,45 @@ unsubscribe();
 | Cache                | `cache.hit`, `cache.miss`, `cache.set`, `cache.stale`, `cache.bypass`, `cache.invalidated`, `cache.revalidatePath`, `cache.revalidateTag`, `cache.updateTag`, `cache.error`                                                        |
 | PPR                  | `ppr.shell.hit`, `ppr.shell.miss`, `ppr.shell.cached`, `ppr.shell.bypass`, `ppr.shell.invalidated`, `ppr.suspense.holeDetected`, `ppr.refresh.start`, `ppr.refresh.complete`, `ppr.refresh.error`                                  |
 | API                  | `api.request.start`, `api.request.complete`, `api.validation.failed`, `api.error`                                                                                                                                                  |
+| MCP                  | `mcp.tool.complete` — configured server, transport route, tool name, outcome and duration; no tool payloads                                                                                                                        |
+| Agents               | `agent.read` — surface (`markdown`, `llms`, `llms-full`, `api-catalog`), path, Markdown view (`outline`, `section`, `parts`, `actions`), status, and the agent the User-Agent declares                                             |
 | Integrations         | `integration.registered`, `integration.config.validated`, `integration.ready`, `integration.disposed`, `integration.api.call.start`, `integration.api.call.complete`, `integration.webhook.verified`, `integration.webhook.failed` |
 | Middleware           | `middleware.start`, `middleware.complete`, `middleware.shortCircuit`, `middleware.error`                                                                                                                                           |
 | Integration database | `storage.query.start`, `storage.query.complete`, `storage.query.error`, `storage.schema.ready`, `storage.schema.error`                                                                                                             |
 
 Middleware events include the matched middleware route, request pathname, middleware file/config name, duration for completes, status for short circuits, and the thrown error for failures.
+
+MCP completion events distinguish tool errors from successful HTTP transport responses. They cover
+registered callbacks only, excluding authorization and SDK rejections before callback execution.
+See [MCP tool observability](/docs/plugins/mcp#observe-tool-executions) for payload and coverage details.
+
+## Agent reads
+
+`agent.read` fires each time an agent surface answers: a Markdown mirror or `page.md` (including
+`?outline`, `?section`, `?max_tokens` parts, and `?actions`), `/llms.txt` or `/llms-full.txt`,
+`/.well-known/api-catalog`, `/.well-known/ai-catalog.json` or `/.well-known/ard.json`
+(`ai-catalog`), and an MCP server card (`mcp-server-card`). It carries the path served, never the query string, the status, and the
+agent the request's User-Agent declares:
+
+```ts
+onFarmEvent((event) => {
+  if (event.type !== "agent.read") return;
+  // { surface: "markdown", route: "/pricing.md", view: "parts", status: 200,
+  //   agent: { family: "openai", category: "agent", identity: "self-reported" } }
+  metrics.increment("agent_reads", { surface: event.surface, family: event.agent.family });
+});
+```
+
+`agent.category` is `agent` for user-triggered fetchers such as ChatGPT-User, Claude-User, and
+Perplexity-User, `crawler` for indexing and training crawlers such as GPTBot, ClaudeBot, and
+PerplexityBot, and `harness` for coding agents such as Claude Code and Codex. The identity is
+`self-reported`: any client can send these tokens, so use it to understand traffic, never to grant
+access. Farm's own reads, such as llms-full.txt reading each page, are not reported.
+
+`classifyFarmAgent(userAgent)` from `@farm.js/core` returns the same identity for any request, for
+example in middleware. `classifyFarmClient(request)` also names clients that aren't AI agents, such
+as browsers, search crawlers and scripts, the way [Farm Infra analytics](/docs/infra-analytics#which-client-sent-a-request)
+reports them.
 
 ## Middleware event payloads
 

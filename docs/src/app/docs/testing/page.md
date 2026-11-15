@@ -106,6 +106,8 @@ const response = await farm.endpoint(GET, {
 });
 ```
 
+A file route takes its method from the export name, so `endpoint` uses the `method` you pass, then the endpoint's own `method`, then `POST` when the request has `json`, `form`, or `body`, and `GET` otherwise.
+
 The helpers return JSON 404 and 405 responses just like the API route manager. Thrown handlers become a 500 response by default. Set `throwOnError: true` when a unit test needs to inspect the original error.
 
 ## Test server functions

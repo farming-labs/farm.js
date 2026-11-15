@@ -1,7 +1,7 @@
 // @vitest-environment node
 import { describe, expect, it, vi } from "vitest";
 import { z } from "zod";
-import { createEndpoint } from "@farm.js/core/api";
+import { createEndpoint, EndpointFailure } from "@farm.js/core/api";
 import { invokeAPIRouteEndpoint, mergePluginAPIRoutes } from "@farm.js/core/api/runtime";
 import type { FarmMCPConfig, FarmMCPExecuteContext } from "@farm.js/core";
 import { apiMcp, defineTool } from "./index.js";
@@ -314,22 +314,82 @@ describe("standalone MCP tools", () => {
     expect(cancelled).toHaveBeenCalledTimes(1);
   });
 
-  it("maps execution failures to tool errors and keeps the server usable", async () => {
+  it("maps execution failures to logged generic tool errors and keeps the server usable", async () => {
+    const consoleError = vi.spyOn(console, "error").mockImplementation(() => {});
     const execute = vi
       .fn()
-      .mockRejectedValueOnce(new Error("Project unavailable"))
+      .mockRejectedValueOnce(new Error("connect postgres://admin:hunter2@db.internal failed"))
       .mockResolvedValueOnce(null);
     const endpoint = mount({
       tools: [defineTool({ name: "search", inputSchema: z.object({}), execute })],
       allowUnauthenticated: true,
     });
-    const failed = await call(endpoint, "tools/call", { name: "search", arguments: {} });
-    expect(failed.payload.result.isError).toBe(true);
-    expect(failed.payload.result.content[0].text).toBe("Project unavailable");
-    expect(
-      (await call(endpoint, "tools/call", { name: "search", arguments: {} })).payload.result
-        .structuredContent,
-    ).toEqual({ result: null });
+    try {
+      const failed = await call(endpoint, "tools/call", { name: "search", arguments: {} });
+      expect(failed.payload.result.isError).toBe(true);
+      expect(failed.payload.result.content[0].text).toBe("Farm MCP tool execution failed.");
+      expect(JSON.stringify(failed.payload)).not.toContain("hunter2");
+      expect(consoleError).toHaveBeenCalledTimes(1);
+      expect(
+        (await call(endpoint, "tools/call", { name: "search", arguments: {} })).payload.result
+          .structuredContent,
+      ).toEqual({ result: null });
+    } finally {
+      consoleError.mockRestore();
+    }
+  });
+
+  it("returns validator messages but hides exceptions thrown inside input refinements", async () => {
+    const consoleError = vi.spyOn(console, "error").mockImplementation(() => {});
+    const execute = vi.fn(() => null);
+    const inputSchema = z.object({ slug: z.string() }).refine(({ slug }) => {
+      if (slug === "boom") throw new Error("connect postgres://admin:hunter2@db.internal failed");
+      return slug !== "taken";
+    }, "Slug is taken");
+    const endpoint = mount({
+      tools: [defineTool({ name: "claim", inputSchema, execute })],
+      allowUnauthenticated: true,
+    });
+    const run = async (slug: string) =>
+      (await call(endpoint, "tools/call", { name: "claim", arguments: { slug } })).payload.result;
+    try {
+      const invalid = await run("taken");
+      expect(invalid.isError).toBe(true);
+      expect(invalid.content[0].text).toContain("Slug is taken");
+
+      const thrown = await run("boom");
+      expect(thrown.isError).toBe(true);
+      expect(thrown.content[0].text).toBe("Farm MCP tool execution failed.");
+      expect(JSON.stringify(thrown)).not.toContain("hunter2");
+      expect(consoleError).toHaveBeenCalledTimes(1);
+      expect(execute).not.toHaveBeenCalled();
+    } finally {
+      consoleError.mockRestore();
+    }
+  });
+
+  it("returns a declared endpoint failure thrown by a tool", async () => {
+    const endpoint = mount({
+      tools: [
+        defineTool({
+          name: "reserve",
+          inputSchema: z.object({}),
+          execute: () => {
+            throw new EndpointFailure(
+              "SOLD_OUT",
+              { seat: "1A" },
+              { status: 409, message: "Seat is sold out" },
+            );
+          },
+        }),
+      ],
+      allowUnauthenticated: true,
+    });
+    const { payload } = await call(endpoint, "tools/call", { name: "reserve", arguments: {} });
+    expect(payload.result.isError).toBe(true);
+    expect(JSON.parse(payload.result.content[0].text)).toEqual({
+      error: { code: "SOLD_OUT", status: 409, message: "Seat is sold out", data: { seat: "1A" } },
+    });
   });
 
   it("rejects duplicate mixed names, malformed declarations and non-object input schemas", () => {

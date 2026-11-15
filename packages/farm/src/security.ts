@@ -1,3 +1,6 @@
+import { _markFarmOwnedResponse, _withFarmResponseHeaders } from "./owned-response";
+import { _resolveCurrentCspNonce } from "./server/request-bridge";
+
 export type FarmCspDirectiveValue = string | readonly string[] | boolean | null | undefined;
 
 export type FarmCspDirectives = Readonly<Record<string, FarmCspDirectiveValue>>;
@@ -12,8 +15,9 @@ export interface FarmCspOptions {
   /**
    * Generate a fresh nonce for every dynamic HTML response and per-page
    * script hashes for prerendered HTML. Farm adds the matching sources to the
-   * governing script directive and stamps dynamic script elements with the
-   * response nonce.
+   * governing script directive. Only Farm's own scripts, the renderer's
+   * streaming scripts, and scripts the app gives `getCspNonce()` carry the
+   * nonce (or get a hash); every other script element loses its nonce.
    */
   nonce?: boolean;
 }
@@ -203,8 +207,50 @@ function applyFarmCspScriptSourcesToPolicy(policy: string, sources: readonly str
     .join("; ");
 }
 
+/**
+ * Stamp `nonce` on every script element in `html`. Only for markup Farm
+ * generates itself: app and renderer output must never pass through here,
+ * or an injected script would receive the nonce.
+ */
 export function addFarmCspNonceToScriptTags(html: string, nonce: string): string {
   validateCspNonce(nonce);
+  return createFarmScriptTagRewriter((tag) => stampScriptTag(tag, nonce)).write(html, true);
+}
+
+/**
+ * Stamp the nonce of the response being rendered on Farm-generated `html`.
+ * Returns `html` unchanged outside nonce mode.
+ */
+export function stampFarmCspNonce(
+  html: string,
+  nonce: string | undefined = _resolveCurrentCspNonce(),
+): string {
+  return nonce && html ? addFarmCspNonceToScriptTags(html, nonce) : html;
+}
+
+/**
+ * Swap a build-time `marker` nonce for the nonce of the response being sent.
+ * Farm renders HTML it stores and serves again (precompiled docs) with a
+ * secret marker in place of a nonce; only script elements carrying exactly
+ * that marker get the response nonce, and every other nonce is left for the
+ * response filter to strip.
+ */
+export function replaceFarmCspNonceMarker(
+  html: string,
+  marker: string,
+  nonce: string | undefined = _resolveCurrentCspNonce(),
+): string {
+  validateCspNonce(marker);
+  if (nonce) validateCspNonce(nonce);
+  return createFarmScriptTagRewriter((tag) => {
+    const range = findScriptTagAttributeRange(tag, "nonce");
+    if (!range || readAttributeValue(tag.slice(range.start, range.end)) !== marker) return tag;
+    return nonce ? stampScriptTag(tag, nonce) : stripScriptNonceAttribute(tag);
+  }).write(html, true);
+}
+
+/** Keep `nonce` only on script elements that already carry it; strip every other nonce. */
+export function filterFarmCspNonces(html: string, nonce: string): string {
   return createFarmCspNonceRewriter(nonce).write(html, true);
 }
 
@@ -212,6 +258,11 @@ export function removeFarmCspNoncesFromScriptTags(html: string): string {
   return createFarmScriptTagRewriter(stripScriptNonceAttribute).write(html, true);
 }
 
+/**
+ * Hashes of the inline scripts in `html` that carry a nonce attribute: the
+ * scripts the response nonce filter kept, which are Farm's own and the ones
+ * the app opted in with `getCspNonce()`.
+ */
 export async function createFarmCspScriptHashes(html: string): Promise<string[]> {
   const hashes: string[] = [];
   const seen = new Set<string>();
@@ -236,8 +287,8 @@ export async function applyFarmCspHashesToHtml(
   security: ResolvedFarmSecurityConfig,
 ): Promise<{ html: string; header: { key: string; value: string } } | undefined> {
   if (!security.csp || !security.csp.nonce) return undefined;
+  const hashes = await createFarmCspScriptHashes(html);
   const staticHtml = removeFarmCspNoncesFromScriptTags(html);
-  const hashes = await createFarmCspScriptHashes(staticHtml);
   return {
     html: staticHtml,
     header: {
@@ -249,26 +300,32 @@ export async function applyFarmCspHashesToHtml(
   };
 }
 
+/**
+ * Send `response` with the nonce policy. `nonce` is the one the response was
+ * rendered with: script elements that carry it keep it, and every other
+ * script element loses its nonce attribute, so markup injected into the page
+ * can never run under the policy.
+ */
 export function applyFarmCspNonceToResponse(
   response: Response,
   security: ResolvedFarmSecurityConfig,
+  nonce: string | undefined = createFarmCspNonce(security),
 ): Response {
-  if (!security.csp || !security.csp.nonce) return response;
+  if (!security.csp || !security.csp.nonce || !nonce) return response;
   if (!response.headers.get("content-type")?.toLowerCase().includes("text/html")) return response;
 
-  const nonce = createFarmCspNonce(security)!;
   const securityHeader = getFarmSecurityHeader(security, nonce)!;
+
+  if (!response.body) {
+    return _withFarmResponseHeaders(response, (headers) => {
+      headers.set(securityHeader.key, securityHeader.value);
+      headers.delete("content-length");
+    });
+  }
+
   const headers = new Headers(response.headers);
   headers.set(securityHeader.key, securityHeader.value);
   headers.delete("content-length");
-
-  if (!response.body) {
-    return new Response(null, {
-      status: response.status,
-      statusText: response.statusText,
-      headers,
-    });
-  }
 
   const decoder = new TextDecoder();
   const encoder = new TextEncoder();
@@ -286,11 +343,14 @@ export function applyFarmCspNonceToResponse(
     }),
   );
 
-  return new Response(body, {
-    status: response.status,
-    statusText: response.statusText,
-    headers,
-  });
+  // The nonce rewrite replaces the body, so this is a new Response Farm owns.
+  return _markFarmOwnedResponse(
+    new Response(body, {
+      status: response.status,
+      statusText: response.statusText,
+      headers,
+    }),
+  );
 }
 
 /**
@@ -395,9 +455,14 @@ function validateCspNonce(value: string): void {
   }
 }
 
+/**
+ * A streaming rewriter for a response rendered with `nonce`. A script element
+ * keeps the nonce only when its own (first) nonce attribute is exactly
+ * `nonce`; every other nonce attribute is removed. It never adds a nonce.
+ */
 export function createFarmCspNonceRewriter(nonce: string) {
   validateCspNonce(nonce);
-  return createFarmScriptTagRewriter((tag) => stampScriptTag(tag, nonce));
+  return createFarmScriptTagRewriter((tag) => keepOwnScriptNonce(tag, nonce));
 }
 
 function createFarmScriptTagRewriter(transformScriptTag: (tag: string) => string) {
@@ -410,7 +475,6 @@ function createFarmScriptTagRewriter(transformScriptTag: (tag: string) => string
       let output = "";
 
       while (pending) {
-        const lower = pending.toLowerCase();
         if (rawTextElement) {
           if (rawTextElement === "plaintext") {
             output += pending;
@@ -418,13 +482,13 @@ function createFarmScriptTagRewriter(transformScriptTag: (tag: string) => string
             break;
           }
           const closing = `</${rawTextElement}`;
-          const start = findHtmlToken(lower, closing);
+          const start = findRawTextEnd(pending, rawTextElement);
           if (start === -1) {
             if (final) {
               output += pending;
               pending = "";
             } else {
-              const keep = matchingSuffixLength(lower, closing);
+              const keep = matchingSuffixLength(pending, closing);
               output += pending.slice(0, pending.length - keep);
               pending = pending.slice(pending.length - keep);
             }
@@ -455,7 +519,6 @@ function createFarmScriptTagRewriter(transformScriptTag: (tag: string) => string
         }
         output += pending.slice(0, start);
         pending = pending.slice(start);
-        const lowerTag = pending.toLowerCase();
 
         if (pending.startsWith("<!--")) {
           const end = pending.indexOf("-->", 4);
@@ -472,7 +535,7 @@ function createFarmScriptTagRewriter(transformScriptTag: (tag: string) => string
         }
         if (!final && "<!--".startsWith(pending)) break;
 
-        const tagNameMatch = lowerTag.match(/^<\/?([a-z][a-z0-9:-]*)\b/);
+        const tagNameMatch = pending.match(/^<\/?([a-z][a-z0-9:-]*)\b/i);
         if (!tagNameMatch) {
           if (!final && /^<\/?[a-z][a-z0-9:-]*$/i.test(pending)) break;
           output += pending[0];
@@ -490,7 +553,7 @@ function createFarmScriptTagRewriter(transformScriptTag: (tag: string) => string
 
         const tag = pending.slice(0, end + 1);
         const tagName = tagNameMatch[1]!.toLowerCase();
-        const isClosing = lowerTag.startsWith("</");
+        const isClosing = pending.startsWith("</");
         const isSelfClosing = /\/\s*>$/.test(tag);
         output += !isClosing && tagName === "script" ? transformScriptTag(tag) : tag;
         pending = pending.slice(end + 1);
@@ -504,16 +567,16 @@ function createFarmScriptTagRewriter(transformScriptTag: (tag: string) => string
   };
 }
 
-const rawTextElements = new Set([
-  "iframe",
-  "noembed",
-  "noframes",
-  "plaintext",
-  "script",
-  "style",
-  "textarea",
-  "title",
-  "xmp",
+const rawTextElements = new Map<string, RegExp | null>([
+  ["iframe", /<\/iframe(?=[\s/>]|$)/gi],
+  ["noembed", /<\/noembed(?=[\s/>]|$)/gi],
+  ["noframes", /<\/noframes(?=[\s/>]|$)/gi],
+  ["plaintext", null],
+  ["script", /<\/script(?=[\s/>]|$)/gi],
+  ["style", /<\/style(?=[\s/>]|$)/gi],
+  ["textarea", /<\/textarea(?=[\s/>]|$)/gi],
+  ["title", /<\/title(?=[\s/>]|$)/gi],
+  ["xmp", /<\/xmp(?=[\s/>]|$)/gi],
 ]);
 
 function stampScriptTag(tag: string, nonce: string): string {
@@ -521,6 +584,31 @@ function stampScriptTag(tag: string, nonce: string): string {
   if (!opening) return tag;
   const attributes = stripScriptNonceAttribute(tag).slice(opening.length, -1);
   return `<script nonce="${nonce}"${attributes}>`;
+}
+
+function keepOwnScriptNonce(tag: string, nonce: string): string {
+  const opening = tag.match(/^<script\b/i)?.[0];
+  if (!opening) return tag;
+  const range = findScriptTagAttributeRange(tag, "nonce");
+  if (!range) return tag;
+  const stripped = stripScriptNonceAttribute(tag);
+  const attributes = stripped.slice(opening.length, -1);
+  // Browsers refuse a nonce on an element whose attributes contain "<script"
+  // or "<style" (dangling markup that swallowed a real script tag).
+  if (/<(?:script|style)/i.test(attributes)) return stripped;
+  if (readAttributeValue(tag.slice(range.start, range.end)) !== nonce) return stripped;
+  return `<script nonce="${nonce}"${attributes}>`;
+}
+
+function readAttributeValue(attribute: string): string | undefined {
+  const equals = attribute.indexOf("=");
+  if (equals === -1) return undefined;
+  const value = attribute.slice(equals + 1).trim();
+  const quote = value[0];
+  if (quote === '"' || quote === "'") {
+    return value.length > 1 && value.endsWith(quote) ? value.slice(1, -1) : undefined;
+  }
+  return value;
 }
 
 function stripScriptNonceAttribute(tag: string): string {
@@ -547,7 +635,7 @@ function collectFarmInlineScriptContents(html: string): string[] {
     }
 
     const remaining = html.slice(start);
-    const tagNameMatch = remaining.toLowerCase().match(/^<\/?([a-z][a-z0-9:-]*)\b/);
+    const tagNameMatch = remaining.match(/^<\/?([a-z][a-z0-9:-]*)\b/i);
     if (!tagNameMatch) {
       offset = start + 1;
       continue;
@@ -562,9 +650,13 @@ function collectFarmInlineScriptContents(html: string): string[] {
     if (isClosing || isSelfClosing || !rawTextElements.has(tagName)) continue;
 
     if (tagName === "plaintext") break;
-    const closingStart = findHtmlToken(html.toLowerCase().slice(offset), `</${tagName}`);
-    const contentEnd = closingStart === -1 ? html.length : offset + closingStart;
-    if (tagName === "script" && !findScriptTagAttributeRange(tag, "src")) {
+    const closingStart = findRawTextEnd(html, tagName, offset);
+    const contentEnd = closingStart === -1 ? html.length : closingStart;
+    if (
+      tagName === "script" &&
+      findScriptTagAttributeRange(tag, "nonce") &&
+      !findScriptTagAttributeRange(tag, "src")
+    ) {
       contents.push(html.slice(offset, contentEnd));
     }
     if (closingStart === -1) break;
@@ -610,22 +702,20 @@ function findScriptTagAttributeRange(
   return undefined;
 }
 
-function findHtmlToken(input: string, token: string): number {
-  let offset = 0;
-  while (offset < input.length) {
-    const index = input.indexOf(token, offset);
-    if (index === -1) return -1;
-    const boundary = input[index + token.length];
-    if (boundary === undefined || /[\s/>]/.test(boundary)) return index;
-    offset = index + 1;
-  }
-  return -1;
+function findRawTextEnd(input: string, tagName: string, offset = 0): number {
+  // Search the original string with ASCII case-insensitive closing tags:
+  // lowercasing entire HTML can expand Unicode (İ → i̇) and invalidate offsets.
+  const closing = rawTextElements.get(tagName)!;
+  // Each synchronous search resets the cursor; separate streamed responses
+  // must not inherit another response's match position.
+  closing.lastIndex = offset;
+  return closing.exec(input)?.index ?? -1;
 }
 
 function matchingSuffixLength(input: string, token: string): number {
   const limit = Math.min(token.length - 1, input.length);
   for (let length = limit; length > 0; length--) {
-    if (token.startsWith(input.slice(-length))) return length;
+    if (token.startsWith(input.slice(-length).toLowerCase())) return length;
   }
   return 0;
 }

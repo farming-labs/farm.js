@@ -63,10 +63,12 @@ test.describe("Farm internationalization", () => {
     const html = await explicitLocale.text();
     expect(html).toContain('<html lang="am" dir="ltr">');
     expect(html).toContain("አንድ መተግበሪያ፣ ለሁሉም ቋንቋ");
-    expect(html).toContain('hreflang="en" href="/"');
-    expect(html).toContain('hreflang="am" href="/am"');
-    expect(html).toContain('hreflang="ar" href="/ar"');
-    expect(html).toContain('hreflang="x-default" href="/"');
+    // hreflang alternates must be absolute; the example sets no metadataBase.
+    const origin = new URL(explicitLocale.url()).origin;
+    expect(html).toContain(`hreflang="en" href="${origin}/"`);
+    expect(html).toContain(`hreflang="am" href="${origin}/am"`);
+    expect(html).toContain(`hreflang="ar" href="${origin}/ar"`);
+    expect(html).toContain(`hreflang="x-default" href="${origin}/"`);
 
     const defaultPrefix = await request.get("/en", { maxRedirects: 0 });
     expect(defaultPrefix.status()).toBe(307);

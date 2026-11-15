@@ -1,0 +1,85 @@
+/* The benchmark area chart (BenchmarkAreaChart in benchmark-section.tsx). Kept out of the SVG so
+   the homepage HTML does not carry it. */
+.benchmark-chart text {
+  fill: currentColor;
+  font-family: var(--font-geist-mono, monospace);
+}
+
+/* Each series' points set --benchmark-ring-opacity; Farm's are a step heavier. */
+.benchmark-point-ring {
+  fill: black;
+  fill-opacity: 0.74;
+  stroke: white;
+  stroke-opacity: var(--benchmark-ring-opacity);
+  stroke-width: 1;
+}
+
+[data-series="farm"] .benchmark-point-ring {
+  fill-opacity: 0.82;
+  stroke-width: 1.2;
+}
+
+.benchmark-point-hit {
+  fill: white;
+  fill-opacity: 0.001;
+  pointer-events: all;
+}
+
+.benchmark-point-tooltip rect {
+  fill: black;
+  stroke: white;
+}
+
+.benchmark-series-line,
+.benchmark-point-ring,
+.benchmark-point-tooltip {
+  transition-duration: 260ms;
+  transition-timing-function: cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+.benchmark-series-line {
+  transition-property: stroke-opacity, stroke-width, filter;
+}
+
+.benchmark-series:hover .benchmark-series-line,
+.benchmark-series:focus-within .benchmark-series-line {
+  filter: drop-shadow(0 0 3px rgba(255, 255, 255, 0.18));
+  stroke-opacity: 0.96;
+  stroke-width: 1.95;
+}
+
+.benchmark-point-ring {
+  transition-property: opacity, transform, fill-opacity, stroke-opacity;
+  transform-box: fill-box;
+  transform-origin: center;
+}
+
+.benchmark-point:hover .benchmark-point-ring,
+.benchmark-point:focus .benchmark-point-ring {
+  fill-opacity: 1;
+  opacity: 1;
+  stroke-opacity: 1;
+  transform: scale(1.22);
+}
+
+.benchmark-point-tooltip {
+  filter: drop-shadow(0 12px 24px rgba(0, 0, 0, 0.42));
+  opacity: 0;
+  pointer-events: none;
+  transform: translateY(8px);
+  transition-property: opacity, transform;
+}
+
+.benchmark-point:hover .benchmark-point-tooltip,
+.benchmark-point:focus .benchmark-point-tooltip {
+  opacity: 1;
+  transform: translateY(0);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .benchmark-series-line,
+  .benchmark-point-ring,
+  .benchmark-point-tooltip {
+    transition-duration: 1ms;
+  }
+}

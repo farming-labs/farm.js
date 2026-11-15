@@ -78,19 +78,9 @@ export async function createFarmVercelRouteRuntimeFunctions(
       regions: route.regions,
       maxDuration: route.maxDuration,
     });
-    routes.push({
-      src,
-      dest: destinations.get(key) || "/__nitro",
-      ...(route.kind === "api" || route.pattern.startsWith("/api/")
-        ? {
-            headers: {
-              "Access-Control-Allow-Origin": "*",
-              "Access-Control-Allow-Methods": "*",
-              "Access-Control-Allow-Headers": "*",
-            },
-          }
-        : {}),
-    });
+    // No CORS headers here: like every other target since #1450, CORS comes
+    // from routeRules.cors or the app's own responses.
+    routes.push({ src, dest: destinations.get(key) || "/__nitro" });
   }
 
   return routes;

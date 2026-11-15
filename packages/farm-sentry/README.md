@@ -106,7 +106,7 @@ data.
 them to Sentry, so production stack traces stay minified until the maps are uploaded separately,
 for example with `sentry-cli`. Uploading from the build is not implemented yet.
 
-Farm only uses its fast esbuild minifier while source maps are off, so enabling them moves
+Farm only uses its fast Oxc minifier while source maps are off, so enabling them moves
 minification to Nitro's terser:
 
 ```bash

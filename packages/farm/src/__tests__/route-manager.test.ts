@@ -10,6 +10,7 @@ import {
 import { defineIntegration } from "../integrations";
 import { REACT_RENDERER } from "../renderer";
 import type { FarmConfig } from "../types";
+import { splitRoutePath } from "../utils";
 
 /** "/test" is not an absolute path on Windows, so resolve it per platform. */
 const TEST_ROOT = path.resolve("/test");
@@ -17,10 +18,11 @@ const appPath = (...segments: string[]) => path.join(TEST_ROOT, "src", "app", ..
 
 // Mock the file system utilities
 vi.mock("../utils", async () => {
-  const actual = await vi.importActual("../utils");
+  const actual = await vi.importActual<typeof import("../utils")>("../utils");
   return {
     ...actual,
     globFiles: vi.fn(),
+    splitRoutePath: vi.fn(actual.splitRoutePath),
     resolveAppPath: vi.fn((root, ...paths) => `${root}/${paths.join("/")}`),
     logger: {
       info: vi.fn(),
@@ -116,9 +118,53 @@ describe("RouteManager", () => {
       expect(result.route).toBeNull();
     });
 
+    it("matches an empty segment like production: dynamic routes only", () => {
+      // Production looks static routes up by their exact path.
+      for (const pathname of ["//about", "//about/", "//", "///"]) {
+        expect(routeManager.matchRoute(pathname).route, pathname).toBeNull();
+      }
+      // Trailing slashes are trimmed first, there as here.
+      expect(routeManager.matchRoute("/about//").route?.pattern).toBe("/about");
+      expect(routeManager.matchRoute("//users/123").params).toEqual({ id: "123" });
+      expect(routeManager.matchRoute("/users//123").params).toEqual({ id: "123" });
+    });
+
+    it("matches requests under the configured basePath like production routing", async () => {
+      const { globFiles } = await import("../utils");
+      vi.mocked(globFiles).mockImplementation(async (pattern: string) => {
+        if (pattern.includes("page")) return ["page.tsx", "about/page.tsx"];
+        if (pattern.includes("layout")) return ["layout.tsx"];
+        if (pattern.includes("loading")) return ["about/loading.tsx"];
+        if (pattern.includes("error")) return ["about/error.tsx"];
+        if (pattern.includes("sitemap")) return ["sitemap.ts"];
+        return [];
+      });
+      const basePathManager = new RouteManager({ ...mockConfig, basePath: "/app" });
+      await basePathManager.discoverRoutes();
+
+      expect(basePathManager.matchRoute("/app").route?.pattern).toBe("/");
+      expect(basePathManager.matchRoute("/app/").route?.pattern).toBe("/");
+      expect(basePathManager.matchRoute("/app/about").route?.pattern).toBe("/about");
+      expect(basePathManager.matchRoute("/app/about").layouts.map((l) => l.pattern)).toEqual(["/"]);
+      expect(basePathManager.matchRoute("/application").route).toBeNull();
+      expect(basePathManager.getMatchingLoading("/app/about")?.pattern).toBe("/about");
+      expect(basePathManager.getMatchingError("/app/about")?.pattern).toBe("/about");
+      expect(basePathManager.matchMetadataRoute("/app/sitemap.xml")?.metadata.kind).toBe("sitemap");
+    });
+
     it("should find matching layouts", () => {
       const result = routeManager.matchRoute("/users/123");
       expect(result.layouts.length).toBeGreaterThan(0);
+    });
+
+    it("decodes the request pathname once while scanning pages and layouts", () => {
+      vi.mocked(splitRoutePath).mockClear();
+
+      const result = routeManager.matchRoute("/users/hello%20farm");
+
+      expect(result.params).toEqual({ id: "hello farm" });
+      expect(result.layouts.length).toBeGreaterThan(0);
+      expect(splitRoutePath).toHaveBeenCalledTimes(1);
     });
 
     it("includes optional catch-all layouts, boundaries, and slot owners at the parent path", async () => {
@@ -338,8 +384,7 @@ export default function Button() { return <button>count</button>; }`,
       await writeFile(
         path.join(root, "src", "app", "widget.tsx"),
         `"use client";
-function Widget() { return <button>count</button>; }
-export { Widget };`,
+export * from "./widget-implementation";`,
       );
       await writeFile(
         layoutFile,
@@ -372,6 +417,46 @@ export default async function Layout({ children }) {
       });
     });
 
+    it("reports islands-mode pages whose client components cannot become islands", async () => {
+      const root = await mkdtemp(path.join(os.tmpdir(), "farm-route-islands-error-"));
+      temporaryDirectories.push(root);
+      await mkdir(path.join(root, "src", "app"), { recursive: true });
+      await writeFile(
+        path.join(root, "src", "app", "row.tsx"),
+        `"use client";\nexport function Row() { return <p>row</p>; }`,
+      );
+      // `export *` names the component only in another module, so it cannot become an island.
+      await writeFile(
+        path.join(root, "src", "app", "rows.tsx"),
+        `"use client";\nexport * from "./row";`,
+      );
+      await writeFile(
+        path.join(root, "src", "app", "page.tsx"),
+        `import { Row } from "./rows";\nexport default function Page() { return <main><Row /></main>; }`,
+      );
+      const { globFiles, logger } = await import("../utils");
+      vi.mocked(globFiles).mockImplementation(async (pattern: string) =>
+        pattern.includes("page") ? ["page.tsx"] : [],
+      );
+      vi.mocked(logger.error).mockClear();
+      mockConfig.root = root;
+      mockConfig.renderer = REACT_RENDERER;
+      mockConfig.experimental = { serverComponents: { mode: "islands" } };
+      routeManager = new RouteManager(mockConfig);
+      await routeManager.discoverRoutes();
+
+      // The page renders without client JavaScript instead of shipping its module to the browser.
+      expect(routeManager.generateClientManifest(root).routes[0]).toMatchObject({
+        shouldHydrate: false,
+      });
+      expect(routeManager.getIslandsErrors(root)).toEqual([
+        expect.stringMatching(/^\/: client boundary .*rows\.tsx uses an unsupported export shape/),
+      ]);
+      routeManager.regenerateClientManifest(root);
+      // Development logs it once, not on every plan refresh.
+      expect(logger.error).toHaveBeenCalledTimes(1);
+    });
+
     it("keeps an isolated layout when a sibling page needs route-wide hydration", async () => {
       const root = await mkdtemp(path.join(os.tmpdir(), "farm-route-local-hydration-"));
       temporaryDirectories.push(root);
@@ -383,7 +468,7 @@ export default async function Layout({ children }) {
       );
       await writeFile(
         path.join(root, "src", "components", "fallback.tsx"),
-        `'use client';\nfunction Fallback() { return null; }\nexport { Fallback };`,
+        `'use client';\nexport * from "./fallback-implementation";`,
       );
       await writeFile(
         path.join(root, "src", "app", "layout.tsx"),
@@ -722,8 +807,9 @@ export default function Layout({ children }) { return <><One /><Two /><Three />{
       expect(routeManager.matchRoute("/pricing").route?.pattern).toBe("/pricing");
       expect(routeManager.matchRoute("/dashboard").route?.pattern).toBe("/dashboard");
 
+      // A layout is identified by its directory, so a grouped one keeps its group.
       const dashboard = routeManager.matchRoute("/dashboard");
-      expect(dashboard.layouts.map((layout) => layout.pattern)).toEqual(["/", "/dashboard"]);
+      expect(dashboard.layouts.map((layout) => layout.pattern)).toEqual(["/", "/(app)/dashboard"]);
       expect(routeManager.getMatchingLoading("/pricing")?.route.filePath).toBe(
         "(marketing)/pricing/loading.tsx",
       );
@@ -739,6 +825,180 @@ export default function Layout({ children }) { return <><One /><Two /><Three />{
       });
 
       await expect(routeManager.discoverRoutes()).rejects.toThrow('Duplicate page route "/x"');
+    });
+
+    it("nests a group layout under the root layout for the group's routes only", async () => {
+      const { globFiles } = await import("../utils");
+      vi.mocked(globFiles).mockImplementation(async (pattern: string) => {
+        if (pattern.includes("page")) {
+          return ["(auth)/sign-in/page.tsx", "(auth)/sign-up/page.tsx", "dashboard/page.tsx"];
+        }
+        // Discovery order must not decide nesting: the root layout stays outermost.
+        if (pattern.includes("layout")) return ["(auth)/layout.tsx", "layout.tsx"];
+        return [];
+      });
+
+      await routeManager.discoverRoutes();
+
+      expect(new Set(routeManager.getLayouts().keys())).toEqual(new Set(["/", "/(auth)"]));
+      const layoutsFor = (pathname: string) =>
+        routeManager.matchRoute(pathname).layouts.map((layout) => layout.modulePath);
+      expect(layoutsFor("/sign-in")).toEqual([
+        appPath("layout.tsx"),
+        appPath("(auth)", "layout.tsx"),
+      ]);
+      expect(layoutsFor("/sign-up")).toEqual([
+        appPath("layout.tsx"),
+        appPath("(auth)", "layout.tsx"),
+      ]);
+      expect(layoutsFor("/dashboard")).toEqual([appPath("layout.tsx")]);
+      // An unmatched URL cannot belong to a group, so only ungrouped layouts apply.
+      expect(layoutsFor("/missing")).toEqual([appPath("layout.tsx")]);
+      expect(routeManager.matchRoute("/sign-in").layouts.map((layout) => layout.pattern)).toEqual([
+        "/",
+        "/(auth)",
+      ]);
+    });
+
+    it("gives sibling groups their own layouts without a shared root layout", async () => {
+      const { globFiles } = await import("../utils");
+      vi.mocked(globFiles).mockImplementation(async (pattern: string) => {
+        if (pattern.includes("page")) {
+          return [
+            "(marketing)/page.tsx",
+            "(marketing)/pricing/page.tsx",
+            "(shop)/cart/page.tsx",
+            "(shop)/cart/[id]/page.tsx",
+          ];
+        }
+        if (pattern.includes("layout")) {
+          return ["(marketing)/layout.tsx", "(shop)/layout.tsx", "(shop)/cart/layout.tsx"];
+        }
+        return [];
+      });
+
+      await routeManager.discoverRoutes();
+
+      const patternsFor = (pathname: string) =>
+        routeManager.matchRoute(pathname).layouts.map((layout) => layout.pattern);
+      expect(patternsFor("/")).toEqual(["/(marketing)"]);
+      expect(patternsFor("/pricing")).toEqual(["/(marketing)"]);
+      expect(patternsFor("/cart")).toEqual(["/(shop)", "/(shop)/cart"]);
+      expect(patternsFor("/cart/42")).toEqual(["/(shop)", "/(shop)/cart"]);
+      expect(patternsFor("/missing")).toEqual([]);
+    });
+
+    it("resolves loading and error boundaries inside route groups", async () => {
+      const { globFiles } = await import("../utils");
+      vi.mocked(globFiles).mockImplementation(async (pattern: string) => {
+        if (pattern.includes("page")) return ["(auth)/sign-in/page.tsx", "dashboard/page.tsx"];
+        if (pattern.includes("layout")) return ["layout.tsx", "(auth)/layout.tsx"];
+        if (pattern.includes("loading")) return ["(auth)/loading.tsx", "loading.tsx"];
+        if (pattern.includes("error")) return ["(auth)/error.tsx", "error.tsx"];
+        return [];
+      });
+
+      await routeManager.discoverRoutes();
+
+      expect(new Set(routeManager.getLoadings().keys())).toEqual(new Set(["/", "/(auth)"]));
+      expect(new Set(routeManager.getErrors().keys())).toEqual(new Set(["/", "/(auth)"]));
+      expect(routeManager.getMatchingLoading("/sign-in")?.pattern).toBe("/(auth)");
+      expect(routeManager.getMatchingError("/sign-in")?.pattern).toBe("/(auth)");
+      expect(routeManager.getMatchingLoading("/dashboard")?.pattern).toBe("/");
+      expect(routeManager.getMatchingError("/dashboard")?.pattern).toBe("/");
+      expect(routeManager.getMatchingError("/missing")?.pattern).toBe("/");
+
+      const signIn = routeManager.matchRoute("/sign-in").route;
+      expect(routeManager.getMatchingLoading("/sign-in", signIn)?.pattern).toBe("/(auth)");
+      expect(routeManager.getMatchingError("/sign-in", null)?.pattern).toBe("/");
+    });
+
+    it("ties a slot to the grouped layout in its directory", async () => {
+      const { globFiles } = await import("../utils");
+      vi.mocked(globFiles).mockImplementation(async (pattern: string) => {
+        if (pattern.includes("page")) {
+          return ["(app)/feed/page.tsx", "(app)/feed/@activity/page.tsx", "about/page.tsx"];
+        }
+        if (pattern.includes("layout")) return ["layout.tsx", "(app)/feed/layout.tsx"];
+        return [];
+      });
+
+      await routeManager.discoverRoutes();
+
+      const match = routeManager.matchRoute("/feed");
+      const owner = match.layouts.at(-1)!;
+      expect(owner.pattern).toBe("/(app)/feed");
+      expect(match.slots).toEqual([
+        expect.objectContaining({
+          name: "activity",
+          ownerPattern: "/feed",
+          ownerDirectory: "/(app)/feed",
+        }),
+      ]);
+    });
+
+    it.each([
+      ["layout", ["(auth)/layout.tsx", "(auth)/layout.jsx"], "/(auth)"],
+      ["layout", ["layout.tsx", "layout.jsx"], "/"],
+      ["loading", ["(auth)/loading.tsx", "(auth)/loading.jsx"], "/(auth)"],
+      ["error", ["(auth)/error.tsx", "(auth)/error.jsx"], "/(auth)"],
+    ])("still rejects two %s files for one directory (%j)", async (kind, files, pattern) => {
+      const { globFiles } = await import("../utils");
+      vi.mocked(globFiles).mockImplementation(async (glob: string) => {
+        if (glob.includes("page")) return ["(auth)/sign-in/page.tsx"];
+        if (glob.includes(kind)) return files;
+        return [];
+      });
+
+      await expect(routeManager.discoverRoutes()).rejects.toThrow(
+        `Duplicate ${kind} route "${pattern}". Found both ${appPath(...files[0]!.split("/"))} and ${appPath(...files[1]!.split("/"))}.`,
+      );
+    });
+
+    it("plans hydration for a client layout inside a group from its own routes", async () => {
+      const root = await mkdtemp(path.join(os.tmpdir(), "farm-route-group-layout-"));
+      temporaryDirectories.push(root);
+      const appDir = path.join(root, "src", "app");
+      await mkdir(path.join(appDir, "(auth)", "sign-in"), { recursive: true });
+      await mkdir(path.join(appDir, "dashboard"), { recursive: true });
+      await writeFile(
+        path.join(appDir, "layout.tsx"),
+        "export default function Layout({ children }) { return <main>{children}</main>; }",
+      );
+      await writeFile(
+        path.join(appDir, "(auth)", "layout.tsx"),
+        `"use client";\nexport default function AuthLayout({ children }) { return <section>{children}</section>; }`,
+      );
+      await writeFile(
+        path.join(appDir, "(auth)", "sign-in", "page.tsx"),
+        "export default function Page() { return <h1>Sign in</h1>; }",
+      );
+      await writeFile(
+        path.join(appDir, "dashboard", "page.tsx"),
+        "export default function Page() { return <h1>Dashboard</h1>; }",
+      );
+      const { globFiles } = await import("../utils");
+      vi.mocked(globFiles).mockImplementation(async (pattern: string) => {
+        if (pattern.includes("page")) return ["(auth)/sign-in/page.tsx", "dashboard/page.tsx"];
+        if (pattern.includes("layout")) return ["layout.tsx", "(auth)/layout.tsx"];
+        return [];
+      });
+      mockConfig.root = root;
+      mockConfig.renderer = REACT_RENDERER;
+      routeManager = new RouteManager(mockConfig);
+      await routeManager.discoverRoutes();
+
+      const manifest = routeManager.generateClientManifest(root);
+      expect(manifest.layouts.find((layout) => layout.pattern === "/(auth)")).toMatchObject({
+        shouldHydrate: true,
+      });
+      expect(manifest.routes.find((route) => route.pattern === "/sign-in")).toMatchObject({
+        directory: "/(auth)/sign-in",
+        renderPlan: { hydration: "layout-island" },
+      });
+      const dashboard = manifest.routes.find((route) => route.pattern === "/dashboard");
+      expect(dashboard?.renderPlan.hydration).not.toBe("layout-island");
+      expect(dashboard).not.toHaveProperty("directory");
     });
   });
 
@@ -1046,11 +1306,73 @@ describe("static rendering suggestions with i18n", () => {
 describe("interpolateRedirectDestination", () => {
   it("interpolates every bracket and colon parameter form", () => {
     const params = { slug: "a/b", id: "42" };
+    const catchAll = { slug: ["a", "b"] };
 
-    expect(interpolateRedirectDestination("/new/[[...slug]]", params)).toBe("/new/a/b");
-    expect(interpolateRedirectDestination("/new/[...slug]", params)).toBe("/new/a/b");
-    expect(interpolateRedirectDestination("/new/[id]", params)).toBe("/new/42");
-    expect(interpolateRedirectDestination("/new/:slug*", params)).toBe("/new/a/b");
-    expect(interpolateRedirectDestination("/new/:id", params)).toBe("/new/42");
+    expect(interpolateRedirectDestination("/new/[[...slug]]", params, catchAll)).toBe("/new/a/b");
+    expect(interpolateRedirectDestination("/new/[...slug]", params, catchAll)).toBe("/new/a/b");
+    expect(interpolateRedirectDestination("/new/[id]", params, catchAll)).toBe("/new/42");
+    expect(interpolateRedirectDestination("/new/:slug*", params, catchAll)).toBe("/new/a/b");
+    expect(interpolateRedirectDestination("/new/:id", params, catchAll)).toBe("/new/42");
+  });
+
+  it("encodes each value as one path segment unless catch-all segments are given", () => {
+    expect(interpolateRedirectDestination("/[slug]", { slug: "//example.com" })).toBe(
+      "/%2F%2Fexample.com",
+    );
+    expect(interpolateRedirectDestination("/:slug", { slug: "\\example.com" })).toBe(
+      "/%5Cexample.com",
+    );
+    expect(
+      interpolateRedirectDestination("/[...path]", { path: "a b//x/y" }, { path: ["a b//x", "y"] }),
+    ).toBe("/a%20b%2F%2Fx/y");
+  });
+});
+
+describe("RouteManager markdown route modules", () => {
+  const counterKey = "__farmMarkdownComponentsLoads";
+  let root: string;
+
+  beforeEach(async () => {
+    // Inside the package, where the test runner can import the fixture's components module.
+    root = await mkdtemp(path.join(process.cwd(), ".tmp-markdown-components-"));
+    await mkdir(path.join(root, "src", "app", "guide"), { recursive: true });
+    await writeFile(
+      path.join(root, "src", "app", "guide", "page.md"),
+      ["---", "title: Guide", "---", "# Guide", "", "<Callout>Read me</Callout>"].join("\n"),
+    );
+    // Counts its evaluations, as a components module that imports most of the app would cost.
+    await writeFile(
+      path.join(root, "markdown-components.mjs"),
+      [
+        `globalThis.${counterKey} = (globalThis.${counterKey} ?? 0) + 1;`,
+        `export default { Callout: (props) => "callout: " + props.children };`,
+      ].join("\n"),
+    );
+    delete (globalThis as Record<string, unknown>)[counterKey];
+  });
+
+  afterEach(async () => {
+    delete (globalThis as Record<string, unknown>)[counterKey];
+    await rm(root, { recursive: true, force: true });
+  });
+
+  it("loads the MDX components when the page renders, not when its module loads", async () => {
+    const manager = new RouteManager({
+      root,
+      srcDir: "src",
+      mdx: { markdownRoutes: true, components: "./markdown-components.mjs" },
+    } as Required<FarmConfig>);
+    const modulePath = path.join(root, "src", "app", "guide", "page.md");
+
+    // The route runtime manifest and SSG load every page's module for its metadata and
+    // rendering config; neither renders it.
+    const routeModule = await manager.loadRouteModule(modulePath);
+    expect(routeModule.metadata).toMatchObject({ title: "Guide" });
+    expect((globalThis as Record<string, unknown>)[counterKey]).toBeUndefined();
+
+    const { renderToStaticMarkup } = await import("react-dom/server");
+    const html = renderToStaticMarkup(await (routeModule.default as any)({}));
+    expect(html).toContain("callout: Read me");
+    expect((globalThis as Record<string, unknown>)[counterKey]).toBe(1);
   });
 });

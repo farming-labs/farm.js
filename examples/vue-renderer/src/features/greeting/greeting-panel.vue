@@ -1,10 +1,12 @@
 <script setup lang="ts">
 import { ref } from "vue";
 import { apiClient } from "./api";
+import { useGreetingStore } from "./store";
 
 const message = ref("Ready for a typed server call.");
 const detail = ref("createServerFn is waiting on the server");
 const pending = ref(false);
+const store = useGreetingStore();
 const failed = ref(false);
 
 async function callServer() {
@@ -19,6 +21,7 @@ async function callServer() {
     if (result.error) throw result.error;
     if (!result.data) throw new Error("The server returned no greeting");
 
+    store.calls += 1;
     message.value = result.data.message;
     detail.value = `server invocation ${result.data.invocation} / ${result.data.runtime}`;
   } catch (error) {
@@ -35,7 +38,7 @@ async function callServer() {
   <div class="server-demo">
     <div class="demo-row">
       <span>01</span>
-      <code>renderer: vue()</code>
+      <code>renderer: vue({ app })</code>
     </div>
     <div class="demo-row">
       <span>02</span>
@@ -51,6 +54,10 @@ async function callServer() {
     <div class="demo-row demo-detail" aria-live="polite">
       <span>03</span>
       <code>{{ detail }}</code>
+    </div>
+    <div class="demo-row demo-detail">
+      <span>04</span>
+      <code>pinia: {{ store.calls }} {{ store.calls === 1 ? "call" : "calls" }} this visit</code>
     </div>
   </div>
 </template>

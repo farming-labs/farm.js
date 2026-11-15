@@ -6,21 +6,22 @@
   "scripts": {
     "dev": "farm dev",
     "build": "farm build",
-    "deploy": "farm deploy",
-    "start": "farm start",
+    "deploy": "farm deploy --vercel",
+    "start": "node .farm/.output/server/index.mjs",
     "type-check": "svelte-check --tsconfig ./tsconfig.json"
   },
   "dependencies": {
-    "@farm.js/core": "0.1.1-beta.2",
-    "@farm.js/svelte": "0.1.0-beta.32",
+    "@farm.js/core": "0.1.73",
+    "@farm.js/svelte": "0.1.0-beta.36",
     "@fontsource-variable/geist": "5.3.0",
     "@fontsource-variable/geist-mono": "5.3.0",
     "svelte": "5.56.8",
-    "zod": "4.1.12"
+    "zod": "4.6.7"
   },
   "devDependencies": {
-    "@farm.js/cli": "0.1.1-beta.2",
-    "@farm.js/devtools": "0.1.1-beta.2",
+    "@farm.js/cli": "0.1.73",
+    "@farm.js/devtools": "0.1.73",
+    "@tailwindcss/vite": "^4.3.3",
     "svelte-check": "4.7.5",
     "tailwindcss": "^4.0.0",
     "typescript": "^5.3.3"

@@ -26,7 +26,7 @@ export default function ContactPage() {
         <ContactCard
           title="Documentation"
           description="Learn more about Farm.js features and API"
-          link="https://farm.js.dev"
+          link="https://farmjs.dev"
           icon="📚"
         />
 

@@ -16,7 +16,4 @@ export default defineConfig({
   migrations: {
     commands: [{ name: "Better Auth schema", command: "pnpm auth:migrate" }],
   },
-  deploy: {
-    target: "vercel",
-  },
 });

@@ -16,7 +16,9 @@ afterEach(async () => {
   await Promise.all([...servers].map((server) => server.close().catch(() => {})));
   servers.clear();
   await Promise.all(
-    [...temporaryRoots].map((root) => fs.rm(root, { recursive: true, force: true })),
+    [...temporaryRoots].map((root) =>
+      fs.rm(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 }),
+    ),
   );
   temporaryRoots.clear();
 });
@@ -98,5 +100,34 @@ describe("development page-data generated metadata", () => {
       siteName: "Farm Shop",
       title: "Product 42",
     });
+  }, 60_000);
+
+  it("advertises the Markdown mirror in the head, the Link header, and page data", async () => {
+    const root = await createProject();
+    const server = await createServer({ root, images: { provider: "none" } });
+    servers.add(server);
+    await server.listen(await getAvailablePort());
+    const address = server.httpServer?.address();
+    if (!address || typeof address === "string") throw new Error("Missing dev server address");
+    const origin = `http://localhost:${address.port}`;
+
+    const page = await fetch(`${origin}/products/42`, { headers: { accept: "text/html" } });
+    expect(page.status).toBe(200);
+    expect(page.headers.get("link")).toContain(
+      '</products/42.md>; rel="alternate"; type="text/markdown"',
+    );
+    expect(await page.text()).toContain(
+      '<link rel="alternate" href="/products/42.md" type="text/markdown">',
+    );
+
+    // Client navigation renders the same link from the page-data metadata.
+    const pageData = await fetch(`${origin}/__farm/page-data?path=/products/42`);
+    const payload = (await pageData.json()) as { metadata?: Record<string, any> };
+    expect(payload.metadata?.alternates?.types).toEqual({ "text/markdown": "/products/42.md" });
+
+    // The advertised URL is served.
+    const mirror = await fetch(`${origin}/products/42.md`);
+    expect(mirror.status).toBe(200);
+    expect(mirror.headers.get("content-type")).toContain("text/markdown");
   }, 60_000);
 });

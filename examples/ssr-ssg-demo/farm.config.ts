@@ -1,5 +1,4 @@
 import { defineConfig } from '@farm.js/core';
-import { createLoggerPlugin } from '@farm.js/core/plugin/server';
 
 export default defineConfig({
   deploy: {
@@ -7,7 +6,6 @@ export default defineConfig({
   },
   experimental: {
     serverComponents: true,
-    serverActions: true,
   },
   notFound: {
     component: './src/app/not-found.tsx',
@@ -23,9 +21,4 @@ export default defineConfig({
       },
     ];
   },
-
-  // Plugins
-  plugins: [
-    createLoggerPlugin({}),
-  ],
 });

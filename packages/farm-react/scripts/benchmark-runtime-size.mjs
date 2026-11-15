@@ -1,16 +1,18 @@
-import { brotliCompressSync, gzipSync } from "node:zlib";
 import { readFile, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { build } from "vite";
 import { createFarmRendererPlugin } from "../dist/vite.mjs";
+import { assertRuntimeSizeBudgets } from "./runtime-size-budget.mjs";
+import { measureJavaScriptOutput } from "./javascript-output-size.mjs";
 
 const packageRoot = join(dirname(fileURLToPath(import.meta.url)), "..");
 const fixtureRoot = join(packageRoot, "fixtures/runtime-size");
 const resultFile = join(packageRoot, "RUNTIME_SIZE_RESULTS.json");
 const checkOnly = process.argv.includes("--check");
+const chunkAccounting = [];
 
-async function bundle(entry, compiler) {
+async function bundle(entry, compiler, compiledRoot = false) {
   const result = await build({
     configFile: false,
     root: fixtureRoot,
@@ -21,7 +23,9 @@ async function bundle(entry, compiler) {
     plugins: createFarmRendererPlugin({
       rendererOptions: {
         experimental: {
-          compiler: compiler ? { onUnsupported: "error" } : false,
+          // These fixtures measure the compiler runtime itself; the compiled root, which moves
+          // React DOM out of the initial download, is measured separately below.
+          compiler: compiler ? { onUnsupported: "error", compiledRoot } : false,
         },
       },
     }),
@@ -33,19 +37,14 @@ async function bundle(entry, compiler) {
       },
     },
   });
-  const outputs = Array.isArray(result) ? result : [result];
-  const code = outputs
-    .flatMap((output) => output.output)
-    .filter((output) => output.type === "chunk")
-    .map((output) => output.code)
-    .join("\n");
-  const bytes = Buffer.from(code);
-  return {
-    code,
-    raw: bytes.length,
-    gzip: gzipSync(bytes, { level: 9 }).length,
-    brotli: brotliCompressSync(bytes).length,
-  };
+  const measured = measureJavaScriptOutput(result);
+  if (compiler && measured.code.includes("@farm.js/react/compiler-hmr-registry")) {
+    throw new Error(`${entry} retained the development refresh registry in production.`);
+  }
+  if (measured.chunkAccounting.files.length > 1) {
+    chunkAccounting.push({ entry, compiler, ...measured.chunkAccounting });
+  }
+  return measured;
 }
 
 const [
@@ -53,6 +52,8 @@ const [
   directOn,
   keyedOff,
   keyedOn,
+  keyedPlainOff,
+  keyedPlainOn,
   keyedAppendOff,
   keyedAppendOn,
   keyedFilterOff,
@@ -93,6 +94,8 @@ const [
   bundle("direct.tsx", true),
   bundle("keyed.tsx", false),
   bundle("keyed.tsx", true),
+  bundle("keyed-plain.tsx", false),
+  bundle("keyed-plain.tsx", true),
   bundle("keyed-append.tsx", false),
   bundle("keyed-append.tsx", true),
   bundle("keyed-filter.tsx", false),
@@ -131,6 +134,9 @@ const [
 ]);
 
 const forbiddenDirectMarkers = [
+  "Array.prototype",
+  "Set.prototype",
+  "Map.prototype",
   "FarmCompiledConditionalBlock",
   "FarmCompiledHostConditionalBlock",
   "FarmCompiledKeyedListBlock",
@@ -148,6 +154,23 @@ for (const marker of forbiddenDirectMarkers) {
 }
 if (!keyedOn.code.includes("FarmCompiledKeyedRows")) {
   throw new Error("Keyed fixture did not retain its keyed-row runtime.");
+}
+if (
+  !keyedPlainOn.code.includes("FarmCompiledKeyedRows") ||
+  !keyedPlainOn.code.includes("keyed-rows:plain")
+) {
+  throw new Error("Plain keyed fixture did not retain its isolated keyed-row runtime.");
+}
+for (const marker of [
+  "identityTarget",
+  "membershipTarget",
+  "mapLookupTarget",
+  '"set-add"',
+  '"map-set"',
+]) {
+  if (keyedPlainOn.code.includes(marker)) {
+    throw new Error(`Plain keyed fixture unexpectedly retained ${marker}.`);
+  }
 }
 if (keyedOn.code.includes("FarmCompiledKeyedRowConditional")) {
   throw new Error("Plain keyed fixture retained the optional row-conditional runtime.");
@@ -169,13 +192,18 @@ if (!keyedOn.code.includes('"set-add"') || !keyedOn.code.includes('"map-set"')) 
 }
 if (
   !keyedAppendOn.code.includes("FarmCompiledKeyedRows") ||
-  !keyedAppendOn.code.includes("keyed-rows:hinted")
+  !keyedAppendOn.code.includes("keyed-rows:append-only")
 ) {
-  throw new Error("Keyed append fixture did not retain its optional hinted runtime.");
+  throw new Error("Keyed append fixture did not retain its isolated append-only runtime.");
+}
+for (const marker of ["Set.prototype.has", "Map.prototype.get", "keyed-rows:hinted"]) {
+  if (keyedAppendOn.code.includes(marker)) {
+    throw new Error(`Append-only fixture unexpectedly retained ${marker}.`);
+  }
 }
 if (
   !keyedFilterOn.code.includes("FarmCompiledKeyedRows") ||
-  !keyedFilterOn.code.includes("keyed-rows:filter-hinted") ||
+  !keyedFilterOn.code.includes("keyed-rows:filter-only") ||
   !keyedFilterOn.code.includes("filterIndexIndependent")
 ) {
   throw new Error("Keyed filter fixture did not retain its optional filter-hint runtime.");
@@ -213,17 +241,24 @@ if (
 }
 if (
   !keyedPrependOn.code.includes("FarmCompiledKeyedRows") ||
-  !keyedPrependOn.code.includes("keyed-rows:prepend-hinted") ||
+  !keyedPrependOn.code.includes("keyed-rows:prepend-only") ||
   !keyedPrependOn.code.includes("prependIndexIndependent")
 ) {
   throw new Error("Keyed prepend fixture did not retain its optional prepend-hint runtime.");
 }
 if (
   !keyedSliceOn.code.includes("FarmCompiledKeyedRows") ||
-  !keyedSliceOn.code.includes("keyed-rows:filter-hinted") ||
+  !keyedSliceOn.code.includes("keyed-rows:filter-only") ||
   !keyedSliceOn.code.includes("filterIndexIndependent")
 ) {
   throw new Error("Keyed slice fixture did not retain its optional removal-hint runtime.");
+}
+for (const fixture of [keyedFilterOn, keyedSliceOn]) {
+  for (const marker of ["Set.prototype.has", "Map.prototype.get", "keyed-rows:filter-hinted"]) {
+    if (fixture.code.includes(marker)) {
+      throw new Error(`Removal-only fixture unexpectedly retained ${marker}.`);
+    }
+  }
 }
 if (
   !keyedRollingWindowOn.code.includes("FarmCompiledKeyedRows") ||
@@ -244,12 +279,17 @@ if (keyedRollingWindowOn.code.includes("keyed-rows:mapped-rolling-window-hinted"
 }
 if (
   !keyedPositionOn.code.includes("FarmCompiledKeyedRows") ||
-  !keyedPositionOn.code.includes("keyed-rows:position-hinted") ||
+  !keyedPositionOn.code.includes("keyed-rows:plain-position-hinted") ||
   !keyedPositionOn.code.includes("positionIndexIndependent")
 ) {
   throw new Error(
-    `Keyed position fixture did not retain its isolated position-hint runtime: rows=${keyedPositionOn.code.includes("FarmCompiledKeyedRows")}, feature=${keyedPositionOn.code.includes("keyed-rows:position-hinted")}, proof=${keyedPositionOn.code.includes("positionIndexIndependent")}.`,
+    `Keyed position fixture did not retain its isolated position-hint runtime: rows=${keyedPositionOn.code.includes("FarmCompiledKeyedRows")}, feature=${keyedPositionOn.code.includes("keyed-rows:plain-position-hinted")}, proof=${keyedPositionOn.code.includes("positionIndexIndependent")}.`,
   );
+}
+for (const marker of ["Set.prototype.has", "Map.prototype.get", "keyed-rows:position-hinted"]) {
+  if (keyedPositionOn.code.includes(marker)) {
+    throw new Error(`Target-free position fixture unexpectedly retained ${marker}.`);
+  }
 }
 if (
   !keyedBatchPositionOn.code.includes("FarmCompiledKeyedRows") ||
@@ -279,26 +319,29 @@ if (
 }
 if (
   !keyedReorderOn.code.includes("FarmCompiledKeyedRows") ||
-  !keyedReorderOn.code.includes("keyed-rows:reorder-hinted") ||
+  !keyedReorderOn.code.includes("keyed-rows:plain-reorder-hinted") ||
   !keyedReorderOn.code.includes("reorderIndexIndependent")
 ) {
   throw new Error("Keyed reorder fixture did not retain its isolated reorder-hint runtime.");
 }
 if (
   !keyedMapReorderOn.code.includes("FarmCompiledKeyedRows") ||
-  !keyedMapReorderOn.code.includes("keyed-rows:map-reorder-hinted") ||
+  !keyedMapReorderOn.code.includes("keyed-rows:plain-map-reorder-hinted") ||
   !keyedMapReorderOn.code.includes("reorderIndexIndependent")
 ) {
   throw new Error(
-    `Keyed map-reorder fixture did not retain its isolated runtime: rows=${keyedMapReorderOn.code.includes("FarmCompiledKeyedRows")}, feature=${keyedMapReorderOn.code.includes("keyed-rows:map-reorder-hinted")}, proof=${keyedMapReorderOn.code.includes("reorderIndexIndependent")}.`,
+    `Keyed map-reorder fixture did not retain its isolated runtime: rows=${keyedMapReorderOn.code.includes("FarmCompiledKeyedRows")}, feature=${keyedMapReorderOn.code.includes("keyed-rows:plain-map-reorder-hinted")}, proof=${keyedMapReorderOn.code.includes("reorderIndexIndependent")}.`,
   );
 }
-if (keyedReorderOn.code.includes("keyed-rows:map-reorder-hinted")) {
+if (
+  keyedReorderOn.code.includes("keyed-rows:map-reorder-hinted") ||
+  keyedReorderOn.code.includes("keyed-rows:plain-map-reorder-hinted")
+) {
   throw new Error("Reorder-only fixture retained the optional map-reorder runtime.");
 }
 if (
   !keyedSortOn.code.includes("FarmCompiledKeyedRows") ||
-  !keyedSortOn.code.includes("keyed-rows:reorder-hinted") ||
+  !keyedSortOn.code.includes("keyed-rows:plain-reorder-hinted") ||
   !keyedSortOn.code.includes("reorderIndexIndependent")
 ) {
   throw new Error("Keyed sort fixture did not retain its isolated reorder-hint runtime.");
@@ -325,13 +368,17 @@ for (const [name, output] of [
   }
   if (
     output.code.includes("positionIndexIndependent") ||
-    output.code.includes("keyed-rows:position-hinted")
+    output.code.includes("keyed-rows:position-hinted") ||
+    output.code.includes("keyed-rows:plain-position-hinted")
   ) {
     throw new Error(`${name} fixture retained the optional position-hint runtime.`);
   }
   if (
     output.code.includes("reorderIndexIndependent") ||
-    output.code.includes("keyed-rows:reorder-hinted")
+    output.code.includes("keyed-rows:reorder-hinted") ||
+    output.code.includes("keyed-rows:plain-reorder-hinted") ||
+    output.code.includes("keyed-rows:plain-map-reorder-hinted") ||
+    output.code.includes("keyed-rows:map-reorder-hinted")
   ) {
     throw new Error(`${name} fixture retained the optional reorder-hint runtime.`);
   }
@@ -372,6 +419,23 @@ const results = {
         raw: keyedOn.raw - keyedOff.raw,
         gzip: keyedOn.gzip - keyedOff.gzip,
         brotli: keyedOn.brotli - keyedOff.brotli,
+      },
+    },
+    keyedPlain: {
+      compilerOff: {
+        raw: keyedPlainOff.raw,
+        gzip: keyedPlainOff.gzip,
+        brotli: keyedPlainOff.brotli,
+      },
+      compilerOn: {
+        raw: keyedPlainOn.raw,
+        gzip: keyedPlainOn.gzip,
+        brotli: keyedPlainOn.brotli,
+      },
+      compilerPremium: {
+        raw: keyedPlainOn.raw - keyedPlainOff.raw,
+        gzip: keyedPlainOn.gzip - keyedPlainOff.gzip,
+        brotli: keyedPlainOn.brotli - keyedPlainOff.brotli,
       },
     },
     keyedAppend: {
@@ -661,141 +725,27 @@ const results = {
   },
 };
 
+// Single-chunk reports retain their existing shape and exact byte measurements.
+if (chunkAccounting.length > 0) {
+  results.chunkAccounting = chunkAccounting.sort(
+    (a, b) => a.entry.localeCompare(b.entry) || Number(a.compiler) - Number(b.compiler),
+  );
+}
+
 if (checkOnly) {
   const reference = JSON.parse(await readFile(resultFile, "utf8"));
-  const checks = [
-    {
-      name: "direct compiler premium",
-      current: results.fixtures.direct.compilerPremium.gzip,
-      maximum: reference.fixtures.direct.compilerPremium.gzip + 128,
-    },
-    {
-      name: "keyed compiler premium",
-      current: results.fixtures.keyed.compilerPremium.gzip,
-      maximum: reference.fixtures.keyed.compilerPremium.gzip + 256,
-    },
-    {
-      name: "keyed append compiler premium",
-      current: results.fixtures.keyedAppend.compilerPremium.gzip,
-      maximum: reference.fixtures.keyedAppend.compilerPremium.gzip + 256,
-    },
-    {
-      name: "keyed filter compiler premium",
-      current: results.fixtures.keyedFilter.compilerPremium.gzip,
-      maximum: (reference.fixtures.keyedFilter?.compilerPremium.gzip ?? 12_000) + 264,
-    },
-    {
-      name: "keyed structural-append compiler premium",
-      current: results.fixtures.keyedStructuralAppend.compilerPremium.gzip,
-      maximum:
-        (reference.fixtures.keyedStructuralAppend?.compilerPremium.gzip ??
-          results.fixtures.keyedStructuralAppend.compilerPremium.gzip) + 256,
-    },
-    {
-      name: "keyed structural-append-map compiler premium",
-      current: results.fixtures.keyedStructuralAppendMap.compilerPremium.gzip,
-      maximum:
-        (reference.fixtures.keyedStructuralAppendMap?.compilerPremium.gzip ??
-          results.fixtures.keyedStructuralAppendMap.compilerPremium.gzip) + 256,
-    },
-    {
-      name: "keyed structural-prepend compiler premium",
-      current: results.fixtures.keyedStructuralPrepend.compilerPremium.gzip,
-      maximum:
-        (reference.fixtures.keyedStructuralPrepend?.compilerPremium.gzip ??
-          results.fixtures.keyedStructuralPrepend.compilerPremium.gzip) + 256,
-    },
-    {
-      name: "keyed structural-prepend-map compiler premium",
-      current: results.fixtures.keyedStructuralPrependMap.compilerPremium.gzip,
-      maximum:
-        (reference.fixtures.keyedStructuralPrependMap?.compilerPremium.gzip ??
-          results.fixtures.keyedStructuralPrependMap.compilerPremium.gzip) + 256,
-    },
-    {
-      name: "keyed prepend compiler premium",
-      current: results.fixtures.keyedPrepend.compilerPremium.gzip,
-      maximum: (reference.fixtures.keyedPrepend?.compilerPremium.gzip ?? 12_000) + 256,
-    },
-    {
-      name: "keyed position compiler premium",
-      current: results.fixtures.keyedPosition.compilerPremium.gzip,
-      maximum:
-        (reference.fixtures.keyedPosition?.compilerPremium.gzip ??
-          results.fixtures.keyedPosition.compilerPremium.gzip) + 256,
-    },
-    {
-      name: "keyed batch-position compiler premium",
-      current: results.fixtures.keyedBatchPosition.compilerPremium.gzip,
-      maximum:
-        (reference.fixtures.keyedBatchPosition?.compilerPremium.gzip ??
-          results.fixtures.keyedBatchPosition.compilerPremium.gzip) + 256,
-    },
-    {
-      name: "keyed window-position compiler premium",
-      current: results.fixtures.keyedWindowPosition.compilerPremium.gzip,
-      maximum:
-        (reference.fixtures.keyedWindowPosition?.compilerPremium.gzip ??
-          results.fixtures.keyedWindowPosition.compilerPremium.gzip) + 256,
-    },
-    {
-      name: "keyed reorder compiler premium",
-      current: results.fixtures.keyedReorder.compilerPremium.gzip,
-      maximum:
-        (reference.fixtures.keyedReorder?.compilerPremium.gzip ??
-          results.fixtures.keyedReorder.compilerPremium.gzip) + 256,
-    },
-    {
-      name: "keyed map-reorder compiler premium",
-      current: results.fixtures.keyedMapReorder.compilerPremium.gzip,
-      maximum:
-        (reference.fixtures.keyedMapReorder?.compilerPremium.gzip ??
-          results.fixtures.keyedMapReorder.compilerPremium.gzip) + 328,
-    },
-    {
-      name: "keyed sort compiler premium",
-      current: results.fixtures.keyedSort.compilerPremium.gzip,
-      maximum:
-        (reference.fixtures.keyedSort?.compilerPremium.gzip ??
-          results.fixtures.keyedSort.compilerPremium.gzip) + 256,
-    },
-    {
-      name: "keyed slice compiler premium",
-      current: results.fixtures.keyedSlice.compilerPremium.gzip,
-      maximum: (reference.fixtures.keyedSlice?.compilerPremium.gzip ?? 12_250) + 256,
-    },
-    {
-      name: "keyed rolling-window compiler premium",
-      current: results.fixtures.keyedRollingWindow.compilerPremium.gzip,
-      maximum:
-        (reference.fixtures.keyedRollingWindow?.compilerPremium.gzip ??
-          results.fixtures.keyedRollingWindow.compilerPremium.gzip) + 256,
-    },
-    {
-      name: "keyed mapped rolling-window compiler premium",
-      current: results.fixtures.keyedMappedRollingWindow.compilerPremium.gzip,
-      maximum:
-        (reference.fixtures.keyedMappedRollingWindow?.compilerPremium.gzip ??
-          results.fixtures.keyedMappedRollingWindow.compilerPremium.gzip) + 256,
-    },
-    {
-      name: "core runtime premium",
-      current: results.fixtures.isolatedRuntime.coreRuntimePremiumGzip,
-      maximum: reference.fixtures.isolatedRuntime.coreRuntimePremiumGzip + 128,
-    },
-  ];
-  for (const check of checks) {
-    if (check.current > check.maximum) {
-      throw new Error(
-        `${check.name} grew to ${check.current} B gzip; persisted maximum is ${check.maximum} B.`,
-      );
-    }
+  assertRuntimeSizeBudgets(results, reference);
+  // With the compiled root (the default when the compiler is on), React DOM leaves the initial
+  // download: it is a deferred chunk, loaded only for trees the compiled root cannot mount.
+  const directCompiledRoot = await bundle("direct.tsx", true, true);
+  const initialGzip = directCompiledRoot.chunkAccounting.initial.gzip;
+  if (!(initialGzip > 0 && initialGzip <= directOff.gzip - 30_000)) {
+    throw new Error(
+      `The compiled root's initial JavaScript is ${initialGzip} B gzip; it must be at least 30,000 B below the React DOM build's ${directOff.gzip} B.`,
+    );
   }
-  if (
-    results.fixtures.isolatedRuntime.gzipReductionPercent <
-    reference.fixtures.isolatedRuntime.gzipReductionPercent - 1
-  ) {
-    throw new Error("Core-only runtime reduction regressed against the persisted result.");
+  if (directCompiledRoot.chunkAccounting.deferred.gzip === 0) {
+    throw new Error("The compiled root did not move React DOM into a deferred chunk.");
   }
 } else {
   await writeFile(resultFile, `${JSON.stringify(results, null, 2)}\n`, "utf8");

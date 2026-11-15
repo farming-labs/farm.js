@@ -1,0 +1,277 @@
+/* Drawn scenes on the agents page: line drawings on dark faces, each object's
+   name printed small on it, a plain summary above, and a live readout. */
+.agents-iso-row {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+.agents-iso-row > .agents-iso:nth-child(even) {
+  border-left: 1px solid var(--farm-line);
+}
+.agents-iso-row > .agents-iso:nth-child(n + 3) {
+  border-top: 1px solid var(--farm-line);
+}
+/* In the hero, the figures take the place of a closing illustration. */
+.agents-hero .agents-iso-row {
+  position: relative;
+  border-top: 1px solid var(--farm-line);
+  background: #000;
+}
+.agents-iso {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  min-width: 0;
+  margin: 0;
+  padding: 22px 28px 20px;
+  outline: none;
+  container: agents-iso / inline-size;
+}
+.agents-iso:focus-visible {
+  outline: 1px solid rgb(255 255 255 / 0.4);
+  outline-offset: -6px;
+}
+/* The header reads like the page's section labels: "01 / One codebase" and a bracketed tag. */
+.agents-iso-top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  color: #929292;
+}
+.agents-iso-label {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: 6px;
+  font-family: var(--font-geist-mono), ui-monospace, monospace;
+  font-size: 10px;
+  text-transform: uppercase;
+}
+.agents-iso-label-index {
+  color: rgb(255 255 255 / 0.26);
+}
+.agents-iso-label-slash {
+  color: rgb(255 255 255 / 0.18);
+}
+.agents-iso-label-icon {
+  width: 14px;
+  height: 14px;
+  flex-shrink: 0;
+}
+.agents-iso-label-text {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.agents-iso-tag {
+  color: #6e6e6e;
+  font-family: var(--font-geist-mono), ui-monospace, monospace;
+  font-size: 10px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+.agents-iso-title {
+  margin: 14px 0 0;
+  color: #ededed;
+  font-size: 24px;
+  font-weight: 400;
+  line-height: 1.2;
+  letter-spacing: -0.035em;
+  text-wrap: balance;
+}
+.agents-iso-summary {
+  max-width: 52ch;
+  margin: 0;
+  color: #929292;
+  font-size: 14px;
+  line-height: 1.6;
+  text-wrap: pretty;
+}
+/* A soft light behind the drawing, never over it. */
+.agents-iso-stage {
+  position: relative;
+  isolation: isolate;
+  margin-block: 4px;
+}
+/* How far the light spreads and how bright it is. The taller objects in Figs
+   2 to 4 get a wide, faint wash; the long, low street in Fig 1 a tighter one. */
+.agents-iso {
+  --iso-spot-size: 74% 66%;
+  --iso-spot: 0.13;
+  --iso-spot-mid: 0.06;
+  --iso-spot-reach: 92%;
+}
+.agents-iso[data-figure="01"] {
+  --iso-spot-size: 56% 50%;
+  --iso-spot: 0.15;
+  --iso-spot-mid: 0.055;
+  --iso-spot-reach: 74%;
+}
+.agents-iso-stage::before {
+  position: absolute;
+  z-index: -1;
+  inset: 4% 6% -2%;
+  background: radial-gradient(
+    ellipse var(--iso-spot-size) at 50% 56%,
+    rgb(255 255 255 / var(--iso-spot)),
+    rgb(255 255 255 / var(--iso-spot-mid)) 44%,
+    transparent var(--iso-spot-reach)
+  );
+  filter: blur(20px);
+  content: "";
+  pointer-events: none;
+}
+.agents-iso-stage svg {
+  display: block;
+  width: 100%;
+  max-width: 560px;
+  height: auto;
+  margin: auto;
+  overflow: visible;
+  touch-action: manipulation;
+}
+/* The live line: what the scene is doing now, or what you are pointing at. */
+.agents-iso-readout {
+  margin: auto -28px 0;
+  padding: 12px 28px 0;
+  border-top: 1px solid rgb(255 255 255 / 0.08);
+  color: #a3a3a3;
+  font-family: var(--font-geist-mono), ui-monospace, monospace;
+  font-size: 11px;
+  line-height: 1.4;
+  /* One height whatever it says, so the page never jumps as it changes: room
+     for one line where the longest readout fits on one, two where it wraps.
+     Readouts stay within 75 characters for this. */
+  min-height: calc(13px + 1.4em);
+}
+@container agents-iso (max-width: 520px) {
+  .agents-iso-readout {
+    min-height: calc(13px + 2.8em);
+  }
+}
+@media (max-width: 900px) {
+  .agents-iso-row {
+    grid-template-columns: 1fr;
+  }
+  .agents-iso-row > .agents-iso:nth-child(even) {
+    border-left: 0;
+  }
+  .agents-iso-row > .agents-iso + .agents-iso {
+    border-top: 1px solid var(--farm-line);
+  }
+  .agents-iso {
+    padding: 20px 24px;
+  }
+  .agents-iso-readout {
+    margin-inline: -24px;
+    padding-inline: 24px;
+  }
+}
+@media (max-width: 600px) {
+  .agents-iso {
+    padding: 18px 16px;
+  }
+  .agents-iso-readout {
+    margin-inline: -16px;
+    padding-inline: 16px;
+  }
+  .agents-iso-title {
+    font-size: 21px;
+  }
+}
+
+.agents-iso {
+  cursor: zoom-in;
+}
+/* The close-up: the same scene in a dialog, over the page blurred behind it. */
+.agents-iso-dialog {
+  width: min(1080px, calc(100vw - 32px));
+  max-width: none;
+  max-height: calc(100dvh - 32px);
+  margin: auto;
+  padding: 0;
+  overflow: auto;
+  border: 1px solid var(--farm-line);
+  background: #000;
+  color: #ededed;
+  cursor: default;
+}
+.agents-iso-dialog::backdrop {
+  background: rgb(0 0 0 / 0.55);
+  -webkit-backdrop-filter: blur(12px);
+  backdrop-filter: blur(12px);
+}
+.agents-iso-dialog[open] {
+  animation: agents-iso-zoom 240ms cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+.agents-iso-dialog[open]::backdrop {
+  animation: agents-iso-fade 240ms ease-out;
+}
+@keyframes agents-iso-zoom {
+  from {
+    opacity: 0;
+    transform: scale(0.94);
+  }
+}
+@keyframes agents-iso-fade {
+  from {
+    opacity: 0;
+  }
+}
+.agents-iso-dialog-body {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  padding: 22px 28px 20px;
+}
+.agents-iso-dialog-head {
+  display: flex;
+  align-items: center;
+  gap: 20px;
+}
+.agents-iso-dialog-head .agents-iso-top {
+  flex: 1;
+  min-width: 0;
+}
+.agents-iso-close {
+  padding: 0;
+  border: 0;
+  background: none;
+  color: #a3a3a3;
+  cursor: pointer;
+  font-family: var(--font-geist-mono), ui-monospace, monospace;
+  font-size: 10px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+.agents-iso-close:hover,
+.agents-iso-close:focus-visible {
+  color: #fff;
+}
+.agents-iso-stage-large svg {
+  max-width: none;
+  height: min(66vh, 680px);
+}
+.agents-iso-dialog .agents-iso-readout {
+  margin: 0 -28px;
+  padding: 12px 28px 0;
+}
+@media (max-width: 600px) {
+  .agents-iso-dialog-body {
+    padding: 18px 16px;
+  }
+  .agents-iso-dialog .agents-iso-readout {
+    margin-inline: -16px;
+    padding-inline: 16px;
+  }
+  .agents-iso-stage-large svg {
+    height: auto;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .agents-iso-dialog[open],
+  .agents-iso-dialog[open]::backdrop {
+    animation: none;
+  }
+}

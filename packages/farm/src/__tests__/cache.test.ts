@@ -674,6 +674,37 @@ describe("server cache primitives", () => {
     ).resolves.toEqual({ calls: 2 });
   });
 
+  it("does not join an in-flight fill that started before its tag was invalidated", async () => {
+    const cache = new FarmDataCache();
+    let finishOldFill!: () => void;
+    const oldFillGate = new Promise<void>((resolve) => {
+      finishOldFill = resolve;
+    });
+    let started = false;
+
+    const oldFill = cache.getOrSet(
+      "featured",
+      async () => {
+        started = true;
+        await oldFillGate;
+        return "old";
+      },
+      { tags: ["products"] },
+    );
+    await vi.waitFor(() => expect(started).toBe(true));
+
+    cache.revalidateTag("products");
+    const freshRead = cache.getOrSet("featured", async () => "fresh", { tags: ["products"] });
+    const dedupedRead = cache.getOrSet("featured", async () => "duplicate", {
+      tags: ["products"],
+    });
+
+    await expect(freshRead).resolves.toBe("fresh");
+    await expect(dedupedRead).resolves.toBe("fresh");
+    finishOldFill();
+    await expect(oldFill).resolves.toBe("old");
+  });
+
   it("shares entries and tag invalidation through a distributed adapter", async () => {
     const adapter = new TestSharedCacheAdapter();
     const first = new FarmDataCache({ adapter, namespace: "catalog" });

@@ -10,27 +10,38 @@ import VueCompat, {
   ErrorBoundary,
   createElement,
   isValidElement,
+  markFunctionComponent,
   materializeVueElement,
 } from "./runtime";
+import { validateFarmVueAppSetup, type FarmVueAppSetup } from "./app-setup";
 
 export const name = "vue";
 export const capabilities = {
   streaming: { node: true, web: true },
 } as const;
-export { Fragment, Suspense, ErrorBoundary, createElement, isValidElement };
+export { Fragment, Suspense, ErrorBoundary, createElement, isValidElement, markFunctionComponent };
 
 /** Vue hydration does not require an inline bootstrap before the client entry. */
 export function generateHydrationScript(): string {
   return "";
 }
 
+let appSetup: FarmVueAppSetup | undefined;
+
+/** Install the app's `app` setup module; Farm calls this before rendering. */
+export function configureApp(setup: unknown): void {
+  appSetup = validateFarmVueAppSetup(setup);
+}
+
 function createFarmVueServerApp(element: unknown) {
-  return createSSRApp(
+  const app = createSSRApp(
     defineComponent({
       name: "FarmVueServerRoot",
       setup: () => () => materializeVueElement(element),
     }),
   );
+  appSetup?.(app, { ssr: true });
+  return app;
 }
 
 export async function renderToString(element: unknown): Promise<string> {

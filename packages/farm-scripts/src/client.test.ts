@@ -67,6 +67,64 @@ describe("Farm Scripts browser runtime", () => {
     expect(supportChat.status).toBe("ready");
   });
 
+  it("still loads a script whose global the page pre-seeded", async () => {
+    // The usual tag-manager snippet runs before the vendor script.
+    (window as any).dataLayer = (window as any).dataLayer || [];
+    try {
+      const tagManager = defineScript<unknown[]>({
+        name: "tag-manager",
+        src: "https://cdn.example.test/gtm.js",
+        global: "dataLayer",
+        load: "manual",
+      });
+      register(tagManager);
+
+      const loading = tagManager.load();
+      await settle();
+      expect(script("tag-manager")).not.toBeNull();
+      expect(tagManager.status).toBe("loading");
+      script("tag-manager")?.dispatchEvent(new Event("load"));
+      await expect(loading).resolves.toBe((window as any).dataLayer);
+      expect(tagManager.status).toBe("ready");
+    } finally {
+      delete (window as any).dataLayer;
+    }
+  });
+
+  it("requests integrity-checked scripts with CORS unless crossOrigin is set", async () => {
+    const pinned = defineScript({
+      name: "pinned",
+      src: "https://cdn.example.test/pinned.js",
+      integrity: "sha384-abc",
+      load: "manual",
+    });
+    const credentialed = defineScript({
+      name: "credentialed",
+      src: "https://cdn.example.test/credentialed.js",
+      integrity: "sha384-def",
+      crossOrigin: "use-credentials",
+      load: "manual",
+    });
+    const plain = defineScript({
+      name: "plain",
+      src: "https://cdn.example.test/plain.js",
+      load: "manual",
+    });
+    startScriptRuntime([pinned.definition, credentialed.definition, plain.definition], window);
+
+    void pinned.load();
+    void credentialed.load();
+    void plain.load();
+    await settle();
+    expect(script("pinned")?.integrity).toBe("sha384-abc");
+    expect(script("pinned")?.crossOrigin).toBe("anonymous");
+    expect(script("credentialed")?.crossOrigin).toBe("use-credentials");
+    expect(script("plain")?.crossOrigin).toBeFalsy();
+    for (const name of ["pinned", "credentialed", "plain"]) {
+      script(name)?.dispatchEvent(new Event("load"));
+    }
+  });
+
   it("applies Farm's base path to app-local scripts", async () => {
     const local = defineScript({ name: "local", src: "/vendor/local.js", load: "manual" });
     startScriptRuntime([local.definition], window, "/dashboard/");
@@ -409,10 +467,13 @@ describe("Farm Scripts browser runtime", () => {
     });
     register(sdk);
     const loading = sdk.load();
-    script("demo-sdk")?.dispatchEvent(new Event("load"));
-    await vi.waitFor(() =>
-      expect(document.querySelectorAll('script[data-farm-script="demo-sdk"]')).toHaveLength(1),
-    );
+    const firstAttempt = script("demo-sdk");
+    firstAttempt?.dispatchEvent(new Event("load"));
+    // The failed element is removed and the retry injects a fresh one.
+    await vi.waitFor(() => {
+      expect(document.querySelectorAll('script[data-farm-script="demo-sdk"]')).toHaveLength(1);
+      expect(script("demo-sdk")).not.toBe(firstAttempt);
+    });
     (window as any).Demo = { sdk: { ready: true } };
     script("demo-sdk")?.dispatchEvent(new Event("load"));
     await expect(loading).resolves.toEqual({ ready: true });

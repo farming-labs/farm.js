@@ -1,16 +1,28 @@
-import type { LayoutProps } from "@farm.js/core";
+import type { LayoutProps, Metadata } from "@farm.js/core";
 import { defineLayoutFonts, localFont } from "@farm.js/core/font";
 import { Databuddy } from "@databuddy/sdk/react";
+import { SITE_URL } from "../lib/site";
 import "./globals.css";
 
+// metadataBase makes canonical, Open Graph, and Twitter URLs absolute on every
+// page. Open Graph merges shallowly and has no fallback to the page title, so
+// pages set their own og title and description rather than inheriting one here.
 export const metadata = {
-  title: "farmjs.dev - Framework for integrated apps",
+  metadataBase: new URL(SITE_URL),
+  title: "Farm.js - The framework for the web and agents",
   description:
-    "Farm.js is an easy and fast full-stack framework that blends app foundations and external services into one flow so teams can ship products faster.",
+    "Farm.js is the full-stack framework for the web and agents: apps are agent-ready by default and run any agent runtime you bring. Built on Vite and Nitro.",
   icons: {
     icon: [{ url: "/favicon.svg", type: "image/svg+xml", sizes: "any" }],
   },
-};
+  openGraph: {
+    siteName: "Farm.js",
+    type: "website",
+  },
+  twitter: {
+    card: "summary_large_image",
+  },
+} satisfies Metadata;
 
 const geistSans = localFont({
   src: "../../node_modules/geist/dist/fonts/geist-sans/Geist-Variable.woff2",
@@ -36,6 +48,9 @@ const geistPixel = localFont({
   weight: 500,
   variable: "--font-geist-pixel",
   fallback: ["monospace"],
+  // Only feature headings below the fold use it; preloading it pushed Geist Sans
+  // out of the two-font preload budget.
+  preload: false,
 });
 
 export const fonts = defineLayoutFonts({

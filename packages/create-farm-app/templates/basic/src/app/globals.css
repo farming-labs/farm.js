@@ -145,6 +145,14 @@ code {
   white-space: nowrap;
 }
 
+.hero-summary {
+  max-width: 540px;
+  margin: 1.1rem 0 0;
+  color: var(--ink-soft);
+  font-size: 0.95rem;
+  line-height: 1.6;
+}
+
 .command-list {
   max-width: 520px;
   margin-top: 1.75rem;
@@ -174,6 +182,44 @@ code {
   color: var(--ink);
   font-size: 0.75rem;
   overflow-wrap: anywhere;
+}
+
+.feature-list {
+  max-width: 520px;
+  margin: 0;
+  padding: 0;
+  border-bottom: 1px solid var(--line);
+  list-style: none;
+}
+
+.feature-list li {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 0.8rem;
+  padding: 0.9rem 0;
+}
+
+.feature-list li + li {
+  border-top: 1px solid var(--line);
+}
+
+.feature-list span {
+  padding-top: 0.2rem;
+  color: var(--ink-faint);
+  font-family: var(--font-mono);
+  font-size: 0.62rem;
+}
+
+.feature-list p {
+  margin: 0;
+  color: var(--ink-soft);
+  font-size: 0.8rem;
+  line-height: 1.55;
+}
+
+.feature-list strong {
+  color: var(--ink);
+  font-weight: 500;
 }
 
 .resource-links {

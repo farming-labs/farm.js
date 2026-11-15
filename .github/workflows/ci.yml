@@ -2,16 +2,469 @@ name: CI
 
 on:
   workflow_dispatch:
+    inputs:
+      compression-benchmark:
+        description: Compare buffered and streamed response compression on the maintained fixture
+        type: boolean
+        default: false
+      preload-owned-html-benchmark:
+        description: Compare renderer-owned buffered HTML on the maintained fixture
+        type: boolean
+        default: false
+      preload-scanning-benchmark:
+        description: Compare preload tag scanning against main on an isolated runner
+        type: boolean
+        default: false
+      response-pathname-benchmark:
+        description: Compare production response pathname work on an isolated runner
+        type: boolean
+        default: false
+      preload-warning-history-benchmark:
+        description: Compare preload warning history work on an isolated runner
+        type: boolean
+        default: false
+      markdown-request-url-benchmark:
+        description: Compare Markdown request URL reuse on an isolated runner
+        type: boolean
+        default: false
+      hydration-planning-benchmark:
+        description: Collect hydration-planning diagnostic samples on an isolated runner
+        type: boolean
+        default: false
+      preload-response-benchmark:
+        description: Collect buffered-response diagnostic samples on an isolated runner
+        type: boolean
+        default: false
+      layout-order-benchmark:
+        description: Collect production layout-order diagnostic samples on an isolated runner
+        type: boolean
+        default: false
+      page-route-inputs-benchmark:
+        description: Collect production page-route input diagnostic samples on an isolated runner
+        type: boolean
+        default: false
+      page-route-baseline:
+        description: Optimization isolated by the page-route diagnostic
+        type: choice
+        options: [inputs, segments]
+        default: inputs
+      configured-headers-benchmark:
+        description: Compare configured header matching with same-code SSR controls
+        type: boolean
+        default: false
+      app-scale-benchmark:
+        description: Time dev startup and builds of a generated 120-route app
+        type: boolean
+        default: false
   push:
     branches: [main]
   pull_request:
     branches: [main]
+
+permissions:
+  contents: read
 
 concurrency:
   group: ci-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: true
 
 jobs:
+  compression-benchmark:
+    name: Compression Diagnostic
+    if: github.event_name == 'workflow_dispatch' && inputs.compression-benchmark
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7
+        with:
+          node-version: "24"
+      - uses: pnpm/action-setup@0977fd99725f1db4007ccb2928dbb4e90d06cc86 # v6
+      - run: pnpm install --frozen-lockfile
+      - name: Build local framework packages
+        run: |
+          pnpm --filter @farm.js/core build
+          pnpm --filter @farm.js/cli build
+        env:
+          NODE_OPTIONS: --max-old-space-size=12288
+      - name: Install and build the maintained fixture
+        run: |
+          pnpm --dir benchmarks/frameworks --filter farm-framework-benchmark install --frozen-lockfile
+          pnpm --dir benchmarks/frameworks/apps/farm exec farm build --preset node-server
+      - name: Collect two independent comparisons
+        run: |
+          node benchmarks/frameworks/compression.mjs > "${{ runner.temp }}/compression-first.json"
+          node benchmarks/frameworks/compression.mjs > "${{ runner.temp }}/compression-second.json"
+      - name: Retain raw samples for review
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
+        with:
+          name: compression-${{ github.sha }}
+          path: ${{ runner.temp }}/compression-*.json
+          if-no-files-found: warn
+          retention-days: 14
+
+  preload-owned-html-benchmark:
+    name: Preload Owned HTML Diagnostic
+    if: github.event_name == 'workflow_dispatch' && inputs.preload-owned-html-benchmark
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7
+        with:
+          node-version: "24"
+      - uses: pnpm/action-setup@0977fd99725f1db4007ccb2928dbb4e90d06cc86 # v6
+      - run: pnpm install --frozen-lockfile
+      - name: Build local framework packages
+        run: |
+          pnpm --filter @farm.js/core build
+          pnpm --filter @farm.js/cli build
+        env:
+          NODE_OPTIONS: --max-old-space-size=12288
+      - name: Install and build the maintained fixture
+        run: |
+          pnpm --dir benchmarks/frameworks --filter farm-framework-benchmark install --frozen-lockfile
+          pnpm --dir benchmarks/frameworks/apps/farm exec farm build --preset node-server
+      - name: Collect two independent alternating comparisons
+        run: |
+          node benchmarks/frameworks/preload-owned-html.mjs > "${{ runner.temp }}/preload-owned-html-first.json"
+          node benchmarks/frameworks/preload-owned-html.mjs > "${{ runner.temp }}/preload-owned-html-second.json"
+      - name: Retain raw samples for review
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
+        with:
+          name: preload-owned-html-${{ github.sha }}
+          path: ${{ runner.temp }}/preload-owned-html-*.json
+          if-no-files-found: warn
+          retention-days: 14
+
+  preload-scanning-benchmark:
+    name: Preload Scanning Diagnostic
+    if: github.event_name == 'workflow_dispatch' && inputs.preload-scanning-benchmark
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7
+        with:
+          node-version: "24"
+      - name: Verify output equivalence and collect two comparisons
+        run: |
+          baseline="$(git merge-base HEAD origin/main)"
+          node benchmarks/preload-scanning/verify.mjs "$baseline"
+          node benchmarks/preload-scanning/run.mjs "$baseline" > "${{ runner.temp }}/preload-scanning-first.json"
+          node benchmarks/preload-scanning/run.mjs "$baseline" > "${{ runner.temp }}/preload-scanning-second.json"
+      - name: Retain raw samples for review
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
+        with:
+          name: preload-scanning-${{ github.sha }}
+          path: ${{ runner.temp }}/preload-scanning-*.json
+          if-no-files-found: warn
+          retention-days: 14
+
+  response-pathname-benchmark:
+    name: Response Pathname Diagnostic
+    if: github.event_name == 'workflow_dispatch' && inputs.response-pathname-benchmark
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7
+        with:
+          node-version: "24"
+      - name: Collect two alternating comparisons
+        run: |
+          node benchmarks/response-pathname/run.mjs > "${{ runner.temp }}/response-pathname-first.json"
+          node benchmarks/response-pathname/run.mjs > "${{ runner.temp }}/response-pathname-second.json"
+      - name: Retain raw samples for review
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
+        with:
+          name: response-pathname-${{ github.sha }}
+          path: ${{ runner.temp }}/response-pathname-*.json
+          if-no-files-found: warn
+          retention-days: 14
+
+  preload-warning-history-benchmark:
+    name: Preload Warning History Diagnostic
+    if: github.event_name == 'workflow_dispatch' && inputs.preload-warning-history-benchmark
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7
+        with:
+          node-version: "24"
+      - name: Collect two alternating comparisons
+        run: |
+          node benchmarks/preload-warning-history/run.mjs > "${{ runner.temp }}/preload-warning-history-first.json"
+          node benchmarks/preload-warning-history/run.mjs > "${{ runner.temp }}/preload-warning-history-second.json"
+      - name: Retain raw samples for review
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
+        with:
+          name: preload-warning-history-${{ github.sha }}
+          path: ${{ runner.temp }}/preload-warning-history-*.json
+          if-no-files-found: warn
+          retention-days: 14
+
+  configured-headers-benchmark:
+    name: Configured Headers Diagnostic
+    if: github.event_name == 'workflow_dispatch' && inputs.configured-headers-benchmark
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7
+        with:
+          node-version: "24"
+      - uses: pnpm/action-setup@0977fd99725f1db4007ccb2928dbb4e90d06cc86 # v6
+      - run: pnpm install --frozen-lockfile
+      - name: Build local framework packages
+        run: |
+          pnpm --filter @farm.js/core build
+          pnpm --filter @farm.js/cli build
+        env:
+          NODE_OPTIONS: --max-old-space-size=12288
+      - name: Verify matching and diagnostic controls
+        run: |
+          pnpm --filter @farm.js/core exec vitest run src/__tests__/configured-header-runtime.test.ts src/__tests__/universal-build-router-runtime.test.ts src/__tests__/route-matcher-parity.test.ts src/__tests__/config-route-plugins.test.ts
+          node --test benchmarks/configured-headers/production.test.mjs
+      - name: Install and build the maintained fixture
+        run: |
+          pnpm --dir benchmarks/frameworks --filter farm-framework-benchmark install --frozen-lockfile
+          pnpm --dir benchmarks/frameworks/apps/farm exec farm build --preset node-server
+      - name: Collect independent comparisons sequentially
+        run: |
+          node benchmarks/configured-headers/run.mjs > "${{ runner.temp }}/configured-headers-helper-first.json"
+          node benchmarks/configured-headers/run.mjs > "${{ runner.temp }}/configured-headers-helper-second.json"
+          node benchmarks/configured-headers/production.mjs > "${{ runner.temp }}/configured-headers-ssr-first.json"
+          node benchmarks/configured-headers/production.mjs > "${{ runner.temp }}/configured-headers-ssr-second.json"
+      - name: Retain every sample for review
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
+        with:
+          name: configured-headers-${{ github.sha }}
+          path: ${{ runner.temp }}/configured-headers-*.json
+          if-no-files-found: warn
+          retention-days: 14
+
+  markdown-request-url-benchmark:
+    name: Markdown Request URL Diagnostic
+    if: github.event_name == 'workflow_dispatch' && inputs.markdown-request-url-benchmark
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7
+        with:
+          node-version: "24"
+      - uses: pnpm/action-setup@0977fd99725f1db4007ccb2928dbb4e90d06cc86 # v6
+      - run: pnpm install --frozen-lockfile
+      - name: Build local framework packages
+        run: |
+          pnpm --filter @farm.js/core build
+          pnpm --filter @farm.js/cli build
+        env:
+          NODE_OPTIONS: --max-old-space-size=12288
+      - name: Install and build the maintained fixture
+        run: |
+          pnpm --dir benchmarks/frameworks --filter farm-framework-benchmark install --frozen-lockfile
+          pnpm --dir benchmarks/frameworks/apps/farm exec farm build --preset node-server
+      - name: Collect two independent alternating comparisons
+        run: |
+          node benchmarks/frameworks/markdown-request-url.mjs > "${{ runner.temp }}/markdown-request-url-first.json"
+          node benchmarks/frameworks/markdown-request-url.mjs > "${{ runner.temp }}/markdown-request-url-second.json"
+      - name: Retain raw samples for review
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
+        with:
+          name: markdown-request-url-${{ github.sha }}
+          path: ${{ runner.temp }}/markdown-request-url-*.json
+          if-no-files-found: warn
+          retention-days: 14
+
+  hydration-planning-benchmark:
+    name: Hydration Planning Diagnostic
+    if: github.event_name == 'workflow_dispatch' && inputs.hydration-planning-benchmark
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7
+        with:
+          node-version: "24"
+      - uses: pnpm/action-setup@0977fd99725f1db4007ccb2928dbb4e90d06cc86 # v6
+      - run: pnpm install --frozen-lockfile
+      - name: Build the local framework runtime
+        run: pnpm --filter @farm.js/core build:runtime
+        env:
+          NODE_OPTIONS: --max-old-space-size=12288
+      - name: Collect two independent alternating comparisons
+        run: |
+          node benchmarks/hydration-planning/run.mjs > "${{ runner.temp }}/hydration-planning-first.json"
+          node benchmarks/hydration-planning/run.mjs > "${{ runner.temp }}/hydration-planning-second.json"
+      - name: Retain raw samples for review
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
+        with:
+          name: hydration-planning-${{ github.sha }}
+          path: ${{ runner.temp }}/hydration-planning-*.json
+          if-no-files-found: warn
+          retention-days: 14
+
+  preload-response-benchmark:
+    name: Preload Response Diagnostic
+    if: github.event_name == 'workflow_dispatch' && inputs.preload-response-benchmark
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7
+        with:
+          node-version: "24"
+      - uses: pnpm/action-setup@0977fd99725f1db4007ccb2928dbb4e90d06cc86 # v6
+      - run: pnpm install --frozen-lockfile
+      - name: Build local framework packages
+        run: |
+          pnpm --filter @farm.js/core build
+          pnpm --filter @farm.js/cli build
+        env:
+          NODE_OPTIONS: --max-old-space-size=12288
+      - name: Install and build the maintained fixture
+        run: |
+          pnpm --dir benchmarks/frameworks --filter farm-framework-benchmark install --frozen-lockfile
+          pnpm --dir benchmarks/frameworks/apps/farm exec farm build --preset node-server
+      - name: Collect two independent alternating comparisons
+        run: |
+          node benchmarks/frameworks/preload-response.mjs > "${{ runner.temp }}/preload-response-first.json"
+          node benchmarks/frameworks/preload-response.mjs > "${{ runner.temp }}/preload-response-second.json"
+      - name: Retain raw samples for review
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
+        with:
+          name: preload-response-${{ github.sha }}
+          path: ${{ runner.temp }}/preload-response-*.json
+          if-no-files-found: warn
+          retention-days: 14
+
+  app-scale-benchmark:
+    name: App Scale Diagnostic
+    if: github.event_name == 'workflow_dispatch' && inputs.app-scale-benchmark
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7
+        with:
+          node-version: "24"
+      - uses: pnpm/action-setup@0977fd99725f1db4007ccb2928dbb4e90d06cc86 # v6
+      - run: pnpm install --frozen-lockfile
+      - name: Build the local framework and CLI
+        run: |
+          pnpm --filter @farm.js/core build:runtime
+          pnpm --filter @farm.js/cli build
+        env:
+          NODE_OPTIONS: --max-old-space-size=12288
+      - name: Time dev startup and builds
+        run: node benchmarks/app-scale/run.mjs --rounds 5 > "${{ runner.temp }}/app-scale.json"
+      - name: Retain raw samples for review
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
+        with:
+          name: app-scale-${{ github.sha }}
+          path: ${{ runner.temp }}/app-scale.json
+          if-no-files-found: warn
+          retention-days: 90
+
+  layout-order-benchmark:
+    name: Layout Order Diagnostic
+    if: github.event_name == 'workflow_dispatch' && inputs.layout-order-benchmark
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7
+        with:
+          node-version: "24"
+      - uses: pnpm/action-setup@0977fd99725f1db4007ccb2928dbb4e90d06cc86 # v6
+      - run: pnpm install --frozen-lockfile
+      - name: Build current router and verify layout selection
+        run: |
+          pnpm --filter @farm.js/core build:runtime
+          pnpm --filter @farm.js/core exec vitest run src/__tests__/production-layout-order.test.ts
+        env:
+          NODE_OPTIONS: --max-old-space-size=12288
+      - name: Collect two independent alternating comparisons
+        run: |
+          node benchmarks/layout-order/run.mjs > "${{ runner.temp }}/layout-order-first.json"
+          node benchmarks/layout-order/run.mjs > "${{ runner.temp }}/layout-order-second.json"
+      - name: Retain raw samples for review
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
+        with:
+          name: layout-order-${{ github.sha }}
+          path: ${{ runner.temp }}/layout-order-*.json
+          if-no-files-found: warn
+          retention-days: 14
+
+  page-route-inputs-benchmark:
+    name: Page Route Inputs Diagnostic
+    if: github.event_name == 'workflow_dispatch' && inputs.page-route-inputs-benchmark
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      FARM_PAGE_ROUTE_BASELINE: ${{ inputs.page-route-baseline || 'inputs' }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7
+        with:
+          node-version: "24"
+      - uses: pnpm/action-setup@0977fd99725f1db4007ccb2928dbb4e90d06cc86 # v6
+      - run: pnpm install --frozen-lockfile
+      - name: Verify generated route matching
+        run: pnpm --filter @farm.js/core exec vitest run src/__tests__/production-page-route-inputs.test.ts src/__tests__/universal-build-router-runtime.test.ts src/__tests__/route-matcher-parity.test.ts src/__tests__/guard-pathname-canonicalization.test.ts
+      - name: Collect two independent alternating comparisons
+        run: |
+          node benchmarks/page-route-inputs/run.mjs > "${{ runner.temp }}/page-route-inputs-first.json"
+          node benchmarks/page-route-inputs/run.mjs > "${{ runner.temp }}/page-route-inputs-second.json"
+      - name: Isolate catch-all measurements from preceding scenarios
+        env:
+          FARM_PAGE_ROUTE_SCENARIO: catchAll
+        run: |
+          node benchmarks/page-route-inputs/run.mjs > "${{ runner.temp }}/page-route-inputs-catchall-short-first.json"
+          node benchmarks/page-route-inputs/run.mjs > "${{ runner.temp }}/page-route-inputs-catchall-short-second.json"
+      - name: Measure warmed catch-all matching separately
+        env:
+          FARM_PAGE_ROUTE_SCENARIO: catchAll
+          FARM_PAGE_ROUTE_WARMUPS: "100000"
+          FARM_PAGE_ROUTE_ITERATIONS: "1000000"
+        run: |
+          node benchmarks/page-route-inputs/run.mjs > "${{ runner.temp }}/page-route-inputs-catchall-long-first.json"
+          node benchmarks/page-route-inputs/run.mjs > "${{ runner.temp }}/page-route-inputs-catchall-long-second.json"
+      - name: Measure warmed unchanged-path controls separately
+        env:
+          FARM_PAGE_ROUTE_WARMUPS: "100000"
+          FARM_PAGE_ROUTE_ITERATIONS: "1000000"
+        run: |
+          for scenario in staticHit genericControl; do
+            for repetition in first second; do
+              FARM_PAGE_ROUTE_SCENARIO="$scenario" node benchmarks/page-route-inputs/run.mjs > "${{ runner.temp }}/page-route-inputs-$scenario-long-$repetition.json"
+            done
+          done
+      - name: Retain raw samples for review
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
+        with:
+          name: page-route-inputs-${{ github.sha }}
+          path: ${{ runner.temp }}/page-route-inputs-*.json
+          if-no-files-found: warn
+          retention-days: 14
+
   test:
     name: Test (${{ matrix.os }}, Node ${{ matrix.node-version }})
     runs-on: ${{ matrix.os }}
@@ -32,15 +485,15 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v7
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
 
       - name: Setup Node.js ${{ matrix.node-version }}
-        uses: actions/setup-node@v7
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7
         with:
           node-version: ${{ matrix.node-version }}
 
       - name: Setup pnpm
-        uses: pnpm/action-setup@v6
+        uses: pnpm/action-setup@0977fd99725f1db4007ccb2928dbb4e90d06cc86 # v6
 
       - name: Get pnpm store directory
         shell: bash
@@ -48,7 +501,7 @@ jobs:
           echo "STORE_PATH=$(pnpm store path --silent)" >> $GITHUB_ENV
 
       - name: Setup pnpm cache
-        uses: actions/cache@v6
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6
         with:
           path: ${{ env.STORE_PATH }}
           key: ${{ runner.os }}-pnpm-store-${{ hashFiles('**/pnpm-lock.yaml') }}
@@ -61,7 +514,7 @@ jobs:
       - name: Build packages
         run: pnpm build
         env:
-          NODE_OPTIONS: --max-old-space-size=8192
+          NODE_OPTIONS: --max-old-space-size=12288
 
       - name: Smoke-test packed integration artifacts
         if: matrix.os == 'ubuntu-latest' && matrix.node-version == '22.13'
@@ -86,7 +539,7 @@ jobs:
       - name: Type check
         run: pnpm type-check
         env:
-          NODE_OPTIONS: --max-old-space-size=8192
+          NODE_OPTIONS: --max-old-space-size=12288
 
   postgres-storage:
     name: Postgres Storage
@@ -109,21 +562,21 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v7
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
 
       - name: Setup Node.js
-        uses: actions/setup-node@v7
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7
         with:
           node-version: "22.13"
 
       - name: Setup pnpm
-        uses: pnpm/action-setup@v6
+        uses: pnpm/action-setup@0977fd99725f1db4007ccb2928dbb4e90d06cc86 # v6
 
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
       - name: Run Postgres storage and schema tests
-        run: pnpm --dir packages/farm exec vitest run src/__tests__/storage.test.ts src/__tests__/schema-migrate.test.ts
+        run: pnpm --dir packages/farm exec vitest run src/__tests__/storage.test.ts src/__tests__/schema-migrate.test.ts src/__tests__/schema-check.test.ts src/__tests__/plugin-schema.test.ts src/__tests__/schema-extend.test.ts src/__tests__/schema-foreign-keys.test.ts src/__tests__/schema-upgrades.test.ts src/__tests__/schema-steps.test.ts src/__tests__/schema-destructive.test.ts
         env:
           FARM_REQUIRE_TEST_POSTGRES: "1"
           FARM_TEST_POSTGRES_URL: postgresql://farm:farm@127.0.0.1:5432/farm_test
@@ -139,15 +592,15 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v7
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
 
       - name: Setup Node.js ${{ matrix.node-version }}
-        uses: actions/setup-node@v7
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7
         with:
           node-version: ${{ matrix.node-version }}
 
       - name: Setup pnpm
-        uses: pnpm/action-setup@v6
+        uses: pnpm/action-setup@0977fd99725f1db4007ccb2928dbb4e90d06cc86 # v6
 
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
@@ -155,7 +608,28 @@ jobs:
       - name: Exercise Cloudflare and Netlify output
         run: pnpm test:deploy-runtimes
         env:
-          NODE_OPTIONS: --max-old-space-size=8192
+          NODE_OPTIONS: --max-old-space-size=12288
+
+  benchmark-harness:
+    name: Benchmark Harness (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7
+        with:
+          node-version: "24"
+      - uses: pnpm/action-setup@0977fd99725f1db4007ccb2928dbb4e90d06cc86 # v6
+      - name: Install harness-only dependencies
+        run: pnpm --dir benchmarks/frameworks --filter farmjs-framework-benchmarks install --frozen-lockfile --ignore-scripts
+      - name: Verify benchmark correctness and reporting guards
+        run: |
+          node benchmarks/frameworks/run.mjs --self-check
+          node --test benchmarks/compiler-analysis/run.test.mjs
+          node --test examples/react-compiler-js-framework-benchmark/scripts/prepare-metadata.test.mjs examples/react-compiler-js-framework-benchmark/scripts/summarize-official.test.mjs
 
   lint:
     name: Lint
@@ -163,15 +637,15 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v7
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
 
       - name: Setup Node.js
-        uses: actions/setup-node@v7
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7
         with:
           node-version: "22.13"
 
       - name: Setup pnpm
-        uses: pnpm/action-setup@v6
+        uses: pnpm/action-setup@0977fd99725f1db4007ccb2928dbb4e90d06cc86 # v6
 
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
@@ -184,6 +658,107 @@ jobs:
           pnpm lint
           pnpm format:check
 
+  commit-attribution:
+    name: Commit Attribution
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      pull-requests: read
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+
+      - name: Setup Node.js
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7
+        with:
+          node-version: "24"
+
+      - name: Reject tool authors and co-author trailers
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          COMMITS_URL: repos/${{ github.repository }}/pulls/${{ github.event.pull_request.number }}/commits?per_page=100
+          COMMIT_COUNT: ${{ github.event.pull_request.commits }}
+        run: |
+          gh api --paginate "$COMMITS_URL" \
+            --jq '.[] | {sha, authorEmail: .commit.author.email, message: .commit.message}' \
+            | node scripts/check-commit-attribution.js --expected-count "$COMMIT_COUNT"
+
+  react-compiler-browser:
+    name: React Compiler Browser (${{ matrix.builder }})
+    # Playwright's Chromium does not install on ubuntu-latest (26.04) yet.
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        builder:
+          - rolldown
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - name: Setup Node.js
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7
+        with:
+          node-version: "22.13"
+      - name: Setup pnpm
+        uses: pnpm/action-setup@0977fd99725f1db4007ccb2928dbb4e90d06cc86 # v6
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+      - name: Install Playwright Chromium
+        run: pnpm exec playwright install --with-deps chromium
+      - name: Build framework packages
+        run: |
+          pnpm --filter @farm.js/core build
+          pnpm --filter @farm.js/cli build
+          pnpm --filter @farm.js/react build
+          pnpm --filter @farm.js/preact build
+        env:
+          NODE_OPTIONS: --max-old-space-size=12288
+      - name: Verify native input reset parity in development and production
+        run: pnpm --dir packages/farm-react exec node scripts/test-input-reset-browser.mjs
+      # Production build of the compiler example, then a real browser through
+      # every compiled component (bindings, blocks, keyed rows, ranges, islands).
+      - name: Verify compiled output in the browser
+        run: pnpm --dir examples/react-compiler experiment
+        env:
+          FARM_VITE_BUILDER: ${{ matrix.builder }}
+          FARM_EXPERIMENT_SCREENSHOT: ${{ runner.temp }}/react-compiler/aot-edge-lab.png
+      # The same app and checks with preact({ compiler }), on preact/compat instead of React DOM.
+      - name: Verify compiled output on Preact in the browser
+        run: pnpm --dir examples/react-compiler experiment:preact
+        env:
+          FARM_VITE_BUILDER: ${{ matrix.builder }}
+          FARM_EXPERIMENT_SCREENSHOT: ${{ runner.temp }}/react-compiler/aot-edge-lab-preact.png
+      - name: Build the compiler starter's generator and devtools
+        if: matrix.builder == 'rolldown'
+        run: |
+          pnpm --filter @farm.js/create-app build
+          pnpm --filter @farm.js/devtools build
+      - name: Verify the packed compiler starter with compiler on and off
+        if: matrix.builder == 'rolldown'
+        run: pnpm test:packed-compiler
+        env:
+          FARM_VITE_BUILDER: ${{ matrix.builder }}
+          FARM_EXPERIMENT_SCREENSHOT: ${{ runner.temp }}/react-compiler/packed-starter.png
+      # Compiler off, static and hybrid builds of the heavy workload must agree.
+      - name: Verify compiler modes agree on the heavy workload
+        run: pnpm --dir examples/react-compiler experiment:heavy
+        env:
+          FARM_VITE_BUILDER: ${{ matrix.builder }}
+      - name: Upload failure screenshots
+        if: ${{ failure() }}
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
+        with:
+          name: react-compiler-browser-${{ matrix.builder }}
+          path: |
+            ${{ runner.temp }}/react-compiler/
+            /tmp/farm-react-*
+          if-no-files-found: ignore
+          retention-days: 7
+
   react-compiler-compat:
     name: React Compiler (React ${{ matrix.react-version }})
     runs-on: ubuntu-latest
@@ -194,15 +769,15 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v7
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
 
       - name: Setup Node.js
-        uses: actions/setup-node@v7
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7
         with:
           node-version: "22.13"
 
       - name: Setup pnpm
-        uses: pnpm/action-setup@v6
+        uses: pnpm/action-setup@0977fd99725f1db4007ccb2928dbb4e90d06cc86 # v6
 
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
@@ -231,15 +806,15 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v7
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
 
       - name: Setup Node.js
-        uses: actions/setup-node@v7
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7
         with:
           node-version: ${{ matrix.node-version }}
 
       - name: Setup pnpm
-        uses: pnpm/action-setup@v6
+        uses: pnpm/action-setup@0977fd99725f1db4007ccb2928dbb4e90d06cc86 # v6
 
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
@@ -247,34 +822,35 @@ jobs:
       - name: Build packages
         run: pnpm build
         env:
-          NODE_OPTIONS: --max-old-space-size=8192
+          NODE_OPTIONS: --max-old-space-size=12288
 
       - name: Build examples
         run: pnpm build:examples -- ${{ matrix.build_args }}
 
   wasm-e2e:
     name: WebAssembly E2E (${{ matrix.builder }})
-    runs-on: ubuntu-latest
+    # Playwright's Chromium does not install on ubuntu-latest (26.04) yet.
+    runs-on: ubuntu-24.04
     timeout-minutes: 15
     strategy:
       fail-fast: false
       matrix:
-        builder: [rolldown, rollup]
+        builder: [rolldown]
     steps:
-      - uses: actions/checkout@v7
-      - uses: actions/setup-node@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7
         with:
           node-version: "22.13"
-      - uses: pnpm/action-setup@v6
+      - uses: pnpm/action-setup@0977fd99725f1db4007ccb2928dbb4e90d06cc86 # v6
       - run: pnpm install --frozen-lockfile
       - run: pnpm exec playwright install --with-deps chromium
       - run: pnpm test:e2e:wasm
         env:
-          NODE_OPTIONS: --max-old-space-size=8192
+          NODE_OPTIONS: --max-old-space-size=12288
           FARM_VITE_BUILDER: ${{ matrix.builder }}
       - name: Upload browser failure artifacts
         if: ${{ failure() }}
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
         with:
           name: wasm-e2e-${{ matrix.builder }}
           path: |
@@ -284,27 +860,28 @@ jobs:
 
   devtools-e2e:
     name: DevTools E2E (${{ matrix.builder }})
-    runs-on: ubuntu-latest
+    # Playwright's Chromium does not install on ubuntu-latest (26.04) yet.
+    runs-on: ubuntu-24.04
     timeout-minutes: 15
     strategy:
       fail-fast: false
       matrix:
-        builder: [rolldown, rollup]
+        builder: [rolldown]
     steps:
-      - uses: actions/checkout@v7
-      - uses: actions/setup-node@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7
         with:
           node-version: "22.13"
-      - uses: pnpm/action-setup@v6
+      - uses: pnpm/action-setup@0977fd99725f1db4007ccb2928dbb4e90d06cc86 # v6
       - run: pnpm install --frozen-lockfile
       - run: pnpm exec playwright install --with-deps chromium
       - run: pnpm test:e2e:devtools
         env:
-          NODE_OPTIONS: --max-old-space-size=8192
+          NODE_OPTIONS: --max-old-space-size=12288
           FARM_VITE_BUILDER: ${{ matrix.builder }}
       - name: Upload browser failure artifacts
         if: ${{ failure() }}
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
         with:
           name: devtools-e2e-${{ matrix.builder }}
           path: |
@@ -314,20 +891,21 @@ jobs:
 
   framework-e2e:
     name: Framework E2E
-    runs-on: ubuntu-latest
+    # Playwright's Chromium does not install on ubuntu-latest (26.04) yet.
+    runs-on: ubuntu-24.04
     timeout-minutes: 45
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v7
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
 
       - name: Setup Node.js
-        uses: actions/setup-node@v7
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7
         with:
           node-version: "22.13"
 
       - name: Setup pnpm
-        uses: pnpm/action-setup@v6
+        uses: pnpm/action-setup@0977fd99725f1db4007ccb2928dbb4e90d06cc86 # v6
 
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
@@ -338,15 +916,30 @@ jobs:
       - name: Verify framework features
         run: pnpm test:e2e:framework
         env:
-          NODE_OPTIONS: --max-old-space-size=8192
+          NODE_OPTIONS: --max-old-space-size=12288
+
+      # The Test job has no Chromium (it does not install on ubuntu-latest yet),
+      # so these tests skip their browser halves there. Run them here, where it is.
+      - name: Verify prebuilt SSR output in the browser
+        run: pnpm --dir packages/farm exec vitest run src/__tests__/production-prebuilt-ssr.test.ts
+        env:
+          NODE_OPTIONS: --max-old-space-size=12288
+          FARM_REQUIRE_TEST_BROWSER: "1"
+
+      - name: Verify islands from packed artifacts
+        run: pnpm test:packed-islands
+        env:
+          NODE_OPTIONS: --max-old-space-size=12288
+          TMPDIR: ${{ runner.temp }}
 
       - name: Upload Playwright failure artifacts
         if: ${{ failure() }}
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
         with:
           name: framework-e2e-playwright
           path: |
             playwright-report/
             test-results/
+            ${{ runner.temp }}/farm-packed-islands-*/test-results/
           if-no-files-found: ignore
           retention-days: 7

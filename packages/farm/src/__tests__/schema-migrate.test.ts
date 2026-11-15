@@ -305,6 +305,93 @@ describe("sql generation", () => {
     },
   );
 
+  it("keeps long Postgres index names distinct after the 63-byte limit", () => {
+    const longSchema = defineSchema({
+      models: {
+        memberships: {
+          name: "organization_membership_invitation_records",
+          fields: {
+            id: { type: "uuid", primaryKey: true },
+            organizationIdentifier: { type: "string", name: "organization_identifier" },
+            invitedEmailAddress: { type: "string", name: "invited_email_address" },
+            invitedPhoneNumber: { type: "string", name: "invited_phone_number" },
+          },
+          constraints: [
+            { type: "unique", fields: ["organizationIdentifier", "invitedEmailAddress"] },
+            { type: "unique", fields: ["organizationIdentifier", "invitedPhoneNumber"] },
+            { type: "index", fields: ["id"], name: "short_name_idx" },
+          ],
+        },
+      },
+    });
+    const indexNames = (dialect: FarmSqlDialect) =>
+      generateSqlStatements(collectSchemaModels([["app", longSchema]]), dialect)
+        .filter((statement) => statement.kind === "index")
+        .map((statement) => statement.target);
+
+    const names = indexNames("postgres");
+    expect(names).toHaveLength(3);
+    // What Postgres keeps of each name is what makes two indexes the same index.
+    const stored = names.map((name) => Buffer.from(name).subarray(0, 63).toString());
+    expect(new Set(stored).size).toBe(3);
+    for (const name of names) expect(Buffer.byteLength(name)).toBeLessThanOrEqual(63);
+    expect(names[0]).toMatch(
+      /^organization_membership_invitation_records_organizatio_[0-9a-f]{8}$/,
+    );
+    // Deterministic, and names within the limit are untouched.
+    expect(indexNames("postgres")).toEqual(names);
+    expect(names[2]).toBe("short_name_idx");
+    // Only Postgres truncates silently; other dialects keep the full name.
+    expect(indexNames("sqlite")[0]).toBe(
+      "organization_membership_invitation_records_organization_identifier_invited_email_address_unique",
+    );
+  });
+
+  itWithPostgres("creates every long-named unique index in Postgres", async () => {
+    const { Client } = requireModule("pg") as {
+      Client: new (options: { connectionString: string }) => {
+        connect(): Promise<void>;
+        end(): Promise<void>;
+        query(sql: string): Promise<{ rows: Array<Record<string, unknown>> }>;
+      };
+    };
+    const table = `farm_long_index_names_${Date.now()}_${Math.floor(Math.random() * 1_000_000)}`;
+    const longSchema = defineSchema({
+      models: {
+        invitations: {
+          name: table,
+          fields: {
+            id: { type: "uuid", primaryKey: true },
+            organization: { type: "string", name: "organization_identifier_value" },
+            email: { type: "string", name: "invited_email_address" },
+            phone: { type: "string", name: "invited_phone_number" },
+          },
+          constraints: [
+            { type: "unique", fields: ["organization", "email"] },
+            { type: "unique", fields: ["organization", "phone"] },
+          ],
+        },
+      },
+    });
+    const client = new Client({ connectionString: postgresTestUrl! });
+    await client.connect();
+    try {
+      for (const statement of generateSqlStatements(
+        collectSchemaModels([["app", longSchema]]),
+        "postgres",
+      )) {
+        await client.query(statement.sql);
+      }
+      const { rows } = await client.query(
+        `SELECT indexname FROM pg_indexes WHERE tablename = '${table}' AND indexdef LIKE 'CREATE UNIQUE INDEX%' AND indexname NOT LIKE '%_pkey'`,
+      );
+      expect(rows).toHaveLength(2);
+    } finally {
+      await client.query(`DROP TABLE IF EXISTS "${table}"`);
+      await client.end();
+    }
+  });
+
   it("uses the mapped table and column names, not the model keys", () => {
     const sql = generateSqlStatements(models(), "postgres")
       .map((statement) => statement.sql)
@@ -690,29 +777,43 @@ describe("migration planning", () => {
     expect(second.drift).toEqual([]);
   });
 
-  it("reports a differing table instead of altering it", async () => {
+  it("adds what a table with rows can take, and reports the rest", async () => {
     const { database, executor } = await sqliteExecutor();
-    // A table that predates a schema change: one column missing, one extra.
+    // A table that predates a schema change: columns missing, one extra, a row.
     database.exec(
       `create table todo_items (id TEXT primary key, title TEXT, list_id TEXT, legacy_note TEXT)`,
     );
+    database.exec(`insert into todo_items (id, title, list_id) values ('t1', 'old', 'l1')`);
 
     const plan = await planSchemaMigration(models(), "sqlite", executor);
 
-    expect(plan.statements).toEqual([]); // nothing is emitted for it
+    expect(plan.statements).toEqual([]); // the table is not created again
+    // Columns with a default, and the plain indexes, can join a table with rows.
+    expect(plan.upgrades!.map((upgrade) => upgrade.target)).toEqual([
+      "todo_items.status",
+      "todo_items.priority",
+      "todo_items_list_id_idx",
+      "todo_items_list_id_status_index",
+    ]);
+    // A unique column and a required one without a default cannot; nor is
+    // the extra column ever dropped.
     expect(plan.drift).toHaveLength(1);
-    expect(plan.drift[0]!.missingColumns).toEqual(
-      expect.arrayContaining(["status", "priority", "slug", "updated_at"]),
-    );
+    expect(plan.drift[0]!.missingColumns).toEqual(["slug", "updated_at"]);
     expect(plan.drift[0]!.extraColumns).toEqual(["legacy_note"]);
 
     const applied = await applySchemaMigration(plan, executor);
-    expect(applied.applied).toEqual([]);
+    expect(applied.applied).toEqual(plan.upgrades!.map((upgrade) => upgrade.target));
     expect(applied.skipped).toHaveLength(1);
 
-    // The pre-existing column is untouched.
-    const columns = await executor.query("pragma table_info('todo_items')");
-    expect(columns.map((row) => row.name)).toContain("legacy_note");
+    // The existing row gets the defaults, and the old column is untouched.
+    const rows = await executor.query("select * from todo_items");
+    expect(rows).toEqual([
+      expect.objectContaining({ id: "t1", status: "open", priority: 0, legacy_note: null }),
+    ]);
+
+    // Running it again adds nothing.
+    const again = await planSchemaMigration(models(), "sqlite", executor);
+    expect(again.upgrades).toEqual([]);
   });
 
   it("reports definition and index drift even when every column name matches", async () => {
@@ -751,12 +852,14 @@ describe("migration planning", () => {
           differences: ["default"],
         },
       ],
-      missingIndexes: expect.arrayContaining([
-        expect.objectContaining({ columns: ["list_id"], unique: false }),
-        expect.objectContaining({ columns: ["slug"], unique: true }),
-        expect.objectContaining({ columns: ["list_id", "status"], unique: false }),
-      ]),
+      // A unique index could fail on duplicate rows, so it stays for a person.
+      missingIndexes: [expect.objectContaining({ columns: ["slug"], unique: true })],
     });
+    // Plain indexes are added.
+    expect(plan.upgrades!.map((upgrade) => upgrade.target)).toEqual([
+      "todo_items_list_id_idx",
+      "todo_items_list_id_status_index",
+    ]);
 
     expect(describeSchemaDrift(plan.drift)).toContain(
       'changed column status: default expected "open", found none',
@@ -773,15 +876,13 @@ describe("migration planning", () => {
     const plan = await planSchemaMigration(models(), "sqlite", executor);
 
     expect(plan.upToDate).toEqual([]);
+    // The removed index is put back; the extra one is reported, never dropped.
+    expect(plan.upgrades).toEqual([
+      expect.objectContaining({ kind: "index", target: "todo_items_list_id_idx" }),
+    ]);
     expect(plan.drift).toHaveLength(1);
     expect(plan.drift[0]!.changedColumns).toEqual([]);
-    expect(plan.drift[0]!.missingIndexes).toEqual([
-      {
-        name: "todo_items_list_id_idx",
-        columns: ["list_id"],
-        unique: false,
-      },
-    ]);
+    expect(plan.drift[0]!.missingIndexes).toEqual([]);
     expect(plan.drift[0]!.extraIndexes).toEqual([
       {
         name: "legacy_title_idx",

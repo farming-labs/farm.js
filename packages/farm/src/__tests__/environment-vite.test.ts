@@ -4,7 +4,7 @@ import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
-import { build, type Rollup } from "vite";
+import { build, type Plugin, type Rollup } from "vite";
 import { farmEnvironmentFunctionsPlugin } from "../environment-vite";
 
 const temporaryRoots: string[] = [];
@@ -13,6 +13,105 @@ afterEach(() => {
   for (const root of temporaryRoots.splice(0)) {
     rmSync(root, { recursive: true, force: true });
   }
+});
+
+describe("client-only reached from islands server code", () => {
+  const files: Record<string, string> = {
+    "node_modules/aria-kit/package.json": '{"name":"aria-kit","exports":"./index.js"}',
+    "node_modules/aria-kit/index.js": 'import "client-only";\nexport const Button = "b";\n',
+    "src/lib/styles.ts": "export const label = 1;\n",
+  };
+
+  async function buildIslands(
+    page: string,
+    extra: Record<string, string> = {},
+    plugins: Plugin[] = [],
+  ) {
+    const root = mkdtempSync(path.join(tmpdir(), "farm-client-only-"));
+    temporaryRoots.push(root);
+    for (const [file, contents] of Object.entries({ ...files, ...extra, "src/page.ts": page })) {
+      mkdirSync(path.dirname(path.join(root, file)), { recursive: true });
+      writeFileSync(path.join(root, file), contents);
+    }
+    await build({
+      root,
+      logLevel: "silent",
+      plugins: [
+        ...plugins,
+        farmEnvironmentFunctionsPlugin({
+          root,
+          srcDir: "src",
+          experimental: { serverComponents: { mode: "islands" } },
+        }),
+      ],
+      build: {
+        ssr: path.join(root, "src/page.ts"),
+        write: false,
+        rolldownOptions: { external: ["client-only"] },
+      },
+      ssr: { noExternal: true },
+    });
+  }
+
+  it("fails the build and names the chain", async () => {
+    await expect(
+      buildIslands('import { Button } from "aria-kit";\nexport default Button;\n'),
+    ).rejects.toThrow(/import of "aria-kit" reaches "client-only".*"use client"/s);
+  });
+
+  it("ignores an import TypeScript erases", async () => {
+    await expect(
+      buildIslands('import { Button } from "aria-kit";\nexport const size: Button = 1 as never;\n'),
+    ).resolves.toBeUndefined();
+  });
+
+  it("allows a module client code reaches", async () => {
+    await expect(
+      buildIslands('import { label } from "./lib/shared";\nexport default label;\n', {
+        "src/client.tsx":
+          '"use client";\nimport { label } from "./lib/shared";\nexport { label };\n',
+        "src/lib/shared.ts": 'import { Button } from "aria-kit";\nexport const label = Button;\n',
+      }),
+    ).resolves.toBeUndefined();
+  });
+  it("allows client modules outside srcDir and what they import", async () => {
+    await expect(
+      buildIslands('import { label } from "../lib/client";\nexport default label;\n', {
+        "lib/client.ts": '"use client";\nexport { label } from "./helper";\n',
+        "lib/helper.ts": 'import { Button } from "aria-kit";\nexport const label = Button;\n',
+      }),
+    ).resolves.toBeUndefined();
+  });
+
+  it("allows a client module outside the scanned directories", async () => {
+    await expect(
+      buildIslands('import { label } from "../.shared/client";\nexport default label;\n', {
+        ".shared/client.ts":
+          '"use client";\nimport { Button } from "aria-kit";\nexport const label = Button;\n',
+      }),
+    ).resolves.toBeUndefined();
+  });
+
+  it("does not read a file for a plugin's virtual script", async () => {
+    const theme: Plugin = {
+      name: "virtual-theme",
+      resolveId: (id) => (id === "virtual:theme.ts" ? id : null),
+      load: (id) => (id === "virtual:theme.ts" ? "export const theme = 1;\n" : null),
+    };
+    await expect(
+      buildIslands('import { theme } from "virtual:theme.ts";\nexport default theme;\n', {}, [
+        theme,
+      ]),
+    ).resolves.toBeUndefined();
+  });
+
+  it("still fails for server code outside srcDir", async () => {
+    await expect(
+      buildIslands('import { label } from "../lib/server";\nexport default label;\n', {
+        "lib/server.ts": 'import { Button } from "aria-kit";\nexport const label = Button;\n',
+      }),
+    ).rejects.toThrow(/reaches "client-only"/);
+  });
 });
 
 describe("environment function Vite transform", () => {

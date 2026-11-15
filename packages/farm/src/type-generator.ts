@@ -1,11 +1,29 @@
 import { readFileSync, existsSync, readdirSync, mkdirSync } from "fs";
-import { join, relative, dirname } from "path";
+import { createRequire } from "module";
+import { join, relative, dirname, extname } from "path";
 import { initSync, parse } from "es-module-lexer";
 import { writeFileIfChanged } from "./write-file-if-changed";
 import { registerAPIRouteShape } from "./api/route-shape";
 import { isFarmAPIRouteFileName } from "./api/route-files";
 
 let moduleLexerInitialized = false;
+
+type JSXRouteLang = "jsx" | "tsx";
+const JSX_ROUTE_LANGS: Record<string, JSXRouteLang> = { ".jsx": "jsx", ".tsx": "tsx" };
+let oxcTransformSync: (typeof import("rolldown/utils"))["transformSync"] | undefined;
+
+// Required on the first JSX route rather than imported, so loading core never
+// loads the native transformer until a route needs it.
+function transformJSXRoute(content: string, lang: JSXRouteLang, filePath: string): string {
+  oxcTransformSync ??= (
+    createRequire(typeof __filename === "string" ? __filename : import.meta.url)(
+      "rolldown/utils",
+    ) as typeof import("rolldown/utils")
+  ).transformSync;
+  const result = oxcTransformSync(filePath, content, { lang, sourceType: "module" });
+  if (result.errors.length > 0) throw result.errors[0];
+  return result.code;
+}
 
 const API_CLIENT_METHOD_SEGMENTS = new Set([
   "get",
@@ -102,7 +120,7 @@ export class APITypeGenerator {
   ): APIRouteInfo | null {
     try {
       const content = readFileSync(filePath, "utf-8");
-      const methods = this.extractExportedMethods(content);
+      const methods = this.extractExportedMethods(content, filePath);
 
       if (methods.length === 0) {
         return null;
@@ -123,16 +141,20 @@ export class APITypeGenerator {
     }
   }
 
-  private extractExportedMethods(content: string): string[] {
+  private extractExportedMethods(content: string, filePath: string): string[] {
     if (!moduleLexerInitialized) {
       initSync();
       moduleLexerInitialized = true;
     }
     const httpMethods = ["GET", "HEAD", "QUERY", "POST", "PUT", "DELETE", "PATCH", "OPTIONS"];
-    const [, exports] = parse(content);
+    // es-module-lexer cannot read JSX, so compile route.tsx/route.jsx first. The
+    // output is only lexed for export names, and type-only exports are erased.
+    const lang = JSX_ROUTE_LANGS[extname(filePath)];
+    const source = lang ? transformJSXRoute(content, lang, filePath) : content;
+    const [, exports] = parse(source);
     const valueExports = new Set(
       exports
-        .filter((specifier) => !this.isTypeOnlyExportSpecifier(content, specifier.s))
+        .filter((specifier) => !this.isTypeOnlyExportSpecifier(source, specifier.s))
         .map((specifier) => specifier.n),
     );
     return httpMethods.filter((method) => valueExports.has(method));

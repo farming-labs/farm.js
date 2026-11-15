@@ -1,4 +1,6 @@
-import { createElement, type ReactElement } from "react";
+// Type only: `page()` loads React when called, so API tests run in apps without React
+// (`renderer: false`).
+import type { ReactElement } from "react";
 import { invokeAPIRouteEndpoint, matchAPIRoute, type APIRouteParams } from "./api/route-manager";
 import { getFarmDataCache } from "./cache";
 import { resolveFarmRouteContext, withFarmRouteContext } from "./route-context";
@@ -18,7 +20,7 @@ import {
 } from "./router";
 import { runWithServerActionRequest } from "./server-action-security";
 import type { ServerFn } from "./server-fn";
-import { searchParamsToObject } from "./search-params";
+import { createFarmSearchParams, searchParamsToObject } from "./search-params";
 import type { FarmContextFactory, MiddlewareProps, PluginContextProps, RouteModule } from "./types";
 
 export type FarmTestQuery = URLSearchParams | Record<string, FarmRouterQueryValue>;
@@ -214,7 +216,7 @@ export function createFarmTestHarness<TContext = unknown>(
       const rawProps = withFarmRouteContext(
         {
           params,
-          searchParams: Promise.resolve(search),
+          searchParams: createFarmSearchParams(search),
           path: url.pathname,
           middleware: routeOptions.middleware,
           context: routeOptions.pluginContext,
@@ -229,9 +231,10 @@ export function createFarmTestHarness<TContext = unknown>(
       ).__farmResolveRouteProps;
       const resolvedProps = resolveProps
         ? await resolveProps(rawProps)
-        : { ...rawProps, search, searchParams: Promise.resolve(search) };
+        : { ...rawProps, search, searchParams: createFarmSearchParams(search) };
       const canonicalPath = readCanonicalPath(resolvedProps);
       const componentProps = stripInternalRouteProps(resolvedProps) as FarmTestRouteProps<TRoute>;
+      const { createElement } = await import("react");
 
       return {
         route,
@@ -267,7 +270,10 @@ export function createFarmTestHarness<TContext = unknown>(
       const endpointPath = endpointOptions.path ?? endpointRecord.__path ?? "/__farm/test/endpoint";
       const endpointRequest = request(endpointPath, {
         ...omitEndpointControlOptions(endpointOptions),
-        method: endpointOptions.method ?? endpointRecord.__method ?? "GET",
+        method:
+          endpointOptions.method ??
+          endpointRecord.__method ??
+          (hasRequestBody(endpointOptions) ? "POST" : "GET"),
       });
 
       return invokeTestEndpoint(
@@ -445,6 +451,10 @@ function readCanonicalPath(props: Record<string, unknown>): string | undefined {
 function stripInternalRouteProps(props: Record<string, unknown>): Record<string, unknown> {
   const { __farmRoutePropsResolved, __farmCanonicalPath, ...componentProps } = props;
   return componentProps;
+}
+
+function hasRequestBody(options: FarmTestRequestOptions): boolean {
+  return options.json !== undefined || options.form !== undefined || options.body != null;
 }
 
 function getDefaultApiMethod(route: ProgrammaticApiRoute): ProgrammaticRouteMethod {

@@ -5,6 +5,9 @@
  * Server modules are imported only as types. Runtime data contains paths and methods only.
  */
 
+import type { POST as POST_agents_check } from "../app/api/agents/check/route";
+import type { GET as GET_cron_heartbeat } from "../app/api/cron/heartbeat/route";
+import type { GET as GET_stats } from "../app/api/stats/route";
 import type { POST as POST_telemetry_dashboard_session } from "../app/api/telemetry/dashboard/session/route";
 import type { POST as POST_telemetry_v1_events } from "../app/api/telemetry/v1/events/route";
 import type { POST as POST_telemetry_v1_sites } from "../app/api/telemetry/v1/sites/route";
@@ -12,6 +15,19 @@ import type { POST as POST_waitlist } from "../app/api/waitlist/route";
 
 // Type-only representation of your API routes
 export type APIRouter = {
+  agents: {
+    check: {
+      post: typeof POST_agents_check;
+    };
+  };
+  cron: {
+    heartbeat: {
+      get: typeof GET_cron_heartbeat;
+    };
+  };
+  stats: {
+    get: typeof GET_stats;
+  };
   telemetry: {
     dashboard: {
       session: {
@@ -34,6 +50,18 @@ export type APIRouter = {
 
 // Pass this schema-free manifest to createApiClients({ routes: apiRoutes }).
 export const apiRoutes = [
+  {
+    path: "/api/agents/check",
+    methods: ["POST"],
+  },
+  {
+    path: "/api/cron/heartbeat",
+    methods: ["GET"],
+  },
+  {
+    path: "/api/stats",
+    methods: ["GET"],
+  },
   {
     path: "/api/telemetry/dashboard/session",
     methods: ["POST"],

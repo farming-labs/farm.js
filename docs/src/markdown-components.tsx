@@ -1,13 +1,20 @@
-import { Fragment, isValidElement, type ComponentPropsWithoutRef } from "react";
-import { Check, Copy } from "lucide-react";
+import {
+  Children,
+  Fragment,
+  isValidElement,
+  type ComponentPropsWithoutRef,
+  type ReactNode,
+} from "react";
 import { createHighlighterCoreSync } from "shiki/core";
 import { createJavaScriptRegexEngine } from "shiki/engine/javascript";
 import bash from "shiki/langs/bash.mjs";
 import typescript from "shiki/langs/typescript.mjs";
 import vesper from "shiki/themes/vesper.mjs";
 import { AgentWaitlist } from "./components/agents/waitlist";
+import { BlogCodeCopy } from "./components/blog/code-copy-button";
 import { BlogFigure } from "./components/blog/figures";
 import { BlogVideo } from "./components/blog/video";
+import { getSectionId } from "./lib/blog";
 
 // Farm loads this map only on the server for source-authored Markdown routes.
 // Load the blog's grammars once, with the same dark palette as the docs.
@@ -58,9 +65,10 @@ function Code({ children, className, ...props }: ComponentPropsWithoutRef<"code"
 }
 
 function Pre({ children, ...props }: ComponentPropsWithoutRef<"pre">) {
-  const language = isValidElement<{ className?: string }>(children)
-    ? children.props.className?.match(/language-([^\s]+)/)?.[1]
+  const code = isValidElement<{ className?: string; children?: unknown }>(children)
+    ? children.props
     : undefined;
+  const language = code?.className?.match(/language-([^\s]+)/)?.[1];
   const label =
     language === "bash" || language === "sh"
       ? "Terminal"
@@ -75,19 +83,11 @@ function Pre({ children, ...props }: ComponentPropsWithoutRef<"pre">) {
           <span aria-hidden="true">
             {language === "typescript" || language === "ts" ? "TS" : language}
           </span>
-          <button
-            type="button"
-            className="blog-code-copy"
-            aria-label={`Copy ${label} code`}
-            title={`Copy ${label} code`}
-            hidden
-          >
-            <Copy className="blog-copy-icon" size={14} strokeWidth={1.8} aria-hidden />
-            <Check className="blog-copy-check" size={14} strokeWidth={1.8} aria-hidden />
-            <span data-copy-label>COPY</span>
-          </button>
+          <BlogCodeCopy
+            text={typeof code?.children === "string" ? code.children : ""}
+            label={label}
+          />
         </div>
-        <span className="sr-only" role="status" data-copy-status />
       </div>
       <pre tabIndex={0} aria-label={`${label} code`} {...props}>
         {children}
@@ -96,4 +96,32 @@ function Pre({ children, ...props }: ComponentPropsWithoutRef<"pre">) {
   );
 }
 
-export const components = { code: Code, pre: Pre, AgentWaitlist, BlogFigure, BlogVideo };
+const textOf = (node: ReactNode): string =>
+  Children.toArray(node)
+    .map((child) =>
+      typeof child === "string" || typeof child === "number"
+        ? String(child)
+        : isValidElement<{ children?: ReactNode }>(child)
+          ? textOf(child.props.children)
+          : "",
+    )
+    .join("");
+
+// A section heading links to its own anchor, the target the contents use, so a reader can click or
+// copy it to share the section. The heading text is the link; no "#" is shown.
+function H2({ children, ...props }: ComponentPropsWithoutRef<"h2">) {
+  const id = getSectionId(textOf(children));
+  return (
+    <h2 {...props}>
+      {id ? (
+        <a className="blog-heading-link" href={`#${id}`}>
+          {children}
+        </a>
+      ) : (
+        children
+      )}
+    </h2>
+  );
+}
+
+export const components = { code: Code, pre: Pre, h2: H2, AgentWaitlist, BlogFigure, BlogVideo };

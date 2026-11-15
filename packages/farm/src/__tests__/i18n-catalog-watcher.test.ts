@@ -40,12 +40,13 @@ async function flushDebouncedTypeArtifactGeneration(): Promise<void> {
 
 async function assertCatalogChangeTriggersFullReload(
   server: ViteDevServer,
-  catalogFile: string,
+  catalogPath: string,
 ): Promise<void> {
   const wsSend = vi.spyOn(server.ws, "send").mockImplementation(() => {});
   try {
     wsSend.mockClear();
-    server.watcher.emit("change", catalogFile);
+    // Vite's watcher reports files under its resolved (real) root.
+    server.watcher.emit("change", path.join(server.config.root, catalogPath));
     await vi.waitFor(
       () => {
         expect(wsSend).toHaveBeenCalledWith({ type: "full-reload", path: "*" });
@@ -71,10 +72,7 @@ describe("Farm dev server i18n catalog reload", () => {
         defaultLocale: "en",
         messages: "content/locales/{locale}/app.json",
       });
-      await assertCatalogChangeTriggersFullReload(
-        server,
-        path.join(root, "content/locales/en/app.json"),
-      );
+      await assertCatalogChangeTriggersFullReload(server, "content/locales/en/app.json");
     });
   });
 
@@ -88,7 +86,7 @@ describe("Farm dev server i18n catalog reload", () => {
         locales: ["en", "am"],
         defaultLocale: "en",
       });
-      await assertCatalogChangeTriggersFullReload(server, path.join(root, "src/messages/en.json"));
+      await assertCatalogChangeTriggersFullReload(server, "src/messages/en.json");
     });
   });
 });

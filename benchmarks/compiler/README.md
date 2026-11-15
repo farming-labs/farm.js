@@ -1,7 +1,7 @@
 # Farm.js compiler benchmark
 
 Measures the experimental AOT compiler against the normal React path using one fixture app built
-twice from identical source: `FARM_BENCH_COMPILER=1` enables `react({ experimental: { compiler } })`
+twice from identical source: `FARM_BENCH_COMPILER=1` enables `react({ compiler })`
 for the compiled variant, and nothing else differs between the builds.
 
 ## Workload

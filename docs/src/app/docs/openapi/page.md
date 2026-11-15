@@ -185,4 +185,8 @@ farm build
   copy. Standard Schema validators without portable schema metadata remain valid at runtime, but
   the generated document uses an explicit metadata-unavailable fallback instead of inventing a
   shape.
+- Query parameters and request bodies are documented by what the client sends. A field that uses
+  `.transform()`, `.pipe()`, or `z.preprocess()` keeps its input schema's type, `enum`,
+  constraints, and optionality, so `z.enum(["open", "done"]).transform(...)` still lists its
+  allowed values.
 - Pair OpenAPI with typed callers so server/client code and published docs describe the same route surface.

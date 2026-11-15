@@ -14,6 +14,15 @@ The gateway limits public request bodies and local preview response bodies to 5 
 
 Public disconnects are propagated through the request queue. The polling agent aborts the matching localhost fetch instead of leaving abandoned app work running until its timeout.
 
+`authorizeSession` is an optional, required-when-configured access hook. It receives only
+session ID, name, verified owner/project/key/grant IDs, and expiry—not transport tokens.
+Return `true` to allow access; denial returns 403 and exceptions return a generic 503.
+The gateway checks registration, public/control requests, queued dispatch and waiting responses.
+Unlike `observer`, errors never fail open. Bound your authority request with a timeout;
+the Infra example uses five seconds. Session DELETE remains available for cleanup.
+Omitting the hook preserves self-hosted behavior. The persistent relay offers the same
+hook, also checking idle sockets every five seconds and dispatch from its coordinator.
+
 Managed deployments can configure `auth` with a GitHub OAuth client id and a signing secret. The gateway then exposes the CLI login exchange, issues account-bound tunnel grants scoped to one preview name and absolute expiry, and requires a grant before creating a session:
 
 ```ts
@@ -37,6 +46,15 @@ is read or the provider API is called, and rejected requests receive `429` with 
 shared store for multi-instance deployments; the hosted Vercel example uses an atomic Redis window.
 If that shared limiter is unavailable, the exchange fails closed with a retryable `503` response and
 does not contact the provider API.
+
+Preview names are bound to their verified owner. While one account holds a name, and for
+`nameReservationMs` (default 5 minutes) after it stops heartbeating or disconnects, the gateway
+refuses another account a tunnel grant or session for that name with `409`; the same owner can
+reconnect at any time. Store the binding across instances by implementing the optional
+`reserveName` and `getNameReservation` store methods (the memory and Redis REST stores do).
+When a persistent relay serves the same domain, pass its `isPreviewNameClaimed(name, ownerId)` as
+the gateway's `isPreviewNameClaimed` option, and the gateway's handler method to the relay, so neither
+transport accepts a name the other holds. A failing check refuses the claim with `503`.
 
 Managed grants and explicitly requested durations are absolute expiries. An unauthenticated session
 created without `expiresInMs` instead uses `sessionTtlMs` as an idle lease and extends it only when the

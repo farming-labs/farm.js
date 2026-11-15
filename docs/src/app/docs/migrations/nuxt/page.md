@@ -6,19 +6,19 @@ section: "Migrations"
 
 # Migrate from Nuxt
 
-Nuxt and FARMJS share Vue, file-based routing, server rendering, API routes, Vite, and Nitro
-deployment output. FARMJS uses a different application and server contract, but the
+Nuxt and Farm share Vue, file-based routing, server rendering, API routes, Vite, and Nitro
+deployment output. Farm uses a different application and server contract, but the
 `@farm.js/vue` renderer lets route UI remain in Vue Single-File Components. Preserve route URLs and
 server contracts while replacing Nuxt-specific macros, composables, modules, and runtime behavior.
 
-> **Manual migration**
+> **Using a coding agent?**
 >
-> `farm migrate` does not detect or rewrite Nuxt projects yet. This guide is the migration
-> checklist for Nuxt applications.
+> Point it at [`/docs/migrations/nuxt.md`](/docs/migrations/nuxt.md). That version maps every
+> Nuxt feature to its Farm equivalent and ends with a verification checklist.
 
 ## Create the Farm shell
 
-Add FARMJS and the Vue renderer without removing Nuxt first:
+Add Farm and the Vue renderer without removing Nuxt first:
 
 ```bash
 pnpm add @farm.js/core @farm.js/vue vue
@@ -43,7 +43,7 @@ Point the application scripts at Farm when the first route is ready to run:
   "scripts": {
     "dev": "farm dev",
     "build": "farm build",
-    "start": "node .output/server/index.mjs"
+    "start": "node .farm/.output/server/index.mjs"
   }
 }
 ```
@@ -53,7 +53,7 @@ Point the application scripts at Farm when the first route is ready to run:
 Nuxt 4 normally keeps pages under `app/pages`; projects using the earlier layout may use `pages` at
 the root. Both map into Farm's `src/app`.
 
-| Nuxt source                                        | FARMJS output                               |
+| Nuxt source                                        | Farm output                                 |
 | -------------------------------------------------- | ------------------------------------------- |
 | `app/pages/index.vue` or `pages/index.vue`         | `src/app/page.vue`                          |
 | `app/pages/about.vue` or `pages/about.vue`         | `src/app/about/page.vue`                    |
@@ -76,7 +76,7 @@ defineOptions({ inheritAttrs: false });
 ```
 
 Keep ordinary templates, `<script setup>`, refs, computed values, and scoped styles. Replace Nuxt
-auto-imports and macros with explicit Vue imports and FARMJS route exports. Use a normal
+auto-imports and macros with explicit Vue imports and Farm route exports. Use a normal
 `<script lang="ts">` block for named exports such as `metadata` and `hydrate`, and add
 `defineOptions({ inheritAttrs: false })` so route props do not fall through to the root DOM element.
 
@@ -84,7 +84,7 @@ See [Vue Renderer](/docs/renderers/vue) for the complete SFC conventions.
 
 ## Replace Nuxt navigation
 
-| Nuxt API                 | FARMJS Vue equivalent                                   |
+| Nuxt API                 | Farm Vue equivalent                                     |
 | ------------------------ | ------------------------------------------------------- |
 | `<NuxtLink to="/about">` | `<a href="/about">`                                     |
 | `navigateTo("/sign-in")` | `redirect("/sign-in")` in server code                   |
@@ -99,7 +99,7 @@ Keep dynamic segment names stable so existing links and external URLs continue t
 
 Classify every `useFetch`, `useAsyncData`, and `$fetch` call by where it should run:
 
-| Nuxt behavior                        | FARMJS destination                                      |
+| Nuxt behavior                        | Farm destination                                        |
 | ------------------------------------ | ------------------------------------------------------- |
 | server-rendered page data            | server module called while rendering or an API endpoint |
 | cached reusable read                 | `createServerQuery` with an explicit structured key     |
@@ -140,7 +140,7 @@ responsibility:
 - move global request behavior into `farm.config.ts` middleware
 - move reusable server lifecycle behavior into a Farm plugin
 - move provider setup into a Farm integration when it owns routes, middleware, or client context
-- replace Nuxt client plugins with Vue components or FARMJS client plugin hooks
+- replace Nuxt client plugins with Vue components or Farm client plugin hooks
 
 Repeat sensitive authorization in API routes and server functions. A page redirect is not an
 authorization boundary.
@@ -150,13 +150,13 @@ authorization boundary.
 Review `nuxt.config.ts`, `app.config.ts`, modules, auto-imports, aliases, and `runtimeConfig`
 explicitly:
 
-| Nuxt configuration       | FARMJS destination                                     |
+| Nuxt configuration       | Farm destination                                       |
 | ------------------------ | ------------------------------------------------------ |
 | private `runtimeConfig`  | typed server environment variables                     |
 | `runtimeConfig.public`   | typed public environment variables                     |
 | app metadata             | page or layout metadata exports                        |
 | Vite plugins and aliases | the `vite` field in `farm.config.ts` when still needed |
-| Nuxt modules             | FARMJS integrations, plugins, or ordinary packages     |
+| Nuxt modules             | Farm integrations, plugins, or ordinary packages       |
 | auto-imported components | explicit Vue component imports                         |
 
 Do not expose a private Nuxt runtime value through Farm's public environment configuration.
@@ -173,7 +173,7 @@ Run both applications during the transition and compare:
 - image and public asset URLs
 - production output on the target deployment platform
 
-After the FARMJS application passes those checks, remove Nuxt, Nuxt modules, `.nuxt`, and
+After the Farm application passes those checks, remove Nuxt, Nuxt modules, `.nuxt`, and
 Nuxt-specific deployment configuration. Keep Vue and `@farm.js/vue` as application dependencies.
 
 For source behavior, refer to Nuxt's official [pages](https://nuxt.com/docs/4.x/directory-structure/app/pages),

@@ -30,7 +30,7 @@ afterEach(async () => {
   );
 });
 
-describe.sequential("writeSearchIndex", () => {
+describe("writeSearchIndex", { concurrent: false }, () => {
   it("creates a real Pagefind bundle from selected static pages", async () => {
     const { outputDir, publicDir } = await createOutput();
     await mkdir(path.join(publicDir, "docs"), { recursive: true });
@@ -376,7 +376,6 @@ describe("search route matching", () => {
 
   it("uses Vercel's static directory after deployment post-processing", () => {
     expect(resolveSearchPublicDir("/output", "vercel")).toBe(path.join("/output", "static"));
-    expect(resolveSearchPublicDir("/output", "vercel-edge")).toBe(path.join("/output", "static"));
     expect(resolveSearchPublicDir("/output", "node-server")).toBe(path.join("/output", "public"));
   });
 });

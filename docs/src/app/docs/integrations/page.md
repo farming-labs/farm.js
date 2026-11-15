@@ -111,9 +111,11 @@ still require an adapter update.
 | Auth.js and Better Auth                      | `instance`: the application-owned auth object. These adapters have no Farm-constructed fallback.                                         |
 | Auth0                                        | `instance`: a compatible application middleware adapter, not the Auth0 SDK. It replaces Farm's built-in route flow.                      |
 | Unkey                                        | `instance`: an application-owned `UnkeyClient`; `createUnkeyClient` is an optional convenience constructor.                              |
+| Convex                                       | `provider`: an application-owned provider component. `readConvexReactClient(url)` shares one browser client per deployment.              |
 | Supabase SSR                                 | `instance`: a request-scoped factory that receives Farm's cookie-aware client options. Never share one SSR auth client between requests. |
 | AI                                           | `model` plus optional AI SDK function overrides. The model is already the injected provider object.                                      |
 | Trigger.dev and Inngest jobs                 | `runtime: trigger(...)` or `runtime: inngest(...)`. Farm talks to the selected external runtime and does not construct its SDK.          |
+| Jobs that run in the app                     | `runtime: local()`, or your own `defineJobsRuntime(...)`. `local()` runs tasks in the app and keeps runs in Farm storage.                |
 | Eve and Cloudflare Agents                    | `origin` for an external runtime, or Farm's managed development process. Agent SDKs remain application-owned.                            |
 
 Provider pages show the exact constructor and any integration-owned options that are still required.
@@ -347,7 +349,7 @@ export const localDemo = defineIntegration({
 });
 ```
 
-Farm validates the body and query before route middleware, `before` hooks, or the handler run. Invalid input returns a `400` response with validation issues.
+Farm validates the body and query before route middleware, `before` hooks, or the handler run. Invalid input returns a `400` response with validation issues that name the `path` and `code` but not the validator's message, except refinement messages you write (`code: "custom"`) and type mismatches (`code: "invalid_type"`).
 
 ## Caller shape
 
@@ -431,6 +433,7 @@ export default defineConfig({
 
 | Runtime                                          | Farm manages                                                                                             | Application uses                                                        |
 | ------------------------------------------------ | -------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------- |
+| [Durable agents](/docs/integrations/agent)       | Agents in `src/agents` on agent-unit's engine: dev serving, build into every target, sweep and storage.  | `defineAgent` or a framework's agent, and `agent-unit/client`.          |
 | [Eve](/docs/integrations/eve)                    | Eve development process, `/eve` and workflow routes, Vercel build composition.                           | `agent/` files and `useEveAgent()`.                                     |
 | [Cloudflare Agents](/docs/integrations/cf-agent) | Wrangler development process, `/agents` WebSocket proxy, combined Worker output and deployment metadata. | Agent classes, Durable Object bindings, `useAgent()`, and callable RPC. |
 
@@ -575,6 +578,7 @@ The route reads that value from `ctx.data`. Browser-provided data is client cont
 | API Keys  | Unkey can create, verify, revoke, update, and delete customer or service keys.                                           |
 | Interface | UI registry entries scaffold shadcn-style integration screens when `--ui` is enabled.                                    |
 | Database  | Integration schemas give database-backed integrations a provider-neutral `ctx.args.db`.                                  |
+| Database  | Convex wraps the app in its provider, loads live data during server rendering, and backs rate limits and KV storage.     |
 
 ## When to build your own
 

@@ -39,10 +39,12 @@ export function normalizeFarmRouteRuntimeConfig(
   const normalized: FarmRouteRuntimeConfig = {};
 
   if (value.runtime !== undefined) {
-    if (value.runtime !== "auto" && value.runtime !== "node" && value.runtime !== "edge") {
+    // Next.js spells the Node runtime "nodejs"; accept it so migrated routes keep working.
+    const runtime = (value.runtime as string) === "nodejs" ? "node" : value.runtime;
+    if (runtime !== "auto" && runtime !== "node" && runtime !== "edge") {
       throw new TypeError(`${source} runtime must be "auto", "node", or "edge"`);
     }
-    normalized.runtime = value.runtime;
+    normalized.runtime = runtime;
   }
 
   if (value.regions !== undefined) {
@@ -187,7 +189,8 @@ export function farmRouteRuleMatches(pattern: string, pathname: string): boolean
   return new RegExp(`^/${expression}/?$`).test(normalizedPathname);
 }
 
-function compareFarmRouteRuleSpecificity(left: string, right: string): number {
+/** Orders route rule patterns from broadest to most specific, the order their options merge in. */
+export function compareFarmRouteRuleSpecificity(left: string, right: string): number {
   const leftScore = getFarmRouteRuleSpecificity(left);
   const rightScore = getFarmRouteRuleSpecificity(right);
   return leftScore - rightScore || left.localeCompare(right);

@@ -305,6 +305,60 @@ describe("generateFarmTypeArtifacts", () => {
     }
   });
 
+  it("treats CRLF copies of generated artifacts as current", async () => {
+    // Git for Windows checks committed files out with CRLF by default
+    // (core.autocrlf=true), while generation always emits LF.
+    const root = mkdtempSync(path.join(os.tmpdir(), "farm-crlf-type-artifacts-"));
+    const apiRoutePath = path.join(root, "src", "app", "api", "hello", "route.ts");
+    mkdirSync(path.dirname(apiRoutePath), { recursive: true });
+    writeFileSync(apiRoutePath, "export const GET = async () => Response.json({ ok: true });\n");
+
+    const generated = await generateFarmTypeArtifacts({ root });
+    const outputPaths = Array.from(
+      new Set(
+        [
+          generated.typesPath,
+          generated.routeTypesPath,
+          generated.apiTypesPath,
+          generated.envTypesPath,
+          generated.imageTypesPath,
+          generated.i18nTypesPath,
+        ].filter((filePath): filePath is string => Boolean(filePath)),
+      ),
+    );
+    expect(outputPaths).toContain(generated.apiTypesPath);
+    for (const filePath of outputPaths) {
+      const source = readFileSync(filePath, "utf8");
+      expect(source).not.toContain("\r");
+      writeFileSync(filePath, source.replace(/\n/g, "\r\n"));
+      utimesSync(filePath, new Date(1_000_000), new Date(1_000_000));
+    }
+    const preserved = new Map(
+      outputPaths.map((filePath) => [
+        filePath,
+        { content: readFileSync(filePath, "utf8"), mtimeMs: statSync(filePath).mtimeMs },
+      ]),
+    );
+
+    const checked = await generateFarmTypeArtifacts({ root, check: true });
+    expect(checked.stalePaths).toEqual([]);
+
+    // Regenerating leaves the checkout's copies alone instead of rewriting them.
+    await generateFarmTypeArtifacts({ root });
+    for (const filePath of outputPaths) {
+      expect(readFileSync(filePath, "utf8")).toBe(preserved.get(filePath)!.content);
+      expect(statSync(filePath).mtimeMs).toBe(preserved.get(filePath)!.mtimeMs);
+    }
+
+    // A CRLF copy with different content is still stale.
+    writeFileSync(
+      generated.apiTypesPath!,
+      `${preserved.get(generated.apiTypesPath!)!.content}// edited\r\n`,
+    );
+    const stale = await generateFarmTypeArtifacts({ root, check: true });
+    expect(stale.stalePaths).toEqual([generated.apiTypesPath]);
+  });
+
   it("checks generated artifacts without changing them", async () => {
     const root = mkdtempSync(path.join(os.tmpdir(), "farm-check-type-artifacts-"));
     const apiRoutePath = path.join(root, "src", "app", "api", "hello", "route.ts");

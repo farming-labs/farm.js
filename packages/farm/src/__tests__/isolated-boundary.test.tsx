@@ -8,6 +8,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   createFarmIsolatedClientBoundary,
   createFarmIsolatedHydrationRuntime,
+  createFarmServerPageBoundary,
   wrapFarmIsolatedClientGraph,
 } from "../client/isolated-boundary";
 import { scheduleFarmIslandHydration } from "../client/island-runtime";
@@ -52,12 +53,12 @@ describe("isolated client boundary", () => {
     );
 
     const html = renderToString(<Boundary initial={2} />);
-    expect(html).toContain('data-farm-client-boundary="/src/counter.tsx"');
-    expect(html).toContain('type="application/json"');
-    expect(html).toMatch(/data-farm-client-id="([^"]+)"/);
-    expect(html).toMatch(/data-farm-client-props="([^"]+)"/);
-    expect(html.match(/data-farm-client-id="([^"]+)"/)?.[1]).toBe(
-      html.match(/data-farm-client-props="([^"]+)"/)?.[1],
+    expect(html).toContain('<f-island src="/src/counter.tsx"');
+    expect(html).toContain('type="f/props"');
+    expect(html).toMatch(/ props="([^"]+)"/);
+    expect(html).toMatch(/<script type="f\/props" for="([^"]+)"/);
+    expect(html.match(/ props="([^"]+)"/)?.[1]).toBe(
+      html.match(/<script type="f\/props" for="([^"]+)"/)?.[1],
     );
     expect(html).toContain('{"initial":2}');
     expect(html).toContain("<button>2</button>");
@@ -78,8 +79,8 @@ describe("isolated client boundary", () => {
     const html = renderToString(wrapFarmIsolatedClientGraph(React, <Boundary />));
 
     expect(html).toContain('<button data-route-counter="true">route</button>');
-    expect(html).not.toContain("<farm-client-boundary");
-    expect(html).not.toContain("data-farm-client-props");
+    expect(html).not.toContain("<f-island");
+    expect(html).not.toContain('type="f/props"');
   });
 
   it("keeps serialized props non-executable and round-trips supported values", async () => {
@@ -102,9 +103,7 @@ describe("isolated client boundary", () => {
     const html = renderToString(<Boundary value={value} />);
     document.body.innerHTML = html;
     const payload =
-      document.querySelector<HTMLScriptElement>(
-        'script[type="application/json"][data-farm-client-props]',
-      )?.textContent ?? "";
+      document.querySelector<HTMLScriptElement>('script[type="f/props"]')?.textContent ?? "";
     expect(payload).not.toContain("<");
     expect(payload).not.toContain(">");
     expect(payload).not.toContain("&");
@@ -203,7 +202,7 @@ describe("isolated client boundary", () => {
     function Lifecycle() {
       const ref = useRef<HTMLButtonElement>(null);
       useEffect(() => {
-        const container = ref.current?.closest("farm-client-boundary");
+        const container = ref.current?.closest("f-island");
         return () => {
           cleanupConnected.push(container?.isConnected === true);
         };
@@ -218,7 +217,7 @@ describe("isolated client boundary", () => {
       "load",
     );
     document.body.innerHTML = renderToString(<Boundary />);
-    const container = document.querySelector("farm-client-boundary")!;
+    const container = document.querySelector("f-island")!;
     const runtime = createRuntime({
       "/src/lifecycle.tsx": { __farm_client_boundary_originals__: { default: Lifecycle } },
     });
@@ -244,7 +243,7 @@ describe("isolated client boundary", () => {
       "interaction",
     );
     document.body.innerHTML = renderToString(<Boundary />);
-    const container = document.querySelector("farm-client-boundary")!;
+    const container = document.querySelector("f-island")!;
     const schedule = vi.fn(scheduleFarmIslandHydration);
     const runtime = createFarmIsolatedHydrationRuntime({
       ReactRuntime: React,
@@ -268,6 +267,135 @@ describe("isolated client boundary", () => {
     expect(runtime.rootCount()).toBe(0);
   });
 
+  it.each([18, 19])("cancels a root before its first commit with React %s", async (version) => {
+    const ReactRuntime = version === 18 ? (requireReact18("react") as typeof React) : React;
+    const hydrate = version === 18 ? requireReact18("react-dom/client").hydrateRoot : hydrateRoot;
+    const render =
+      version === 18 ? requireReact18("react-dom/server").renderToString : renderToString;
+    const mounted = vi.fn();
+    const errors = vi.fn();
+    vi.stubGlobal("reportError", errors);
+    function Cancelled() {
+      ReactRuntime.useEffect(mounted, []);
+      return ReactRuntime.createElement("button", null, "Cancelled");
+    }
+    const Boundary = createFarmIsolatedClientBoundary(
+      ReactRuntime,
+      Cancelled,
+      "/src/cancelled.tsx",
+      "default",
+      "load",
+    );
+    document.body.innerHTML = render(ReactRuntime.createElement(Boundary));
+    const container = document.querySelector("f-island")!;
+    const runtime = createFarmIsolatedHydrationRuntime({
+      ReactRuntime,
+      hydrateRoot: (container, element, options) =>
+        hydrate(container, element, {
+          onRecoverableError: errors,
+          ...options,
+        }),
+      load: async () => ({ __farm_client_boundary_originals__: { default: Cancelled } }),
+      schedule: async ({ hydrate }) => hydrate(),
+    });
+
+    // Keep React's scheduled work pending until navigation has removed this root.
+    await ReactRuntime.act(async () => {
+      await runtime.hydrate(document);
+      runtime.dispose(container);
+      container.remove();
+    });
+
+    expect(errors).not.toHaveBeenCalled();
+    expect(mounted).not.toHaveBeenCalled();
+    expect(runtime.rootCount()).toBe(0);
+    expect(container.hasAttribute("data-farm-hydrated")).toBe(false);
+  });
+
+  it.each([
+    [
+      "This root received an early update, before anything was able hydrate. Switched the entire root to client rendering.",
+      true,
+    ],
+    ["Minified React error #424; visit https://react.dev/errors/424 for the full message", true],
+    ["Minified React error #418; hydration mismatch", false],
+    ["Unexpected teardown error", false],
+  ])(
+    "reports %s except for the known synchronous cancellation diagnostic",
+    async (message, cancellation) => {
+      function Content() {
+        return <button>Content</button>;
+      }
+      const Boundary = createFarmIsolatedClientBoundary(
+        React,
+        Content,
+        "/src/content.tsx",
+        "default",
+        "load",
+      );
+      document.body.innerHTML = renderToString(<Boundary />);
+      const error = new Error(message);
+      const errors = vi.fn();
+      vi.stubGlobal("reportError", errors);
+      let recover!: (error: unknown) => void;
+      const unmount = vi.fn(() => recover(error));
+      const runtime = createFarmIsolatedHydrationRuntime({
+        ReactRuntime: React,
+        hydrateRoot: (_container, _element, options) => {
+          recover = options?.onRecoverableError ?? errors;
+          return { render() {}, unmount };
+        },
+        load: async () => ({ __farm_client_boundary_originals__: { default: Content } }),
+        schedule: async ({ hydrate }) => hydrate(),
+      });
+      await runtime.hydrate(document);
+      recover(error);
+      expect(errors).toHaveBeenCalledExactlyOnceWith(error);
+      errors.mockClear();
+
+      runtime.dispose(document);
+      runtime.dispose(document);
+      expect(unmount).toHaveBeenCalledOnce();
+      expect(errors).toHaveBeenCalledTimes(cancellation ? 0 : 1);
+      errors.mockClear();
+
+      // A later error is not part of this root's synchronous unmount operation.
+      recover(error);
+      expect(errors).toHaveBeenCalledExactlyOnceWith(error);
+      vi.stubGlobal("reportError", undefined);
+      const consoleError = vi.spyOn(console, "error").mockImplementation(() => {});
+      recover(error);
+      expect(consoleError).toHaveBeenCalledExactlyOnceWith(error);
+    },
+  );
+
+  it("still reports real hydration mismatches on live roots", async () => {
+    function Content() {
+      return <button>Client</button>;
+    }
+    const Boundary = createFarmIsolatedClientBoundary(
+      React,
+      Content,
+      "/src/content.tsx",
+      "default",
+      "load",
+    );
+    document.body.innerHTML = renderToString(<Boundary />).replace(
+      ">Client</button>",
+      ">Server</button>",
+    );
+    const errors = vi.fn();
+    vi.stubGlobal("reportError", errors);
+    const runtime = createRuntime({
+      "/src/content.tsx": { __farm_client_boundary_originals__: { default: Content } },
+    });
+    await act(async () => runtime.hydrate(document));
+    expect(errors).toHaveBeenCalledOnce();
+    expect(errors.mock.calls[0][0].message).toContain("Hydration failed");
+    expect(document.querySelector("button")?.textContent).toBe("Client");
+    act(() => runtime.dispose(document));
+  });
+
   it("rehydrates a boundary whose earlier pass was aborted while its module was still loading", async () => {
     function Slow() {
       return <button>Slow</button>;
@@ -280,7 +408,7 @@ describe("isolated client boundary", () => {
       "load",
     );
     document.body.innerHTML = renderToString(<Boundary />);
-    const container = document.querySelector("farm-client-boundary")!;
+    const container = document.querySelector("f-island")!;
 
     let imports = 0;
     let enteredFirstImport!: () => void;
@@ -494,8 +622,8 @@ describe("isolated client boundary", () => {
       "load",
     );
     const html = renderToString(<ParentBoundary />);
-    expect(html.match(/<farm-client-boundary/g)).toHaveLength(1);
-    expect(html.match(/type="application\/json"/g)).toHaveLength(1);
+    expect(html.match(/<f-island/g)).toHaveLength(1);
+    expect(html.match(/type="f\/props"/g)).toHaveLength(1);
     document.body.innerHTML = html;
     const runtime = createRuntime({
       "/src/parent.tsx": { __farm_client_boundary_originals__: { default: Parent } },
@@ -507,7 +635,7 @@ describe("isolated client boundary", () => {
 
     expect(counter.textContent).toBe("nested:1");
     expect(runtime.rootCount()).toBe(1);
-    expect(document.querySelectorAll("farm-client-boundary")).toHaveLength(1);
+    expect(document.querySelectorAll("f-island")).toHaveLength(1);
   });
 
   it("preserves client-local Suspense behavior", async () => {
@@ -630,7 +758,7 @@ describe("isolated client boundary", () => {
 
     const html = renderToString(<Boundary onAction={() => undefined} />);
     expect(html).toBe("<button>Run</button>");
-    expect(html).not.toContain("farm-client-boundary");
+    expect(html).not.toContain("f-island");
     expect(warn).toHaveBeenCalledWith(expect.stringContaining("function values"));
   });
 
@@ -650,7 +778,7 @@ describe("isolated client boundary", () => {
 
     const html = renderToString(<Boundary value={undefined} />);
     expect(html).toBe("<span>undefined</span>");
-    expect(html).not.toContain("farm-client-boundary");
+    expect(html).not.toContain("f-island");
     expect(warn).toHaveBeenCalledWith(expect.stringContaining("undefined values"));
   });
 
@@ -679,8 +807,14 @@ describe("isolated client boundary", () => {
     vi.stubGlobal("window", undefined);
 
     const html = renderToString(<Boundary {...props} />);
-    expect(html).not.toContain("farm-client-boundary");
+    expect(html).not.toContain("f-island");
     expect(warn).toHaveBeenCalledWith(expect.stringContaining("Could not isolate"));
+
+    // Every request renders the same props: one warning per component, not per render.
+    renderToString(<Boundary {...props} />);
+    expect(
+      warn.mock.calls.filter(([message]) => String(message).includes("Could not isolate")),
+    ).toHaveLength(1);
   });
 
   it("preserves SSR and reports the original module-load error", async () => {
@@ -695,7 +829,7 @@ describe("isolated client boundary", () => {
       "load",
     );
     document.body.innerHTML = renderToString(<Boundary />);
-    const serverHTML = document.querySelector("farm-client-boundary")?.innerHTML;
+    const serverHTML = document.querySelector("f-island")?.innerHTML;
     const failure = new Error("chunk unavailable");
     const report = vi.fn();
     const runtime = createFarmIsolatedHydrationRuntime({
@@ -711,10 +845,10 @@ describe("isolated client boundary", () => {
     await act(async () => runtime.hydrate(document));
     await Promise.resolve();
 
-    expect(document.querySelector("farm-client-boundary")?.innerHTML).toBe(serverHTML);
-    expect(
-      document.querySelector("farm-client-boundary")?.hasAttribute("data-farm-island-hydrated"),
-    ).toBe(false);
+    expect(document.querySelector("f-island")?.innerHTML).toBe(serverHTML);
+    expect(document.querySelector("f-island")?.hasAttribute("data-farm-island-hydrated")).toBe(
+      false,
+    );
     expect(runtime.rootCount()).toBe(0);
     expect(report).toHaveBeenCalledWith(
       expect.stringContaining("/src/missing.tsx#default"),
@@ -737,7 +871,7 @@ describe("isolated client boundary", () => {
       "load",
     );
     document.body.innerHTML = renderToString(<Boundary />);
-    const container = document.querySelector("farm-client-boundary")!;
+    const container = document.querySelector("f-island")!;
     const serverHTML = container.innerHTML;
     const report = vi.fn();
     vi.spyOn(console, "error").mockImplementation(() => undefined);
@@ -762,5 +896,84 @@ describe("isolated client boundary", () => {
       expect.stringContaining("/src/broken.tsx#default"),
       expect.objectContaining({ message: "client render failed" }),
     );
+  });
+});
+
+describe("islands in a page a hydrating layout keeps as server HTML", () => {
+  afterEach(() => {
+    document.body.innerHTML = "";
+  });
+
+  function Counter({ label }: { label: string }) {
+    const [count, setCount] = useState(0);
+    return (
+      <button data-island={label} onClick={() => setCount((value) => value + 1)}>
+        {label} {count}
+      </button>
+    );
+  }
+  const CounterBoundary = createFarmIsolatedClientBoundary(
+    React,
+    Counter,
+    "/src/counter.tsx",
+    "default",
+    "load",
+  );
+  const pageHtml = (label: string) =>
+    renderToString(
+      <main>
+        <p>Server text</p>
+        <CounterBoundary label={label} />
+      </main>,
+    );
+
+  it("starts them after the layout hydrates, and swaps them when the page HTML changes", async () => {
+    const runtime = createRuntime({
+      "/src/counter.tsx": { __farm_client_boundary_originals__: { default: Counter } },
+    });
+    const ServerPage = createFarmServerPageBoundary(React, runtime);
+    const layout = (html: string) => (
+      <section data-layout>
+        <ServerPage id="__farm_page__" dangerouslySetInnerHTML={{ __html: html }} />
+      </section>
+    );
+
+    const container = document.createElement("div");
+    container.innerHTML = renderToString(layout(pageHtml("first")));
+    document.body.append(container);
+    let root!: ReturnType<typeof hydrateRoot>;
+    await act(async () => {
+      root = hydrateRoot(container, layout(pageHtml("first")));
+    });
+    await act(async () => {});
+
+    const first = container.querySelector<HTMLButtonElement>('[data-island="first"]')!;
+    await act(async () => first.click());
+    expect(first.textContent).toBe("first 1");
+    expect(runtime.rootCount()).toBe(1);
+
+    // Client navigation inside the shared layout: React replaces the page HTML in place.
+    await act(async () => root.render(layout(pageHtml("second"))));
+    await act(async () => {});
+    expect(container.querySelector('[data-island="first"]')).toBeNull();
+    const second = container.querySelector<HTMLButtonElement>('[data-island="second"]')!;
+    await act(async () => second.click());
+    expect(second.textContent).toBe("second 1");
+    expect(runtime.rootCount()).toBe(1);
+
+    await act(async () => root.unmount());
+    expect(runtime.rootCount()).toBe(0);
+  });
+
+  it("does nothing for a page without islands", async () => {
+    const runtime = { hydrate: vi.fn(async () => {}), dispose: vi.fn() };
+    const ServerPage = createFarmServerPageBoundary(React, runtime);
+    const container = document.createElement("div");
+    const html = "<main>Server text</main>";
+    container.innerHTML = renderToString(<ServerPage dangerouslySetInnerHTML={{ __html: html }} />);
+    await act(async () => {
+      hydrateRoot(container, <ServerPage dangerouslySetInnerHTML={{ __html: html }} />);
+    });
+    expect(runtime.hydrate).not.toHaveBeenCalled();
   });
 });

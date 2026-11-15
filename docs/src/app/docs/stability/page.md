@@ -44,9 +44,9 @@ An integration's stable surface is its Farm API: the factory, options, mounted r
 **Beta, versioned independently:**
 
 - Renderer packages: `@farm.js/react` (the React compiler and runtime package; the default React path lives in core), `@farm.js/preact`, `@farm.js/solid`, `@farm.js/vue`, `@farm.js/svelte`
-- Plugins: `@farm.js/analyzer`, `@farm.js/cache-redis`, `@farm.js/content`, `@farm.js/hints`, `@farm.js/msw`, `@farm.js/otel`, `@farm.js/partytown`, `@farm.js/preview-tunnel`, `@farm.js/pwa`, `@farm.js/scripts`, `@farm.js/search`, `@farm.js/stylex`, `@farm.js/sync`
+- Plugins: `@farm.js/analyzer`, `@farm.js/bot`, `@farm.js/cache-redis`, `@farm.js/content`, `@farm.js/hints`, `@farm.js/msw`, `@farm.js/otel`, `@farm.js/partytown`, `@farm.js/preview-tunnel`, `@farm.js/progress`, `@farm.js/pwa`, `@farm.js/scripts`, `@farm.js/search`, `@farm.js/stylex`, `@farm.js/sync`
 
-**Experimental packages:** `@farm.js/federation`, `@farm.js/mcp`, `@farm.js/wasm`, `@farm.js/webmcp`.
+**Experimental packages:** `@farm.js/convex`, `@farm.js/desktop`, `@farm.js/federation`, `@farm.js/mcp`, `@farm.js/mobile`, `@farm.js/native`, `@farm.js/wasm`, `@farm.js/webmcp`.
 
 ## Renderers
 
@@ -60,6 +60,19 @@ An integration's stable surface is its Farm API: the factory, options, mounted r
 
 Framework-level behavior (routing, APIs, actions, queries, middleware, deployment) is renderer-neutral and covered by the shared renderer conformance suite. See [Renderers](/docs/renderers) for the per-renderer capability matrix.
 
+### Experimental React compiler
+
+The compiler is experimental. Its package is independently versioned and stays beta until its first
+non-prerelease version is published. Its application API is `react({ compiler: true })`; the former
+`experimental.compiler` spelling is a deprecated compatibility alias. The compiler is disabled by
+default, and unsupported components retain the normal React path.
+
+The stable-release contract covers the documented compiler options and `@farm.js/react/list`.
+Generated compiler definitions and their runtime must use the same package version: rebuild both
+server and browser output when upgrading. The compiler's internal representation and the exact
+set of optimized components are not a cross-version API. See the
+[compiler compatibility guide](/docs/renderers/react#compatibility-and-release-status).
+
 ## Deployment targets
 
 | Target                       | Preset             | Level        | How it is verified                                                                             |
@@ -70,23 +83,22 @@ Framework-level behavior (routing, APIs, actions, queries, middleware, deploymen
 | `netlify`                    | `netlify`          | Stable       | Built output runs through Netlify's request pipeline on every supported Node.js version in CI. |
 | Direct Nitro `preset` values | any                | Pass-through | Farm passes the preset to Nitro. Output is not tested by Farm unless it appears above.         |
 
-`deploy.target` values get Farm's defaults and deploy commands. A raw Nitro `preset` such as `vercel-edge`, `netlify-edge`, `cloudflare-module`, `deno`, or `bun` is supported on a best-effort basis. See [Deployment](/docs/deployment).
+`deploy.target` values get Farm's defaults and deploy commands. A raw Nitro `preset` such as `netlify-edge`, `cloudflare-module`, `deno`, or `bun` is supported on a best-effort basis. Farm's Nitro version has no `vercel-edge` preset, so Farm rejects it; use `vercel`. See [Deployment](/docs/deployment).
 
 ## Experimental features
 
 These are off by default and outside the stability promise:
 
-| Feature                   | How to enable                                                       |
-| ------------------------- | ------------------------------------------------------------------- |
-| React Server Components   | `experimental.serverComponents`, or the `@farm.js/plugin/rsc` setup |
-| Server Actions under RSC  | `experimental.serverActions`                                        |
-| Partial Prerendering      | `experimental.ppr`, then opt routes in                              |
-| Isolated client hydration | `experimental.isolatedClientHydration: "analyze" \| "enabled"`      |
-| React compiler            | `react({ experimental: { compiler: true } })` from `@farm.js/react` |
-| API route MCP server      | `apiMcp()` from `@farm.js/mcp`                                      |
-| WebMCP browser tools      | `@farm.js/webmcp`                                                   |
-| Module federation         | `@farm.js/federation`                                               |
-| WebAssembly components    | `@farm.js/wasm`                                                     |
+| Feature                   | How to enable                                                                                     |
+| ------------------------- | ------------------------------------------------------------------------------------------------- |
+| Server components         | `experimental.serverComponents`: `true` (islands), `{ mode: "rsc" }` or `@farm.js/plugin/rsc` RSC |
+| Server Actions under RSC  | `experimental.serverActions`                                                                      |
+| Partial Prerendering      | `experimental.ppr`, then opt routes in                                                            |
+| Isolated client hydration | `experimental.isolatedClientHydration: "analyze" \| "enabled"`                                    |
+| API route MCP server      | `apiMcp()` from `@farm.js/mcp`                                                                    |
+| WebMCP browser tools      | `@farm.js/webmcp`                                                                                 |
+| Module federation         | `@farm.js/federation`                                                                             |
+| WebAssembly components    | `@farm.js/wasm`                                                                                   |
 
 ## Known limits in 0.1
 

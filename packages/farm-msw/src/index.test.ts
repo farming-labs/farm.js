@@ -118,10 +118,16 @@ describe("msw Farm plugin", () => {
     };
     const closeListeners: Array<() => void> = [];
     const viteServer = {
-      ssrLoadModule: vi
-        .fn()
-        .mockResolvedValueOnce({ handlers: [firstHandler] })
-        .mockResolvedValueOnce({ handlers: [nextHandler] }),
+      environments: {
+        ssr: {
+          runner: {
+            import: vi
+              .fn()
+              .mockResolvedValueOnce({ handlers: [firstHandler] })
+              .mockResolvedValueOnce({ handlers: [nextHandler] }),
+          },
+        },
+      },
       moduleGraph: {
         getModulesByFile: vi.fn(() => new Set([handlerModule])),
       },
@@ -137,7 +143,7 @@ describe("msw Farm plugin", () => {
 
     await plugin.dev?.update?.({ file: dependency, modules: [] }, { state } as never);
     expect(mocks.resetHandlers).toHaveBeenCalledWith(nextHandler);
-    expect(viteServer.ssrLoadModule.mock.calls[1]?.[0]).toMatch(/\?farm-msw=\d+$/);
+    expect(viteServer.environments.ssr.runner.import.mock.calls[1]?.[0]).toMatch(/\?farm-msw=\d+$/);
 
     await plugin.runtime?.close?.({ state } as never);
     closeListeners[0]?.();
@@ -148,7 +154,9 @@ describe("msw Farm plugin", () => {
     const plugin = msw({ handlers: "src/mocks/handlers.ts", browser: false });
     await plugin.configure?.({ root: "/app", plugins: [plugin], vite: {} } as never, context(true));
     const state = await plugin.setup?.(context(true));
-    const viteServer = { ssrLoadModule: vi.fn(async () => ({ handlers: {} })) };
+    const viteServer = {
+      environments: { ssr: { runner: { import: vi.fn(async () => ({ handlers: {} })) } } },
+    };
 
     await expect(plugin.dev?.server?.(viteServer as never, { state } as never)).rejects.toThrow(
       "must export a handlers array",

@@ -10,7 +10,7 @@ type AnyServer = Record<string, any> & {
   config: { root: string; publicDir: string };
   hot: undefined;
   middlewares: { use: (fn: any) => void };
-  ssrLoadModule: (...args: any[]) => any;
+  environments: { ssr: { runner: { import: (...args: any[]) => any } } };
 };
 
 async function setupPlugin() {
@@ -19,7 +19,7 @@ async function setupPlugin() {
     config: { root: tmpRoot, publicDir: path.join(tmpRoot, "public") },
     hot: undefined,
     middlewares: { use() {} },
-    ssrLoadModule: vi.fn(),
+    environments: { ssr: { runner: { import: vi.fn() } } },
   };
 
   const plugin = farmMiddleware({});

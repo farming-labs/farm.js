@@ -355,7 +355,7 @@ async function writeStandardFixture(root, shape, mode) {
   );
   await writeFile(
     path.join(root, "farm.config.ts"),
-    `${compareCompiler ? 'import { react } from "@farm.js/react";\n' : ""}import { defineConfig } from "@farm.js/core";\nexport default defineConfig({${compareCompiler ? ` renderer: react({ experimental: { compiler: ${compiler ? "{ report: true }" : "false"} } }),` : ""} images: { provider: "none" }, experimental: { isolatedClientHydration: "${isolated ? "enabled" : "off"}" } });\n`,
+    `${compareCompiler ? 'import { react } from "@farm.js/react";\n' : ""}import { defineConfig } from "@farm.js/core";\nexport default defineConfig({${compareCompiler ? ` renderer: react({ compiler: ${compiler ? "{ report: true }" : "false"} }),` : ""} images: { provider: "none" }, experimental: { isolatedClientHydration: "${isolated ? "enabled" : "off"}" } });\n`,
   );
   await writeFile(
     path.join(root, "package.json"),

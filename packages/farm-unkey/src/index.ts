@@ -1,11 +1,10 @@
+import type { FarmIntegrationHandlerContext, FarmIntegrationLogger } from "@farm.js/core";
 import {
+  api as clientApi,
   FARM_INTEGRATION_INTERNAL_DISPATCH_CONTEXT_KEY,
   defineIntegration,
   integrationRoute,
-  type FarmIntegrationHandlerContext,
-  type FarmIntegrationLogger,
-} from "@farm.js/core";
-import { api as clientApi } from "@farm.js/core/client";
+} from "@farm.js/core/integrations";
 import { createPathInferredClientApi, integrationConfig } from "@farm.js/integration-utils";
 
 const DEFAULT_UNKEY_BASE_URL = "https://api.unkey.com";

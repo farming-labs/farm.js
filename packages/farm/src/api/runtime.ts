@@ -7,16 +7,18 @@ import {
 import { isEndpointFailure, type EndpointFailure } from "./endpoint";
 import {
   bufferFarmRequestBody,
+  cloneFarmRequest,
   createFarmRequestBodyErrorResponse,
   DEFAULT_FARM_SERVER_BODY_SIZE_LIMIT,
 } from "../server-http";
 import { DEFAULT_FARM_API_BASE_PATH, normalizeFarmAPIBasePath } from "./config";
 import { resolveFarmAPICanonicalPathname } from "./server-path";
-import { parseRouteSchema } from "./route-schema";
+import { parseRouteSchema, toPublicValidationIssues } from "./route-schema";
 import { omitFarmResponseBody } from "../response-body";
 
 export { registerAPIRouteShape, type APIRouteShapeSource } from "./route-shape";
 export { parseRouteSchema } from "./route-schema";
+export { isEndpointFailure } from "./endpoint";
 export { mergePluginAPIRoutes } from "./plugin-route-runtime";
 
 export {
@@ -25,7 +27,22 @@ export {
   type APIRouteParamValue,
   type APIRouteMatch,
 } from "./route-pattern";
-import { matchAPIRoute, type APIRouteParams, type APIRouteMatch } from "./route-pattern";
+import {
+  createStaticAPIRouteMatcher,
+  matchAPIRoute,
+  type APIRouteParams,
+  type APIRouteMatch,
+} from "./route-pattern";
+import {
+  rejectCrossSiteNonJSONBody,
+  validateIntegrationRequestOrigin,
+} from "../integration-request-security";
+import { isMultipartSchema } from "./transport";
+
+const CROSS_SITE_JSON_BODY_MESSAGE =
+  "This endpoint reads a JSON body, so a request from another origin must send Content-Type: " +
+  "application/json. To accept form posts from other origins, wrap the body schema in multipart().";
+
 /**
  * Every method an API route module can export. Route discovery in core and in
  * the plain-Vite plugin reads this list, so a handler exported under any of
@@ -78,6 +95,20 @@ export function matchAPIRouteAtBasePath<T extends { path: string }>(
 
   const canonicalPathname = resolveFarmAPICanonicalPathname(pathname, serverBasePath);
   return canonicalPathname === pathname ? null : matchAPIRoute(routes, canonicalPathname);
+}
+
+/** @internal Prepare the fixed API table owned by a generated production bundle. */
+export function createStaticAPIRouteMatcherAtBasePath<T extends { path: string }>(
+  routes: readonly T[],
+  serverBasePath = DEFAULT_FARM_API_BASE_PATH,
+): (pathname: string) => APIRouteMatch<T> | null {
+  const match = createStaticAPIRouteMatcher(routes);
+  return (pathname) => {
+    const directMatch = match(pathname);
+    if (directMatch) return directMatch;
+    const canonicalPathname = resolveFarmAPICanonicalPathname(pathname, serverBasePath);
+    return canonicalPathname === pathname ? null : match(canonicalPathname);
+  };
 }
 
 /** Test whether a pathname belongs to the configured local API surface. */
@@ -147,15 +178,22 @@ async function invokeAPIRouteEndpointInContext(
     ...searchParamsToObject(url.searchParams),
   };
 
+  const types = endpoint.__types || {};
   let body: any = undefined;
   if (request.method.toUpperCase() !== "GET" && request.method.toUpperCase() !== "HEAD") {
+    // A JSON body schema is the contract the generated client sends. Form bodies stay readable
+    // from the app's own pages (a native `<fetcher.Form>` submission before hydration), but
+    // another site posting one is refused; `multipart()` declares form input instead.
+    if (types.body && !isMultipartSchema(types.body)) {
+      const rejection = rejectCrossSiteNonJSONBody(request, CROSS_SITE_JSON_BODY_MESSAGE);
+      if (rejection) return rejection;
+    }
     const parsedBody = await readRequestBody(request);
     if (parsedBody.error) return parsedBody.error;
     body = parsedBody.body;
   }
 
   const headers = Object.fromEntries(request.headers.entries());
-  const types = endpoint.__types || {};
 
   const queryValidation = await validateInput(types.query, query, "Invalid query parameters");
   if (queryValidation instanceof Response) {
@@ -291,6 +329,21 @@ function attachEndpointInvalidations(response: Response, keys: readonly string[]
   });
 }
 
+/**
+ * @internal The JSON body of the generic `500` Farm answers when an API route, a docs API
+ * route, or app middleware throws. It is the production entry's body, so `farm dev` sends the
+ * same one. Typed endpoint failures answer {@link createEndpointFailureResponse} instead.
+ */
+export const FARM_INTERNAL_SERVER_ERROR_BODY = JSON.stringify({ error: "Internal Server Error" });
+
+/** @internal The generic `500` response, with {@link FARM_INTERNAL_SERVER_ERROR_BODY}. */
+export function createFarmInternalServerErrorResponse(): Response {
+  return new Response(FARM_INTERNAL_SERVER_ERROR_BODY, {
+    status: 500,
+    headers: { "Content-Type": "application/json" },
+  });
+}
+
 export function createEndpointFailureResponse(failure: EndpointFailure<string, unknown>): Response {
   return new Response(
     JSON.stringify({
@@ -320,7 +373,7 @@ async function readRequestBody(request: Request): Promise<RequestBodyParseResult
 
   if (contentType === "multipart/form-data") {
     try {
-      return { body: formDataToObject(await request.clone().formData()) };
+      return { body: formDataToObject(await cloneFarmRequest(request).formData()) };
     } catch {
       return invalidRequestBody("The request body is not valid multipart form data.");
     }
@@ -328,7 +381,7 @@ async function readRequestBody(request: Request): Promise<RequestBodyParseResult
 
   let text: string;
   try {
-    text = await request.clone().text();
+    text = await cloneFarmRequest(request).text();
   } catch {
     if (contentType === "application/json" || contentType?.endsWith("+json")) {
       return invalidRequestBody("The request body is not valid JSON.");
@@ -362,7 +415,9 @@ async function readRequestBody(request: Request): Promise<RequestBodyParseResult
 
   // A body is only parsed as JSON when the request says it is JSON, or when it
   // declares no type at all (the permissive path kept for non-browser callers
-  // that omit the header).
+  // that omit the header). A browser omits it too, for a Blob or byte body, and
+  // will send that cross-site in a no-cors fetch with the visitor's cookies, so
+  // a typeless body from another origin is not read as JSON either.
   //
   // Parsing a *declared* non-JSON type as JSON removed the barrier that keeps
   // browsers from reaching this surface cross-origin: `text/plain`,
@@ -371,6 +426,9 @@ async function readRequestBody(request: Request): Promise<RequestBodyParseResult
   // without a preflight. Honouring the declared type means such a request no
   // longer arrives as a parsed JSON object.
   if (contentType === undefined) {
+    if (!validateIntegrationRequestOrigin(request, { requireOriginMetadata: false }).ok) {
+      return { body: undefined };
+    }
     try {
       return { body: JSON.parse(text) };
     } catch {
@@ -432,17 +490,24 @@ async function validateInput(
   if (!schema) return value;
   try {
     return await parseRouteSchema(schema, value);
-  } catch (validationError: any) {
+  } catch (validationError) {
     return Response.json(
       {
         error,
-        details: (validationError.issues || validationError.errors || []).map((issue: any) => ({
-          path: issue.path,
-          message: issue.message,
-          code: issue.code,
-        })),
+        details: toPublicValidationIssues(validationError),
       },
       { status: 400 },
     );
   }
 }
+
+// The MCP tool registry, published by @farm.js/mcp, and the AI catalog's list of MCP
+// servers Farm does not serve. They live behind this edge-safe entry so a plugin or
+// docs runtime never pulls core's main index into a worker.
+export {
+  _findFarmMCPEndpointTool,
+  _publishFarmMCPCatalog,
+  registerFarmMCPServer,
+  type FarmMCPCatalogDetails,
+  type FarmMCPServerRegistration,
+} from "../mcp-catalog";

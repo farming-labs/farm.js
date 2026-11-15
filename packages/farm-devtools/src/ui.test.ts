@@ -1,6 +1,6 @@
 import { JSDOM } from "jsdom";
 import { describe, expect, it } from "vitest";
-import { codeBlock, escapeHtml } from "./ui.js";
+import { codeBlock, createShortcutMatcher, escapeHtml } from "./ui.js";
 import { startDevtoolsLauncher } from "./client.js";
 
 describe("DevTools code and launcher", () => {
@@ -65,5 +65,27 @@ describe("DevTools code and launcher", () => {
     expect(dom.window.document.querySelectorAll("farm-devtools-launcher")).toHaveLength(1);
     second.dispose();
     dom.window.close();
+  });
+  it("matches only the configured toggle shortcut so other keys stay in the panel", () => {
+    const key = (key: string, code: string, modifiers: Record<string, boolean> = {}) => ({
+      key,
+      code,
+      altKey: false,
+      ctrlKey: false,
+      metaKey: false,
+      shiftKey: false,
+      repeat: false,
+      ...modifiers,
+    });
+    const mac = createShortcutMatcher("mod+shift+.", true);
+    expect(mac(key(">", "Period", { metaKey: true, shiftKey: true }))).toBe(true);
+    expect(mac(key(">", "Period", { metaKey: true, shiftKey: true, repeat: true }))).toBe(false);
+    expect(mac(key(">", "Period", { ctrlKey: true, shiftKey: true }))).toBe(false);
+    for (const typed of ["a", "s", "Enter", "1"])
+      expect(mac(key(typed, `Key${typed}`))).toBe(false);
+    const other = createShortcutMatcher("Ctrl + D", false);
+    expect(other(key("d", "KeyD", { ctrlKey: true }))).toBe(true);
+    expect(other(key("d", "KeyD"))).toBe(false);
+    expect(createShortcutMatcher("", false)(key("d", "KeyD"))).toBe(false);
   });
 });

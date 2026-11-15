@@ -196,7 +196,7 @@ process.send?.("farm:test:ready");
 
       const apiResponse = await request("/api/failure");
       expect(apiResponse.status).toBe(500);
-      await expect(apiResponse.json()).resolves.toEqual({ error: "Internal server error" });
+      await expect(apiResponse.json()).resolves.toEqual({ error: "Internal Server Error" });
 
       developmentServer.kill("SIGTERM");
       await new Promise<void>((resolve, reject) => {
@@ -206,7 +206,9 @@ process.send?.("farm:test:ready");
         );
         developmentServer?.once("exit", (code, signal) => {
           clearTimeout(timeout);
-          if (code && code !== 0) {
+          // Vite's own SIGTERM listener closes the server and exits with
+          // 128 + 15 since Vite 6; either path must flush traces first.
+          if (code && code !== 0 && code !== 143) {
             reject(
               new Error(`Development server exited with ${code}/${signal}:\n${output.join("")}`),
             );

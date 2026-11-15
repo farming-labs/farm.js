@@ -212,5 +212,8 @@ function joinURLPath(basePath: string, suffix: string): string {
 }
 
 function getDefaultOrigin(): string {
-  return typeof window !== "undefined" ? window.location.origin : "http://localhost:3000";
+  // React Native has a `window` but no `location`.
+  return typeof window !== "undefined" && window.location
+    ? window.location.origin
+    : "http://localhost:3000";
 }

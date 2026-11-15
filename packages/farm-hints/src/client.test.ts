@@ -68,6 +68,30 @@ describe("Farm Hints browser runtime", () => {
     runtime.close();
   });
 
+  it("still scans while the page mutates faster than the debounce interval", async () => {
+    vi.useFakeTimers();
+    const runtime = startHintsRuntime(
+      resolveHintsOptions({
+        accessibility: false,
+        html: true,
+        thirdParty: false,
+        report: "console",
+      }),
+      window,
+    );
+    try {
+      const main = document.querySelector("main")!;
+      for (let tick = 0; tick < 20; tick += 1) {
+        main.setAttribute("id", `tick-${tick}`);
+        await vi.advanceTimersByTimeAsync(100);
+      }
+      expect(mocks.collectDocumentHints).toHaveBeenCalled();
+    } finally {
+      runtime.close();
+      vi.useRealTimers();
+    }
+  });
+
   it("connects the three browser vitals only when performance hints are enabled", () => {
     const runtime = startHintsRuntime(
       resolveHintsOptions({

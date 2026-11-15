@@ -1,12 +1,15 @@
 // @vitest-environment node
 
 import { randomUUID } from "node:crypto";
+import { createRequire } from "node:module";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { FarmIntegrationHandlerContext } from "../integrations";
 import { autumn } from "../../../farm-integrations/src/autumn/index";
 
-const standardWebhooksModulePath =
-  "../../../../node_modules/.pnpm/node_modules/standardwebhooks/dist/index.js";
+// Resolve the real SDK from the integration that owns it, independent of pnpm's layout.
+const { Webhook } = createRequire(new URL("../../../farm-autumn/package.json", import.meta.url))(
+  "standardwebhooks",
+);
 
 function createRequestContextStore() {
   return {
@@ -79,7 +82,6 @@ function createAutumnWebhookPayload() {
 }
 
 async function signAutumnWebhook(body: string, webhookId = "msg_autumn_123") {
-  const { Webhook } = await import(standardWebhooksModulePath);
   const timestamp = new Date();
   const secret = "autumn_webhook_secret";
   const signature = new Webhook(Buffer.from(secret, "utf-8").toString("base64")).sign(
@@ -105,7 +107,6 @@ async function signAutumnWebhook(body: string, webhookId = "msg_autumn_123") {
  * mismatch with the secrets Autumn actually issues.
  */
 async function signSvixWebhook(body: string, webhookId = "msg_svix_123") {
-  const { Webhook } = await import(standardWebhooksModulePath);
   const timestamp = new Date();
   const secret = `whsec_${Buffer.from(randomUUID() + randomUUID()).toString("base64")}`;
   const signature = new Webhook(secret).sign(webhookId, timestamp, body);

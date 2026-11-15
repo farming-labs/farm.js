@@ -12,14 +12,19 @@ import {
   Webhook as StandardWebhook,
   WebhookVerificationError as StandardWebhookVerificationError,
 } from "standardwebhooks";
+import type {
+  FarmIntegration,
+  FarmIntegrationAPI,
+  FarmIntegrationHandlerContext,
+  FarmIntegrationLogger,
+} from "@farm.js/core";
 import {
+  describeIntegrationOriginRejection,
+  resolveIntegrationAllowedOrigins,
+  validateIntegrationRequestOrigin,
   defineIntegration,
   integrationRoute,
-  type FarmIntegration,
-  type FarmIntegrationAPI,
-  type FarmIntegrationHandlerContext,
-  type FarmIntegrationLogger,
-} from "@farm.js/core";
+} from "@farm.js/core/integrations";
 import {
   integrationConfig,
   normalizeWebhookConfig,
@@ -265,6 +270,12 @@ export interface AutumnIntegrationInput extends AutumnClientPathOptions {
   secretKey?: string;
   serverURL?: string;
   appBaseUrl?: string;
+  /**
+   * Origins besides the app's own that may call the billing routes, in
+   * `serverActions.allowedOrigins` pattern syntax. The routes act for the signed-in caller from its
+   * cookies, so a request from any other origin is refused.
+   */
+  allowedOrigins?: readonly string[];
   webhooks?: AutumnWebhookConfig;
   billing: AutumnBillingOptions;
   log?: FarmIntegrationLogger;
@@ -285,9 +296,6 @@ interface ResolvedAutumnProduct extends AutumnBillingProduct {
 
 type AutumnAttachCustomizeItems = NonNullable<
   NonNullable<Parameters<AutumnSDK["billing"]["attach"]>[0]["customize"]>["items"]
->;
-type AutumnUpdateCustomizeItems = NonNullable<
-  NonNullable<Parameters<AutumnSDK["billing"]["update"]>[0]["customize"]>["items"]
 >;
 
 const pendingAutumnMeterProjection = new Map<string, number>();
@@ -315,6 +323,11 @@ function getReportedUsageEvent(key: string): AutumnBillingReportUsageResult | nu
   }
   return entry.result;
 }
+
+// Reports still being applied, keyed like the replay cache. The replay cache
+// is only written once a report finishes, so without this a retry that
+// arrives while the first attempt is in flight would apply the usage again.
+const inFlightUsageReports = new Map<string, Promise<Response>>();
 
 function setReportedUsageEvent(key: string, result: AutumnBillingReportUsageResult): void {
   reportedUsageEvents.set(key, { at: Date.now(), result });
@@ -747,12 +760,31 @@ function getOwnerExternalCustomerId(
     return billing.resolveExternalCustomerId(owner, tools);
   }
 
-  const normalizedId = owner.id
+  const normalizedId = normalizeLegacyAutumnCustomerId(owner.id);
+  // An id the normalization keeps as is maps as it always has. Any other id (`a.b`, an email, a
+  // non-ASCII handle, an empty id) used to collapse onto another owner's customer (`a.b` and `a-b`
+  // both became `user_a-b`), so it is encoded instead. A normalized id never starts with `-`, so
+  // `kind_-<base64url>` cannot collide with it.
+  if (normalizedId && normalizedId === owner.id) {
+    return `${owner.kind}_${normalizedId}`;
+  }
+  return `${owner.kind}_-${Buffer.from(owner.id, "utf8").toString("base64url")}`;
+}
+
+function normalizeLegacyAutumnCustomerId(id: string): string {
+  return id
     .trim()
     .replace(/[^a-zA-Z0-9_-]+/g, "-")
     .replace(/^-+|-+$/g, "");
+}
 
-  return `${owner.kind}_${normalizedId || "unknown"}`;
+/**
+ * The Autumn customer id Farm derived before ids it could not keep as is were encoded. Owners
+ * with such ids (emails, handles) share customers under it; return it from
+ * `billing.resolveExternalCustomerId` only to keep existing customers while migrating them.
+ */
+export function legacyAutumnExternalCustomerId(owner: AutumnBillingOwner): string {
+  return `${owner.kind}_${normalizeLegacyAutumnCustomerId(owner.id) || "unknown"}`;
 }
 
 function resolveAutumnPlanLimitReference(
@@ -1235,6 +1267,10 @@ export function autumn<const TInput extends AutumnIntegrationInput>(
 export function autumn<TInput extends AutumnIntegrationInput>(
   input: TInput,
 ): AutumnIntegrationResult<FarmIntegrationAPI> {
+  const allowedOrigins = resolveIntegrationAllowedOrigins(
+    input.allowedOrigins,
+    "autumn().allowedOrigins",
+  );
   const secretKey = input.secretKey ?? process.env.AUTUMN_SECRET_KEY ?? "";
   const appBaseUrl = input.appBaseUrl ?? process.env.APP_BASE_URL ?? undefined;
   const webhookSecret = process.env.AUTUMN_WEBHOOK_SECRET ?? undefined;
@@ -1709,6 +1745,8 @@ export function autumn<TInput extends AutumnIntegrationInput>(
       integrationRoute.post(usagePath, {
         responseFormat: "json",
         async handler(request, ctx) {
+          const rejected = rejectForeignOrigin(request, allowedOrigins);
+          if (rejected) return rejected;
           const body = (await request.json().catch(() => ({}))) as AutumnBillingUsageInput;
           if (!body.key) {
             return new Response("A billing usage key is required.", { status: 400 });
@@ -1748,6 +1786,8 @@ export function autumn<TInput extends AutumnIntegrationInput>(
       integrationRoute.post(meterUsagePath, {
         responseFormat: "json",
         async handler(request, ctx) {
+          const rejected = rejectForeignOrigin(request, allowedOrigins);
+          if (rejected) return rejected;
           const body = (await request.json().catch(() => ({}))) as AutumnBillingMeterUsageInput;
           if (!body.key) {
             return new Response("An Autumn meter key is required.", { status: 400 });
@@ -1848,6 +1888,8 @@ export function autumn<TInput extends AutumnIntegrationInput>(
       integrationRoute.post(reportUsagePath, {
         responseFormat: "json",
         async handler(request, ctx) {
+          const rejected = rejectForeignOrigin(request, allowedOrigins);
+          if (rejected) return rejected;
           const body = (await request.json().catch(() => ({}))) as AutumnBillingReportUsageInput;
           if (!body.key) {
             return new Response("An Autumn meter key is required.", { status: 400 });
@@ -1892,30 +1934,123 @@ export function autumn<TInput extends AutumnIntegrationInput>(
             return Response.json(replayed);
           }
 
-          const active = resolveActiveProduct(resolved.customer, products);
-          const planId = active.product?.planId ?? "free";
-          const plan = plans[planId] ?? {};
-          const livePlan = active.product?.autumnPlanId
-            ? await sdk.plans.get({ planId: active.product.autumnPlanId })
-            : null;
-          const currentUsed = getProjectedUsage({
-            externalCustomerId: resolved.externalCustomerId,
-            featureId,
-            currentPeriodEnd: currentPeriodEnd(active.subscription),
-            currentPeriodUsed: resolved.customer.balances?.[featureId]?.usage ?? 0,
-          });
-          const includedLimit =
-            plan.limits?.[body.key] ?? resolved.customer.balances?.[featureId]?.granted ?? null;
-          const softLimit = resolveSoftLimit(plans, planId, body.key, includedLimit, meter.guard);
-          const hardLimit = resolveHardLimit(planId, includedLimit, meter.guard);
-          const projectedCurrentPeriodUsed = projectMeterUsage({
-            aggregation: meter.aggregation,
-            currentUsed,
-            quantity: body.quantity,
-          });
+          // A concurrent retry with the same key waits for the report already
+          // in flight instead of applying the usage a second time.
+          const inFlight = inFlightUsageReports.get(idempotencyCacheKey);
+          if (inFlight) {
+            return (await inFlight).clone();
+          }
 
-          if (typeof hardLimit === "number" && projectedCurrentPeriodUsed > hardLimit) {
-            return Response.json({
+          const report = (async (): Promise<Response> => {
+            const active = resolveActiveProduct(resolved.customer, products);
+            const planId = active.product?.planId ?? "free";
+            const plan = plans[planId] ?? {};
+            const livePlan = active.product?.autumnPlanId
+              ? await sdk.plans.get({ planId: active.product.autumnPlanId })
+              : null;
+            const currentUsed = getProjectedUsage({
+              externalCustomerId: resolved.externalCustomerId,
+              featureId,
+              currentPeriodEnd: currentPeriodEnd(active.subscription),
+              currentPeriodUsed: resolved.customer.balances?.[featureId]?.usage ?? 0,
+            });
+            const includedLimit =
+              plan.limits?.[body.key] ?? resolved.customer.balances?.[featureId]?.granted ?? null;
+            const softLimit = resolveSoftLimit(plans, planId, body.key, includedLimit, meter.guard);
+            const hardLimit = resolveHardLimit(planId, includedLimit, meter.guard);
+            const projectedCurrentPeriodUsed = projectMeterUsage({
+              aggregation: meter.aggregation,
+              currentUsed,
+              quantity: body.quantity,
+            });
+
+            const hardLimitReached = (used: number, projected: number) =>
+              Response.json({
+                key: body.key,
+                quantity: body.quantity,
+                customerId: resolved.customer.id,
+                eventName: meter.eventName ?? featureId,
+                eventIdentifier: body.idempotencyKey,
+                occurredAt: body.occurredAt ?? new Date().toISOString(),
+                currentPeriodUsed: used,
+                projectedCurrentPeriodUsed: projected,
+                softLimit,
+                hardLimit,
+                state: "hard_limit_reached",
+                warning:
+                  "The configured metered hard cap has been reached for the current billing period. Reported usage is blocked until the next cycle or a plan change.",
+              } satisfies AutumnBillingReportUsageResult);
+
+            if (typeof hardLimit === "number" && projectedCurrentPeriodUsed > hardLimit) {
+              return hardLimitReached(currentUsed, projectedCurrentPeriodUsed);
+            }
+
+            let nextUsed = projectedCurrentPeriodUsed;
+
+            if (isPrepaidFeatureQuantity({ livePlan, product: active.product, featureId })) {
+              // A prepaid quantity is something the customer buys. Changing it
+              // here would let a usage report resize, and charge for, the
+              // subscription with immediate proration and no confirmation.
+              return new Response(
+                `Autumn meter "${body.key}" is billed as a prepaid quantity, which usage reporting cannot change. Change the quantity through checkout (${checkoutPath}) instead.`,
+                { status: 409 },
+              );
+            } else if (meter.aggregation === "last") {
+              // A last-value meter reports the period's absolute usage, so the write sets it.
+              await sdk.balances.update({
+                customerId: resolved.customer.id ?? resolved.externalCustomerId,
+                featureId,
+                usage: projectedCurrentPeriodUsed,
+              });
+            } else {
+              // Track adds to Autumn's stored usage atomically. Writing back the total read above
+              // let concurrent reports overwrite each other, so usage and the cap both lost them.
+              const customerId = resolved.customer.id ?? resolved.externalCustomerId;
+              const increment = meter.aggregation === "count" ? 1 : body.quantity;
+              const properties = { idempotencyKey: body.idempotencyKey };
+              const tracked = await sdk.track({
+                customerId,
+                featureId,
+                value: increment,
+                properties,
+              });
+              nextUsed = tracked.balance?.usage ?? projectedCurrentPeriodUsed;
+
+              // Reports that raced past the cap between the read and the increment are taken back
+              // out, so the cap holds; the accepted reports are never reversed.
+              if (typeof hardLimit === "number" && nextUsed > hardLimit) {
+                await sdk.track({
+                  customerId,
+                  featureId,
+                  value: -increment,
+                  properties: { ...properties, reversal: true },
+                });
+                return hardLimitReached(nextUsed - increment, nextUsed);
+              }
+            }
+
+            setProjectedUsage({
+              externalCustomerId: resolved.externalCustomerId,
+              featureId,
+              currentPeriodEnd: currentPeriodEnd(active.subscription),
+              projectedUsage: nextUsed,
+            });
+
+            await billing.hooks?.onUsageReported?.(
+              {
+                owner: resolved.owner,
+                key: body.key,
+                quantity: body.quantity,
+                idempotencyKey: body.idempotencyKey,
+                occurredAt: body.occurredAt ?? new Date().toISOString(),
+                eventName: meter.eventName ?? featureId,
+                customerId: resolved.customer.id,
+                projectedCurrentPeriodUsed: nextUsed,
+              },
+              resolved.tools,
+            );
+
+            const result = {
               key: body.key,
               quantity: body.quantity,
               customerId: resolved.customer.id,
@@ -1923,107 +2058,41 @@ export function autumn<TInput extends AutumnIntegrationInput>(
               eventIdentifier: body.idempotencyKey,
               occurredAt: body.occurredAt ?? new Date().toISOString(),
               currentPeriodUsed: currentUsed,
-              projectedCurrentPeriodUsed,
+              projectedCurrentPeriodUsed: nextUsed,
               softLimit,
               hardLimit,
-              state: "hard_limit_reached",
+              state:
+                typeof hardLimit === "number" && nextUsed >= hardLimit
+                  ? "hard_limit_reached"
+                  : typeof softLimit === "number" && nextUsed >= softLimit
+                    ? "soft_limit_reached"
+                    : "ok",
               warning:
-                "The configured metered hard cap has been reached for the current billing period. Reported usage is blocked until the next cycle or a plan change.",
-            } satisfies AutumnBillingReportUsageResult);
-          }
+                typeof hardLimit === "number" && nextUsed >= hardLimit
+                  ? "The configured metered hard cap has been reached for the current billing period."
+                  : typeof softLimit === "number" && nextUsed >= softLimit
+                    ? "Included usage has been exhausted. Additional usage is billable."
+                    : null,
+            } satisfies AutumnBillingReportUsageResult;
 
-          if (isPrepaidFeatureQuantity({ livePlan, product: active.product, featureId })) {
-            if (!active.product?.autumnPlanId) {
-              return new Response(
-                "Autumn prepaid quantity updates require an active subscription product.",
-                { status: 409 },
-              );
+            setReportedUsageEvent(idempotencyCacheKey, result);
+            return Response.json(result);
+          })();
+          inFlightUsageReports.set(idempotencyCacheKey, report);
+          try {
+            return (await report).clone();
+          } finally {
+            if (inFlightUsageReports.get(idempotencyCacheKey) === report) {
+              inFlightUsageReports.delete(idempotencyCacheKey);
             }
-
-            const customizedItems = mergeAutumnProductItems(livePlan, active.product);
-            await sdk.billing.update({
-              customerId: resolved.customer.id ?? resolved.externalCustomerId,
-              planId: active.product.autumnPlanId,
-              featureQuantities: [
-                {
-                  featureId,
-                  quantity: body.quantity,
-                },
-              ],
-              customize:
-                customizedItems.length > 0
-                  ? {
-                      items: customizedItems as AutumnUpdateCustomizeItems,
-                    }
-                  : undefined,
-              prorationBehavior: "prorate_immediately",
-              redirectMode: "never",
-            });
-          } else {
-            // Autumn's current SDK/runtime track path is inconsistent across the published
-            // types/docs and the actual endpoint behavior. Update the balance usage directly so
-            // the example remains functional and type-safe for metered demos.
-            await sdk.balances.update({
-              customerId: resolved.customer.id ?? resolved.externalCustomerId,
-              featureId,
-              usage: projectedCurrentPeriodUsed,
-            });
           }
-          const nextUsed = projectedCurrentPeriodUsed;
-
-          setProjectedUsage({
-            externalCustomerId: resolved.externalCustomerId,
-            featureId,
-            currentPeriodEnd: currentPeriodEnd(active.subscription),
-            projectedUsage: nextUsed,
-          });
-
-          await billing.hooks?.onUsageReported?.(
-            {
-              owner: resolved.owner,
-              key: body.key,
-              quantity: body.quantity,
-              idempotencyKey: body.idempotencyKey,
-              occurredAt: body.occurredAt ?? new Date().toISOString(),
-              eventName: meter.eventName ?? featureId,
-              customerId: resolved.customer.id,
-              projectedCurrentPeriodUsed: nextUsed,
-            },
-            resolved.tools,
-          );
-
-          const result = {
-            key: body.key,
-            quantity: body.quantity,
-            customerId: resolved.customer.id,
-            eventName: meter.eventName ?? featureId,
-            eventIdentifier: body.idempotencyKey,
-            occurredAt: body.occurredAt ?? new Date().toISOString(),
-            currentPeriodUsed: currentUsed,
-            projectedCurrentPeriodUsed: nextUsed,
-            softLimit,
-            hardLimit,
-            state:
-              typeof hardLimit === "number" && nextUsed >= hardLimit
-                ? "hard_limit_reached"
-                : typeof softLimit === "number" && nextUsed >= softLimit
-                  ? "soft_limit_reached"
-                  : "ok",
-            warning:
-              typeof hardLimit === "number" && nextUsed >= hardLimit
-                ? "The configured metered hard cap has been reached for the current billing period."
-                : typeof softLimit === "number" && nextUsed >= softLimit
-                  ? "Included usage has been exhausted. Additional usage is billable."
-                  : null,
-          } satisfies AutumnBillingReportUsageResult;
-
-          setReportedUsageEvent(idempotencyCacheKey, result);
-          return Response.json(result);
         },
       }),
       integrationRoute.post(checkPath, {
         responseFormat: "json",
         async handler(request, ctx) {
+          const rejected = rejectForeignOrigin(request, allowedOrigins);
+          if (rejected) return rejected;
           const body = (await request.json().catch(() => ({}))) as AutumnBillingCheckInput;
           if (!body.key) {
             return new Response("An Autumn meter key is required.", { status: 400 });
@@ -2074,6 +2143,8 @@ export function autumn<TInput extends AutumnIntegrationInput>(
       integrationRoute.post(checkoutPath, {
         responseFormat: "json",
         async handler(request, ctx) {
+          const rejected = rejectForeignOrigin(request, allowedOrigins);
+          if (rejected) return rejected;
           const body = (await request.json().catch(() => ({}))) as AutumnCheckoutInput;
           if (!body.productId) {
             return new Response("A billing productId is required.", { status: 400 });
@@ -2125,6 +2196,8 @@ export function autumn<TInput extends AutumnIntegrationInput>(
       integrationRoute.post(portalPath, {
         responseFormat: "json",
         async handler(request, ctx) {
+          const rejected = rejectForeignOrigin(request, allowedOrigins);
+          if (rejected) return rejected;
           const body = (await request.json().catch(() => ({}))) as AutumnPortalInput;
           const resolved = await requireOwner(ctx, billing, sdk);
           const returnPath = resolveAppPath(body.returnTo, "Autumn portal returnTo");
@@ -2145,4 +2218,21 @@ export function autumn<TInput extends AutumnIntegrationInput>(
       ...webhookRoutes,
     ],
   });
+}
+
+/**
+ * The billing routes act for the signed-in caller from its session cookie, and a page on another
+ * site can send them a simple POST (a text/plain form, a no-cors fetch) with no preflight. A browser
+ * sends such a POST with its page's Origin, so a foreign origin, or one the browser marks
+ * cross-site, is refused before the body is read. A caller with no Origin at all (a server, a
+ * script) is not a browser on another site and keeps working, as with the email routes.
+ */
+function rejectForeignOrigin(request: Request, allowedOrigins: readonly string[]): Response | null {
+  const origin = validateIntegrationRequestOrigin(request, {
+    allowedOrigins,
+    requireOriginMetadata: false,
+  });
+  return origin.ok
+    ? null
+    : Response.json({ error: describeIntegrationOriginRejection(origin.reason) }, { status: 403 });
 }

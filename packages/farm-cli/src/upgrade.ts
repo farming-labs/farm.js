@@ -29,6 +29,8 @@ export interface FarmUpgradeCommand {
   command: FarmPackageManager;
   args: string[];
   cwd: string;
+  /** The package manager's environment. Default: this process's. */
+  env?: NodeJS.ProcessEnv;
 }
 
 export interface FarmUpgradePlan {
@@ -304,16 +306,17 @@ function getDependencySectionFlags(
   return ["--save-peer"];
 }
 
-function runFarmUpgradeCommand(command: FarmUpgradeCommand): Promise<void> {
+export function runFarmUpgradeCommand(command: FarmUpgradeCommand): Promise<void> {
   return new Promise((resolve, reject) => {
     const isWindows = process.platform === "win32";
-    const executable = isWindows ? `${command.command}.cmd` : command.command;
     // Node rejects spawning .cmd/.bat files without a shell since the fix for
-    // CVE-2024-27980 (EINVAL). Safe here: the command is one of npm|pnpm|yarn|bun
-    // and the arguments are literal flags plus name@channel package specs.
-    const child = spawn(executable, command.args, {
+    // CVE-2024-27980 (EINVAL), so Windows runs through cmd.exe, which resolves
+    // the bare name with PATHEXT: npm/pnpm/yarn are .cmd shims but bun usually
+    // ships as bun.exe. Safe here: the command is one of npm|pnpm|yarn|bun and
+    // the arguments are literal flags plus name@channel package specs.
+    const child = spawn(command.command, command.args, {
       cwd: command.cwd,
-      env: process.env,
+      env: command.env ?? process.env,
       stdio: "inherit",
       shell: isWindows,
     });

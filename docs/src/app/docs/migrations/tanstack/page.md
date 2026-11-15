@@ -1,108 +1,193 @@
 ---
 title: "Migrate from TanStack Start"
-description: "Move TanStack Start or TanStack Router file routes to Farm with the built-in migrator."
+description: "Move a TanStack Start app to Farm: file routes, the root route, loaders, server functions, and server routes."
 section: "Migrations"
 ---
 
 # Migrate from TanStack Start
 
-Farm's TanStack migrator converts file-based routes from TanStack Start or TanStack Router into
-Farm's `src/app` route tree. It automates route paths and simple component exports while reporting
-loader and router-runtime behavior for manual review.
+Farm and TanStack Start both build on Vite and file-based routing. The migration moves file routes
+into Farm's `src/app` tree, turns the root route into a root layout, and replaces router loaders and
+server functions with Farm data loading and API routes. Components and styles carry over.
 
-## Inspect the project
+> **Using a coding agent?**
+>
+> Point it at [`/docs/migrations/tanstack.md`](/docs/migrations/tanstack.md). That version maps
+> every TanStack Start feature to its Farm equivalent, with before and after code, failure
+> symptoms, and a verification checklist.
 
-Run the inspection from the TanStack project root:
+## Set up Farm
 
-```bash
-farm migrate inspect
-```
-
-TanStack detection uses the `@tanstack/react-router` dependency, `src/routes` or `routes`, and a
-generated route tree as evidence. Inspection does not change the project.
-
-## Preview the migration
-
-Prepare a dry-run plan:
+Work on a branch and keep the TanStack app runnable until the Farm build matches it. React is
+Farm's default renderer, so no renderer package is needed:
 
 ```bash
-farm migrate tanstack
+pnpm add @farm.js/core
+pnpm add -D @farm.js/cli
 ```
 
-The plan lists route conversions, package script changes, skipped targets, and manual review items.
-Apply it only after reviewing that output:
+Pin exact versions in `package.json`. Package managers with a minimum release age, such as pnpm 11
+and later, can resolve `latest` to an older Farm release for a day after a publish.
 
-```bash
-farm migrate tanstack --write
+Create `farm.config.ts` and point the scripts at Farm. TanStack starters have no `start` script, so
+add one:
+
+```ts
+import { defineConfig } from "@farm.js/core";
+
+export default defineConfig({});
 ```
 
-Use `--force` only when you intentionally want generated files to overwrite existing Farm targets.
+```json
+{
+  "scripts": {
+    "dev": "farm dev",
+    "build": "farm build",
+    "start": "node .farm/.output/server/index.mjs"
+  }
+}
+```
 
-## Route mapping
+## Remove the TanStack Vite config
 
-The migrator reads file routes from `src/routes` or `routes`.
+Farm loads a root `vite.config.*` alongside its own Vite setup. The TanStack config adds
+`tanstackStart()`, `@vitejs/plugin-react`, and devtools plugins, which break hydration on every
+route with `@vitejs/plugin-react can't detect preamble`. Delete `vite.config.ts`, or move it out of
+the project root while you still need the old app.
 
-| TanStack source                | Farm output                        |
-| ------------------------------ | ---------------------------------- |
-| `src/routes/index.tsx`         | `src/app/page.tsx`                 |
-| `src/routes/about.tsx`         | `src/app/about/page.tsx`           |
-| `src/routes/posts.$postId.tsx` | `src/app/posts/[postId]/page.tsx`  |
-| `src/routes/docs.$.tsx`        | `src/app/docs/[...splat]/page.tsx` |
+Farm enables Tailwind CSS v4 on its own, so `tailwindcss()` does not need to be re-added to a Vite
+config. Keep `tailwindcss` and `@tailwindcss/vite` installed: Farm loads the plugin from the app. The
+starter's `#/*` alias is a `package.json` `imports` entry and keeps working, and Farm also resolves
+`@/` to `src`.
 
-Pathless layout segments beginning with `_` are omitted from the URL path. Root route and generated
-route-tree files are not copied automatically.
+## Turn the root route into a layout
 
-## Page component exports
-
-Farm renders a page module's default export. When a simple route uses
-`component: ComponentName`, the migrator appends the matching default export:
+Farm does not read `__root.tsx`. Recreate it as `src/app/layout.tsx`, which can return the whole
+`<html>` document:
 
 ```tsx
-export const Route = createFileRoute("/posts/$postId")({
-  component: PostPage,
-});
+import type { LayoutProps, Metadata } from "@farm.js/core";
+import Footer from "../components/Footer";
+import Header from "../components/Header";
+import "../styles.css";
 
-function PostPage() {
-  return <h1>Post</h1>;
+export const metadata: Metadata = {
+  title: "TanStack Start Starter",
+};
+
+export default function RootLayout({ children }: LayoutProps) {
+  return (
+    <html lang="en">
+      <head>
+        <meta charSet="utf-8" />
+        <meta name="viewport" content="width=device-width, initial-scale=1" />
+      </head>
+      <body>
+        <Header />
+        {children}
+        <Footer />
+      </body>
+    </html>
+  );
 }
-
-export default PostPage;
 ```
 
-If the migrator cannot find a component identifier, it leaves the file intact and adds a manual
-review item.
+Import stylesheets directly instead of through `?url` and a `links` entry, move `head()` titles and
+descriptions into `metadata`, and remove `<HeadContent />`, `<Scripts />`, and the devtools
+components. Farm injects its own head tags, assets, and client runtime.
 
-## Project setup
+## Map file routes
 
-The migrator also:
+| TanStack file in `src/routes`                      | Farm file in `src/app`                            |
+| -------------------------------------------------- | ------------------------------------------------- |
+| `index.tsx`                                        | `page.tsx`                                        |
+| `about.tsx`                                        | `about/page.tsx`                                  |
+| `posts.$postId.tsx` or `posts/$postId.tsx`         | `posts/[postId]/page.tsx`                         |
+| `docs.$.tsx`                                       | `docs/[...splat]/page.tsx`                        |
+| `posts.tsx` or `posts/route.tsx` with `<Outlet />` | `posts/layout.tsx` rendering `{children}`         |
+| `_app.tsx` with `_app/settings.tsx`                | `(app)/layout.tsx` with `(app)/settings/page.tsx` |
+| `-components/` and other ignored files             | any name; only reserved file names are routes     |
 
-- creates `farm.config.ts` when one does not exist
-- creates a minimal root layout when one is missing
-- changes compatible Vite or Vinxi scripts to `farm dev` and `farm build`
-- adds `@farm.js/core` and `@farm.js/cli`
+Farm renders a page module's default export. Add `export default ComponentName` to each page and
+remove `export const Route = createFileRoute(...)` once its options are ported. Splat params arrive
+as `params.splat`, a single string joined with `/`.
 
-## Manual review
+Interactive components keep working: Farm detects hooks and `"use client"` and hydrates them.
 
-Review every reported use of:
+## Replace loaders and router hooks
 
-- route `loader` and `beforeLoad`
-- loader data and search parameters
-- `Route.use*` hooks
-- root route and route-tree setup
-- TanStack Start server functions or framework-specific APIs
+A route that still calls `Route.useLoaderData()` renders a 500 under Farm. Move simple loaders into
+an async page:
 
-Move that behavior into Farm page props, server queries, API routes, middleware, or integrations
-depending on its responsibility. Keep validation on the server when route input crosses a trust
-boundary.
+```tsx
+import type { PageProps } from "@farm.js/core";
+
+export default async function PostPage({ params }: PageProps<"/posts/[postId]">) {
+  const post = await getPost(params.postId);
+  return <h1>{post.title}</h1>;
+}
+```
+
+Use a programmatic `createRoute` from `@farm.js/core/routes` when a route also needs search-param
+validation, guards, caching, or pending and error components. See [Routing](/docs/routing).
+
+| TanStack                             | Farm                                                   |
+| ------------------------------------ | ------------------------------------------------------ |
+| `Link` from `@tanstack/react-router` | `Link` from `@farm.js/core/client`                     |
+| `useNavigate()`                      | `useRouter().push()` from `@farm.js/core/navigation`   |
+| `Route.useParams()`                  | the page's `params` prop                               |
+| `Route.useSearch()`                  | the page's `searchParams` prop, or `useSearchParams()` |
+| `redirect()`, `notFound()`           | the same names from `@farm.js/core/navigation`         |
+| `router.invalidate()`                | `useRouter().refresh()`                                |
+
+## Server functions
+
+Farm supports two ways to move `createServerFn` calls.
+
+| Approach              | Status       | Use it when                                                                  |
+| --------------------- | ------------ | ---------------------------------------------------------------------------- |
+| API routes            | Stable       | Most apps. Each server function becomes a typed endpoint.                    |
+| Farm server functions | Experimental | You want the closest shape to `createServerFn` and accept the RSC toolchain. |
+
+With API routes, keep the handler logic in a server module, call it directly from async pages, and
+mount it as an endpoint for the browser:
+
+```ts
+// src/app/api/todos/route.ts
+import { createEndpoint } from "@farm.js/core/api";
+import { z } from "zod";
+
+export const POST = createEndpoint(
+  { body: z.object({ title: z.string().min(1) }) },
+  async ({ body }) => db.todo.create({ data: body }),
+);
+```
+
+Client components call it through the generated client, `apiClient.todos.post({ body })`. See
+[API Routes](/docs/api-routes) and [API Client](/docs/api-client).
+
+Farm's own `createServerFn` from `@farm.js/core/server-fn` takes an `input` schema in place of
+`.inputValidator()`. Calling it from client components requires the experimental
+`@farm.js/plugin/rsc` setup with `experimental.serverActions: true`. See
+[Route actions](/docs/routing#route-actions).
+
+## Server routes and middleware
+
+Move `server.handlers` from file routes into `src/app/api/**/route.ts`, exporting one function per
+HTTP method that takes a `Request` and returns a `Response`. A server route and a page cannot share
+one path, so keep APIs under `/api`. Move `createMiddleware` request middleware into
+`src/app/middleware.ts`. See [Middleware](/docs/middleware).
 
 ## Finish the migration
 
 ```bash
-pnpm install
 pnpm dev
 pnpm build
+pnpm start
+pnpm exec tsc --noEmit
 ```
 
-Verify static, dynamic, and catch-all routes, then remove unused TanStack dependencies and generated
-route-tree files only after the Farm app is working. The migrator leaves the original route files in
-place so you can compare behavior during the transition.
+Check every route in development and production, confirm client components hydrate and keep state
+across client navigation, and exercise each mutation. Remove `@tanstack/react-start`, the router
+packages and devtools, `src/router.tsx`, `src/routeTree.gen.ts`, and `src/routes` only after the
+Farm build behaves the same in production.

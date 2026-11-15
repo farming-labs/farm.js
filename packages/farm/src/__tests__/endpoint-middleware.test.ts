@@ -305,4 +305,17 @@ describe("createEndpoint middleware", () => {
 
     await expect(endpoint()).resolves.toEqual({ source: "middleware" });
   });
+  it("rejects the unsupported use option instead of serving the handler unguarded", () => {
+    const deny = vi.fn(() => new Response("denied", { status: 401 }));
+    const handler = vi.fn(() => ({ secret: "admin-data" }));
+
+    expect(() =>
+      // @ts-expect-error `use` is not a Farm endpoint option.
+      createEndpoint({ use: [deny] }, handler),
+    ).toThrow(
+      "createEndpoint does not support the `use` option. Move these functions to `middleware`",
+    );
+    expect(deny).not.toHaveBeenCalled();
+    expect(handler).not.toHaveBeenCalled();
+  });
 });

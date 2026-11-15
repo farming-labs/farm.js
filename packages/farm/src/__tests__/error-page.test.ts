@@ -25,6 +25,30 @@ afterEach(async () => {
 });
 
 describe("default error page", () => {
+  it("fits the screen and scrolls long details inside the content", () => {
+    // The frame is exactly one screen tall, and the content scrolls within
+    // it, so a long stack never makes the page itself scroll.
+    expect(DEFAULT_ERROR_STYLES).toMatch(
+      /\.farm-default-error__frame \{[^}]*height: 100svh;[^}]*\}/,
+    );
+    expect(DEFAULT_ERROR_STYLES).not.toMatch(
+      /\.farm-default-error__frame \{[^}]*min-height: 100svh;[^}]*\}/,
+    );
+    expect(DEFAULT_ERROR_STYLES).toMatch(
+      /\.farm-default-error__frame > \.farm-default-error__content \{[^}]*max-height: 100%;[^}]*overflow-y: auto;[^}]*\}/,
+    );
+    // The dev overlay reuses the content class without the frame and keeps its
+    // own scroll container and pinned actions, so the base rule must not scroll.
+    expect(DEFAULT_ERROR_STYLES).not.toMatch(
+      /(^|\n)\.farm-default-error__content \{[^}]*overflow-y: auto;[^}]*\}/,
+    );
+    // Source lines are blocks inside <pre>; the newlines between them must not
+    // render as blank lines.
+    expect(DEFAULT_ERROR_STYLES).toMatch(
+      /\.farm-default-error__source-code > code \{[^}]*white-space: normal;[^}]*\}/,
+    );
+  });
+
   it("renders the approved diagnostic layout in development", () => {
     const sourceFrame: DefaultErrorSourceFrame = {
       file: "src/app/[owner]/page.tsx",
@@ -61,7 +85,8 @@ describe("default error page", () => {
     expect(html).toContain("500 Internal Server Error");
     expect(html).toContain(">Technical details</h2>");
     expect(html).toContain("COPY DEBUG REPORT");
-    expect(html).toContain("https://farm.js.dev/docs");
+    expect(html).toContain('href="https://farmjs.dev/docs"');
+    expect(html).not.toContain("farm.js.dev");
     expect(html).toContain("farm-default-error__docs-icon");
     expect(html).toContain("src/app/[owner]/page.tsx:13:16");
     expect(html).toContain("farm-default-error__source-line--active");

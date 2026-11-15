@@ -3,7 +3,11 @@ import {
   renderToPipeableStream as reactRenderToPipeableStream,
   renderToString as reactRenderToString,
 } from "react-dom/server";
-import { wrapFarmIsolatedClientGraph } from "../../client/isolated-boundary";
+import {
+  isolateFarmServerPageGraph,
+  wrapFarmIsolatedClientGraph,
+} from "../../client/isolated-boundary";
+import { renderFarmServerTreePage } from "../../client/server-tree";
 
 export class ErrorBoundary extends React.Component<
   {
@@ -45,6 +49,12 @@ export const createElement = React.createElement;
 export const isValidElement = React.isValidElement;
 export const wrapClientGraph = (element: React.ReactNode) =>
   wrapFarmIsolatedClientGraph(React, element);
+export const isolateServerPageGraph = (element: React.ReactNode) =>
+  isolateFarmServerPageGraph(React, element);
+export const renderServerTreePage = (
+  element: React.ReactNode,
+  options: { values?: boolean } = {},
+) => renderFarmServerTreePage(React, element, { isolate: isolateServerPageGraph, ...options });
 export const renderToString = reactRenderToString;
 export const renderToPipeableStream = reactRenderToPipeableStream;
 

@@ -121,9 +121,41 @@ function callFetch(worker, request, env, context, label) {
   return handler.call(worker, request, env, context);
 }
 
+// Nitro's module Worker always defines scheduled, email, queue, tail and trace, so a
+// plain spread would drop the agent's handlers. Run both, agent first, and rethrow the
+// first failure after both have run.
+function composeHandler(agentHandler, farmHandler) {
+  return async function composedHandler(...args) {
+    let failure;
+    for (const [owner, handler] of [
+      [agentWorker, agentHandler],
+      [farmWorker, farmHandler],
+    ]) {
+      try {
+        await handler.apply(owner, args);
+      } catch (error) {
+        failure ??= { error };
+      }
+    }
+    if (failure) throw failure.error;
+  };
+}
+
+const handlers = {};
+for (const name of Object.keys(agentWorker ?? {})) {
+  if (
+    name !== "fetch" &&
+    typeof agentWorker[name] === "function" &&
+    typeof farmWorker?.[name] === "function"
+  ) {
+    handlers[name] = composeHandler(agentWorker[name], farmWorker[name]);
+  }
+}
+
 const worker = {
   ...agentWorker,
   ...farmWorker,
+  ...handlers,
   fetch(request, env, context) {
     const pathname = new URL(request.url).pathname;
     if (pathname === agentRoutePrefix || pathname.startsWith(agentRoutePrefix + "/")) {

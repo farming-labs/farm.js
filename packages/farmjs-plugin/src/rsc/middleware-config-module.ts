@@ -1,10 +1,10 @@
 import path from "node:path";
 
-// The RSC server needs live middleware functions, but importing the complete
-// application config would also execute and bundle build-only plugins. This
-// static slice keeps the explicit middleware expression and only the
-// top-level bindings reachable from it. Ambiguous config shapes fail during
-// configuration instead of producing a partial runtime config.
+// The RSC server needs live config values such as middleware functions and
+// MCP tools, but importing the complete application config would also execute
+// and bundle build-only plugins. This static slice keeps one explicit config
+// property and only the top-level bindings reachable from it. Ambiguous config
+// shapes fail during configuration instead of producing a partial runtime config.
 
 type AstNode = {
   type: string;
@@ -24,6 +24,12 @@ type ExtractionResult =
   | { kind: "module"; code: string }
   | { kind: "absent" }
   | { kind: "unsupported"; reason: string };
+
+/**
+ * Entries to keep from a `plugins` array literal: their positions, and the array's length the
+ * evaluated config had, which must match the literal for the positions to mean the same entries.
+ */
+export type RscConfigArraySelection = { indexes: readonly number[]; count: number };
 
 function isNode(value: unknown): value is AstNode {
   return Boolean(
@@ -244,9 +250,58 @@ function resolveConfigObject(
   return null;
 }
 
+/**
+ * The extracted module keeps declarations and drops everything else, so a
+ * top-level statement that runs code (`matcher.push("/admin")`,
+ * `config.middleware = ...`, a side-effect import) would silently vanish and
+ * leave the guard with a different matcher than the config it came from. Fail
+ * on those instead of producing a module that disagrees with the config.
+ */
+function unsupportedStatementReason(
+  statement: AstNode,
+  source: string,
+  key: string,
+): string | null {
+  switch (statement.type) {
+    case "ImportDeclaration":
+      if (((statement.specifiers as AstNode[]) ?? []).length > 0) return null;
+      break;
+    case "ExportAllDeclaration":
+    case "ExportDefaultDeclaration":
+    case "ExportNamedDeclaration":
+    case "VariableDeclaration":
+    case "FunctionDeclaration":
+    case "ClassDeclaration":
+    case "EmptyStatement":
+      return null;
+    case "ExpressionStatement":
+      if (typeof statement.directive === "string") return null;
+      break;
+  }
+  const text = source.slice(statement.start, statement.end).replace(/\s+/g, " ").trim();
+  const snippet = text.length > 80 ? `${text.slice(0, 77)}...` : text;
+  return statement.type === "ImportDeclaration"
+    ? `the side-effect import \`${snippet}\` would not run with the extracted ${key}`
+    : `the top-level statement \`${snippet}\` would not run with the extracted ${key}`;
+}
+
 export function extractRscMiddlewareConfigModule(
   source: string,
   program: AstNode,
+): ExtractionResult {
+  return extractRscConfigPropertyModule(source, program, "middleware");
+}
+
+/**
+ * Extracts `key` from the default-exported config, as a module that exports `{ [key] }`. With
+ * `selection`, an array literal keeps only the selected entries and the bindings they read. Any
+ * other value is kept whole.
+ */
+export function extractRscConfigPropertyModule(
+  source: string,
+  program: AstNode,
+  key: "middleware" | "mcp" | "plugins",
+  selection?: RscConfigArraySelection,
 ): ExtractionResult {
   const body = (program.body as AstNode[]) ?? [];
   const bindings = new Map<string, Binding>();
@@ -256,6 +311,9 @@ export function extractRscMiddlewareConfigModule(
   let order = 0;
 
   for (const statement of body) {
+    const unsupported = unsupportedStatementReason(statement, source, key);
+    if (unsupported) return { kind: "unsupported", reason: unsupported };
+
     if (statement.type === "ImportDeclaration") {
       const moduleName = (statement.source as AstNode).value;
       for (const specifier of (statement.specifiers as AstNode[]) ?? []) {
@@ -339,34 +397,45 @@ export function extractRscMiddlewareConfigModule(
   }
 
   const properties = (configObject.properties as AstNode[]) ?? [];
-  let middlewareProperty: AstNode | null = null;
-  let middlewareIndex = -1;
+  let keyProperty: AstNode | null = null;
+  let keyIndex = -1;
   for (const [index, property] of properties.entries()) {
-    if (property.type === "Property" && propertyName(property) === "middleware") {
-      middlewareProperty = property;
-      middlewareIndex = index;
+    if (property.type === "Property" && propertyName(property) === key) {
+      keyProperty = property;
+      keyIndex = index;
     }
   }
-  if (!middlewareProperty) {
+  if (!keyProperty) {
     if (properties.some((property) => property.type === "SpreadElement")) {
       return {
         kind: "unsupported",
-        reason: "middleware may be supplied through a config spread",
+        reason: `${key} may be supplied through a config spread`,
       };
     }
     return { kind: "absent" };
   }
-  if (properties.slice(middlewareIndex + 1).some((property) => property.type === "SpreadElement")) {
+  if (properties.slice(keyIndex + 1).some((property) => property.type === "SpreadElement")) {
     return {
       kind: "unsupported",
-      reason: "a config spread after middleware may override it",
+      reason: `a config spread after ${key} may override it`,
     };
   }
 
-  const middlewareValue = middlewareProperty.value as AstNode;
+  const keyValue = keyProperty.value as AstNode;
+  const elements = keyValue.type === "ArrayExpression" ? (keyValue.elements as unknown[]) : null;
+  const selectedElements =
+    selection &&
+    elements &&
+    elements.length === selection.count &&
+    elements.every((element) => isNode(element) && element.type !== "SpreadElement")
+      ? selection.indexes.map((index) => elements[index] as AstNode)
+      : null;
+  const keptValues = selectedElements ?? [keyValue];
   const candidateNames = new Set(bindings.keys());
   const selectedBindings = new Set<Binding>();
-  const pending = [...referencedTopLevelNames(middlewareValue, candidateNames)];
+  const pending = keptValues.flatMap((value) => [
+    ...referencedTopLevelNames(value, candidateNames),
+  ]);
   while (pending.length > 0) {
     const name = pending.pop()!;
     const binding = bindings.get(name);
@@ -382,14 +451,16 @@ export function extractRscMiddlewareConfigModule(
   const declarations = [...selectedBindings]
     .sort((a, b) => a.order - b.order)
     .map((binding) => binding.render());
-  const middlewareSource = source.slice(middlewareValue.start, middlewareValue.end);
+  const valueSource = selectedElements
+    ? `[${selectedElements.map((element) => source.slice(element.start, element.end)).join(", ")}]`
+    : source.slice(keyValue.start, keyValue.end);
   return {
     kind: "module",
-    code: `${declarations.join("\n")}${declarations.length ? "\n" : ""}export default { middleware: ${middlewareSource} };\n`,
+    code: `${declarations.join("\n")}${declarations.length ? "\n" : ""}export default { ${key}: ${valueSource} };\n`,
   };
 }
 
-function esbuildLoader(file: string): "js" | "jsx" | "ts" | "tsx" {
+function sourceLang(file: string): "js" | "jsx" | "ts" | "tsx" {
   switch (path.extname(file)) {
     case ".ts":
     case ".mts":
@@ -405,18 +476,35 @@ function esbuildLoader(file: string): "js" | "jsx" | "ts" | "tsx" {
 }
 
 export async function loadRscMiddlewareConfigModule(configPath: string): Promise<ExtractionResult> {
-  const [{ readFile }, { parseAst, transformWithEsbuild }] = await Promise.all([
-    import("node:fs/promises"),
-    import("vite"),
-  ]);
+  return loadRscConfigPropertyModule(configPath, "middleware");
+}
+
+export async function loadRscConfigPropertyModule(
+  configPath: string,
+  key: "middleware" | "mcp" | "plugins",
+  selection?: RscConfigArraySelection,
+): Promise<ExtractionResult> {
+  const [{ readFile }, vite] = await Promise.all([import("node:fs/promises"), import("vite")]);
   const source = await readFile(configPath, "utf8");
-  const transformed = await transformWithEsbuild(source, configPath, {
-    format: "esm",
-    jsx: "automatic",
-    loader: esbuildLoader(configPath),
-  });
-  return extractRscMiddlewareConfigModule(
+  const lang = sourceLang(configPath);
+  // Vite 8 transforms with Oxc and only reaches esbuild when the app installs it.
+  // Vite 6 and 7 have no transformWithOxc and always ship esbuild.
+  const transformed =
+    typeof vite.transformWithOxc === "function"
+      ? await vite.transformWithOxc(source, configPath, {
+          lang,
+          sourceType: "module",
+          jsx: { runtime: "automatic" },
+        })
+      : await vite.transformWithEsbuild(source, configPath, {
+          format: "esm",
+          jsx: "automatic",
+          loader: lang,
+        });
+  return extractRscConfigPropertyModule(
     transformed.code,
-    parseAst(transformed.code) as unknown as AstNode,
+    vite.parseAst(transformed.code) as unknown as AstNode,
+    key,
+    selection,
   );
 }

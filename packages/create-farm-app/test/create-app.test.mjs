@@ -1,7 +1,16 @@
 import assert from "node:assert/strict";
 import { execFileSync, spawn } from "node:child_process";
 import { once } from "node:events";
-import { chmod, mkdir, mkdtemp, readFile, realpath, rm, writeFile } from "node:fs/promises";
+import {
+  chmod,
+  mkdir,
+  mkdtemp,
+  readdir,
+  readFile,
+  realpath,
+  rm,
+  writeFile,
+} from "node:fs/promises";
 import { createServer } from "node:http";
 import os from "node:os";
 import path from "node:path";
@@ -21,6 +30,12 @@ async function assertRendererNeutralStarter(generatedDir, packageJson) {
   assert.equal(packageJson.dependencies["@farming-labs/theme"], undefined);
   assert.equal(packageJson.dependencies.react, undefined);
   assert.equal(packageJson.dependencies["react-dom"], undefined);
+  // GHSA-mrhx-c7xc-m3w5 is fixed in zod 4.6.6.
+  const zod = packageJson.dependencies.zod
+    .replace(/^[\^~]/, "")
+    .split(".")
+    .map(Number);
+  assert.ok(zod[0] > 4 || (zod[0] === 4 && (zod[1] > 6 || (zod[1] === 6 && zod[2] >= 6))));
   await assert.rejects(readFile(path.join(generatedDir, "docs.config.ts"), "utf8"));
   await assert.rejects(readFile(path.join(generatedDir, "docs.json"), "utf8"));
   await assert.rejects(readFile(path.join(generatedDir, "src/app/docs/page.md"), "utf8"));
@@ -39,8 +54,29 @@ test("spaces the CLI banner and matches the website hero copy", async () => {
   }
 
   assert.equal(lines[8], "");
-  assert.match(lines[9], /Create FARMJS App.*a framework for product-integrated apps/);
+  assert.match(lines[9], /Create FARMJS App.*the framework for the web and agents/);
   assert.doesNotMatch(lines.join("\n"), /React (?:meta-)?framework/i);
+});
+
+test("prints the GitHub star link only to an interactive terminal", async () => {
+  const { showStarInvitation } = await import("../dist/utils.mjs");
+  const lines = [];
+  const originalLog = console.log;
+  console.log = (...values) => lines.push(values.join(" "));
+
+  try {
+    showStarInvitation(false);
+    assert.deepEqual(lines, []);
+
+    showStarInvitation(true);
+  } finally {
+    console.log = originalLog;
+  }
+
+  assert.match(
+    lines.at(-1),
+    /Enjoying Farm\? Star it: https:\/\/github\.com\/farming-labs\/farm\.js$/,
+  );
 });
 
 test("writes a valid package name when the target is a nested path", async () => {
@@ -314,6 +350,7 @@ test("generates a buildable starter application", async () => {
       "utf8",
     );
     assert.match(generatedGitignore, /^\.env$/m);
+    assert.match(generatedGitignore, /^\.netlify\/?$/m);
     assert.match(generatedGitignore, /^\.env\.local$/m);
     assert.match(generatedGitignore, /^\*\.sqlite$/m);
     assert.match(generatedGitignore, /^\*\.sqlite-\*$/m);
@@ -364,6 +401,8 @@ test("generates the experimental React Compiler starter with the shared dark sta
       },
     );
 
+    assert.doesNotMatch(output, /Star it:/);
+
     const templateDir = path.join(packageDir, "templates/react-compiler");
     const basicTemplateDir = path.join(packageDir, "templates/basic");
     const generatedDir = path.join(tempDir, "compiler-app");
@@ -397,13 +436,15 @@ test("generates the experimental React Compiler starter with the shared dark sta
 
     const config = await readFile(path.join(generatedDir, "farm.config.ts"), "utf8");
     assert.match(config, /from "@farm\.js\/react"/);
-    assert.match(config, /experimental:\s*\{\s*compiler: compilerEnabled/s);
+    assert.match(config, /react\(\{\s*compiler: compilerEnabled/s);
     assert.match(config, /FARM_REACT_COMPILER_ENABLED/);
     assert.match(config, /theme:\s*\{\s*default: "dark"/s);
 
     const page = await readFile(path.join(generatedDir, "src/app/page.tsx"), "utf8");
     assert.match(page, /className="landing-main"/);
     assert.match(page, /FARMJS \/ React Compiler starter/);
+    assert.match(page, />Experimental<\/span>/);
+    assert.doesNotMatch(page, />Opt-in<\/span>/);
     assert.match(page, /The compiler handles the rest\./);
     assert.match(page, /data-compiler-status/);
     assert.match(page, /publicEnv\.FARM_REACT_COMPILER_ENABLED/);
@@ -491,7 +532,7 @@ test("generates a Solid starter while keeping React as the default renderer", as
       packageJson.dependencies["@farm.js/solid"],
       await workspaceRendererVersion("farm-solid"),
     );
-    assert.equal(packageJson.dependencies["solid-js"], "1.9.14");
+    assert.equal(packageJson.dependencies["solid-js"], "1.9.18");
     await assertRendererNeutralStarter(generatedDir, packageJson);
     assert.match(config, /renderer: solid\(\)/);
     assert.match(config, /from "@farm\.js\/solid"/);
@@ -596,7 +637,7 @@ test("generates a Vue SFC starter with typed server interaction", async () => {
       packageJson.dependencies["@farm.js/vue"],
       await workspaceRendererVersion("farm-vue"),
     );
-    assert.equal(packageJson.dependencies.vue, "3.5.41");
+    assert.equal(packageJson.dependencies.vue, "3.5.44");
     await assertRendererNeutralStarter(generatedDir, packageJson);
     assert.equal(packageJson.scripts["type-check"], "vue-tsc --noEmit");
     assert.ok(packageJson.devDependencies["@farm.js/devtools"]);
@@ -742,7 +783,7 @@ test("generates renderer-native Better Auth starters", async () => {
         packageJson.dependencies["@farm.js/better-auth"],
         templatePackage.dependencies["@farm.js/better-auth"],
       );
-      assert.equal(packageJson.dependencies["better-auth"], "1.6.25");
+      assert.equal(packageJson.dependencies["better-auth"], "1.7.14");
       assert.equal(
         packageJson.scripts["auth:migrate"],
         "node --experimental-strip-types src/lib/migrate-auth.ts",
@@ -776,13 +817,121 @@ test("generates renderer-native Better Auth starters", async () => {
   }
 });
 
+test("Better Auth starter trusts the dev server's own origin and requires BETTER_AUTH_URL in production", async () => {
+  const tempDir = await mkdtemp(path.join(os.tmpdir(), "create-farm-app-better-auth-origin-"));
+
+  try {
+    execFileSync(
+      process.execPath,
+      [
+        path.join(packageDir, "bin/create-farm-app.js"),
+        "origin-app",
+        "--template",
+        "better-auth",
+        "--typescript",
+        "--skip-install",
+      ],
+      { cwd: tempDir, stdio: "pipe" },
+    );
+
+    const generatedDir = path.join(tempDir, "origin-app");
+    const auth = await readFile(path.join(generatedDir, "src/lib/auth.ts"), "utf8");
+    const envExample = await readFile(path.join(generatedDir, ".env.example"), "utf8");
+    assert.doesNotMatch(auth, /BETTER_AUTH_URL \?\? "http:\/\/localhost:3000"/);
+    assert.match(
+      auth,
+      /trustedOrigins: authBaseUrl \? \[new URL\(authBaseUrl\)\.origin\] : devServerOrigin/,
+    );
+    assert.match(envExample, /^# BETTER_AUTH_URL=/m);
+    assert.doesNotMatch(envExample, /^BETTER_AUTH_URL=/m);
+
+    // Run the generated module with stand-ins for its SDKs: betterAuth() returns its options.
+    for (const [name, source] of [
+      ["better-auth", "export const betterAuth = (options) => options;\n"],
+      ["pg", "export class Pool {}\n"],
+    ]) {
+      const dir = path.join(generatedDir, "node_modules", name);
+      await mkdir(dir, { recursive: true });
+      await writeFile(
+        path.join(dir, "package.json"),
+        JSON.stringify({ name, type: "module", exports: "./index.js" }),
+      );
+      await writeFile(path.join(dir, "index.js"), source);
+    }
+    const probe = `
+const { auth } = await import("./src/lib/auth.ts");
+const trusted = typeof auth.trustedOrigins === "function"
+  ? (url) => auth.trustedOrigins(new Request(url + "/api/auth/sign-in/email"))
+  : () => auth.trustedOrigins;
+console.log(JSON.stringify({
+  baseURL: auth.baseURL,
+  origins: Object.fromEntries(
+    ["http://localhost:3311", "http://10.0.2.2:3311", "http://192.168.1.20:5173", "http://[::1]:3311",
+     "http://app.localhost:3311", "http://evil.example:3311"].map((url) => [url, trusted(url)]),
+  ),
+  withoutRequest: typeof auth.trustedOrigins === "function" ? auth.trustedOrigins() : null,
+}));
+`;
+    const run = (env) => {
+      const childEnv = {
+        ...process.env,
+        BETTER_AUTH_SECRET: "test-secret",
+        DATABASE_URL: "postgresql://user:password@localhost/database",
+        ...env,
+      };
+      for (const [key, value] of Object.entries(childEnv)) {
+        if (value === undefined) delete childEnv[key];
+      }
+      return execFileSync(
+        process.execPath,
+        ["--experimental-strip-types", "--no-warnings", "--input-type=module", "-e", probe],
+        { cwd: generatedDir, env: childEnv, encoding: "utf8", stdio: "pipe" },
+      );
+    };
+
+    const dev = JSON.parse(run({ NODE_ENV: "development", BETTER_AUTH_URL: undefined }));
+    assert.equal(dev.baseURL, "http://localhost:3000");
+    for (const origin of [
+      "http://localhost:3311",
+      "http://10.0.2.2:3311",
+      "http://192.168.1.20:5173",
+      "http://[::1]:3311",
+      "http://app.localhost:3311",
+    ]) {
+      assert.deepEqual(dev.origins[origin], [origin]);
+    }
+    // A DNS-rebinding name sends a matching Host and Origin, but is never trusted.
+    assert.deepEqual(dev.origins["http://evil.example:3311"], []);
+    assert.deepEqual(dev.withoutRequest, []);
+
+    // A configured URL stays authoritative in development.
+    const configured = JSON.parse(
+      run({ NODE_ENV: "development", BETTER_AUTH_URL: "http://app.localhost:4000" }),
+    );
+    assert.equal(configured.baseURL, "http://app.localhost:4000");
+    assert.deepEqual(configured.origins["http://10.0.2.2:3311"], ["http://app.localhost:4000"]);
+
+    const production = JSON.parse(
+      run({ NODE_ENV: "production", BETTER_AUTH_URL: "https://app.example.com" }),
+    );
+    assert.deepEqual(production.origins["http://localhost:3311"], ["https://app.example.com"]);
+    assert.throws(
+      () => run({ NODE_ENV: "production", BETTER_AUTH_URL: undefined }),
+      (error) => /BETTER_AUTH_URL is required in production/.test(String(error.stderr)),
+    );
+  } finally {
+    await rm(tempDir, { recursive: true, force: true });
+  }
+});
+
 for (const template of [
   {
     name: "auth",
     dependency: "@farm.js/auth",
     homePagePattern: /auth\.session\(\)/,
     brandPattern: /FARMJS \/ Auth starter/,
-    instructionPattern: /FARMJS Auth uses local SQLite automatically/,
+    instructionPattern:
+      /FARMJS Auth uses local SQLite automatically and generates a random \.farm\/auth-secret/,
     betterCall: "1.3.2",
   },
   {
@@ -922,9 +1071,10 @@ for (const template of [
 
       const generatedGitignore = await readFile(path.join(generatedDir, ".gitignore"), "utf8");
       assert.match(generatedGitignore, /^\.env\.local$/m);
+      assert.match(generatedGitignore, /^\.netlify\/?$/m);
       const generatedConfig = await readFile(path.join(generatedDir, "farm.config.ts"), "utf8");
       assert.match(generatedConfig, /theme:\s*\{\s*default: "dark"/s);
-      await readFile(path.join(generatedDir, ".env.example"), "utf8");
+      assertNoSecretValues(await readFile(path.join(generatedDir, ".env.example"), "utf8"));
       const generatedReadme = await readFile(path.join(generatedDir, "README.md"), "utf8");
       assert.match(generatedReadme, /^# FARMJS /);
 
@@ -1092,9 +1242,14 @@ test("generates every official integration starter", async () => {
       for (const key of template.env) {
         assert.match(environment, new RegExp(`^${key}=`, "m"));
       }
+      assertNoSecretValues(environment);
 
       if (template.name === "ai") {
-        await readFile(path.join(generatedDir, "src/app/api/chat/route.ts"), "utf8");
+        const chatRoute = await readFile(
+          path.join(generatedDir, "src/app/api/chat/route.ts"),
+          "utf8",
+        );
+        assert.match(chatRoute, /authorize: \(\) => process\.env\.NODE_ENV === "development"/);
       } else {
         assert.match(
           await readFile(path.join(generatedDir, "farm.config.ts"), "utf8"),
@@ -1104,7 +1259,7 @@ test("generates every official integration starter", async () => {
       }
 
       if (template.name === "authjs") {
-        assert.equal(packageJson.dependencies["@auth/core"], "0.34.3");
+        assert.equal(packageJson.dependencies["@auth/core"], "^0.41.3");
         assert.match(
           await readFile(path.join(generatedDir, "src/lib/auth.ts"), "utf8"),
           /GitHub\(\{/,
@@ -1122,75 +1277,85 @@ test("generates every official integration starter", async () => {
   }
 });
 
-test("installs dependencies with the invoking package manager", async () => {
-  const tempDir = await mkdtemp(path.join(os.tmpdir(), "create-farm-app-install-"));
-  const binDir = path.join(tempDir, "bin");
-  const markerPath = path.join(tempDir, "install.json");
-  const runnerPath = path.join(binDir, "fake-package-manager.cjs");
-  const executablePath = path.join(binDir, process.platform === "win32" ? "pnpm.cmd" : "pnpm");
+for (const { name, userAgent, windowsExtension } of [
+  { name: "pnpm", userAgent: "pnpm/10.15.0 npm/? node/v22.0.0", windowsExtension: ".cmd" },
+  // Bun installs bun.exe on Windows, not a .cmd shim. A .bat launcher stands in
+  // for it: the installer must resolve the bare name rather than assume .cmd.
+  { name: "bun", userAgent: "bun/1.2.0 npm/? node/v22.0.0", windowsExtension: ".bat" },
+]) {
+  test(`installs dependencies with the invoking package manager (${name})`, async () => {
+    const tempDir = await mkdtemp(path.join(os.tmpdir(), "create-farm-app-install-"));
+    const binDir = path.join(tempDir, "bin");
+    const markerPath = path.join(tempDir, "install.json");
+    const runnerPath = path.join(binDir, "fake-package-manager.cjs");
+    const executablePath = path.join(
+      binDir,
+      process.platform === "win32" ? `${name}${windowsExtension}` : name,
+    );
 
-  try {
-    await mkdir(binDir, { recursive: true });
-    await writeFile(
-      runnerPath,
-      `const { writeFileSync } = require("node:fs");
+    try {
+      await mkdir(binDir, { recursive: true });
+      await writeFile(
+        runnerPath,
+        `const { writeFileSync } = require("node:fs");
 writeFileSync(process.env.FARM_CREATE_APP_INSTALL_MARKER, JSON.stringify({
   args: process.argv.slice(2),
   cwd: process.cwd(),
 }));
 `,
-    );
-
-    if (process.platform === "win32") {
-      await writeFile(executablePath, `@"${process.execPath}" "${runnerPath}" %*\r\n`);
-    } else {
-      await writeFile(
-        executablePath,
-        `#!/bin/sh\nexec "${process.execPath}" "${runnerPath}" "$@"\n`,
       );
-      await chmod(executablePath, 0o755);
-    }
 
-    const output = execFileSync(
-      process.execPath,
-      [
-        path.join(packageDir, "bin/create-farm-app.js"),
-        "generated-app",
-        "--template",
-        "basic",
-        "--typescript",
-      ],
-      {
-        cwd: tempDir,
-        encoding: "utf8",
-        env: {
-          ...process.env,
-          FARM_CREATE_APP_INSTALL_MARKER: markerPath,
-          PATH: `${binDir}${path.delimiter}${process.env.PATH || ""}`,
-          npm_config_user_agent: "pnpm/10.15.0 npm/? node/v22.0.0",
+      if (process.platform === "win32") {
+        await writeFile(executablePath, `@"${process.execPath}" "${runnerPath}" %*\r\n`);
+      } else {
+        await writeFile(
+          executablePath,
+          `#!/bin/sh\nexec "${process.execPath}" "${runnerPath}" "$@"\n`,
+        );
+        await chmod(executablePath, 0o755);
+      }
+
+      const output = execFileSync(
+        process.execPath,
+        [
+          path.join(packageDir, "bin/create-farm-app.js"),
+          "generated-app",
+          "--template",
+          "basic",
+          "--typescript",
+        ],
+        {
+          cwd: tempDir,
+          encoding: "utf8",
+          env: {
+            ...process.env,
+            FARM_CREATE_APP_INSTALL_MARKER: markerPath,
+            PATH: `${binDir}${path.delimiter}${process.env.PATH || ""}`,
+            npm_config_user_agent: userAgent,
+          },
         },
-      },
-    );
+      );
 
-    const invocation = JSON.parse(await readFile(markerPath, "utf8"));
-    const generatedPackage = JSON.parse(
-      await readFile(path.join(tempDir, "generated-app/package.json"), "utf8"),
-    );
+      const invocation = JSON.parse(await readFile(markerPath, "utf8"));
+      const generatedPackage = JSON.parse(
+        await readFile(path.join(tempDir, "generated-app/package.json"), "utf8"),
+      );
 
-    assert.deepEqual(invocation.args, ["install"]);
-    assert.equal(
-      await realpath(invocation.cwd),
-      await realpath(path.join(tempDir, "generated-app")),
-    );
-    assert.equal(generatedPackage.packageManager, "pnpm@10.15.0");
-    assert.match(output, /Installing dependencies with pnpm/);
-    assert.match(output, /Dependencies installed/);
-    assert.match(output, /pnpm dev/);
-    assert.doesNotMatch(output, /pnpm install/);
-  } finally {
-    await rm(tempDir, { recursive: true, force: true });
-  }
-});
+      assert.deepEqual(invocation.args, ["install"]);
+      assert.equal(
+        await realpath(invocation.cwd),
+        await realpath(path.join(tempDir, "generated-app")),
+      );
+      assert.equal(generatedPackage.packageManager, userAgent.split(" ")[0].replace("/", "@"));
+      assert.match(output, new RegExp(`Installing dependencies with ${name}`));
+      assert.match(output, /Dependencies installed/);
+      assert.match(output, new RegExp(`${name} (run )?dev`));
+      assert.doesNotMatch(output, new RegExp(`${name} install`));
+    } finally {
+      await rm(tempDir, { recursive: true, force: true });
+    }
+  });
+}
 
 test("uses the invoking package manager throughout generated guidance", async () => {
   const tempDir = await mkdtemp(
@@ -1202,6 +1367,7 @@ test("uses the invoking package manager throughout generated guidance", async ()
       userAgent: "npm/11.6.0 node/v22.0.0",
       dev: "npm run dev",
       migrate: "npm run auth:migrate",
+      start: "npm run start",
       check: "npm run type-check && npm run build",
     },
     {
@@ -1209,6 +1375,7 @@ test("uses the invoking package manager throughout generated guidance", async ()
       userAgent: "pnpm/11.18.0 npm/? node/v22.0.0",
       dev: "pnpm dev",
       migrate: "pnpm auth:migrate",
+      start: "pnpm start",
       check: "pnpm type-check && pnpm build",
     },
     {
@@ -1216,6 +1383,7 @@ test("uses the invoking package manager throughout generated guidance", async ()
       userAgent: "yarn/4.9.2 npm/? node/v22.0.0",
       dev: "yarn dev",
       migrate: "yarn auth:migrate",
+      start: "yarn start",
       check: "yarn type-check && yarn build",
     },
     {
@@ -1223,6 +1391,7 @@ test("uses the invoking package manager throughout generated guidance", async ()
       userAgent: "bun/1.2.22 npm/? node/v22.0.0",
       dev: "bun run dev",
       migrate: "bun run auth:migrate",
+      start: "bun run start",
       check: "bun run type-check && bun run build",
     },
   ];
@@ -1257,6 +1426,7 @@ test("uses the invoking package manager throughout generated guidance", async ()
       assert.match(readme, new RegExp(escapeRegExp(`${packageManager.name} install`)));
       assert.match(readme, new RegExp(escapeRegExp(packageManager.dev)));
       assert.match(readme, new RegExp(escapeRegExp(packageManager.migrate)));
+      assert.match(readme, new RegExp(escapeRegExp(packageManager.start)));
       assert.match(farmConfig, new RegExp(escapeRegExp(packageManager.migrate)));
       assert.equal(packageJson.scripts.check, packageManager.check);
       assert.match(output, new RegExp(escapeRegExp(packageManager.dev)));
@@ -1294,6 +1464,251 @@ test("uses the invoking package manager throughout generated guidance", async ()
   }
 });
 
+test("generates starters that start the built server and deploy to Vercel explicitly", async () => {
+  const tempDir = await mkdtemp(path.join(os.tmpdir(), "create-farm-app-self-host-"));
+  const builtServer = "node .farm/.output/server/index.mjs";
+  const starters = [
+    { template: "basic" },
+    ...["preact", "solid", "vue", "svelte"].map((renderer) => ({ template: "basic", renderer })),
+    { template: "auth" },
+    { template: "better-auth" },
+    ...betterAuthRenderers.map(({ name }) => ({ template: "better-auth", renderer: name })),
+  ];
+
+  try {
+    for (const { template, renderer } of starters) {
+      const projectName = `${template}-${renderer ?? "react"}-app`;
+      execFileSync(
+        process.execPath,
+        [
+          path.join(packageDir, "bin/create-farm-app.js"),
+          projectName,
+          "--template",
+          template,
+          ...(renderer ? ["--renderer", renderer] : []),
+          "--typescript",
+          "--skip-install",
+        ],
+        { cwd: tempDir, stdio: "pipe" },
+      );
+
+      const generatedDir = path.join(tempDir, projectName);
+      const packageJson = JSON.parse(
+        await readFile(path.join(generatedDir, "package.json"), "utf8"),
+      );
+      const farmConfig = await readFile(path.join(generatedDir, "farm.config.ts"), "utf8");
+
+      // Hosts that prune devDependencies before `start` would lose the `farm`
+      // CLI, so `start` runs the self-contained server that `farm build` emits.
+      assert.equal(packageJson.scripts.start, builtServer, projectName);
+      assert.equal(packageJson.scripts.deploy, "farm deploy --vercel", projectName);
+      assert.doesNotMatch(farmConfig, /\btarget:/, projectName);
+    }
+
+    execFileSync(
+      process.execPath,
+      [
+        path.join(packageDir, "bin/create-farm-app.js"),
+        "react-compiler-app",
+        "--template",
+        "react-compiler",
+        "--typescript",
+        "--skip-install",
+      ],
+      { cwd: tempDir, stdio: "pipe" },
+    );
+    const compilerPackage = JSON.parse(
+      await readFile(path.join(tempDir, "react-compiler-app/package.json"), "utf8"),
+    );
+    assert.equal(compilerPackage.scripts.start, builtServer);
+  } finally {
+    await rm(tempDir, { recursive: true, force: true });
+  }
+});
+
+// A placeholder secret that passes a provider's length check would be accepted
+// as-is once the file is copied, so every secret ships empty, commented or not.
+function assertNoSecretValues(environment) {
+  for (const match of environment.matchAll(/^#?\s*([A-Z][A-Z0-9_]*)=(.*)$/gm)) {
+    const [, key, value] = match;
+    if (/SECRET|_KEY$|TOKEN|PASSWORD/.test(key)) {
+      assert.equal(value.trim(), "", `${key} ships a value in .env.example`);
+    }
+  }
+}
+
 function escapeRegExp(input) {
   return input.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
+
+/**
+ * Feature packages that @farm.js/core declares as optional peers. A starter that
+ * uses the feature must declare the package, or it breaks on a clean install.
+ */
+const optionalCorePeers = [
+  {
+    name: "@tailwindcss/vite",
+    section: "devDependencies",
+    async isUsed(generatedDir) {
+      const stylesheets = await readGeneratedFiles(generatedDir, /\.css$/);
+      return stylesheets.some((source) => /@import\s+["']tailwindcss["']/.test(source));
+    },
+  },
+  {
+    name: "@farming-labs/docs",
+    section: "dependencies",
+    async isUsed(generatedDir) {
+      // Farm enables docs for an explicit config or a discovered docs.config.* / docs.json.
+      const [config] = await readGeneratedFiles(generatedDir, /^farm\.config\.[cm]?[jt]s$/);
+      const docsFiles = await readGeneratedFiles(
+        generatedDir,
+        /^docs\.(?:config\.[cm]?[jt]s|json)$/,
+      );
+      return docsFiles.length > 0 || /\bdocs:\s*(?:true|\{)/.test(config ?? "");
+    },
+  },
+];
+
+async function readGeneratedFiles(directory, pattern) {
+  const sources = [];
+  for (const entry of await readdir(directory, { withFileTypes: true, recursive: true })) {
+    const parent = entry.parentPath ?? entry.path;
+    if (!entry.isFile() || !pattern.test(entry.name) || parent.includes("node_modules")) continue;
+    sources.push(await readFile(path.join(parent, entry.name), "utf8"));
+  }
+  return sources;
+}
+
+test("generated starters declare the optional core peers their features use", async () => {
+  const tempDir = await mkdtemp(path.join(os.tmpdir(), "create-farm-app-optional-peers-"));
+  const starters = [
+    ...["basic", "auth", "better-auth", "react-compiler"].map((template) => ({ template })),
+    ...["preact", "solid", "svelte", "vue"].map((renderer) => ({ template: "basic", renderer })),
+    ...integrationTemplates.map(({ name }) => ({ template: name })),
+  ];
+  const used = new Set();
+
+  try {
+    for (const { template, renderer } of starters) {
+      const projectName = `${template}-${renderer || "react"}-app`;
+      execFileSync(
+        process.execPath,
+        [
+          path.join(packageDir, "bin/create-farm-app.js"),
+          projectName,
+          "--template",
+          template,
+          ...(renderer ? ["--renderer", renderer] : []),
+          "--typescript",
+          "--skip-install",
+        ],
+        {
+          cwd: tempDir,
+          env: { ...process.env, npm_config_user_agent: "pnpm/11.18.0 npm/? node/v22.0.0" },
+          stdio: "pipe",
+        },
+      );
+      const generatedDir = path.join(tempDir, projectName);
+      const packageJson = JSON.parse(
+        await readFile(path.join(generatedDir, "package.json"), "utf8"),
+      );
+
+      for (const peer of optionalCorePeers) {
+        if (!(await peer.isUsed(generatedDir))) continue;
+        used.add(peer.name);
+        assert.equal(
+          typeof packageJson[peer.section]?.[peer.name],
+          "string",
+          `${projectName} uses ${peer.name} but does not declare it in ${peer.section}`,
+        );
+      }
+    }
+
+    // Guard against a detector that silently stops matching the starters.
+    assert.deepEqual([...used].sort(), optionalCorePeers.map(({ name }) => name).sort());
+  } finally {
+    await rm(tempDir, { recursive: true, force: true });
+  }
+});
+
+test("basic starters ship what agents read: server-rendered copy and an Open Graph image", async () => {
+  const tempDir = await mkdtemp(path.join(os.tmpdir(), "create-farm-app-agent-ready-"));
+  const image = await readFile(
+    path.join(packageDir, "templates/basic/src/app/opengraph-image.png"),
+  );
+  const pages = {
+    react: "src/app/page.tsx",
+    preact: "src/app/page.tsx",
+    solid: "src/app/page.tsx",
+    vue: "src/app/page.vue",
+    svelte: "src/app/page.svelte",
+  };
+
+  try {
+    for (const [renderer, page] of Object.entries(pages)) {
+      const projectName = `agent-ready-${renderer}-app`;
+      execFileSync(
+        process.execPath,
+        [
+          path.join(packageDir, "bin/create-farm-app.js"),
+          projectName,
+          "--template",
+          "basic",
+          ...(renderer === "react" ? [] : ["--renderer", renderer]),
+          "--typescript",
+          "--skip-install",
+        ],
+        { cwd: tempDir, stdio: "pipe" },
+      );
+      const generatedDir = path.join(tempDir, projectName);
+      // Copied byte for byte: og:image for the whole app through the file convention.
+      assert.deepEqual(
+        await readFile(path.join(generatedDir, "src/app/opengraph-image.png")),
+        image,
+        renderer,
+      );
+      // Agent checks treat a page with a few words of HTML as an empty client shell, so the
+      // starter says what it is in the server-rendered markup.
+      const source = await readFile(path.join(generatedDir, page), "utf8");
+      const text = source
+        .slice(source.indexOf("<main"))
+        .replace(/<[^>]+>/g, " ")
+        .replace(/\{[^}]*\}/g, " ")
+        .replace(/\s+/g, " ")
+        .trim();
+      assert.ok(text.length > 500, `${renderer}: ${text.length} characters of text`);
+      assert.match(source, /class(?:Name)?="feature-list"/, renderer);
+    }
+  } finally {
+    await rm(tempDir, { recursive: true, force: true });
+  }
+});
+
+test("starter templates pin the @farming-labs/* versions the docs app runs", async () => {
+  const docsManifest = JSON.parse(
+    await readFile(path.resolve(packageDir, "..", "..", "docs", "package.json"), "utf8"),
+  );
+  const templatesDir = path.join(packageDir, "templates");
+  const pins = [];
+
+  for (const entry of await readdir(templatesDir, { withFileTypes: true, recursive: true })) {
+    const parent = entry.parentPath ?? entry.path;
+    if (!entry.isFile() || entry.name !== "package.json" || parent.includes("node_modules")) {
+      continue;
+    }
+    const manifest = JSON.parse(await readFile(path.join(parent, entry.name), "utf8"));
+    for (const section of ["dependencies", "devDependencies"]) {
+      for (const [name, version] of Object.entries(manifest[section] ?? {})) {
+        if (!name.startsWith("@farming-labs/")) continue;
+        pins.push(name);
+        assert.equal(
+          version,
+          docsManifest.dependencies[name],
+          `${path.relative(templatesDir, parent)} pins ${name}@${version}`,
+        );
+      }
+    }
+  }
+
+  assert.ok(pins.length > 0, "expected at least one template to pin @farming-labs/*");
+});

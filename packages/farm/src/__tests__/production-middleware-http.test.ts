@@ -41,10 +41,46 @@ describe("production middleware HTTP behavior", () => {
       new Response("ok", { headers: { "set-cookie": "existing=1; Path=/" } }),
       result.headers,
     );
+    // The response's own cookie comes last, so it wins for a name both set, as in dev.
     expect(response.headers.getSetCookie()).toEqual([
-      "existing=1; Path=/",
       "session=abc; Path=/; HttpOnly",
       "theme=dark; Path=/; SameSite=Lax",
+      "existing=1; Path=/",
+    ]);
+  });
+
+  it("lets a returned Response clear a cookie an earlier middleware refreshed", async () => {
+    const runner = createProductionMiddlewareRunner({
+      modules: [
+        {
+          path: "/",
+          module: {
+            middleware(_request: Request, ctx: { cookies: any }) {
+              if (ctx.cookies.get("session"))
+                ctx.cookies.set("session", "refreshed", { httpOnly: true });
+            },
+          },
+        },
+        {
+          path: "/logout",
+          module: {
+            middleware() {
+              return new Response("logged out", {
+                headers: { "set-cookie": "session=; Path=/; Max-Age=0" },
+              });
+            },
+          },
+        },
+      ],
+    });
+
+    const result = await runner(
+      new Request("https://example.com/logout", { headers: { cookie: "session=abc" } }),
+    );
+    // A browser applies Set-Cookie in order: the logout's deletion must come last.
+    expect(result.response?.headers.getSetCookie()).toEqual([
+      "session=refreshed; Path=/; HttpOnly",
+      "session=; Path=/; Max-Age=0",
     ]);
   });
 
@@ -245,7 +281,9 @@ describe("production middleware HTTP behavior", () => {
       });
     const request = () =>
       new Request("https://example.com/", {
-        headers: { "x-forwarded-for": "203.0.113.8, 10.0.0.1" },
+        // The client sent 6.6.6.6 and the trusted proxy appended the address
+        // it saw. Only that last hop identifies the caller.
+        headers: { "x-forwarded-for": "6.6.6.6, 203.0.113.8" },
       });
 
     const direct = await createRunner(false)(request());

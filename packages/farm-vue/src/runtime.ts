@@ -12,6 +12,7 @@ import {
 } from "vue";
 
 const FARM_VUE_ELEMENT = Symbol.for("farm.vue.element");
+const FARM_VUE_FUNCTION_COMPONENT = Symbol.for("farm.vue.function-component");
 
 export interface FarmVueElement {
   readonly [FARM_VUE_ELEMENT]: true;
@@ -75,6 +76,40 @@ export function isFarmVueElement(value: unknown): value is FarmVueElement {
     value &&
     typeof value === "object" &&
     (value as Partial<FarmVueElement>)[FARM_VUE_ELEMENT] === true,
+  );
+}
+
+/**
+ * Marks a plain function component: one that takes React-shaped props and
+ * returns a Farm element tree.
+ *
+ * A native Vue functional component is also a plain function, but Vue calls it
+ * with `(props, { slots, attrs, emit })` and expects VNodes back. The two
+ * shapes are indistinguishable at runtime, so Farm marks the components it
+ * wires up from modules the renderer does not compile, and the compat layer
+ * calls only those directly. Every other function goes through `h()`.
+ *
+ * A frozen component stays unmarked and renders as a Vue component.
+ */
+export function markFunctionComponent<T>(component: T): T {
+  if (typeof component !== "function") return component;
+  try {
+    Object.defineProperty(component, FARM_VUE_FUNCTION_COMPONENT, {
+      value: true,
+      configurable: true,
+    });
+  } catch {
+    // Non-configurable or frozen: fall through unmarked.
+  }
+  return component;
+}
+
+function isFarmFunctionComponent(
+  value: unknown,
+): value is (props: Record<string, unknown>) => unknown {
+  return (
+    typeof value === "function" &&
+    (value as { [FARM_VUE_FUNCTION_COMPONENT]?: boolean })[FARM_VUE_FUNCTION_COMPONENT] === true
   );
 }
 
@@ -256,10 +291,8 @@ export function materializeVueElement(value: unknown): VNodeChild {
     throw new TypeError("FARMJS Vue renderer received an invalid component type.");
   }
 
-  if (typeof value.type === "function") {
-    const rendered = (value.type as (props: Record<string, unknown>) => unknown)(
-      withComponentChildren(props, children),
-    );
+  if (isFarmFunctionComponent(value.type)) {
+    const rendered = value.type(withComponentChildren(props, children));
     if (isThenable(rendered)) {
       throw new TypeError(
         "FARMJS Vue renderer does not support async function components; use Vue Suspense or a synchronous component.",
@@ -282,6 +315,7 @@ const VueCompat = {
   ErrorBoundary,
   createElement,
   isValidElement,
+  markFunctionComponent,
 };
 
 export default VueCompat;

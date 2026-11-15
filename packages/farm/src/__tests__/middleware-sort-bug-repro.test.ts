@@ -41,12 +41,18 @@ function writeMiddlewareFile(root: string, relativePath: string): string {
 }
 
 function createViteServer(handlersByFile: Record<string, MiddlewareFunction>): {
-  ssrLoadModule: (file: string) => Promise<Record<string, unknown>>;
+  environments: { ssr: { runner: { import: (file: string) => Promise<Record<string, unknown>> } } };
 } {
   const fallback: MiddlewareFunction = async (_ctx, next) => next();
   return {
-    async ssrLoadModule(file: string) {
-      return { default: handlersByFile[file] ?? fallback };
+    environments: {
+      ssr: {
+        runner: {
+          async import(file: string) {
+            return { default: handlersByFile[file] ?? fallback };
+          },
+        },
+      },
     },
   };
 }

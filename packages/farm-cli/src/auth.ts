@@ -1,4 +1,4 @@
-import { loadConfig, logger, resolveConfig } from "@farm.js/core";
+import { loadConfig, logger, resolveConfig } from "@farm.js/core/internal/cli-runtime";
 import { writeFile } from "node:fs/promises";
 import { createRequire } from "node:module";
 import path from "node:path";

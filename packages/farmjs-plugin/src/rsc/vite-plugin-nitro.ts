@@ -51,6 +51,8 @@ export interface NitroPluginOptions {
   };
   config?: {
     preset?: string;
+    /** Deployment output directory (default `.output`). */
+    outputDir?: string;
   };
   /** Base output dir when not using .nitro/vite/dist (fallback). */
   outDir?: string;
@@ -77,10 +79,18 @@ export default function nitro(options: NitroPluginOptions = {}): Plugin {
       delete (globalThis as any).__FARM_NITRO_SERVER_BUNDLE;
       delete (globalThis as any).__FARM_NITRO_PATHS;
       delete (globalThis as any).__FARM_NITRO_BUILD_PROMISE;
+      // The server entries are always index.js, which the Nitro step loads: Vite names an ESM
+      // server entry index.mjs when the app's package.json is not "type": "module". The Nitro
+      // output's package.json is "type": "module", so .js loads as ESM there.
+      const serverOutput = { output: { entryFileNames: "[name].js" } };
       return {
         environments: {
-          rsc: { build: { outDir: path.join(NITRO_VITE_DIST, "rsc") } },
-          ssr: { build: { outDir: path.join(NITRO_VITE_DIST, "ssr") } },
+          rsc: {
+            build: { outDir: path.join(NITRO_VITE_DIST, "rsc"), rolldownOptions: serverOutput },
+          },
+          ssr: {
+            build: { outDir: path.join(NITRO_VITE_DIST, "ssr"), rolldownOptions: serverOutput },
+          },
           client: { build: { outDir: path.join(NITRO_VITE_DIST, "client") } },
         },
       };
@@ -122,6 +132,7 @@ export default function nitro(options: NitroPluginOptions = {}): Plugin {
           clientOutDir,
           serverEntryName,
           preset: options.config?.preset ?? process.env.NITRO_PRESET ?? "vercel",
+          outputDir: options.config?.outputDir,
           clientAssetsDir,
         };
       }
@@ -140,6 +151,7 @@ export async function runNitroFromBuildApp(): Promise<void> {
         serverEntryName: string;
         preset: string;
         clientAssetsDir?: string;
+        outputDir?: string;
       }
     | undefined;
   const bundle = (globalThis as any).__FARM_NITRO_SERVER_BUNDLE as Record<
@@ -175,6 +187,7 @@ async function runCapturedNitroBuild(
     serverEntryName: string;
     preset: string;
     clientAssetsDir?: string;
+    outputDir?: string;
   },
   bundle: Record<
     string,
@@ -210,5 +223,6 @@ async function runCapturedNitroBuild(
     ssrPath: resolveRscBuildOutputPath(root, paths.ssrOutDir, "index.js"),
     assetsDir: paths.clientAssetsDir ?? "assets",
     preset,
+    outputDir: paths.outputDir,
   });
 }

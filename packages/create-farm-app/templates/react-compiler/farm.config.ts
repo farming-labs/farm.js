@@ -12,9 +12,7 @@ export default defineConfig({
     },
   },
   renderer: react({
-    experimental: {
-      compiler: compilerEnabled,
-    },
+    compiler: compilerEnabled,
   }),
   theme: {
     default: "dark",

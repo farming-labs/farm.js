@@ -21,6 +21,7 @@ export type RoutePath =
   | "/package-island"
   | "/select"
   | "/slots"
+  | "/stream"
   | "/svg"
   | "/table";
 export type RoutePattern =
@@ -32,6 +33,7 @@ export type RoutePattern =
   | "/package-island"
   | "/select"
   | "/slots"
+  | "/stream"
   | "/svg"
   | "/table";
 export type RouteModulePattern =
@@ -43,6 +45,7 @@ export type RouteModulePattern =
   | "/package-island"
   | "/select"
   | "/slots"
+  | "/stream"
   | "/svg"
   | "/table";
 declare module "@farm.js/core/client" {

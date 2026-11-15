@@ -39,6 +39,15 @@ describe("instrumentation convention", () => {
     );
   });
 
+  it("finds a root instrumentation file once when srcDir is the app root", async () => {
+    const root = await createTemporaryRoot();
+    const rootFile = path.join(root, "instrumentation.ts");
+    await fs.writeFile(rootFile, "export function register() {}\n");
+
+    expect(resolveFarmInstrumentationFile(root, ".")).toBe(rootFile);
+    expect(resolveFarmInstrumentationFile(root, "")).toBe(rootFile);
+  });
+
   it("starts and shuts down once in deterministic order", async () => {
     const calls: string[] = [];
     const lifecycle = createFarmInstrumentationLifecycle(

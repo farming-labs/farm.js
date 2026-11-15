@@ -19,10 +19,19 @@ Options: `launcher?: boolean`, `shortcut?: string | false`, `inspect?: boolean`.
 is the opt-in; there is no `enabled` option. Without the plugin, apps fall back to the
 deprecated built-in dashboard. Do not combine it with `devtools: false`.
 
+Plugins lists active Farm plugins in the plugin manager's execution order (pre, normal, post),
+with versions and declared server/client hook names. It includes legacy hook names as declared.
+This is registration metadata, not a call trace; parallel hooks can finish in a different order.
+Plugin configuration, public data, hook source, and private state are never serialized.
+
 Inspect compares the current application source with Vite's cached browser output, not individual
 plugin stages. Only already-transformed, in-project browser source is eligible; virtual/server-only
 modules, dependencies, hidden paths, and outside-project symlinks are excluded. Limits: 500 listed
 modules, 1 MiB per source/output, 1,500 displayed lines. Copy includes the full bounded text.
+While Inspect is open, the selected module refreshes after Vite completes an HMR update. Pending
+updates, failures, and disconnects label previously displayed code as stale. This reuses the app's
+Vite connection, without polling or a second socket. Other views keep their filters and selection;
+use Refresh for their latest snapshot. A full page reload closes the panel with the app.
 
 DevTools is read-only, not an authentication boundary for a public development server. Environment
 values are absent from snapshots; literals in client source are not redacted. Keep development

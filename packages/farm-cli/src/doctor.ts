@@ -1,12 +1,15 @@
 import {
+  FARM_RSC_INSTALL_HINT,
+  formatFarmRscBlockingMessage,
+  formatFarmRscFallbackMessage,
   generateFarmTypeArtifacts,
   getFarmSourceRoots,
   getFarmDocsRouteTypeEntries,
+  inspectFarmServerComponents,
   loadConfig,
   resolveConfig,
-  type FarmCronJob,
-  type ResolvedFarmConfig,
-} from "@farm.js/core";
+} from "@farm.js/core/internal/cli-runtime";
+import type { FarmCronJob, ResolvedFarmConfig } from "@farm.js/core";
 import { existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from "node:fs";
 import { createRequire } from "node:module";
 import path from "node:path";
@@ -124,6 +127,7 @@ type WorkspaceContext = {
   packages: Map<string, string>;
 };
 
+const REGISTRY_TIMEOUT_MS = 10_000;
 const ROUTE_EXTENSIONS = ["ts", "tsx", "js", "jsx", "vue", "md", "mdx"];
 const CONFIG_FILES = [
   "farm.config.ts",
@@ -397,6 +401,8 @@ async function createProjectReport(
     collectRouterChecks(config, checks);
     await collectGeneratedArtifactChecks(config, options.configPath, root, checks);
     collectEntrypointChecks(config, root, checks);
+    collectOptionalPackageChecks(config, root, checks);
+    collectServerComponentsChecks(userConfig, config.root, checks);
     report.target = collectDeploymentChecks(config, userConfig, checks);
     collectCronChecks(config, options.env || process.env, checks);
   }
@@ -726,9 +732,10 @@ function collectLocalPackageChecks(
 
 function getWorkspaceTargetName(name: string, specifier: string): string {
   const target = specifier.slice("workspace:".length);
-  if (!target.startsWith("@")) return name;
-  const versionSeparator = target.indexOf("@", 1);
-  return versionSeparator === -1 ? target : target.slice(0, versionSeparator);
+  // pnpm aliases use `workspace:<name>@<range>`, where <name> may be scoped.
+  const versionSeparator = target.indexOf("@", target.startsWith("@") ? 1 : 0);
+  if (versionSeparator > 0) return target.slice(0, versionSeparator);
+  return target.startsWith("@") ? target : name;
 }
 
 function findWorkspaceContext(start: string): WorkspaceContext | undefined {
@@ -754,6 +761,17 @@ function readWorkspacePatterns(root: string): string[] {
     const patterns: string[] = [];
     let packagesIndent: number | undefined;
     for (const line of readFileSync(workspaceFile, "utf8").split(/\r?\n/)) {
+      const flow = /^\s*packages\s*:\s*\[([^\]]*)\]\s*(?:#.*)?$/.exec(line);
+      if (flow) {
+        for (const entry of flow[1].split(",")) {
+          const pattern = entry
+            .trim()
+            .replace(/^(["'])(.*)\1$/, "$2")
+            .trim();
+          if (pattern) patterns.push(pattern);
+        }
+        break;
+      }
       const key = /^(\s*)packages\s*:\s*(?:#.*)?$/.exec(line);
       if (key) {
         packagesIndent = key[1].length;
@@ -975,6 +993,223 @@ function collectEntrypointChecks(
   }
 }
 
+/**
+ * Feature packages that @farm.js/core declares as optional peers. An app that
+ * uses the feature must install the package itself.
+ */
+type OptionalFeaturePackage = {
+  name: string;
+  dev?: boolean;
+  purpose: string;
+  /** Whether core fails (`fail`) or keeps going without the feature (`warn`). */
+  missingStatus: "warn" | "fail" | ((config: ResolvedFarmConfig) => "warn" | "fail");
+  /** Where the app uses the feature, or undefined when it does not. */
+  findUse(config: ResolvedFarmConfig, root: string): string | undefined;
+};
+
+const OPTIONAL_FEATURE_PACKAGES: readonly OptionalFeaturePackage[] = [
+  {
+    name: "@tailwindcss/vite",
+    dev: true,
+    purpose: "enable built-in Tailwind CSS support",
+    missingStatus: "warn",
+    findUse: findTailwindUse,
+  },
+  {
+    name: "@vercel/og",
+    purpose: "render OG and metadata images",
+    missingStatus: "fail",
+    findUse: findOgImageUse,
+  },
+  {
+    name: "sharp",
+    purpose: "optimize images",
+    // `provider: "node"` fails without Sharp; `auto` serves original image URLs.
+    missingStatus: (config) => (config.images.provider === "node" ? "fail" : "warn"),
+    findUse: findImageOptimizationUse,
+  },
+  {
+    name: "@farming-labs/docs",
+    purpose: "use the docs engine",
+    missingStatus: "fail",
+    findUse: (config) =>
+      config.docs?.enabled ? `docs is enabled at ${config.docs.entry || "/docs"}` : undefined,
+  },
+];
+
+const POSTCSS_CONFIG_FILE =
+  /^(?:postcss\.config\.(?:[cm]?[jt]s|json)|\.postcssrc(?:\.(?:json|[cm]?[jt]s))?)$/;
+const TAILWIND_CSS_IMPORT = /@import\s+["']tailwindcss["']/;
+const GENERATED_METADATA_IMAGE_FILE = /^(?:opengraph|twitter)-image\.(?:[cm]?[jt]sx?|vue|svelte)$/;
+const SOURCE_FILE = /(?<!\.d)\.(?:[cm]?[jt]sx?|vue|svelte)$/;
+const CORE_OG_IMPORT = /["']@farm\.js\/core\/og["']/;
+const CORE_IMAGE_IMPORT = /["']@farm\.js\/core\/image["']/;
+
+/**
+ * `experimental.serverComponents: true` now runs the RSC pipeline. Report which way this app goes,
+ * so the change is visible before an upgrade removes the fallback.
+ */
+function collectServerComponentsChecks(
+  userConfig: Record<string, any>,
+  root: string,
+  checks: FarmDoctorCheck[],
+): void {
+  const status = inspectFarmServerComponents(userConfig, root);
+  if (status.mode === "islands") {
+    checks.push({
+      status: "pass",
+      code: "SERVER_COMPONENTS_ISLANDS",
+      title: "Server components run in islands mode",
+      message:
+        "farm dev and farm build render server components on Farm's pipeline and hydrate only client components (experimental, RFC 0003).",
+    });
+    return;
+  }
+  if (!status.enabled) return;
+  if (status.missingPackages.length > 0 && !status.fallback) {
+    checks.push({
+      status: "fail",
+      code: "SERVER_COMPONENTS_PACKAGES_MISSING",
+      title: "React Server Components packages are not installed",
+      message: `experimental.serverComponents: { mode: "rsc" } needs ${status.missingPackages.join(", ")}.`,
+      action: `Install them: ${FARM_RSC_INSTALL_HINT}`,
+    });
+    return;
+  }
+  if (status.fallback) {
+    checks.push({
+      status: "warn",
+      code: "SERVER_COMPONENTS_FALLBACK",
+      title: "experimental.serverComponents runs without React Server Components",
+      message: formatFarmRscFallbackMessage(status.missingPackages, status.blockingKeys),
+      action:
+        status.blockingKeys.length > 0
+          ? "Remove experimental.serverComponents, or move those features out of farm.config."
+          : `Run farm dev or farm build to install them, or ${FARM_RSC_INSTALL_HINT}.`,
+    });
+    return;
+  }
+  if (status.blockingKeys.length > 0) {
+    checks.push({
+      status: "fail",
+      code: "SERVER_COMPONENTS_BLOCKED",
+      title: "React Server Components cannot start",
+      message: formatFarmRscBlockingMessage(status.blockingKeys),
+      action: "Remove experimental.serverComponents, or move those features out of farm.config.",
+    });
+    return;
+  }
+  checks.push({
+    status: "pass",
+    code: "SERVER_COMPONENTS_READY",
+    title: "React Server Components are on",
+    message:
+      status.ignoredKeys.length > 0
+        ? `farm dev and farm build run the RSC pipeline; it ignores ${status.ignoredKeys
+            .map((key) =>
+              key === "plugins" ? "plugins (except their configure and client hooks)" : key,
+            )
+            .join(", ")}.`
+        : "farm dev and farm build run the RSC pipeline.",
+  });
+}
+
+function collectOptionalPackageChecks(
+  config: ResolvedFarmConfig,
+  root: string,
+  checks: FarmDoctorCheck[],
+): void {
+  for (const feature of OPTIONAL_FEATURE_PACKAGES) {
+    const use = feature.findUse(config, root);
+    if (!use) continue;
+    if (isPackageInstalled(config.root, feature.name)) {
+      checks.push({
+        status: "pass",
+        code: "OPTIONAL_PACKAGE_INSTALLED",
+        title: `${feature.name} is installed`,
+        message: `${use}, and ${feature.name} resolves.`,
+      });
+      continue;
+    }
+    checks.push({
+      status:
+        typeof feature.missingStatus === "function"
+          ? feature.missingStatus(config)
+          : feature.missingStatus,
+      code: "OPTIONAL_PACKAGE_MISSING",
+      title: `${feature.name} is not installed`,
+      message: `${use}, but ${feature.name} does not resolve from ${toPosix(path.relative(root, config.root)) || "the app root"}.`,
+      action: `Install "${feature.name}" to ${feature.purpose}: pnpm add ${feature.dev ? "-D " : ""}${feature.name}`,
+    });
+  }
+}
+
+function isPackageInstalled(root: string, name: string): boolean {
+  try {
+    createRequire(path.join(root, "package.json")).resolve(`${name}/package.json`);
+    return true;
+  } catch (error) {
+    // The package is installed but does not export its manifest.
+    return (error as { code?: unknown }).code === "ERR_PACKAGE_PATH_NOT_EXPORTED";
+  }
+}
+
+function findTailwindUse(config: ResolvedFarmConfig, root: string): string | undefined {
+  // A project PostCSS config replaces Farm's built-in Tailwind support.
+  if (readdirSync(config.root).some((file) => POSTCSS_CONFIG_FILE.test(file))) return undefined;
+  const stylesheet = findFile(path.join(config.root, config.srcDir), (file) =>
+    file.endsWith(".css") ? TAILWIND_CSS_IMPORT.test(readFileSync(file, "utf8")) : false,
+  );
+  return stylesheet ? `${toPosix(path.relative(root, stylesheet))} imports tailwindcss` : undefined;
+}
+
+function findOgImageUse(config: ResolvedFarmConfig, root: string): string | undefined {
+  const sourceRoot = path.join(config.root, config.srcDir);
+  const generated = findFile(sourceRoot, (file) =>
+    GENERATED_METADATA_IMAGE_FILE.test(path.basename(file)),
+  );
+  if (generated) return `${toPosix(path.relative(root, generated))} renders a metadata image`;
+  const importer = findFile(sourceRoot, (file) =>
+    SOURCE_FILE.test(file) ? CORE_OG_IMPORT.test(readFileSync(file, "utf8")) : false,
+  );
+  return importer
+    ? `${toPosix(path.relative(root, importer))} imports @farm.js/core/og`
+    : undefined;
+}
+
+function findImageOptimizationUse(config: ResolvedFarmConfig, root: string): string | undefined {
+  const provider = config.images.provider;
+  if (provider === "none") return undefined;
+  if (provider === "node") return 'images.provider is "node"';
+  const importer = findFile(path.join(config.root, config.srcDir), (file) =>
+    SOURCE_FILE.test(file) ? CORE_IMAGE_IMPORT.test(readFileSync(file, "utf8")) : false,
+  );
+  return importer
+    ? `${toPosix(path.relative(root, importer))} imports @farm.js/core/image, so optimized images fall back to their original URLs`
+    : undefined;
+}
+
+function findFile(directory: string, matches: (file: string) => boolean): string | undefined {
+  if (!existsSync(directory)) return undefined;
+  const pending = [directory];
+  while (pending.length) {
+    const current = pending.pop();
+    if (!current) continue;
+    for (const entry of readdirSync(current, { withFileTypes: true })) {
+      const entryPath = path.join(current, entry.name);
+      if (entry.isFile() && matches(entryPath)) return entryPath;
+      if (
+        entry.isDirectory() &&
+        !entry.name.startsWith(".") &&
+        !WORKSPACE_SCAN_IGNORES.has(entry.name)
+      ) {
+        pending.push(entryPath);
+      }
+    }
+  }
+  return undefined;
+}
+
 type RegistryPackageMetadata = {
   "dist-tags"?: Record<string, unknown>;
   versions?: Record<string, unknown>;
@@ -987,13 +1222,16 @@ async function collectRegistryChecks(
 ): Promise<void> {
   const packageNames = ["@farm.js/core", "@farm.js/create-app"];
   const fetchRegistry = options.fetch || globalThis.fetch;
-  const resolved: Array<{ name: string; beta: string }> = [];
+  const resolved: Array<{ name: string; beta: string; newest: string }> = [];
 
   try {
     for (const name of packageNames) {
       const response = await fetchRegistry(
         `https://registry.npmjs.org/${encodeURIComponent(name)}`,
-        { headers: { accept: "application/json" } },
+        {
+          headers: { accept: "application/json" },
+          signal: AbortSignal.timeout(REGISTRY_TIMEOUT_MS),
+        },
       );
       if (!response.ok) {
         throw new Error(`${name} returned ${response.status}.`);
@@ -1020,7 +1258,12 @@ async function collectRegistryChecks(
         });
         continue;
       }
-      resolved.push({ name, beta });
+      const latest = metadata["dist-tags"]?.latest;
+      const newest =
+        typeof latest === "string" && isExactVersion(latest) && compareVersions(latest, beta) > 0
+          ? latest
+          : beta;
+      resolved.push({ name, beta, newest });
     }
   } catch (error) {
     checks.push({
@@ -1043,9 +1286,13 @@ async function collectRegistryChecks(
   }
 
   const dependencies = manifest ? getProjectDependencies(manifest) : {};
-  const stale = resolved.filter(({ name, beta }) => {
+  const stale = resolved.filter(({ name, newest }) => {
     const declared = dependencies[name];
-    return typeof declared === "string" && isExactVersion(declared) && declared !== beta;
+    return (
+      typeof declared === "string" &&
+      isExactVersion(declared) &&
+      compareVersions(declared, newest) < 0
+    );
   });
   if (stale.length > 0) {
     checks.push({
@@ -1054,18 +1301,52 @@ async function collectRegistryChecks(
       title: "Installed Farm beta declarations are stale",
       message: stale
         .map(
-          ({ name, beta }) =>
-            `${name} declares ${String(dependencies[name])}; registry beta is ${beta}`,
+          ({ name, beta, newest }) =>
+            `${name} declares ${String(dependencies[name])}; registry ${newest === beta ? "beta" : "latest"} is ${newest}`,
         )
         .join(", "),
-      action:
-        "Run farm upgrade --beta, or refresh the scaffold command with PNPM_CONFIG_DLX_CACHE_MAX_AGE=0.",
+      action: `Run ${stale.some(({ beta, newest }) => newest !== beta) ? "farm upgrade" : "farm upgrade --beta"}, or refresh the scaffold command with PNPM_CONFIG_DLX_CACHE_MAX_AGE=0.`,
     });
   }
 }
 
 function isExactVersion(value: string): boolean {
   return /^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$/.test(value);
+}
+
+/** Semver precedence for versions accepted by isExactVersion. */
+function compareVersions(left: string, right: string): number {
+  const parse = (value: string) => {
+    const separator = value.indexOf("-");
+    const core = separator === -1 ? value : value.slice(0, separator);
+    return {
+      core: core.split(".").map(Number),
+      prerelease: separator === -1 ? undefined : value.slice(separator + 1).split("."),
+    };
+  };
+  const a = parse(left);
+  const b = parse(right);
+  for (let index = 0; index < 3; index += 1) {
+    const difference = a.core[index] - b.core[index];
+    if (difference !== 0) return Math.sign(difference);
+  }
+  if (!a.prerelease || !b.prerelease) {
+    return a.prerelease ? -1 : b.prerelease ? 1 : 0;
+  }
+  const length = Math.max(a.prerelease.length, b.prerelease.length);
+  for (let index = 0; index < length; index += 1) {
+    const x = a.prerelease[index];
+    const y = b.prerelease[index];
+    if (x === undefined) return -1;
+    if (y === undefined) return 1;
+    if (x === y) continue;
+    const xNumeric = /^\d+$/.test(x);
+    const yNumeric = /^\d+$/.test(y);
+    if (xNumeric && yNumeric) return Math.sign(Number(x) - Number(y));
+    if (xNumeric !== yNumeric) return xNumeric ? -1 : 1;
+    return x < y ? -1 : 1;
+  }
+  return 0;
 }
 
 function collectRouterChecks(config: ResolvedFarmConfig, checks: FarmDoctorCheck[]): void {
@@ -1087,6 +1368,41 @@ function collectRouterChecks(config: ResolvedFarmConfig, checks: FarmDoctorCheck
       existsSync(path.join(source.root, source.srcDir, `farm.routes.${extension}`)),
     ),
   );
+
+  // `renderer: false` resolves to the "none" renderer and serves API routes only: pages and a
+  // root layout are not expected.
+  if (config.renderer.name === "none") {
+    const routeFilePattern = new RegExp(
+      `^route\\.(?:${routeExtensions.map(escapeRegExp).join("|")})$`,
+    );
+    const hasAPIRoutes = appDirectories.some((directory) =>
+      containsFile(path.join(directory, "api"), routeFilePattern),
+    );
+    const hasRoutesFile = sources.some((source) =>
+      routeExtensions.some((extension) =>
+        ["routes", "farm.routes"].some((name) =>
+          existsSync(path.join(source.root, source.srcDir, `${name}.${extension}`)),
+        ),
+      ),
+    );
+    checks.push(
+      hasAPIRoutes || hasRoutesFile
+        ? {
+            status: "pass",
+            code: "API_ROUTES_READY",
+            title: "API routes are present",
+            message: "This app sets `renderer: false` and serves API routes only.",
+          }
+        : {
+            status: "fail",
+            code: "NO_API_ROUTES",
+            title: "No API routes were found",
+            message: `This app sets \`renderer: false\` but has no ${config.srcDir}/app/api/**/route.ts files or ${config.srcDir}/routes.ts.`,
+            action: `Add ${config.srcDir}/app/api/route.ts, or remove \`renderer: false\` to render pages.`,
+          },
+    );
+    return;
+  }
   checks.push(
     hasPages || hasProgrammaticRoutes
       ? {

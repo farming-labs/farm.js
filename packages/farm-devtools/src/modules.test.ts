@@ -1,7 +1,7 @@
 import path from "node:path";
 import os from "node:os";
 import { mkdtemp, mkdir, writeFile, symlink, rm } from "node:fs/promises";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import type { ModuleNode, ViteDevServer } from "vite";
 import { createModuleInspector } from "./modules.js";
 
@@ -119,6 +119,20 @@ describe("browser module inspector", () => {
     await expect(f.inspector.read(modules[0].id)).rejects.toMatchObject({ status: 413 });
     module.transformResult = null;
     await expect(f.inspector.read(modules[0].id)).rejects.toMatchObject({ status: 404 });
+  });
+  it("sizes the source buffer from the file instead of the inspection limit", async () => {
+    const f = await fixture();
+    await f.add("src/value.ts", "export const small = 1;");
+    const { modules } = await f.inspector.list();
+    const alloc = vi.spyOn(Buffer, "alloc");
+    try {
+      expect((await f.inspector.read(modules[0].id)).source).toBe("export const small = 1;");
+      expect(alloc.mock.calls.map(([size]) => size)).toEqual([
+        Buffer.byteLength("export const small = 1;") + 1,
+      ]);
+    } finally {
+      alloc.mockRestore();
+    }
   });
   it("handles HMR invalidation while checking the source path", async () => {
     const f = await fixture();

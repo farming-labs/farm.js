@@ -104,6 +104,19 @@ pnpm dev
 - Test in multiple environments (playground, examples)
 - Ensure all existing tests pass
 
+The workspace pins Vitest and its coverage provider to one version. When upgrading,
+update every declaration together and run `node --test scripts/vitest-versions.test.js`.
+Vitest 5 uses the workspace's Vite peer, clears mock call history before each test,
+and exposes benchmarks through the test-context `bench` fixture. Keep benchmark
+controls and assertions when migrating a benchmark; use `await bench.compare(...)`
+inside a test in a `.bench.ts` file.
+
+Use `pnpm --filter @farm.js/core exec vitest doctor` or
+`pnpm --filter @farm.js/react exec vitest doctor` on a quiet machine to compare test
+settings. Filters may scope a diagnosis, but a filtered result does not establish
+that disabling isolation or changing pools is safe for the whole package. Validate
+any recommendation against the full suite before changing shared defaults.
+
 ### Documentation
 
 - Update relevant documentation in `/docs`

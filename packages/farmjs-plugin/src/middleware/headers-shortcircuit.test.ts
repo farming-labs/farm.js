@@ -10,7 +10,7 @@ type AnyServer = Record<string, any> & {
   config: { root: string; publicDir: string };
   hot: undefined;
   middlewares: { use: (fn: any) => void };
-  ssrLoadModule: (...args: any[]) => any;
+  environments: { ssr: { runner: { import: (...args: any[]) => any } } };
 };
 
 // Build a minimal fake Vite dev server, wire the plugin's configureServer
@@ -28,7 +28,7 @@ async function setupPlugin(options?: { srcDir?: string }) {
         installedMiddleware = fn;
       },
     },
-    ssrLoadModule: vi.fn(),
+    environments: { ssr: { runner: { import: vi.fn() } } },
   };
 
   const plugin = farmMiddleware(options ?? {});

@@ -1,26 +1,25 @@
 import { normalizePath, type Plugin } from "vite";
 import { compileReactModule } from "./compiler";
+import { getReactCompilerBuildCache } from "./compiler-build-cache";
+import { resolveCompilerOption } from "./compiler-options";
 import { writeReactCompilerReport, type ReactCompilerModuleObservation } from "./compiler-report";
 import { normalizeReactCompilerOptions, type NormalizedReactCompilerOptions } from "./index";
 
 interface RendererPluginOptions {
   ssr?: boolean;
+  /** Build-owned disposal signal shared by discovery, client and SSR graphs. */
+  buildLifetime?: AbortSignal;
   rendererOptions?: Readonly<Record<string, unknown>>;
 }
 
 function readCompilerOptions(
   rendererOptions: Readonly<Record<string, unknown>> | undefined,
 ): NormalizedReactCompilerOptions | false {
-  const experimental = rendererOptions?.experimental;
-  if (!experimental || typeof experimental !== "object") return false;
-  const compiler = (experimental as { compiler?: unknown }).compiler;
+  // Renderer options built by an older `react()` or by hand may still carry
+  // the deprecated `experimental.compiler` shape.
+  const compiler = resolveCompilerOption(rendererOptions);
   if (!compiler) return false;
   if (compiler === true) return normalizeReactCompilerOptions(true);
-  if (typeof compiler !== "object") {
-    throw new TypeError(
-      "React experimental.compiler must be a boolean or compiler options object.",
-    );
-  }
   const normalized = compiler as Partial<NormalizedReactCompilerOptions>;
   if (
     (normalized.mode === "infer" || normalized.mode === "annotation") &&
@@ -33,6 +32,52 @@ function readCompilerOptions(
     return normalized as NormalizedReactCompilerOptions;
   }
   return normalizeReactCompilerOptions(compiler as NormalizedReactCompilerOptions);
+}
+
+interface SourceLiteral {
+  type: string;
+  start: number;
+  end: number;
+  value?: unknown;
+}
+
+/**
+ * Points `import { createRoot } from "react-dom/client"` at the compiled root. Imports that also
+ * name anything else (hydrateRoot, a default or namespace import) are left to React DOM.
+ */
+export function rewriteCompiledRootImports(
+  code: string,
+  program: { body: readonly unknown[] },
+): string | null {
+  const edits: SourceLiteral[] = [];
+  for (const statement of program.body) {
+    const node = statement as {
+      type?: string;
+      importKind?: string;
+      source?: SourceLiteral;
+      specifiers?: Array<{ type: string; imported?: { name?: string; value?: string } }>;
+    };
+    if (
+      node.type !== "ImportDeclaration" ||
+      node.importKind === "type" ||
+      node.source?.value !== "react-dom/client" ||
+      !node.specifiers?.length ||
+      !node.specifiers.every(
+        (specifier) =>
+          specifier.type === "ImportSpecifier" &&
+          (specifier.imported?.name ?? specifier.imported?.value) === "createRoot",
+      )
+    ) {
+      continue;
+    }
+    edits.push(node.source);
+  }
+  if (edits.length === 0) return null;
+  let result = code;
+  for (const literal of edits.sort((left, right) => right.start - left.start)) {
+    result = `${result.slice(0, literal.start)}"@farm.js/react/compiled-root"${result.slice(literal.end)}`;
+  }
+  return result;
 }
 
 export function createFarmRendererPlugin(options: RendererPluginOptions = {}): Plugin[] {
@@ -62,7 +107,23 @@ export function createFarmRendererPlugin(options: RendererPluginOptions = {}): P
         )
           return null;
 
-        const result = await compileReactModule(code, cleanId, compilerOptions);
+        const cache = options.buildLifetime && getReactCompilerBuildCache(options.buildLifetime);
+        // The compiler does not consume Vite's SSR flag or graph transforms.
+        // Only exact compiler inputs can cross graph boundaries. No key work
+        // or retained cache is introduced on the ordinary development path.
+        const result = cache
+          ? await cache.compile(
+              JSON.stringify([
+                projectRoot,
+                cleanId,
+                compilerOptions,
+                process.env.NODE_ENV,
+                process.env.BABEL_ENV,
+                code,
+              ]),
+              () => compileReactModule(code, cleanId, compilerOptions),
+            )
+          : await compileReactModule(code, cleanId, compilerOptions);
         if (reportEnabled) {
           if (result.compiled.length > 0 || result.diagnostics.length > 0) {
             reportObservations.set(cleanId, { id: cleanId, result });
@@ -85,6 +146,25 @@ export function createFarmRendererPlugin(options: RendererPluginOptions = {}): P
           compilerOptions.reportFile,
           reportObservations.values(),
         );
+      },
+    },
+    {
+      // Runs after TypeScript and JSX are compiled, so the module parses as JavaScript.
+      name: "farm:react-compiled-root",
+      transform(code, id, transformOptions) {
+        if (compilerOptions.compiledRoot === false || options.ssr || transformOptions?.ssr) {
+          return null;
+        }
+        if (!code.includes("react-dom/client")) return null;
+        const cleanId = normalizePath(id.split("?", 1)[0]);
+        if (
+          !/\.[cm]?[jt]sx?$/.test(cleanId) ||
+          cleanId.includes("/node_modules/") ||
+          (projectRoot && !cleanId.startsWith(`${projectRoot}/`))
+        ) {
+          return null;
+        }
+        return rewriteCompiledRootImports(code, this.parse(code));
       },
     },
   ];

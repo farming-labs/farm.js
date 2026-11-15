@@ -146,14 +146,29 @@ async function request(body: unknown): Promise<any> {
 export async function loadModel(model: string): Promise<void> {
   const store = getSyncStore(model);
   const generation = store.generation;
+  const revision = store.revision;
   if (store.status === "idle") store.setStatus("loading");
 
+  // Rows saved by an earlier visit are not shown until the server confirms
+  // they belong to the current session's scope; until then they only offer a
+  // cursor, which the server ignores when the scope differs.
+  const saved = store.scope === null ? readPersisted(store) : null;
+  const since = saved ? saved.cursor : store.cursor;
+  const scope = saved ? saved.scope : store.scope;
+
   try {
-    const result = await request({ model, operation: "list", since: store.cursor });
+    const result = await request({ model, operation: "list", since, scope });
     if (store.generation !== generation) return;
+    const full = result.full !== false;
+    const resultScope = typeof result.scope === "string" ? result.scope : null;
+    if (saved && !full && resultScope === saved.scope) store.seed(saved.rows);
     store.applyServerRows(result.rows ?? [], {
-      full: result.full !== false,
+      full,
       cursor: result.cursor ?? null,
+      // Servers before `keys` existed send none, and deltas then only add.
+      keys: Array.isArray(result.keys) ? result.keys : undefined,
+      revision,
+      scope: resultScope,
     });
     // Keep the warm-start copy current even when the session performs no writes.
     persistModel(model);
@@ -244,7 +259,17 @@ function runMutation(
   let handleState: SyncMutationState = "pending";
   const isPersisted = (async () => {
     try {
-      const result = await dispatchWrite(store, { model, operation, input }, state.options);
+      const result = await dispatchWrite(store, { model, operation, input }, state.options).catch(
+        (error) => {
+          // The row is already gone: another client deleted it, or this is a
+          // retry whose first attempt landed but never answered. Either way
+          // the delete's end state holds, so it is not a failure to roll back.
+          if (operation === "delete" && (error as { code?: string }).code === "not_found") {
+            return { deleted: 0 };
+          }
+          throw error;
+        },
+      );
       handleState = "completed";
       // The store was cleared for a new session while this was in flight.
       if (store.generation !== generation) return result as SyncRow;
@@ -529,9 +554,19 @@ const PERSIST_VERSION = "1";
  * what makes a warm start paint before the first network round trip. Apps that
  * outgrow it can pass their own store.
  */
+type SyncPersistedRows = {
+  rows: SyncRow[];
+  cursor: string | null;
+  /**
+   * Scope fingerprint the rows were synced under. Rows without one, or with
+   * one the server no longer reports, are never shown.
+   */
+  scope?: string | null;
+};
+
 type SyncPersistence = {
-  read(model: string): { rows: SyncRow[]; cursor: string | null } | null;
-  write(model: string, value: { rows: SyncRow[]; cursor: string | null }): void;
+  read(model: string): SyncPersistedRows | null;
+  write(model: string, value: SyncPersistedRows): void;
   clear(): void;
 };
 
@@ -580,9 +615,11 @@ export function setSyncPersistence(store: SyncPersistence | null): void {
 
 /**
  * Forget every synced row, on disk and in memory. Call it when the session
- * changes (sign out, sign in as someone else, switch organization) so the next
- * account never sees the previous one's rows. Each model reloads in full on its
- * next use, scoped to the session current at that point.
+ * changes without a page reload (sign out, sign in as someone else, switch
+ * organization) so the next account never sees the previous one's rows. Each
+ * model reloads in full on its next use, scoped to the session current at that
+ * point. After a reload, persisted rows are only shown once the server reports
+ * the scope they were saved under.
  */
 export function clearSyncedRows(): void {
   getPersistence()?.clear();
@@ -592,16 +629,41 @@ export function clearSyncedRows(): void {
 function persistModel(model: string): void {
   const store = runtime?.stores.get(model);
   if (!store?.descriptor.persist) return;
+  // Rows whose scope the server never confirmed could not be shown again.
+  if (store.scope === null) return;
 
-  getPersistence()?.write(model, { rows: store.confirmedRows(), cursor: store.cursor });
+  getPersistence()?.write(model, {
+    rows: store.confirmedRows(),
+    cursor: store.cursor,
+    scope: store.scope,
+  });
 }
 
+/** The saved rows of a model, when they carry a scope fingerprint. */
+function readPersisted(
+  store: SyncModelStore,
+): { rows: SyncRow[]; cursor: string | null; scope: string } | null {
+  if (!store.descriptor.persist) return null;
+  const saved = getPersistence()?.read(store.name);
+  if (!saved || typeof saved.scope !== "string" || !Array.isArray(saved.rows)) return null;
+  return { rows: saved.rows, cursor: saved.cursor ?? null, scope: saved.scope };
+}
+
+/**
+ * Paint persisted rows before the network answers, when that is safe: only a
+ * public (`where: false`) model knows its scope before the server reports it.
+ * A scoped model's saved rows wait for the first list, which reuses them only
+ * when the server confirms the same scope, so a reload after a sign-out never
+ * shows the previous account's rows, online or offline.
+ */
 export function hydrateModel(model: string): void {
   const store = getSyncStore(model);
-  if (!store.descriptor.persist) return;
-
-  const saved = getPersistence()?.read(model);
-  if (saved?.rows?.length) store.hydrate(saved.rows, saved.cursor ?? null);
+  const saved = readPersisted(store);
+  if (!saved?.rows.length) return;
+  const current = store.scope ?? store.descriptor.scope ?? null;
+  if (current !== null && saved.scope === current) {
+    store.hydrate(saved.rows, saved.cursor, saved.scope);
+  }
 }
 
 // Register for the plugin handshake: the client hook may run before or after

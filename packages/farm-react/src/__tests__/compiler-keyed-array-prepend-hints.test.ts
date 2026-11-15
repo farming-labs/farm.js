@@ -31,7 +31,7 @@ describe("React AOT keyed-array prepend hints", () => {
     expect(result.optimizations.keyedArrayPrependHints).toBe(1);
     expect(result.code).toContain("createCompilerKeyedArrayPrepend");
     expect(result.code).toContain("prependIndexIndependent={true}");
-    expect(result.code).toContain("keyedRowsPrependHintedRuntimeFeature");
+    expect(result.code).toContain("keyedRowsPrependOnlyRuntimeFeature");
     await expect(
       transformWithEsbuild(result.code, "/app/KeyedArrayPrependHints.tsx", {
         loader: "tsx",
@@ -61,7 +61,7 @@ describe("React AOT keyed-array prepend hints", () => {
     expect(result.optimizations.keyedArrayPrependHints).toBe(1);
     expect(result.code).toContain("createCompilerKeyedArrayPrepend");
     expect(result.code).toContain("prependIndexIndependent={true}");
-    expect(result.code).toContain("keyedRowsPrependHintedRuntimeFeature");
+    expect(result.code).toContain("keyedRowsPrependOnlyRuntimeFeature");
     await expect(
       transformWithEsbuild(result.code, "/app/KeyedArrayPrependHints.tsx", {
         loader: "tsx",

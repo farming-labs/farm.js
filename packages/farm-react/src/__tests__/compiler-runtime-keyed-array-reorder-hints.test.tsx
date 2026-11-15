@@ -1,3 +1,4 @@
+import { observeWeakMapSets } from "./observe-weak-map-sets";
 import React, { StrictMode, useState } from "react";
 import { act } from "react";
 import { createRoot, hydrateRoot, type Root } from "react-dom/client";
@@ -214,12 +215,7 @@ function itemLabels(container: Element): string[] {
 
 function trackRowIndexWrites() {
   const writes = { count: 0 };
-  const originalSet = WeakMap.prototype.set;
-  vi.spyOn(WeakMap.prototype, "set").mockImplementation(function (
-    this: WeakMap<object, unknown>,
-    key: object,
-    value: unknown,
-  ) {
+  observeWeakMapSets((key, value) => {
     if (
       value !== null &&
       typeof value === "object" &&
@@ -228,7 +224,6 @@ function trackRowIndexWrites() {
     ) {
       writes.count += 1;
     }
-    return originalSet.call(this, key, value);
   });
   return writes;
 }
@@ -337,7 +332,8 @@ describe("compiled keyed-array reorder hints", () => {
           harness.removeAndReverse();
           await flushCompilerUpdates();
         });
-        expect(writes.count).toBe(expectedRows.length);
+        // Surviving rows keep their element entries; removed rows leave the root.
+        expect(writes.count).toBe(0);
         expect([...container.querySelectorAll("li")]).toEqual(expectedRows);
         expect(itemLabels(container)).toEqual(expectedItems.map((item) => item.label));
         harness.calls.length = 0;

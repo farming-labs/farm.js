@@ -157,6 +157,77 @@ export default { fetch() { return new Response("agent"); } };
     await expect(access(join(root, "wrangler.jsonc"))).resolves.toBeUndefined();
   });
 
+  it("runs both the agent's and Nitro's scheduled, queue and email handlers", async () => {
+    const root = await mkdtemp(join(tmpdir(), "farm-cf-agent-"));
+    const outputDir = join(root, ".output");
+    await mkdir(join(root, "src"), { recursive: true });
+    await mkdir(join(outputDir, "server"), { recursive: true });
+    await mkdir(join(outputDir, "public"), { recursive: true });
+    await writeFile(
+      join(root, "wrangler.jsonc"),
+      `{ "name": "farm-agent", "main": "src/agent.mjs", "compatibility_date": "2026-07-16" }\n`,
+    );
+    await writeFile(
+      join(root, "src", "agent.mjs"),
+      `const calls = (globalThis.__cfAgentCalls ??= []);
+export default {
+  fetch() { return new Response("agent"); },
+  async scheduled(controller) { calls.push("agent:scheduled:" + controller.cron); },
+  async queue(batch) {
+    calls.push("agent:queue");
+    if (batch.fail) throw new Error("agent queue failed");
+  },
+  tail() { calls.push("agent:tail"); },
+};
+`,
+    );
+    // Nitro's cloudflare-module output defines every event handler, used or not.
+    await writeFile(
+      join(outputDir, "server", "index.mjs"),
+      `const calls = (globalThis.__cfAgentCalls ??= []);
+export default {
+  fetch() { return new Response("farm"); },
+  scheduled(controller) { calls.push("farm:scheduled:" + controller.cron); },
+  email() { calls.push("farm:email"); },
+  queue() { calls.push("farm:queue"); },
+};
+`,
+    );
+
+    const result = await writeCloudflareAgentOutput({
+      root,
+      outputDir,
+      config: "wrangler.jsonc",
+      routePrefix: "/agents",
+    });
+    const calls: string[] = ((globalThis as { __cfAgentCalls?: string[] }).__cfAgentCalls = []);
+    try {
+      const wrapperUrl = decodeURI(pathToFileURL(result.wrapperPath).href);
+      const { default: worker } = await import(`${wrapperUrl}?test=${Date.now()}`);
+
+      await worker.scheduled({ cron: "0 * * * *" }, {}, {});
+      await worker.email({}, {}, {});
+      await worker.tail([], {}, {});
+      await worker.queue({ messages: [] }, {}, {});
+      expect(calls).toEqual([
+        "agent:scheduled:0 * * * *",
+        "farm:scheduled:0 * * * *",
+        "farm:email",
+        "agent:tail",
+        "agent:queue",
+        "farm:queue",
+      ]);
+
+      calls.length = 0;
+      await expect(worker.queue({ messages: [], fail: true }, {}, {})).rejects.toThrow(
+        "agent queue failed",
+      );
+      expect(calls).toEqual(["agent:queue", "farm:queue"]);
+    } finally {
+      delete (globalThis as { __cfAgentCalls?: string[] }).__cfAgentCalls;
+    }
+  });
+
   it("rewrites an environment-level main to the combined worker", async () => {
     const root = await mkdtemp(join(tmpdir(), "farm-cf-agent-env-"));
     const outputDir = join(root, ".output");

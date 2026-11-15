@@ -1,6 +1,6 @@
 {
   "name": "@farm.js/sentry",
-  "version": "0.1.1-beta.2",
+  "version": "0.1.73",
   "description": "Sentry error reporting and tracing for Farm.js",
   "keywords": [
     "error-tracking",
@@ -44,7 +44,8 @@
   "devDependencies": {
     "@sentry/node": "^10.71.0",
     "typescript": "^5.3.3",
-    "vitest": "^3.2.7"
+    "vite": "8.3.4",
+    "vitest": "5.0.5"
   },
   "peerDependencies": {
     "@sentry/node": ">=8.47.0"

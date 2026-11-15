@@ -326,6 +326,245 @@ test("reports loaded integrations and declared Farm packages that are not instal
   }
 });
 
+test("reports an optional feature package the app uses but has not installed", async () => {
+  const root = await createTempProject();
+
+  try {
+    await writeFile(path.join(root, "src/app/globals.css"), '@import "tailwindcss";\n');
+
+    const missing = await runFarmDoctor({ root, offline: true });
+    const missingCheck = missing.checks.find((entry) => entry.code === "OPTIONAL_PACKAGE_MISSING");
+    assert.equal(missingCheck?.status, "warn");
+    assert.equal(missingCheck?.title, "@tailwindcss/vite is not installed");
+    assert.match(missingCheck?.message || "", /src\/app\/globals\.css imports tailwindcss/);
+    assert.equal(
+      missingCheck?.action,
+      'Install "@tailwindcss/vite" to enable built-in Tailwind CSS support: pnpm add -D @tailwindcss/vite',
+    );
+
+    const packageDir = path.join(root, "node_modules/@tailwindcss/vite");
+    await mkdir(packageDir, { recursive: true });
+    await writeFile(
+      path.join(packageDir, "package.json"),
+      JSON.stringify({
+        name: "@tailwindcss/vite",
+        version: "4.3.3",
+        exports: { ".": "./index.mjs" },
+      }),
+    );
+
+    const installed = await runFarmDoctor({ root, offline: true });
+    assert.equal(
+      installed.checks.some((entry) => entry.code === "OPTIONAL_PACKAGE_MISSING"),
+      false,
+    );
+    assert.equal(
+      installed.checks.find((entry) => entry.code === "OPTIONAL_PACKAGE_INSTALLED")?.title,
+      "@tailwindcss/vite is installed",
+    );
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("fails when the app renders OG images without @vercel/og", async () => {
+  for (const [file, source, use] of [
+    [
+      "src/app/opengraph-image.tsx",
+      "export default () => <div>card</div>;\n",
+      /src\/app\/opengraph-image\.tsx renders a metadata image/,
+    ],
+    [
+      "src/app/api/card/route.tsx",
+      'import { ImageResponse } from "@farm.js/core/og";\nexport const GET = () => new ImageResponse(<div />);\n',
+      /src\/app\/api\/card\/route\.tsx imports @farm\.js\/core\/og/,
+    ],
+  ]) {
+    const root = await createTempProject();
+    try {
+      await mkdir(path.dirname(path.join(root, file)), { recursive: true });
+      await writeFile(path.join(root, file), source);
+
+      const report = await runFarmDoctor({ root, offline: true });
+      const check = report.checks.find(
+        (entry) =>
+          entry.code === "OPTIONAL_PACKAGE_MISSING" && entry.title.startsWith("@vercel/og"),
+      );
+      assert.equal(check?.status, "fail");
+      assert.match(check?.message || "", use);
+      assert.equal(
+        check?.action,
+        'Install "@vercel/og" to render OG and metadata images: pnpm add @vercel/og',
+      );
+      assert.equal(report.health, "error");
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  }
+});
+
+test("reports image optimization without sharp by provider", async () => {
+  const root = await createTempProject();
+  try {
+    await writeFile(
+      path.join(root, "src/app/hero.tsx"),
+      'import { Image } from "@farm.js/core/image";\nexport const Hero = () => <Image src="/a.png" width={10} height={10} alt="" />;\n',
+    );
+    const sharpCheck = (report) =>
+      report.checks.find(
+        (entry) => entry.code === "OPTIONAL_PACKAGE_MISSING" && entry.title.startsWith("sharp"),
+      );
+
+    const auto = await runFarmDoctor({ root, offline: true });
+    assert.equal(sharpCheck(auto)?.status, "warn");
+    assert.match(
+      sharpCheck(auto)?.message || "",
+      /src\/app\/hero\.tsx imports @farm\.js\/core\/image/,
+    );
+    assert.equal(sharpCheck(auto)?.action, 'Install "sharp" to optimize images: pnpm add sharp');
+
+    const configPath = path.join(root, "farm.config.mjs");
+    const source = await readFile(configPath, "utf8");
+    await writeFile(
+      configPath,
+      source.replace("export default {", "export default {\n  images: { provider: 'node' },"),
+    );
+    assert.equal(sharpCheck(await runFarmDoctor({ root, offline: true }))?.status, "fail");
+
+    await writeFile(
+      configPath,
+      source.replace("export default {", "export default {\n  images: { provider: 'none' },"),
+    );
+    assert.equal(sharpCheck(await runFarmDoctor({ root, offline: true })), undefined);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("fails when docs are enabled without @farming-labs/docs", async () => {
+  const root = await createTempProject();
+  try {
+    const configPath = path.join(root, "farm.config.mjs");
+    const source = await readFile(configPath, "utf8");
+    await writeFile(
+      configPath,
+      source.replace("export default {", "export default {\n  docs: true,"),
+    );
+
+    const report = await runFarmDoctor({ root, offline: true });
+    const check = report.checks.find(
+      (entry) =>
+        entry.code === "OPTIONAL_PACKAGE_MISSING" && entry.title.startsWith("@farming-labs/docs"),
+    );
+    assert.equal(check?.status, "fail");
+    assert.match(check?.message || "", /docs is enabled at \/docs/);
+    assert.equal(
+      check?.action,
+      'Install "@farming-labs/docs" to use the docs engine: pnpm add @farming-labs/docs',
+    );
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("reports whether experimental.serverComponents runs React Server Components", async () => {
+  const root = await createTempProject();
+  const writeConfig = (lines) =>
+    writeFile(
+      path.join(root, "farm.config.mjs"),
+      [
+        "export default {",
+        '  experimental: { serverComponents: { mode: "rsc" } },',
+        ...lines,
+        "};",
+        "",
+      ].join("\n"),
+    );
+
+  try {
+    // `{ mode: "rsc" }` without the packages fails with the install command.
+    await writeConfig([]);
+    const missing = await runFarmDoctor({ root, offline: true });
+    const missingCheck = missing.checks.find(
+      (entry) => entry.code === "SERVER_COMPONENTS_PACKAGES_MISSING",
+    );
+    assert.equal(missingCheck?.status, "fail");
+
+    for (const name of ["@farm.js/plugin", "@vitejs/plugin-rsc", "react-server-dom-webpack"]) {
+      const dir = path.join(root, "node_modules", ...name.split("/"));
+      await mkdir(dir, { recursive: true });
+      await writeFile(path.join(dir, "package.json"), JSON.stringify({ name, version: "1.0.0" }));
+    }
+    const ready = await runFarmDoctor({ root, offline: true });
+    assert.equal(
+      ready.checks.find((entry) => entry.code === "SERVER_COMPONENTS_READY")?.status,
+      "pass",
+    );
+
+    // RSC runs the configure and client hooks of plugins, and the check says so.
+    await writeConfig(['  plugins: [{ name: "app:recorder", client: { setup() {} } }],']);
+    const withPlugins = await runFarmDoctor({ root, offline: true });
+    assert.equal(
+      withPlugins.checks.find((entry) => entry.code === "SERVER_COMPONENTS_READY")?.message,
+      "farm dev and farm build run the RSC pipeline; it ignores plugins (except their configure and client hooks).",
+    );
+
+    // `true` and `{ mode: "islands" }` both run islands mode.
+    for (const value of ["true", '{ mode: "islands" }']) {
+      await writeFile(
+        path.join(root, "farm.config.mjs"),
+        `export default { experimental: { serverComponents: ${value} } };\n`,
+      );
+      const islands = await runFarmDoctor({ root, offline: true });
+      assert.equal(
+        islands.checks.find((entry) => entry.code === "SERVER_COMPONENTS_ISLANDS")?.status,
+        "pass",
+      );
+    }
+
+    // Config RSC cannot run that decides what a request may receive stops it, as farm dev does.
+    await writeConfig(['  routeRules: { "/admin/**": { headers: { "x-admin": "1" } } },']);
+    const blocked = await runFarmDoctor({ root, offline: true });
+    const blockedCheck = blocked.checks.find((entry) => entry.code === "SERVER_COMPONENTS_BLOCKED");
+    assert.equal(blockedCheck?.status, "fail");
+    assert.match(blockedCheck?.message || "", /does not run `routeRules` yet/);
+
+    // Config headers(), redirects() and rewrites() run in RSC and no longer block it.
+    await writeConfig(["  headers() { return []; },"]);
+    const withHeaders = await runFarmDoctor({ root, offline: true });
+    assert.equal(
+      withHeaders.checks.find((entry) => entry.code === "SERVER_COMPONENTS_BLOCKED"),
+      undefined,
+    );
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("skips optional feature packages the app does not use", async () => {
+  const root = await createTempProject();
+
+  try {
+    await writeFile(path.join(root, "src/app/globals.css"), "body { margin: 0; }\n");
+    const plain = await runFarmDoctor({ root, offline: true });
+    assert.equal(
+      plain.checks.some((entry) => entry.code.startsWith("OPTIONAL_PACKAGE_")),
+      false,
+    );
+
+    // A project PostCSS config owns Tailwind, so Farm's built-in plugin is unused.
+    await writeFile(path.join(root, "src/app/globals.css"), '@import "tailwindcss";\n');
+    await writeFile(path.join(root, "postcss.config.mjs"), "export default { plugins: {} };\n");
+    const postcss = await runFarmDoctor({ root, offline: true });
+    assert.equal(
+      postcss.checks.some((entry) => entry.code.startsWith("OPTIONAL_PACKAGE_")),
+      false,
+    );
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
 test("checks beta registry tags only when requested and reports a stale beta", async () => {
   const root = await createTempProject();
   const typesPath = path.join(root, "src/farm.d.ts");
@@ -353,6 +592,88 @@ test("checks beta registry tags only when requested and reports a stale beta", a
     assert.ok(report.checks.some((check) => check.code === "REGISTRY_BETA_RESOLVED"));
     assert.ok(report.checks.some((check) => check.code === "FARM_BETA_STALE"));
     assert.equal(await readFile(typesPath, "utf8"), before);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("compares registry versions by precedence across the beta and latest tags", async () => {
+  const root = await createTempProject();
+  const packagePath = path.join(root, "package.json");
+  const signals = [];
+  const runWithDeclared = async (declared) => {
+    const packageJson = JSON.parse(await readFile(packagePath, "utf8"));
+    packageJson.dependencies["@farm.js/core"] = declared;
+    await writeFile(packagePath, JSON.stringify(packageJson), "utf8");
+    const report = await runFarmDoctor({
+      root,
+      offline: true,
+      registry: true,
+      fetch: async (_input, init) => {
+        signals.push(init?.signal);
+        return Response.json({
+          "dist-tags": { beta: "0.1.3-beta.0", latest: "0.1.17" },
+          versions: { "0.1.3-beta.0": {}, "0.1.17": {} },
+        });
+      },
+    });
+    return report.checks.find((check) => check.code === "FARM_BETA_STALE");
+  };
+
+  try {
+    assert.equal(await runWithDeclared("0.1.17"), undefined);
+    assert.equal(await runWithDeclared("0.1.18-beta.0"), undefined);
+
+    const stale = await runWithDeclared("0.1.16");
+    assert.equal(stale?.status, "warn");
+    assert.match(stale?.message || "", /declares 0\.1\.16; registry latest is 0\.1\.17/);
+    assert.match(stale?.action || "", /^Run farm upgrade,/);
+
+    assert.ok(signals.length > 0);
+    assert.ok(signals.every((signal) => signal instanceof AbortSignal));
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("resolves unscoped workspace aliases and flow-style workspace packages", async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "farm-cli-doctor-workspace-alias-"));
+
+  try {
+    await mkdir(path.join(root, "packages/core"), { recursive: true });
+    await mkdir(path.join(root, "packages/bar"), { recursive: true });
+    await mkdir(path.join(root, "src/app"), { recursive: true });
+    await writeFile(
+      path.join(root, "package.json"),
+      JSON.stringify({
+        name: "doctor-workspace-alias",
+        packageManager: "pnpm@8.12.1",
+        dependencies: { "@farm.js/core": "workspace:*", "bar-alias": "workspace:bar@*" },
+      }),
+    );
+    await writeFile(path.join(root, "pnpm-workspace.yaml"), "packages: ['packages/*']\n");
+    await writeFile(
+      path.join(root, "packages/core/package.json"),
+      JSON.stringify({ name: "@farm.js/core", version: "0.1.0-beta.106" }),
+    );
+    await writeFile(
+      path.join(root, "packages/bar/package.json"),
+      JSON.stringify({ name: "bar", version: "1.0.0" }),
+    );
+    await writeFile(path.join(root, "farm.config.mjs"), "export default {};\n");
+    await writeFile(path.join(root, "src/app/page.tsx"), "export default () => null;\n");
+    await writeFile(
+      path.join(root, "src/app/layout.tsx"),
+      "export default ({ children }) => children;\n",
+    );
+    await generateFarmArtifacts({ root });
+
+    const report = await runFarmDoctor({ root, offline: true });
+    const missing = report.checks.find((check) => check.code === "LOCAL_PACKAGES_MISSING");
+    const resolved = report.checks.find((check) => check.code === "LOCAL_PACKAGES_RESOLVED");
+
+    assert.equal(missing, undefined, missing?.message);
+    assert.match(resolved?.message || "", /@farm\.js\/core, bar-alias/);
   } finally {
     await rm(root, { recursive: true, force: true });
   }
@@ -533,6 +854,38 @@ test("recognizes routes using the configured renderer extension", async () => {
     assert.ok(report.checks.some((check) => check.code === "ROOT_LAYOUT_READY"));
     assert.ok(!report.checks.some((check) => check.code === "NO_PAGE_ROUTES"));
     assert.ok(!report.checks.some((check) => check.code === "ROOT_LAYOUT_MISSING"));
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("treats a renderer: false app as API-only", async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "farm-cli-doctor-backend-"));
+
+  try {
+    await mkdir(path.join(root, "src/app/api/users"), { recursive: true });
+    await writeFile(
+      path.join(root, "package.json"),
+      JSON.stringify({ name: "backend-doctor", dependencies: { "@farm.js/core": "workspace:*" } }),
+    );
+    await writeFile(path.join(root, "farm.config.mjs"), "export default { renderer: false };\n");
+    await writeFile(
+      path.join(root, "src/app/api/users/route.ts"),
+      "export function GET() { return Response.json([]); }\n",
+    );
+
+    const report = await runFarmDoctor({ root, offline: true, fix: true });
+
+    assert.ok(report.checks.some((check) => check.code === "API_ROUTES_READY"));
+    for (const code of ["NO_PAGE_ROUTES", "ROOT_LAYOUT_MISSING", "ROOT_LAYOUT_READY"]) {
+      assert.ok(!report.checks.some((check) => check.code === code), code);
+    }
+    // The safe fixes must not add a React layout to an app without pages.
+    await assert.rejects(stat(path.join(root, "src/app/layout.tsx")));
+
+    await rm(path.join(root, "src/app/api"), { recursive: true });
+    const empty = await runFarmDoctor({ root, offline: true });
+    assert.equal(empty.checks.find((check) => check.code === "NO_API_ROUTES")?.status, "fail");
   } finally {
     await rm(root, { recursive: true, force: true });
   }

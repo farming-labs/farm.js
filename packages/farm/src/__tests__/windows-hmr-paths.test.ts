@@ -51,7 +51,7 @@ describe("Windows HMR paths", () => {
       modules: [],
       server: {
         moduleGraph: { invalidateModule: vi.fn() },
-        ssrLoadModule,
+        environments: { ssr: { runner: { import: ssrLoadModule } } },
       },
     });
 
@@ -70,7 +70,7 @@ describe("Windows HMR paths", () => {
       server: {
         config: { root: "C:\\project" },
         moduleGraph: { invalidateModule: vi.fn() },
-        ssrLoadModule,
+        environments: { ssr: { runner: { import: ssrLoadModule } } },
       },
     });
 

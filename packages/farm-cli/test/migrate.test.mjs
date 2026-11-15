@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { execFile } from "node:child_process";
-import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, symlink, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { createRequire } from "node:module";
@@ -294,11 +294,251 @@ export default function AboutPage() {
     const packageJson = JSON.parse(await readFile(path.join(root, "package.json"), "utf8"));
     assert.equal(packageJson.scripts.dev, "farm dev");
     assert.equal(packageJson.scripts.build, "farm build");
-    assert.equal(packageJson.scripts.start, "node .output/server/index.mjs");
+    assert.equal(packageJson.scripts.start, "node .farm/.output/server/index.mjs");
     assert.equal(packageJson.dependencies["@farm.js/core"], "latest");
     assert.equal(packageJson.devDependencies["@farm.js/cli"], "latest");
   } finally {
     await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("rewrites Next imports in shared code outside the App Router", async () => {
+  const root = await createTempProject({
+    scripts: { dev: "next dev", build: "next build" },
+    dependencies: { next: "latest", react: "latest", "react-dom": "latest" },
+  });
+
+  try {
+    await mkdir(path.join(root, "app"), { recursive: true });
+    await mkdir(path.join(root, "components"), { recursive: true });
+    await mkdir(path.join(root, "content"), { recursive: true });
+    await writeFile(
+      path.join(root, "app", "page.tsx"),
+      `import { Nav } from "@/components/nav";\nexport default function Home() {\n  return <Nav />;\n}\n`,
+      "utf8",
+    );
+    await writeFile(
+      path.join(root, "components", "nav.tsx"),
+      `import Link from "next/link";\nimport Image from "next/image";\nimport { usePathname } from "next/navigation";\n\nexport function Nav() {\n  usePathname();\n  return <Link href="/"><Image alt="" src="/a.png" width={1} height={1} /></Link>;\n}\n`,
+      "utf8",
+    );
+    // A docs page that shows Next.js code stays as written.
+    const guide = '```tsx\nimport Link from "next/link";\n```\n';
+    await writeFile(path.join(root, "content", "guide.mdx"), guide, "utf8");
+    await writeFile(
+      path.join(root, "tsconfig.json"),
+      // Next's generated tsconfig: the "include" globs follow the "@/*" alias.
+      `{\n  // Next's default alias\n  "compilerOptions": { "paths": { "@/*": ["./*"] } },\n  "include": ["next-env.d.ts", "**/*.ts", "**/*.tsx"],\n}\n`,
+      "utf8",
+    );
+    await writeFile(path.join(root, "next.config.ts"), "export default {};\n", "utf8");
+
+    const plan = await createFrameworkMigrationPlan(root, "next");
+    assert.ok(
+      plan.manual.some((note) => note.includes("components/nav.tsx; it still imports next/image")),
+    );
+    assert.ok(plan.manual.some((note) => note.includes("maps @/* to ./*")));
+    assert.ok(plan.manual.some((note) => note.includes("next.config.*")));
+
+    await migrateFarm({ root, source: "next", write: true });
+
+    const nav = await readFile(path.join(root, "components", "nav.tsx"), "utf8");
+    assert.match(nav, /import \{ Link \} from "@farm.js\/core\/client";/);
+    assert.match(nav, /from "@farm.js\/core\/navigation";/);
+    assert.match(nav, /from "next\/image";/);
+    assert.equal(await readFile(path.join(root, "content", "guide.mdx"), "utf8"), guide);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("leaves Next imports Farm does not export in place and names them", async () => {
+  const root = await createTempProject({
+    dependencies: { next: "latest", react: "latest", "react-dom": "latest" },
+  });
+
+  try {
+    await mkdir(path.join(root, "app"), { recursive: true });
+    const page = `import { useParams, usePathname } from "next/navigation";
+import { redirect, RedirectType } from "next/navigation";
+import {
+  notFound,
+  useRouter as useAppRouter,
+  type FarmRedirectStatus,
+} from "next/navigation";
+import type { ReadonlyURLSearchParams } from "next/navigation";
+import { useSelectedLayoutSegment as useSegment } from "next/navigation";
+import * as navigation from "next/navigation";
+import { cookies, draftMode } from "next/headers";
+import { headers } from "next/headers";
+export { useSearchParams } from "next/navigation";
+export * from "next/headers";
+const loadImage = () => import("next/image");
+const router = require("next/router");
+
+export default function Page() {
+  return null;
+}
+`;
+    await writeFile(path.join(root, "app", "page.tsx"), page, "utf8");
+
+    const plan = await createFrameworkMigrationPlan(root, "next");
+    const notes = plan.manual.filter((note) => note.startsWith("Review page.tsx;"));
+    for (const expected of [
+      "it still imports next/navigation because @farm.js/core/navigation does not export useParams.",
+      "it still imports next/navigation because @farm.js/core/navigation does not export RedirectType.",
+      "it still imports next/navigation because @farm.js/core/navigation does not export ReadonlyURLSearchParams.",
+      "it still imports next/navigation because @farm.js/core/navigation does not export useSelectedLayoutSegment.",
+      "it still imports next/navigation because @farm.js/core/navigation does not export every name (*).",
+      "it still imports next/headers because @farm.js/core/headers does not export draftMode.",
+      "it still imports next/headers because @farm.js/core/headers does not export every name (*).",
+      "it loads next/image with import(), which the migration does not rewrite.",
+      "it loads next/router with require(), which the migration does not rewrite.",
+    ]) {
+      assert.ok(
+        notes.some((note) => note.endsWith(expected)),
+        `missing note: ${expected}\n${notes.join("\n")}`,
+      );
+    }
+    assert.equal(notes.length, 9, notes.join("\n"));
+
+    await migrateFarm({ root, source: "next", write: true });
+
+    const migrated = await readFile(path.join(root, "src", "app", "page.tsx"), "utf8");
+    // Supported imports move to Farm; the rest stay as written instead of breaking the build.
+    for (const statement of [
+      `import { useParams, usePathname } from "next/navigation";`,
+      `import { redirect, RedirectType } from "next/navigation";`,
+      `import type { ReadonlyURLSearchParams } from "next/navigation";`,
+      `import { useSelectedLayoutSegment as useSegment } from "next/navigation";`,
+      `import * as navigation from "next/navigation";`,
+      `import { cookies, draftMode } from "next/headers";`,
+      `export * from "next/headers";`,
+      `const loadImage = () => import("next/image");`,
+      `const router = require("next/router");`,
+      `import {\n  notFound,\n  useRouter as useAppRouter,\n  type FarmRedirectStatus,\n} from "@farm.js/core/navigation";`,
+      `import { headers } from "@farm.js/core/headers";`,
+      `export { useSearchParams } from "@farm.js/core/navigation";`,
+    ]) {
+      assert.ok(migrated.includes(statement), `missing: ${statement}\n${migrated}`);
+    }
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("rewrites next/navigation and next/headers names exactly as core exports them", async () => {
+  const ts = require("typescript");
+  const migrateSource = await readFile(path.resolve(testDir, "../src/migrate.ts"), "utf8");
+  for (const [moduleId, entry] of [
+    ["next/navigation", "navigation.ts"],
+    ["next/headers", "headers.ts"],
+  ]) {
+    const sourcePath = path.resolve(testDir, "../../farm/src", entry);
+    const file = ts.createSourceFile(
+      sourcePath,
+      await readFile(sourcePath, "utf8"),
+      ts.ScriptTarget.Latest,
+    );
+    const exported = new Set();
+    for (const statement of file.statements) {
+      if (ts.isExportDeclaration(statement)) {
+        assert.ok(statement.exportClause, `${entry} uses export *; list its names in migrate.ts`);
+        for (const element of statement.exportClause.elements) exported.add(element.name.text);
+      } else if (
+        statement.modifiers?.some((modifier) => modifier.kind === ts.SyntaxKind.ExportKeyword)
+      ) {
+        if (ts.isVariableStatement(statement)) {
+          for (const declaration of statement.declarationList.declarations) {
+            exported.add(declaration.name.text);
+          }
+        } else if (statement.name) {
+          exported.add(statement.name.text);
+        }
+      }
+    }
+    const block = migrateSource.match(
+      new RegExp(`"${moduleId}": \\{[\\s\\S]*?names: new Set\\(\\[([\\s\\S]*?)\\]\\)`),
+    );
+    assert.ok(block, `no allowlist for ${moduleId}`);
+    const allowed = new Set(Array.from(block[1].matchAll(/"([^"]+)"/g), (match) => match[1]));
+    assert.deepEqual([...allowed].sort(), [...exported].sort(), moduleId);
+
+    // Every name core exports is rewritten.
+    const root = await createTempProject({ dependencies: { next: "latest" } });
+    try {
+      await mkdir(path.join(root, "app"), { recursive: true });
+      await writeFile(
+        path.join(root, "app", "page.tsx"),
+        `import { ${[...exported].join(", ")} } from "${moduleId}";\n`,
+        "utf8",
+      );
+      const plan = await createFrameworkMigrationPlan(root, "next");
+      assert.ok(!plan.manual.some((note) => note.includes(`imports ${moduleId}`)), moduleId);
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  }
+});
+
+test("walks shared code without following symlinks or skipping nested build folders", async () => {
+  const root = await createTempProject({ dependencies: { next: "latest" } });
+  const outside = await mkdtemp(path.join(os.tmpdir(), "farm-cli-migrate-outside-"));
+  const nextImport = `import { usePathname } from "next/navigation";\nexport const a = usePathname;\n`;
+
+  try {
+    await mkdir(path.join(root, "app"), { recursive: true });
+    await writeFile(path.join(root, "app", "page.tsx"), "export default () => null;\n", "utf8");
+    await mkdir(path.join(root, "lib", "build"), { recursive: true });
+    await writeFile(path.join(root, "lib", "build", "link.tsx"), nextImport, "utf8");
+    await mkdir(path.join(root, "build"), { recursive: true });
+    await writeFile(path.join(root, "build", "output.js"), nextImport, "utf8");
+    await writeFile(path.join(outside, "shared.ts"), nextImport, "utf8");
+    // A link back to a parent would loop forever (ELOOP), and one leaving the project must
+    // not be written through.
+    await symlink(root, path.join(root, "lib", "loop"), "junction");
+    await symlink(outside, path.join(root, "lib", "outside"), "junction");
+
+    await migrateFarm({ root, source: "next", write: true });
+
+    assert.match(
+      await readFile(path.join(root, "lib", "build", "link.tsx"), "utf8"),
+      /from "@farm.js\/core\/navigation"/,
+    );
+    assert.equal(await readFile(path.join(root, "build", "output.js"), "utf8"), nextImport);
+    assert.equal(await readFile(path.join(outside, "shared.ts"), "utf8"), nextImport);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+    await rm(outside, { recursive: true, force: true });
+  }
+});
+
+test("resolves the tsconfig @/* alias against baseUrl", async () => {
+  for (const [baseUrl, note] of [
+    ["./src", null],
+    ["src/", null],
+    ["./lib", "maps @/* to ./lib/*"],
+  ]) {
+    const root = await createTempProject({ dependencies: { next: "latest" } });
+    try {
+      await mkdir(path.join(root, "app"), { recursive: true });
+      await writeFile(path.join(root, "app", "page.tsx"), "export default () => null;\n", "utf8");
+      await writeFile(
+        path.join(root, "tsconfig.json"),
+        JSON.stringify({ compilerOptions: { baseUrl, paths: { "@/*": ["./*"] } } }),
+        "utf8",
+      );
+      const plan = await createFrameworkMigrationPlan(root, "next");
+      const aliasNotes = plan.manual.filter((entry) => entry.includes("maps @/* to"));
+      if (note)
+        assert.ok(
+          aliasNotes.some((entry) => entry.includes(note)),
+          baseUrl,
+        );
+      else assert.deepEqual(aliasNotes, [], baseUrl);
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
   }
 });
 
@@ -376,6 +616,231 @@ function PostPage() {
     const packageJson = JSON.parse(await readFile(path.join(root, "package.json"), "utf8"));
     assert.equal(packageJson.scripts.dev, "farm dev");
     assert.equal(packageJson.scripts.build, "farm build");
+    // TanStack starters have no start script; add the one new Farm projects use.
+    assert.equal(packageJson.scripts.start, "node .farm/.output/server/index.mjs");
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("replaces a TanStack start script and keeps a custom one", async () => {
+  for (const [start, expected] of [
+    ["vinxi start", "node .farm/.output/server/index.mjs"],
+    ["node .output/server/index.mjs", "node .farm/.output/server/index.mjs"],
+    ["node server/custom.mjs", "node server/custom.mjs"],
+  ]) {
+    const root = await createTempProject({
+      scripts: { dev: "vinxi dev", build: "vinxi build", start },
+      dependencies: { "@tanstack/react-router": "latest" },
+    });
+    try {
+      await mkdir(path.join(root, "src", "routes"), { recursive: true });
+      await writeFile(
+        path.join(root, "src", "routes", "index.tsx"),
+        "export default function Home() { return null; }\n",
+        "utf8",
+      );
+      await migrateFarm({ root, source: "tanstack", write: true });
+      const packageJson = JSON.parse(await readFile(path.join(root, "package.json"), "utf8"));
+      assert.equal(packageJson.scripts.start, expected, start);
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  }
+});
+
+async function planNextMiddlewareFixture(files) {
+  const root = await createTempProject({ dependencies: { next: "latest" } });
+  for (const [file, content] of Object.entries(files)) {
+    await mkdir(path.dirname(path.join(root, file)), { recursive: true });
+    await writeFile(path.join(root, file), content, "utf8");
+  }
+  return { root, plan: await createFrameworkMigrationPlan(root, "next") };
+}
+
+function plannedFile(root, plan, file) {
+  return plan.operations.find((operation) => operation.path === path.join(root, file));
+}
+
+test("moves src/middleware.ts next to a src/app Next app into src/app", async () => {
+  const { root, plan } = await planNextMiddlewareFixture({
+    "src/app/page.tsx": "export default function Home() { return null; }\n",
+    "src/middleware.ts": `export function middleware(request) {
+  return Response.redirect(new URL("/login", request.url));
+}
+
+export const config = { matcher: ["/dashboard/:path*"] };
+`,
+  });
+  try {
+    const operation = plannedFile(root, plan, "src/app/middleware.ts");
+    assert.ok(operation, "src/middleware.ts must move into the app directory");
+    assert.equal(operation.skipped, false);
+    assert.match(operation.content, /export function middleware\(request\)/);
+    assert.deepEqual(
+      plan.warnings.filter((warning) => warning.includes("matcher")),
+      [],
+    );
+
+    await migrateFarm({ root, source: "next", write: true });
+    assert.match(
+      await readFile(path.join(root, "src", "app", "middleware.ts"), "utf8"),
+      /matcher: \["\/dashboard\/:path\*"\]/,
+    );
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("moves a Next 16 proxy.ts and exposes its proxy export as middleware", async () => {
+  const cases = [
+    [
+      "export function proxy(request) {\n  return Response.redirect(new URL('/login', request.url));\n}\n",
+      /export function proxy\(request\)[\s\S]*export \{ proxy as middleware \};/,
+    ],
+    [
+      "export const proxy = async (request) => undefined;\n",
+      /export const proxy = [\s\S]*export \{ proxy as middleware \};/,
+    ],
+    [
+      "export default async function proxy(request) {\n  return undefined;\n}\n",
+      /^export async function proxy\(request\)[\s\S]*export \{ proxy as middleware \};/,
+    ],
+    [
+      "export default function (request) {\n  return undefined;\n}\n",
+      /^export function middleware\(request\)/,
+    ],
+    ["export default clerkMiddleware();\n", /^export const middleware = clerkMiddleware\(\);/],
+    [
+      "function check(request) {}\nexport { check as proxy };\n",
+      /export \{ check as middleware \}/,
+    ],
+  ];
+  for (const [file, location] of [
+    ["proxy.ts", "app/page.tsx"],
+    ["src/proxy.ts", "src/app/page.tsx"],
+  ]) {
+    for (const [source, expected] of cases) {
+      const { root, plan } = await planNextMiddlewareFixture({
+        [location]: "export default function Home() { return null; }\n",
+        [file]: source,
+      });
+      try {
+        const operation = plannedFile(root, plan, "src/app/middleware.ts");
+        assert.ok(operation, `${file} must move into src/app/middleware.ts`);
+        assert.match(operation.content, expected, source);
+        assert.doesNotMatch(operation.content, /export default/, source);
+      } finally {
+        await rm(root, { recursive: true, force: true });
+      }
+    }
+  }
+});
+
+test("follows Next's middleware location and warns about the file Next ignores", async () => {
+  const { root, plan } = await planNextMiddlewareFixture({
+    "src/app/page.tsx": "export default function Home() { return null; }\n",
+    "src/middleware.ts": "export function middleware() { return new Response('src'); }\n",
+    "middleware.ts": "export function middleware() { return new Response('root'); }\n",
+  });
+  try {
+    assert.match(plannedFile(root, plan, "src/app/middleware.ts").content, /'src'/);
+    assert.ok(
+      plan.warnings.some(
+        (warning) =>
+          warning.startsWith("middleware.ts was not migrated") &&
+          warning.includes("src/middleware.ts"),
+      ),
+      plan.warnings.join("\n"),
+    );
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("warns when a migrated middleware matcher is a regex string", async () => {
+  const { root, plan } = await planNextMiddlewareFixture({
+    "app/page.tsx": "export default function Home() { return null; }\n",
+    "middleware.ts": `export function middleware() {}
+
+export const config = {
+  matcher: [
+    "/((?!_next|[^?]*\\\\.(?:html?|css|js(?!on)|jpe?g|webp|png|gif|svg|ttf|woff2?|ico|csv|docx?|xlsx?|zip|webmanifest)).*)",
+    "/(api|trpc)(.*)",
+    "/dashboard/:path*",
+  ],
+};
+`,
+  });
+  try {
+    const warnings = plan.warnings.filter((warning) => warning.includes("RegExp"));
+    assert.equal(warnings.length, 2, plan.warnings.join("\n"));
+    assert.ok(warnings[0].includes('"/((?!_next|[^?]*\\.(?:html?|css'), warnings[0]);
+    assert.ok(warnings[1].includes('"/(api|trpc)(.*)"'), warnings[1]);
+    assert.ok(warnings.every((warning) => warning.includes("will not run")));
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("warns when a migrated middleware matcher uses .* or an inline param", async () => {
+  const { root, plan } = await planNextMiddlewareFixture({
+    "app/page.tsx": "export default function Home() { return null; }\n",
+    "middleware.ts": `export function middleware() {}
+
+export const config = {
+  matcher: ["/admin/.*", "/admin.+", "/user-:id", "/dash:path*", "/c++", "/admin*", "/*.json"],
+};
+`,
+  });
+  try {
+    const warnings = plan.warnings.filter((warning) => warning.includes("RegExp"));
+    assert.equal(warnings.length, 4, plan.warnings.join("\n"));
+    for (const [index, matcher] of [
+      "/admin/.*",
+      "/admin.+",
+      "/user-:id",
+      "/dash:path*",
+    ].entries()) {
+      assert.ok(warnings[index].includes(`"${matcher}"`), warnings[index]);
+    }
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("warns that a TanStack pathless layout's beforeLoad check is not migrated", async () => {
+  const root = await createTempProject({ dependencies: { "@tanstack/react-router": "latest" } });
+  try {
+    const routes = path.join(root, "src", "routes");
+    await mkdir(path.join(routes, "_authed"), { recursive: true });
+    await writeFile(
+      path.join(routes, "_authed.tsx"),
+      `export const Route = createFileRoute("/_authed")({
+  beforeLoad: ({ context }) => {
+    if (!context.user) throw redirect({ to: "/login" });
+  },
+});
+`,
+      "utf8",
+    );
+    await writeFile(
+      path.join(routes, "_authed", "dashboard.tsx"),
+      "export default function Dashboard() { return null; }\n",
+      "utf8",
+    );
+    await writeFile(
+      path.join(routes, "about.tsx"),
+      "export default function About() { return null; }\n",
+      "utf8",
+    );
+
+    const plan = await createFrameworkMigrationPlan(root, "tanstack");
+    const warning = plan.warnings.find((entry) => entry.includes("beforeLoad"));
+    assert.ok(warning, plan.warnings.join("\n"));
+    assert.match(warning, /^src\/routes\/_authed\.tsx guards/);
+    assert.match(warning, /not active for src\/app\/dashboard\/page\.tsx;/);
+    assert.doesNotMatch(warning, /about/);
   } finally {
     await rm(root, { recursive: true, force: true });
   }

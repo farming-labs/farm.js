@@ -322,8 +322,44 @@ describe("client plugin lifecycle", () => {
     expect(document.querySelector("[data-farm-runtime-error-overlay]")).toBeNull();
   });
 
+  it("keeps ResizeObserver loop notices out of the overlay but still reports them", async () => {
+    const phases: string[] = [];
+    const manager = createManager([
+      {
+        name: "test:errors",
+        definition: {
+          error({ phase }) {
+            phases.push(phase);
+          },
+        },
+      },
+    ]);
+    await manager.start();
+
+    for (const message of [
+      "ResizeObserver loop completed with undelivered notifications.",
+      "ResizeObserver loop limit exceeded",
+    ]) {
+      window.dispatchEvent(new ErrorEvent("error", { message }));
+    }
+    await Promise.resolve();
+    expect(document.querySelector("[data-farm-runtime-error-overlay]")?.hidden ?? true).toBe(true);
+    expect(phases).toEqual(["window", "window"]);
+
+    // An app that throws an Error with the same message is a real failure.
+    const thrown = new Error("ResizeObserver loop completed with undelivered notifications.");
+    window.dispatchEvent(new ErrorEvent("error", { error: thrown, message: thrown.message }));
+    await Promise.resolve();
+    expect(document.querySelector<HTMLElement>("[data-farm-runtime-error-overlay]")?.hidden).toBe(
+      false,
+    );
+
+    await manager.close();
+  });
+
   it("does not install the runtime error overlay in production", async () => {
-    const manager = createClientPluginManager([], {
+    const error = vi.fn();
+    const manager = createClientPluginManager([{ name: "monitoring", definition: { error } }], {
       router: createRouter(),
       isDev: false,
       isProd: true,
@@ -332,8 +368,15 @@ describe("client plugin lifecycle", () => {
     await manager.start();
 
     await manager.reportError(new Error("Production failure"), "window");
+    window.dispatchEvent(new ErrorEvent("error", { error: new Error("Browser failure") }));
+    await vi.waitFor(() => expect(error).toHaveBeenCalledTimes(2));
 
     expect(document.querySelector("[data-farm-runtime-error-overlay]")).toBeNull();
+    const remove = vi.spyOn(window, "removeEventListener");
     await manager.close();
+    expect(remove).toHaveBeenCalledWith("error", expect.any(Function));
+    expect(remove).toHaveBeenCalledWith("unhandledrejection", expect.any(Function));
+    await manager.reportError(new Error("Closed runtime"), "window");
+    expect(error).toHaveBeenCalledTimes(2);
   });
 });

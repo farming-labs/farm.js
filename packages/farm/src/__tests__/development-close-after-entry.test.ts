@@ -12,7 +12,9 @@ const temporaryRoots = new Set<string>();
 
 afterEach(async () => {
   await Promise.all(
-    [...temporaryRoots].map((root) => fs.rm(root, { recursive: true, force: true })),
+    [...temporaryRoots].map((root) =>
+      fs.rm(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 }),
+    ),
   );
   temporaryRoots.clear();
 });

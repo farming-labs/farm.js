@@ -1,3 +1,4 @@
+import { loadFarmDevModule } from "../dev-module";
 import type { PluginOption } from "vite";
 import type { ViteDevServer } from "vite";
 import type { IncomingMessage, ServerResponse } from "http";
@@ -76,7 +77,7 @@ export function devServerPlugin(): PluginOption {
           const serverEntryPath = "/@farm/server-entry";
           let serverEntry;
           try {
-            serverEntry = await viteDevServer.ssrLoadModule(serverEntryPath);
+            serverEntry = await loadFarmDevModule(viteDevServer, serverEntryPath);
           } catch {
             // Fallback: try to load from actual file
             const { join } = await import("path");
@@ -89,7 +90,7 @@ export function devServerPlugin(): PluginOption {
               "nitro",
               "server-entry.ts",
             );
-            serverEntry = await viteDevServer.ssrLoadModule(actualPath);
+            serverEntry = await loadFarmDevModule(viteDevServer, actualPath);
           }
 
           // Call the fetch handler

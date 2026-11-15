@@ -6,6 +6,7 @@ import {
   type FarmIslandReplayKind,
   type FarmIslandStrategy,
 } from "../island";
+import { observeIslandVisibility } from "./island-triggers";
 
 export interface ScheduleFarmIslandHydrationOptions<T> {
   container: Element;
@@ -38,15 +39,18 @@ function getPreHydrationClickQueue(): FarmQueuedClick[] | null {
     : null;
 }
 
-function findQueuedTarget(container: Element): FarmQueuedInteraction | null {
+function hasQueuedTarget(container: Element): boolean {
   const queue = getPreHydrationClickQueue();
-  if (!queue) return null;
-  for (const item of queue) {
-    if (item?.target instanceof Element && container.contains(item.target)) {
-      return { target: item.target, kind: toReplayKind(item.kind) };
-    }
-  }
-  return null;
+  return !!queue?.some(
+    (item) => item?.target instanceof Element && container.contains(item.target),
+  );
+}
+
+/** Whether replaying `target` submits a form: a held submit, or a click on a submit button. */
+function submitsForm({ target, kind }: FarmQueuedInteraction): boolean {
+  if (kind === "submit") return true;
+  const control = target as Element & { form?: HTMLFormElement | null; type?: string };
+  return !!control.form && control.type === "submit";
 }
 
 function takeQueuedTargets(container: Element): FarmQueuedInteraction[] {
@@ -77,6 +81,16 @@ function runWhenIdle(callback: () => void): () => void {
 
   const handle = window.setTimeout(callback, 1);
   return () => window.clearTimeout(handle);
+}
+
+/**
+ * The element a click before hydration is held on: a control, or a same-page link, whose handler
+ * the island may need (a table of contents marking its heading). Any other link navigates.
+ */
+export function heldClickTarget(target: Element): Element | null {
+  const link = target.closest("a[href]");
+  if (link) return link.getAttribute("href")?.startsWith("#") ? link : null;
+  return target.closest(FARM_ISLAND_REPLAYABLE_SELECTOR);
 }
 
 function replayClick(target: Element): void {
@@ -122,18 +136,18 @@ export function replayFarmQueuedInteraction(target: Element, kind: unknown): voi
 
 function finishIslandHydration(
   container: Element,
-  activating?: FarmQueuedInteraction | null,
+  held: readonly FarmQueuedInteraction[] = [],
 ): void {
-  const interactions = new Map<Element, FarmQueuedInteraction>();
-  if (activating?.target.isConnected) interactions.set(activating.target, activating);
-  for (const interaction of takeQueuedTargets(container)) {
-    if (interaction.target.isConnected) interactions.set(interaction.target, interaction);
-  }
+  // What the pre-hydration script or the boot script queued, then what this scheduler held, in
+  // the order they happened. Each is its own event, so every click is replayed.
+  const interactions = [...takeQueuedTargets(container), ...held].filter(
+    (interaction) => interaction.target.isConnected,
+  );
 
   if (!container.isConnected) return;
   container.setAttribute("data-farm-island-hydrated", "true");
 
-  for (const interaction of interactions.values()) {
+  for (const interaction of interactions) {
     window.setTimeout(() => {
       if (
         container.getAttribute("data-farm-island-hydrated") === "true" &&
@@ -173,7 +187,9 @@ export function scheduleFarmIslandHydration<T>({
   return new Promise<T | undefined>((resolve, reject) => {
     let started = false;
     let cancelled = false;
-    let queuedInteraction: FarmQueuedInteraction | null = null;
+    // What this scheduler held itself. An interaction the pre-hydration or boot script held is in
+    // their queue, which finishIslandHydration reads.
+    const held: FarmQueuedInteraction[] = [];
     // One-shot triggers, dropped the moment hydration starts: an
     // IntersectionObserver or an idle callback has no reason to fire twice.
     const triggerCleanups = new Set<() => void>();
@@ -210,9 +226,7 @@ export function scheduleFarmIslandHydration<T>({
           (value) => {
             cleanup();
             if (cancelled || signal?.aborted) return;
-            const activating = queuedInteraction;
-            queuedInteraction = null;
-            finishIslandHydration(container, activating);
+            finishIslandHydration(container, held.splice(0));
             resolve(value);
           },
           (error) => {
@@ -254,33 +268,27 @@ export function scheduleFarmIslandHydration<T>({
         return;
       }
 
-      const observer = new IntersectionObserver(
-        (entries) => {
-          if (entries.some((entry) => entry.isIntersecting)) start();
-        },
-        { rootMargin: "200px" },
-      );
-      for (const target of targets) observer.observe(target);
-      triggerCleanups.add(() => observer.disconnect());
+      triggerCleanups.add(observeIslandVisibility(container.ownerDocument, targets, start));
       return;
     }
 
     const hold = (event: Event, target: Element, kind: FarmIslandReplayKind) => {
-      queuedInteraction ??= { target, kind };
+      const interaction = { target, kind };
+      // Every click is replayed, so two on a counter count two. A form is submitted once: a
+      // repeat is held so it never posts natively ahead of the replay, and not held again.
+      if (!submitsForm(interaction) || !held.some((item) => item.target === target)) {
+        held.push(interaction);
+      }
       event.preventDefault();
       event.stopImmediatePropagation();
       start();
     };
 
     const queueActivatingClick = (event: MouseEvent) => {
-      const target =
-        event.target instanceof Element
-          ? event.target.closest(FARM_ISLAND_REPLAYABLE_SELECTOR)
-          : null;
+      const target = event.target instanceof Element ? heldClickTarget(event.target) : null;
       if (
         !target ||
         !container.contains(target) ||
-        target.closest("a[href]") ||
         event.button !== 0 ||
         event.metaKey ||
         event.altKey ||
@@ -318,9 +326,8 @@ export function scheduleFarmIslandHydration<T>({
       const target = detail?.target;
       if (!(target instanceof Element) || !container.contains(target)) return;
 
-      // A null kind means the inline script only observed the interaction and
-      // let it through, so there is nothing to reproduce afterwards.
-      if (detail?.kind) queuedInteraction ??= { target, kind: toReplayKind(detail.kind) };
+      // A held interaction is in the queue the announcing script wrote; a null kind means it only
+      // observed the interaction and let it through. Either way there is nothing to record here.
       start();
     };
 
@@ -347,10 +354,6 @@ export function scheduleFarmIslandHydration<T>({
     }
     listen("farm:island-interaction", activateFromInteraction, false);
 
-    const queued = findQueuedTarget(container);
-    if (queued) {
-      queuedInteraction = queued;
-      start();
-    }
+    if (hasQueuedTarget(container)) start();
   });
 }

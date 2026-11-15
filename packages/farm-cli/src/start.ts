@@ -1,4 +1,9 @@
-import { loadConfig, logger, resolveDeployConfig, resolveDeployOutputPath } from "@farm.js/core";
+import {
+  loadConfig,
+  logger,
+  resolveDeployConfig,
+  resolveDeployOutputPath,
+} from "@farm.js/core/internal/cli-runtime";
 import { spawn } from "child_process";
 import { constants as osConstants } from "os";
 import { existsSync } from "fs";

@@ -1,3 +1,4 @@
+import { loadFarmDevModule } from "@farm.js/core/plugin";
 /**
  * Farm.js Middleware Plugin
  *
@@ -19,7 +20,12 @@ import type { IncomingMessage, ServerResponse } from "http";
 import { createRequire } from "node:module";
 import { _withAfterNodeMiddleware } from "@farm.js/core/after";
 import { devServableFileExists } from "../dev-static.js";
-import { matchesMiddlewareConfig } from "@farm.js/core/middleware";
+import { resolveDevRequestURL, resolveViteHtmlFallbackUrl } from "../dev-request.js";
+import {
+  canonicalizeRequestPathname,
+  matchesMiddlewareConfig,
+  serializeMiddlewareCookieDeletion,
+} from "@farm.js/core/middleware";
 import type { MiddlewareConfig } from "@farm.js/core/middleware";
 import { middlewareMatchesPath, parseCookies, serializeCookie } from "./matching.js";
 
@@ -76,7 +82,7 @@ export interface CookieOptions {
 export interface CookieJar {
   get(name: string): string | undefined;
   set(name: string, value: string, options?: CookieOptions): void;
-  delete(name: string): void;
+  delete(name: string, options?: CookieOptions): void;
   getAll(): Record<string, string>;
 }
 
@@ -88,7 +94,14 @@ export interface MiddlewareContext {
   request: IncomingMessage;
   response: ServerResponse;
   url: URL;
+  /** Request pathname as received: still percent-encoded. */
   pathname: string;
+  /**
+   * The pathname the router matches: each segment decoded once, as core's
+   * `ctx.routePathname`. `.when()` conditions and function matchers also see it,
+   * so `/%61dmin` cannot skip a check written for `/admin`. Updated by `rewrite()`.
+   */
+  readonly routePathname: string;
   searchParams: URLSearchParams;
   method: string;
 
@@ -148,7 +161,13 @@ export interface DiscoveredMiddleware {
  */
 function createCookieJar(req: IncomingMessage, res: ServerResponse): CookieJar {
   const cookies = parseCookies(req.headers.cookie);
-  const setCookies: string[] = [];
+  // Keep any Set-Cookie an earlier handler already wrote.
+  const existing = res.getHeader("Set-Cookie");
+  const setCookies = Array.isArray(existing)
+    ? existing.map(String)
+    : existing === undefined
+      ? []
+      : [String(existing)];
 
   return {
     get(name: string): string | undefined {
@@ -157,18 +176,15 @@ function createCookieJar(req: IncomingMessage, res: ServerResponse): CookieJar {
 
     set(name: string, value: string, options: CookieOptions = {}): void {
       cookies[name] = value;
-      const cookieString = serializeCookie(name, value, options);
-      setCookies.push(cookieString);
+      setCookies.push(serializeCookie(name, value, options));
       res.setHeader("Set-Cookie", setCookies);
     },
 
-    delete(name: string): void {
+    delete(name: string, options: CookieOptions = {}): void {
       delete cookies[name];
-      const cookieString = serializeCookie(name, "", {
-        maxAge: 0,
-        expires: new Date(0),
-      });
-      setCookies.push(cookieString);
+      // Path and Domain must match the cookie that was set, or the tombstone
+      // addresses a different cookie and the original survives.
+      setCookies.push(serializeMiddlewareCookieDeletion(name, options));
       res.setHeader("Set-Cookie", setCookies);
     },
 
@@ -186,7 +202,7 @@ function createContext(
   res: ServerResponse,
   viteServer?: ViteDevServer,
 ): MiddlewareContext {
-  const url = new URL(req.url || "/", `http://${req.headers.host || "localhost"}`);
+  const url = resolveDevRequestURL(req);
   const headers = new Map<string, string>();
   const data = new Map<string, any>();
   const cookies = createCookieJar(req, res);
@@ -208,11 +224,13 @@ function createContext(
     }
   };
 
-  const ctx: MiddlewareContext = {
+  const ctx: MiddlewareContext & { routePathname: string } = {
     request: req,
     response: res,
     url,
     pathname: url.pathname,
+    // Vite has already removed its base from the URL, so this is the app's path.
+    routePathname: canonicalizeRequestPathname(url.pathname),
     searchParams: url.searchParams,
     method: req.method || "GET",
     params: {},
@@ -251,6 +269,7 @@ function createContext(
       const newUrl = new URL(rewriteUrl, `http://${req.headers.host || "localhost"}`);
       ctx.url = newUrl;
       ctx.pathname = newUrl.pathname;
+      ctx.routePathname = canonicalizeRequestPathname(newUrl.pathname);
       ctx.searchParams = newUrl.searchParams;
       // Update the original request URL
       req.url = rewriteUrl;
@@ -348,7 +367,7 @@ export default function farmMiddleware(options: FarmMiddlewareOptions = {}): Plu
           const middlewareFile = path.join(dir, `middleware${ext}`);
           if (fs.existsSync(middlewareFile)) {
             try {
-              const module = await server.ssrLoadModule(middlewareFile);
+              const module = await loadFarmDevModule(server, middlewareFile);
               if (module.default) {
                 middlewareCache.set(routePath, {
                   path: routePath,
@@ -515,8 +534,17 @@ export default function farmMiddleware(options: FarmMiddlewareOptions = {}): Plu
       return () => {
         server.middlewares.use(
           _withAfterNodeMiddleware(async (req, res, next) => {
-            const url = req.url || "/";
-            const pathname = url.split("?")[0];
+            // Run middleware for the URL the client sent, not Vite's SPA
+            // fallback rewrite, then hand Vite its rewrite back so it still
+            // serves the HTML shell (unless middleware rewrote the request).
+            const fallbackUrl = req.url;
+            const requestedUrl = resolveViteHtmlFallbackUrl(req, server.config.base);
+            if (requestedUrl) req.url = requestedUrl;
+            const passThrough = (error?: unknown) => {
+              if (requestedUrl && req.url === requestedUrl) req.url = fallbackUrl;
+              return error === undefined ? next() : next(error);
+            };
+            const pathname = resolveDevRequestURL(req).pathname;
 
             // Skip Vite internal requests and real static assets. Dotted
             // paths that don't map to a file on disk are app routes (route
@@ -529,14 +557,14 @@ export default function farmMiddleware(options: FarmMiddlewareOptions = {}): Plu
                 !pathname.endsWith("/") &&
                 devServableFileExists(pathname, [server.config.publicDir, server.config.root]))
             ) {
-              return next();
+              return passThrough();
             }
 
             // @farm.js/plugin/api runs middleware itself for the requests it
             // serves, because it may be registered ahead of this hook. Running
             // it here as well executed every middleware twice per API request.
             if ((server as any).__farmApi__ && pathname.startsWith("/api/")) {
-              return next();
+              return passThrough();
             }
 
             try {
@@ -555,10 +583,12 @@ export default function farmMiddleware(options: FarmMiddlewareOptions = {}): Plu
               // Fail the request, as core's dev server does. Carrying on would
               // render the page a throwing auth check was meant to protect.
               console.error("[FARM] Middleware error:", e);
-              return next(e);
+              // Vite's error page reports it, kept out of caches like core's.
+              if (!res.headersSent) res.setHeader("Cache-Control", "private, no-store");
+              return passThrough(e);
             }
 
-            next();
+            passThrough();
           }),
         );
       };
@@ -579,7 +609,7 @@ export default function farmMiddleware(options: FarmMiddlewareOptions = {}): Plu
           if (mw.filePath === file) {
             try {
               // Reload the module
-              const module = await server.ssrLoadModule(file);
+              const module = await loadFarmDevModule(server, file);
               if (module.default) {
                 middlewareCache.set(routePath, {
                   path: routePath,
@@ -606,7 +636,7 @@ export default function farmMiddleware(options: FarmMiddlewareOptions = {}): Plu
               .replace(/\/middleware\.(ts|tsx|js|jsx)$/, "");
             const routePath = relativePath === "" ? "/" : relativePath;
 
-            const module = await server.ssrLoadModule(file);
+            const module = await loadFarmDevModule(server, file);
             if (module.default) {
               middlewareCache.set(routePath, {
                 path: routePath,

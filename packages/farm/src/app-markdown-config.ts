@@ -1,3 +1,4 @@
+import path from "node:path";
 import type React from "react";
 
 export type FarmMdxComponent = React.ComponentType<any> | keyof React.JSX.IntrinsicElements;
@@ -30,4 +31,17 @@ export function resolveMdxConfig(config: FarmMdxUserConfig | undefined): FarmMdx
     markdownRoutes: config?.markdownRoutes ?? true,
     className: config?.className ?? "farm-markdown",
   };
+}
+
+/**
+ * The MDX components module a Markdown page renders from, as an absolute path. Undefined when
+ * the components are an inline object, which cannot be analyzed for client components.
+ */
+export function resolveFarmMdxComponentsModulePath(
+  config: FarmMdxResolvedConfig | undefined,
+  root: string,
+): string | undefined {
+  const components = config?.components;
+  if (typeof components !== "string") return undefined;
+  return path.isAbsolute(components) ? components : path.join(root, components);
 }

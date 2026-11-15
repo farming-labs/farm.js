@@ -77,6 +77,17 @@ describe("useRouter push/replace delegation", () => {
     expect(navigate).toHaveBeenCalledWith("/pricing", { replace: true });
   });
 
+  it("passes Next.js's scroll option through to the router", async () => {
+    const spa = installRouter();
+    const navigate = vi.spyOn(spa, "navigate").mockResolvedValue();
+    const getApi = renderHook();
+
+    act(() => getApi().replace("/docs", { scroll: false }));
+    await settle();
+
+    expect(navigate).toHaveBeenCalledWith("/docs", { replace: true, scroll: false });
+  });
+
   it("uses the configured app base path without duplicating it", async () => {
     setFarmBasePath("/console");
     const spa = installRouter();

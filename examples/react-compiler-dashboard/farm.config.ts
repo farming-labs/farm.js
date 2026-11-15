@@ -6,9 +6,7 @@ const reactivity = process.env.FARM_REACTIVITY === "static" ? "static" : "hybrid
 
 export default defineConfig({
   renderer: react({
-    experimental: {
-      compiler: compilerEnabled ? { reactivity, report: true } : false,
-    },
+    compiler: compilerEnabled ? { reactivity, report: true } : false,
   }),
   theme: {
     default: "dark",

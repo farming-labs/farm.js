@@ -7,6 +7,9 @@
     "declarationMap": true,
     "sourceMap": false,
     "moduleResolution": "bundler",
+    "paths": {
+      "@farm.js/core/internal/client-error-overlay": ["./src/client/runtime-error-overlay.ts"]
+    },
     "allowSyntheticDefaultImports": true,
     "esModuleInterop": true,
     "jsx": "react-jsx",

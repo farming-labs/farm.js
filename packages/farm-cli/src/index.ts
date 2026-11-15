@@ -14,6 +14,7 @@ export {
   FarmDeployError,
   formatFarmDeployPlan,
   resolveCloudflareAgentDeployPlan,
+  resolveDeployCliCommand,
   resolveDeployCliExecutable,
   type CloudflareAgentDeployPlan,
   type FarmDeployCommand,
@@ -61,11 +62,25 @@ export {
   formatPreviewExpiration,
   loadPreviewAuthConfig,
   parsePreviewDuration,
+  previewCredentialFromEnvironment,
+  previewSignInStatus,
+  signInToPreviewGateway,
+  signOutOfPreviewGateway,
   type AuthorizePreviewPlanOptions,
+  type PreviewSignInMode,
+  type PreviewSignInStatus,
+  type PreviewProject,
+  type PreviewEnvironmentCredential,
   type PreviewAuthPublicConfig,
   type PreviewAuthRuntime,
   type PreviewCredentialStore,
 } from "./preview-auth";
+export {
+  loginToFarmPreview,
+  logoutOfFarmPreview,
+  whoamiFarmPreview,
+  type PreviewAccountOptions,
+} from "./preview-account";
 export {
   escapeDoubleQuoted,
   escapeSqlString,
@@ -73,6 +88,12 @@ export {
   generateFarmArtifacts,
   type GenerateFarmOptions,
 } from "./generate";
+export {
+  formatFarmAgentCheckReport,
+  runFarmAgentCheck,
+  type FarmAgentCheckOptions,
+  type FarmAgentCheckReport,
+} from "./agent-check";
 export {
   formatFarmDoctorReport,
   runFarmDoctor,
@@ -101,6 +122,12 @@ export {
   type RunFarmCronOptions,
 } from "./cron";
 export {
+  syncFarmCronJobs,
+  FarmCronSyncError,
+  type SyncFarmCronOptions,
+  type FarmCronSyncResult,
+} from "./cron-sync";
+export {
   createFrameworkMigrationPlan,
   inspectFrameworkMigrations,
   migrateFarm,
@@ -110,7 +137,14 @@ export {
   type FrameworkMigrationPlan,
 } from "./migrate";
 export { migrateFarmAuth, type MigrateFarmAuthOptions } from "./auth";
-export { listSchemaTableOwners, migrateSchema, type MigrateSchemaOptions } from "./schema-migrate";
+export {
+  listSchemaTableOwners,
+  askToConfirm,
+  migrateAllSchemas,
+  migrateSchema,
+  type MigrateSchemaOptions,
+} from "./schema-migrate";
+export { formatSchemaCheck, runSchemaCheck, type CheckSchemaOptions } from "./schema-check";
 export {
   createFarmUpgradePlan,
   detectFarmPackageManager,
@@ -149,3 +183,4 @@ export {
   type FarmTelemetryStatus,
   type FarmTelemetryTemplate,
 } from "./telemetry";
+export { ensureFarmRscPackages } from "./rsc-packages";

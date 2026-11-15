@@ -29,9 +29,15 @@ describe("APIRouteManager", () => {
     fs.writeFileSync(routeFile, "export const GET = () => new Response('jsx');\n");
 
     const manager = new APIRouteManager(root, {
-      ssrLoadModule: async (filePath: string) => {
-        expect(filePath).toBe(routeFile);
-        return { GET: async () => new Response("jsx") };
+      environments: {
+        ssr: {
+          runner: {
+            import: async (filePath: string) => {
+              expect(filePath).toBe(routeFile);
+              return { GET: async () => new Response("jsx") };
+            },
+          },
+        },
       },
     } as any);
 
@@ -54,7 +60,9 @@ describe("APIRouteManager", () => {
     );
 
     const manager = new APIRouteManager(root, {
-      ssrLoadModule: async () => ({ GET: async () => new Response() }),
+      environments: {
+        ssr: { runner: { import: async () => ({ GET: async () => new Response() }) } },
+      },
     } as any);
 
     const error = await manager.discoverRoutes().catch((cause) => cause);
@@ -71,7 +79,9 @@ describe("APIRouteManager", () => {
     fs.mkdirSync(routeDir, { recursive: true });
     fs.writeFileSync(path.join(routeDir, "route.ts"), "export const GET = () => new Response();\n");
     const manager = new APIRouteManager(root, {
-      ssrLoadModule: async () => ({ GET: async () => new Response() }),
+      environments: {
+        ssr: { runner: { import: async () => ({ GET: async () => new Response() }) } },
+      },
     } as any);
 
     await expect(manager.discoverRoutes()).rejects.toThrow(
@@ -86,7 +96,9 @@ describe("APIRouteManager", () => {
     fs.mkdirSync(routeDir, { recursive: true });
     fs.writeFileSync(path.join(routeDir, "route.ts"), "export const GET = () => new Response();\n");
     const manager = new APIRouteManager(root, {
-      ssrLoadModule: async () => ({ GET: async () => new Response() }),
+      environments: {
+        ssr: { runner: { import: async () => ({ GET: async () => new Response() }) } },
+      },
     } as any);
 
     await expect(manager.discoverRoutes()).rejects.toThrow('Duplicate route parameter "id"');
@@ -99,7 +111,9 @@ describe("APIRouteManager", () => {
     fs.mkdirSync(routeDir, { recursive: true });
     fs.writeFileSync(path.join(routeDir, "route.ts"), "export const GET = () => new Response();\n");
     const manager = new APIRouteManager(root, {
-      ssrLoadModule: async () => ({ GET: async () => new Response() }),
+      environments: {
+        ssr: { runner: { import: async () => ({ GET: async () => new Response() }) } },
+      },
     } as any);
 
     await expect(manager.discoverRoutes()).rejects.toThrow('Route parameter "__proto__"');
@@ -116,16 +130,22 @@ describe("APIRouteManager", () => {
 
     const handler = async () => new Response("ok");
     const manager = new APIRouteManager(appDir, {
-      ssrLoadModule: async () => ({
-        default: defineRoutes(({ api }) => [
-          api("/api/items/[id]", {}),
-          api("/api/items/[slug]", { GET: handler }),
-          api("/api/literal/:id", { GET: handler }),
-          api("/api/literal/[id]", { GET: handler }),
-          api("/api/(group)/items", { GET: handler }),
-          api("/api/items", { GET: handler }),
-        ]),
-      }),
+      environments: {
+        ssr: {
+          runner: {
+            import: async () => ({
+              default: defineRoutes(({ api }) => [
+                api("/api/items/[id]", {}),
+                api("/api/items/[slug]", { GET: handler }),
+                api("/api/literal/:id", { GET: handler }),
+                api("/api/literal/[id]", { GET: handler }),
+                api("/api/(group)/items", { GET: handler }),
+                api("/api/items", { GET: handler }),
+              ]),
+            }),
+          },
+        },
+      },
     } as any);
 
     await manager.discoverRoutes();
@@ -151,10 +171,16 @@ describe("APIRouteManager", () => {
     fs.writeFileSync(slugFile, "export {};\n");
 
     const manager = new APIRouteManager(root, {
-      ssrLoadModule: async (filePath: string) => ({
-        GET: async () => new Response("ok"),
-        ...(filePath === idFile ? { runtime: "invalid" } : {}),
-      }),
+      environments: {
+        ssr: {
+          runner: {
+            import: async (filePath: string) => ({
+              GET: async () => new Response("ok"),
+              ...(filePath === idFile ? { runtime: "invalid" } : {}),
+            }),
+          },
+        },
+      },
     } as any);
 
     await manager.discoverRoutes();
@@ -175,11 +201,19 @@ describe("APIRouteManager", () => {
     fs.writeFileSync(routesFile, "export {};\n");
 
     const manager = new APIRouteManager(root, {
-      ssrLoadModule: async (filePath: string) => {
-        if (filePath === routeFile) return { GET: async () => new Response("file") };
-        return {
-          health: createEndpoint("/api/health", { method: "GET" }, async () => ({ ok: true })),
-        };
+      environments: {
+        ssr: {
+          runner: {
+            import: async (filePath: string) => {
+              if (filePath === routeFile) return { GET: async () => new Response("file") };
+              return {
+                health: createEndpoint("/api/health", { method: "GET" }, async () => ({
+                  ok: true,
+                })),
+              };
+            },
+          },
+        },
       },
     } as any);
 
@@ -200,11 +234,19 @@ describe("APIRouteManager", () => {
     fs.writeFileSync(routesFile, "export {};\n");
 
     const manager = new APIRouteManager(root, {
-      ssrLoadModule: async (filePath: string) => {
-        if (filePath === routeFile) return { GET: async () => new Response("file") };
-        return {
-          update: createEndpoint("/api/health", { method: "POST" }, async () => ({ ok: true })),
-        };
+      environments: {
+        ssr: {
+          runner: {
+            import: async (filePath: string) => {
+              if (filePath === routeFile) return { GET: async () => new Response("file") };
+              return {
+                update: createEndpoint("/api/health", { method: "POST" }, async () => ({
+                  ok: true,
+                })),
+              };
+            },
+          },
+        },
       },
     } as any);
 
@@ -229,10 +271,16 @@ describe("APIRouteManager", () => {
       ok: true,
     }));
     const manager = new APIRouteManager(root, {
-      ssrLoadModule: async (filePath: string) => {
-        if (filePath === routeFile) return { GET: async () => new Response("file") };
-        rootEndpoint.__method = rootMethod;
-        return { health: rootEndpoint };
+      environments: {
+        ssr: {
+          runner: {
+            import: async (filePath: string) => {
+              if (filePath === routeFile) return { GET: async () => new Response("file") };
+              rootEndpoint.__method = rootMethod;
+              return { health: rootEndpoint };
+            },
+          },
+        },
       },
     } as any);
 
@@ -259,10 +307,16 @@ describe("APIRouteManager", () => {
     fs.writeFileSync(jsRouteFile, "export const POST = () => new Response('post');\n");
 
     const manager = new APIRouteManager(root, {
-      ssrLoadModule: async (filePath: string) =>
-        filePath === tsRouteFile
-          ? { GET: async () => new Response("get") }
-          : { POST: async () => new Response("post") },
+      environments: {
+        ssr: {
+          runner: {
+            import: async (filePath: string) =>
+              filePath === tsRouteFile
+                ? { GET: async () => new Response("get") }
+                : { POST: async () => new Response("post") },
+          },
+        },
+      },
     } as any);
 
     await manager.discoverRoutes();
@@ -429,25 +483,31 @@ describe("APIRouteManager", () => {
     fs.writeFileSync(routeFile, "export {};\n");
 
     const manager = new APIRouteManager(root, {
-      ssrLoadModule: async (filePath: string) => {
-        expect(filePath).toBe(routeFile);
-        return {
-          GET: async () => {
-            const encoder = new TextEncoder();
-            const stream = new ReadableStream({
-              start(controller) {
-                controller.enqueue(encoder.encode("part-one\n"));
-                controller.enqueue(encoder.encode("part-two\n"));
-                controller.close();
-              },
-            });
+      environments: {
+        ssr: {
+          runner: {
+            import: async (filePath: string) => {
+              expect(filePath).toBe(routeFile);
+              return {
+                GET: async () => {
+                  const encoder = new TextEncoder();
+                  const stream = new ReadableStream({
+                    start(controller) {
+                      controller.enqueue(encoder.encode("part-one\n"));
+                      controller.enqueue(encoder.encode("part-two\n"));
+                      controller.close();
+                    },
+                  });
 
-            return new Response(stream, {
-              status: 202,
-              headers: { "Content-Type": "text/plain; charset=utf-8" },
-            });
+                  return new Response(stream, {
+                    status: 202,
+                    headers: { "Content-Type": "text/plain; charset=utf-8" },
+                  });
+                },
+              };
+            },
           },
-        };
+        },
       },
     } as any);
 
@@ -475,11 +535,17 @@ describe("APIRouteManager", () => {
     const failure = new Error("API failure");
 
     const manager = new APIRouteManager(root, {
-      ssrLoadModule: async () => ({
-        GET: async () => {
-          throw failure;
+      environments: {
+        ssr: {
+          runner: {
+            import: async () => ({
+              GET: async () => {
+                throw failure;
+              },
+            }),
+          },
         },
-      }),
+      },
     } as any);
 
     await manager.discoverRoutes();
@@ -498,15 +564,21 @@ describe("APIRouteManager", () => {
     fs.writeFileSync(routeFile, "export {};\n");
 
     const manager = new APIRouteManager(root, {
-      ssrLoadModule: async (filePath: string) => {
-        expect(filePath).toBe(routeFile);
-        return {
-          POST: async (request: Request) =>
-            Response.json({
-              method: request.method,
-              body: await request.json(),
-            }),
-        };
+      environments: {
+        ssr: {
+          runner: {
+            import: async (filePath: string) => {
+              expect(filePath).toBe(routeFile);
+              return {
+                POST: async (request: Request) =>
+                  Response.json({
+                    method: request.method,
+                    body: await request.json(),
+                  }),
+              };
+            },
+          },
+        },
       },
     } as any);
 
@@ -538,14 +610,20 @@ describe("APIRouteManager", () => {
     fs.writeFileSync(routeFile, "export {};\n");
 
     const manager = new APIRouteManager(root, {
-      ssrLoadModule: async (filePath: string) => {
-        expect(filePath).toBe(routeFile);
-        return {
-          GET: async (_request: Request, context: { params: Promise<{ id: string }> }) => {
-            const params = await context.params;
-            return Response.json({ id: params.id });
+      environments: {
+        ssr: {
+          runner: {
+            import: async (filePath: string) => {
+              expect(filePath).toBe(routeFile);
+              return {
+                GET: async (_request: Request, context: { params: Promise<{ id: string }> }) => {
+                  const params = await context.params;
+                  return Response.json({ id: params.id });
+                },
+              };
+            },
           },
-        };
+        },
       },
     } as any);
 
@@ -568,14 +646,23 @@ describe("APIRouteManager", () => {
     fs.writeFileSync(routeFile, "export {};\n");
 
     const manager = new APIRouteManager(root, {
-      ssrLoadModule: async (filePath: string) => {
-        expect(filePath).toBe(routeFile);
-        return {
-          GET: async (_request: Request, context: { params: Promise<{ slug: string[] }> }) => {
-            const params = await context.params;
-            return Response.json({ slug: params.slug });
+      environments: {
+        ssr: {
+          runner: {
+            import: async (filePath: string) => {
+              expect(filePath).toBe(routeFile);
+              return {
+                GET: async (
+                  _request: Request,
+                  context: { params: Promise<{ slug: string[] }> },
+                ) => {
+                  const params = await context.params;
+                  return Response.json({ slug: params.slug });
+                },
+              };
+            },
           },
-        };
+        },
       },
     } as any);
 
@@ -598,23 +685,29 @@ describe("APIRouteManager", () => {
     fs.writeFileSync(routeFile, "export {};\n");
 
     const manager = new APIRouteManager(root, {
-      ssrLoadModule: async (filePath: string) => {
-        expect(filePath).toBe(routeFile);
-        return {
-          GET: createEndpoint(
-            {
-              method: "GET",
-              query: z.object({ view: z.enum(["summary", "details"]) }),
-              middleware: [({ params }) => ({ projectId: params.id })],
+      environments: {
+        ssr: {
+          runner: {
+            import: async (filePath: string) => {
+              expect(filePath).toBe(routeFile);
+              return {
+                GET: createEndpoint(
+                  {
+                    method: "GET",
+                    query: z.object({ view: z.enum(["summary", "details"]) }),
+                    middleware: [({ params }) => ({ projectId: params.id })],
+                  },
+                  async (ctx) => ({
+                    id: ctx.params.id,
+                    middlewareProjectId: ctx.context.projectId,
+                    view: ctx.query.view,
+                    hasRequest: ctx.request instanceof Request,
+                  }),
+                ),
+              };
             },
-            async (ctx) => ({
-              id: ctx.params.id,
-              middlewareProjectId: ctx.context.projectId,
-              view: ctx.query.view,
-              hasRequest: ctx.request instanceof Request,
-            }),
-          ),
-        };
+          },
+        },
       },
     } as any);
 
@@ -653,23 +746,29 @@ describe("APIRouteManager", () => {
     fs.writeFileSync(routeFile, "export {};\n");
 
     const manager = new APIRouteManager(root, {
-      ssrLoadModule: async (filePath: string) => {
-        expect(filePath).toBe(routeFile);
-        return {
-          POST: createEndpoint(
-            {
-              method: "POST",
-              body: z.object({
-                message: z.string().min(1),
-              }),
+      environments: {
+        ssr: {
+          runner: {
+            import: async (filePath: string) => {
+              expect(filePath).toBe(routeFile);
+              return {
+                POST: createEndpoint(
+                  {
+                    method: "POST",
+                    body: z.object({
+                      message: z.string().min(1),
+                    }),
+                  },
+                  async (ctx) =>
+                    Response.json({
+                      message: ctx.body.message,
+                      path: new URL(ctx.request.url).pathname,
+                    }),
+                ),
+              };
             },
-            async (ctx) =>
-              Response.json({
-                message: ctx.body.message,
-                path: new URL(ctx.request.url).pathname,
-              }),
-          ),
-        };
+          },
+        },
       },
     } as any);
 
@@ -717,14 +816,20 @@ describe("APIRouteManager", () => {
     fs.writeFileSync(routeFile, "export {};\n");
 
     const manager = new APIRouteManager(root, {
-      ssrLoadModule: async () => ({
-        QUERY: QUERY(
-          {
-            body: z.object({ term: z.string().min(1), limit: z.number().int() }),
+      environments: {
+        ssr: {
+          runner: {
+            import: async () => ({
+              QUERY: QUERY(
+                {
+                  body: z.object({ term: z.string().min(1), limit: z.number().int() }),
+                },
+                ({ body }) => ({ matches: [`${body.term}:${body.limit}`] }),
+              ),
+            }),
           },
-          ({ body }) => ({ matches: [`${body.term}:${body.limit}`] }),
-        ),
-      }),
+        },
+      },
     } as any);
 
     await manager.discoverRoutes();
@@ -764,21 +869,27 @@ describe("APIRouteManager", () => {
     fs.writeFileSync(routesFile, "export {};\n");
 
     const manager = new APIRouteManager(root, {
-      ssrLoadModule: async (filePath: string) => {
-        expect(filePath).toBe(routesFile);
-        return {
-          healthCheck: createEndpoint("/api/health", { method: "GET" }, async () => ({
-            ok: true,
-          })),
-          echo: createEndpoint(
-            "/api/echo",
-            {
-              method: "POST",
-              body: z.object({ message: z.string().min(1) }),
+      environments: {
+        ssr: {
+          runner: {
+            import: async (filePath: string) => {
+              expect(filePath).toBe(routesFile);
+              return {
+                healthCheck: createEndpoint("/api/health", { method: "GET" }, async () => ({
+                  ok: true,
+                })),
+                echo: createEndpoint(
+                  "/api/echo",
+                  {
+                    method: "POST",
+                    body: z.object({ message: z.string().min(1) }),
+                  },
+                  async (ctx) => ({ echo: ctx.body.message }),
+                ),
+              };
             },
-            async (ctx) => ({ echo: ctx.body.message }),
-          ),
-        };
+          },
+        },
       },
     } as any);
 
@@ -814,32 +925,44 @@ describe("APIRouteManager", () => {
     fs.writeFileSync(routesFile, "export {};\n");
 
     const manager = new APIRouteManager(path.join(srcDir, "app"), {
-      ssrLoadModule: async (filePath: string) => {
-        expect(filePath).toBe(routesFile);
-        return {
-          default: defineRoutes(({ api }) => [
-            api("/rss.xml", {
-              GET: async () =>
-                new Response("<rss>farm</rss>", {
-                  headers: { "Content-Type": "application/rss+xml" },
-                }),
-            }),
-            api("/api/posts/[id]", {
-              GET: async (_request: Request, context: { params: Promise<{ id: string }> }) => {
-                const params = await context.params;
-                return Response.json({ id: params.id });
-              },
-            }),
-            // A dynamic segment whose value carries a file extension, the shape
-            // farmjs.dev serves its shadcn registry at (`/r/button.json`).
-            api("/r/[item]", {
-              GET: async (_request: Request, context: { params: Promise<{ item: string }> }) => {
-                const params = await context.params;
-                return Response.json({ item: params.item });
-              },
-            }),
-          ]),
-        };
+      environments: {
+        ssr: {
+          runner: {
+            import: async (filePath: string) => {
+              expect(filePath).toBe(routesFile);
+              return {
+                default: defineRoutes(({ api }) => [
+                  api("/rss.xml", {
+                    GET: async () =>
+                      new Response("<rss>farm</rss>", {
+                        headers: { "Content-Type": "application/rss+xml" },
+                      }),
+                  }),
+                  api("/api/posts/[id]", {
+                    GET: async (
+                      _request: Request,
+                      context: { params: Promise<{ id: string }> },
+                    ) => {
+                      const params = await context.params;
+                      return Response.json({ id: params.id });
+                    },
+                  }),
+                  // A dynamic segment whose value carries a file extension, the shape
+                  // farmjs.dev serves its shadcn registry at (`/r/button.json`).
+                  api("/r/[item]", {
+                    GET: async (
+                      _request: Request,
+                      context: { params: Promise<{ item: string }> },
+                    ) => {
+                      const params = await context.params;
+                      return Response.json({ item: params.item });
+                    },
+                  }),
+                ]),
+              };
+            },
+          },
+        },
       },
     } as any);
 
@@ -879,18 +1002,24 @@ describe("APIRouteManager", () => {
     fs.writeFileSync(routeFile, "export {};\n");
 
     const manager = new APIRouteManager(root, {
-      ssrLoadModule: async (filePath: string) => {
-        expect(filePath).toBe(routeFile);
-        return {
-          DELETE: createEndpoint({ method: "DELETE" }, async (ctx) => ({
-            method: "DELETE",
-            body: ctx.body ?? null,
-          })),
-          POST: createEndpoint({ method: "POST" }, async (ctx) => ({
-            method: "POST",
-            body: ctx.body ?? null,
-          })),
-        };
+      environments: {
+        ssr: {
+          runner: {
+            import: async (filePath: string) => {
+              expect(filePath).toBe(routeFile);
+              return {
+                DELETE: createEndpoint({ method: "DELETE" }, async (ctx) => ({
+                  method: "DELETE",
+                  body: ctx.body ?? null,
+                })),
+                POST: createEndpoint({ method: "POST" }, async (ctx) => ({
+                  method: "POST",
+                  body: ctx.body ?? null,
+                })),
+              };
+            },
+          },
+        },
       },
     } as any);
     await manager.discoverRoutes();
@@ -937,13 +1066,19 @@ describe("APIRouteManager", () => {
     fs.writeFileSync(routeFile, "export {};\n");
 
     const manager = new APIRouteManager(root, {
-      ssrLoadModule: async () => ({
-        GET: async (context: Request) =>
-          Response.json({
-            isRequest: context instanceof Request,
-            url: context.url,
-          }),
-      }),
+      environments: {
+        ssr: {
+          runner: {
+            import: async () => ({
+              GET: async (context: Request) =>
+                Response.json({
+                  isRequest: context instanceof Request,
+                  url: context.url,
+                }),
+            }),
+          },
+        },
+      },
     } as any);
     await manager.discoverRoutes();
 

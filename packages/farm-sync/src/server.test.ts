@@ -42,14 +42,21 @@ function makeOrm(rows: Record<string, unknown>[] = []) {
         ? (expected as any[]).every((clause) => matches(row, clause))
         : expected && typeof expected === "object" && "gt" in expected
           ? new Date(row[field]).getTime() > new Date(expected.gt).getTime()
-          : row[field] === expected,
+          : expected && typeof expected === "object" && "gte" in expected
+            ? new Date(row[field]).getTime() >= new Date(expected.gte).getTime()
+            : row[field] === expected,
     );
 
   const orm: SyncOrmClient = {
     tasks: {
       async findMany(args) {
         calls.push({ op: "findMany", args });
-        return store.filter((row) => matches(row, (args as any)?.where));
+        const found = store.filter((row) => matches(row, (args as any)?.where));
+        const select = (args as any)?.select as Record<string, boolean> | undefined;
+        if (!select) return found;
+        return found.map((row) =>
+          Object.fromEntries(Object.keys(select).map((field) => [field, row[field]])),
+        );
       },
       async create({ data }) {
         calls.push({ op: "create", args: data });
@@ -97,6 +104,28 @@ describe("resolveSyncModels", () => {
     expect(() => resolveSyncModels(schema as any, { tasks: "write" }, undefined, true)).toThrow(
       /no row filter is configured/,
     );
+  });
+
+  it("rejects a read-only model with no row filter", () => {
+    // An unfiltered read model would hand every row to any caller.
+    expect(() => resolveSyncModels(schema as any, { tasks: "read" }, undefined, true)).toThrow(
+      /models\.tasks is readable but no row filter is configured/,
+    );
+    expect(() =>
+      resolveSyncModels(schema as any, { tasks: { access: "read" } }, undefined, true),
+    ).toThrow(/no row filter is configured/);
+  });
+
+  it("allows an explicitly public read-only model", () => {
+    const perModel = resolveSyncModels(
+      schema as any,
+      { tasks: { access: "read", where: false } },
+      undefined,
+      true,
+    );
+    expect(perModel.get("tasks")!.where).toBe(false);
+    const global = resolveSyncModels(schema as any, { tasks: "read" }, false, true);
+    expect(global.get("tasks")!.where).toBe(false);
   });
 
   it("allows an explicit unscoped model", () => {
@@ -162,6 +191,151 @@ describe("executeSyncOperation", () => {
     expect(result.rows.map((row: any) => row.title)).toEqual(["new"]);
     expect(result.full).toBe(false);
   });
+
+  it("keeps the row filter's own condition on the cursor field in a delta", async () => {
+    // The filter only shows rows changed since March; an older client cursor must not widen it.
+    const { orm } = makeOrm([
+      { id: "1", title: "hidden", listId: "list-a", updatedAt: "2026-02-01T00:00:00.000Z" },
+      { id: "2", title: "visible", listId: "list-a", updatedAt: "2026-03-15T00:00:00.000Z" },
+    ]);
+    const recent = resolveSyncModels(
+      schema as any,
+      { tasks: "read" },
+      () => ({ listId: "list-a", updatedAt: { gte: "2026-03-01T00:00:00.000Z" } }),
+      true,
+    );
+
+    const result: any = await executeSyncOperation({
+      body: { model: "tasks", operation: "list", since: "2026-01-15T00:00:00.000Z" },
+      models: recent,
+      orm,
+      request,
+      context,
+    });
+
+    expect(result.full).toBe(false);
+    expect(result.rows.map((row: any) => row.title)).toEqual(["visible"]);
+  });
+
+  it("lists every key still visible to the caller with a delta, scoped by the row filter", async () => {
+    const { orm, store } = makeOrm([
+      { id: "1", title: "unchanged", listId: "list-a", updatedAt: "2026-01-01T00:00:00.000Z" },
+      { id: "2", title: "deleted", listId: "list-a", updatedAt: "2026-01-01T00:00:00.000Z" },
+      { id: "3", title: "changed", listId: "list-a", updatedAt: "2026-02-01T00:00:00.000Z" },
+      { id: "4", title: "theirs", listId: "list-b", updatedAt: "2026-02-01T00:00:00.000Z" },
+    ]);
+    // Deleted straight in the database, so no sync write ever reported it.
+    store.splice(1, 1);
+
+    const result: any = await executeSyncOperation({
+      body: { model: "tasks", operation: "list", since: "2026-01-15T00:00:00.000Z" },
+      models: models(),
+      orm,
+      request,
+      context,
+    });
+
+    expect(result.rows.map((row: any) => row.id)).toEqual(["3"]);
+    expect(result.keys).toEqual(["1", "3"]);
+  });
+
+  it("fingerprints the caller's scope without revealing it, and snapshots on a scope change", async () => {
+    const { orm } = makeOrm([
+      { id: "1", title: "a", listId: "list-a", updatedAt: "2026-01-01T00:00:00.000Z" },
+      { id: "2", title: "b", listId: "list-b", updatedAt: "2026-02-01T00:00:00.000Z" },
+    ]);
+    const list = (listId: string, extra: Record<string, unknown> = {}) =>
+      executeSyncOperation({
+        body: { model: "tasks", operation: "list", ...extra },
+        models: models(),
+        orm,
+        request,
+        context: { listId },
+      }) as Promise<any>;
+
+    const a = await list("list-a");
+    const again = await list("list-a");
+    const b = await list("list-b");
+    expect(a.scope).toMatch(/^[0-9a-f]{32}$/);
+    expect(again.scope).toBe(a.scope);
+    expect(b.scope).not.toBe(a.scope);
+    expect(a.scope).not.toContain("list-a");
+
+    // A cursor kept under list-a's scope gets list-b a full snapshot.
+    const switched = await list("list-b", { since: "2026-01-15T00:00:00.000Z", scope: a.scope });
+    expect(switched.full).toBe(true);
+    const same = await list("list-b", { since: "2026-01-15T00:00:00.000Z", scope: b.scope });
+    expect(same.full).toBe(false);
+  });
+
+  it("reports one public fingerprint for an unscoped model", async () => {
+    const { orm } = makeOrm([{ id: "1", title: "a", listId: "list-a" }]);
+    const result: any = await executeSyncOperation({
+      body: { model: "tasks", operation: "list" },
+      models: resolveSyncModels(schema as any, { tasks: "write" }, false, true),
+      orm,
+      request,
+      context,
+    });
+    expect(result.scope).toBe("public");
+  });
+
+  it("does not send keys with a full snapshot", async () => {
+    const { orm } = makeOrm([{ id: "1", title: "a", listId: "list-a" }]);
+    const result: any = await executeSyncOperation({
+      body: { model: "tasks", operation: "list" },
+      models: models(),
+      orm,
+      request,
+      context,
+    });
+    expect(result.full).toBe(true);
+    expect(result).not.toHaveProperty("keys");
+  });
+
+  it("still sends a row written in the same millisecond as the cursor", async () => {
+    const at = "2026-01-01T00:00:00.000Z";
+    const { orm, store } = makeOrm([{ id: "1", title: "first", listId: "list-a", updatedAt: at }]);
+
+    const first: any = await executeSyncOperation({
+      body: { model: "tasks", operation: "list" },
+      models: models(),
+      orm,
+      request,
+      context,
+    });
+    expect(first.cursor).toBe(at);
+
+    // Committed after that list, within the same millisecond.
+    store.push({ id: "2", title: "same ms", listId: "list-a", updatedAt: at });
+
+    const next: any = await executeSyncOperation({
+      body: { model: "tasks", operation: "list", since: first.cursor },
+      models: models(),
+      orm,
+      request,
+      context,
+    });
+    expect(next.rows.map((row: any) => row.id)).toContain("2");
+    expect(next.cursor).toBe(at);
+  });
+
+  it.each([["not a date"], [42], [{ gt: "2026-01-01" }]])(
+    "rejects a malformed cursor %j as invalid input",
+    async (since) => {
+      const { orm, calls } = makeOrm();
+      await expect(
+        executeSyncOperation({
+          body: { model: "tasks", operation: "list", since: since as any },
+          models: models(),
+          orm,
+          request,
+          context,
+        }),
+      ).rejects.toMatchObject({ code: "invalid_input", status: 400 });
+      expect(calls).toHaveLength(0);
+    },
+  );
 
   it("injects scope columns on insert and ignores client-supplied ones", async () => {
     const { orm, store } = makeOrm();
@@ -494,6 +668,22 @@ describe("primary keys must be single values", () => {
     ).rejects.toMatchObject({ code: "invalid_input" });
 
     expect(store).toHaveLength(0);
+  });
+});
+
+describe("sync middleware", () => {
+  it("rejects a middleware entry that is not a function at config time", () => {
+    // createServerMiddleware() returns a frozen descriptor, not a function;
+    // calling it per request would answer every operation with a 500.
+    expect(() =>
+      sync({
+        schema: schema as any,
+        client: {},
+        models: { tasks: "read" },
+        where: false,
+        middleware: [{ __farmServerFnMiddleware: true, handler() {} } as any],
+      }),
+    ).toThrow(/middleware\[0\] must be a function/);
   });
 });
 

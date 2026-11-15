@@ -1,11 +1,11 @@
 # FARMJS React Compiler Starter
 
-A focused experimental starter for FARMJS's React AOT compiler. It uses the same minimal dark shell
+A focused starter for FARMJS's experimental React AOT compiler. It uses the same minimal dark shell
 as the other Create FARMJS App starters and includes one live comparison: an eligible local state
 update beside ordinary React reconciliation.
 
-> The compiler is experimental. Unsupported component shapes stay on React, so the optimization is
-> never required for correctness.
+> The compiler is experimental and opt-in. Unsupported component shapes stay on React, so the
+> optimization is never required for correctness.
 
 ## Create this starter
 
@@ -24,9 +24,7 @@ The starter enables the compiler through the React renderer:
 
 ```ts
 renderer: react({
-  experimental: {
-    compiler: true,
-  },
+  compiler: true,
 }),
 ```
 
@@ -54,9 +52,13 @@ The command builds the app, opens the production output in Chromium, checks both
 that the compiled update does not execute the component again, and saves a screenshot to
 `/tmp/farm-react-compiler-starter.png`.
 
+Set `FARM_REACT_COMPILER=false` when running `pnpm experiment` to verify the ordinary React path
+too. `FARM_EXPERIMENT_BROWSER_PATH` can point to an existing Chrome/Chromium executable instead of
+Playwright's downloaded browser. `FARM_EXPERIMENT_SCREENSHOT` overrides the screenshot location.
+
 For batching, multiple bindings, safe keyed-list fallback, and the full compiler-on/off benchmark,
 see the maintained
 [React Compiler example](https://github.com/farming-labs/farm.js/tree/main/examples/react-compiler).
 
-Read the [React compiler guide](https://farmjs.dev/docs/renderers/react#experimental-aot-compiler)
+Read the [React compiler guide](https://farmjs.dev/docs/renderers/react#aot-compiler)
 for the supported component contract and rollout guidance.

@@ -1,9 +1,9 @@
 # Inngest Jobs Example
 
 This example mounts the Farm `jobs({...})` integration against the Inngest runtime.
-It supports normal event triggering and batch fan-out. One-off scheduling through
-`api.jobs.<task>.schedule(...)` is exposed by the shared Farm API, but this runtime reports it
-as unsupported until the adapter grows delayed event support.
+It supports normal event triggering, batch fan-out, and one-off scheduling through
+`api.jobs.<task>.schedule(...)`, which sets the Inngest event `ts`. Cancellation, tags, and
+per-call debounce are reported as unsupported.
 
 Expected env:
 

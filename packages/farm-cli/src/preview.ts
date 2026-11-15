@@ -1,6 +1,6 @@
 import { spawn, spawnSync, type ChildProcess } from "node:child_process";
 import { setTimeout as delay } from "node:timers/promises";
-import { loadConfig, logger } from "@farm.js/core";
+import { loadConfig, logger } from "@farm.js/core/internal/cli-runtime";
 import type { PreviewAgentSession } from "@farm.js/tunnel";
 import {
   createPreviewGatewayPlan,
@@ -11,7 +11,9 @@ import {
 } from "./preview-gateway";
 import { runNativePreviewTunnel } from "./preview-native";
 import { createHttpLocalUrl } from "./local-url";
+import { startPreviewMarkerProxy } from "./preview-local-proxy";
 import { authorizePreviewGatewayPlan, parsePreviewDuration } from "./preview-auth";
+import { resolvePreviewProject } from "./preview-project";
 
 export interface PreviewFarmOptions {
   root?: string;
@@ -21,12 +23,15 @@ export interface PreviewFarmOptions {
   url?: string;
   gatewayUrl?: string;
   name?: string;
+  project?: string;
   dryRun?: boolean;
   noProbe?: boolean;
   timeoutMs?: number;
   provider?: "farm" | "local";
   expires?: string | number;
   login?: boolean;
+  /** Send a Farm.js Infrastructure API key to a gateway you run (`--trust-gateway`). */
+  trustGateway?: boolean;
 }
 
 export interface PreviewTarget {
@@ -64,6 +69,9 @@ const DEFAULT_PREVIEW_PORTS = [3000, 4319, 5173, 4173, 8080];
 const PREVIEW_URL_PATTERN = /https:\/\/[^\s"')\]}]+/g;
 
 export async function previewFarm(options: PreviewFarmOptions = {}): Promise<PreviewFarmResult> {
+  // Loading the config reads the app's .env files the way farm dev does, so a
+  // FARMJS_API_KEY kept there signs the preview in. A broken config doesn't stop it.
+  await loadPreviewEnvironment(options.root, options.configPath);
   const target = await resolvePreviewTarget(options);
 
   logger.info("Creating public preview for the running app...");
@@ -73,6 +81,7 @@ export async function previewFarm(options: PreviewFarmOptions = {}): Promise<Pre
     const expiresInMs = parsePreviewDuration(options.expires);
     const plan = {
       ...createPreviewGatewayPlan(target, options),
+      project: await resolvePreviewProject(options),
       ...(expiresInMs ? { expiresInMs } : {}),
     };
 
@@ -85,6 +94,8 @@ export async function previewFarm(options: PreviewFarmOptions = {}): Promise<Pre
     const authorizedPlan = await authorizePreviewGatewayPlan(plan, {
       expiresInMs,
       forceLogin: options.login,
+      trustGateway: options.trustGateway,
+      root: options.root,
     });
     logger.info(`Relay: ${authorizedPlan.relayUrl}`);
     logger.info("Opening native Farm preview tunnel...");
@@ -112,17 +123,25 @@ export async function previewFarm(options: PreviewFarmOptions = {}): Promise<Pre
     }
   }
 
-  const plan = createPreviewTunnelPlan(target, options);
-
   if (options.dryRun) {
+    const plan = createPreviewTunnelPlan(target, options);
     logger.info(`Command: ${formatCommand(plan)}`);
+    logger.info("The tunnel will reach the app through a local proxy that marks preview requests.");
     logger.success("Preview tunnel dry run completed.");
     return { target, plan };
   }
 
-  logger.info("Opening public tunnel...");
-  const publicUrl = await runPreviewTunnel(plan, options.timeoutMs ?? 30000);
-  return { target, plan, publicUrl };
+  // A local provider forwards public traffic straight to the dev server, which would treat it
+  // as the developer's own browser. The proxy marks it, so the preview guard still applies.
+  const proxy = await startPreviewMarkerProxy(target);
+  try {
+    const plan = createPreviewTunnelPlan(proxy.target, options);
+    logger.info("Opening public tunnel...");
+    const publicUrl = await runPreviewTunnel(plan, options.timeoutMs ?? 30000);
+    return { target, plan, publicUrl };
+  } finally {
+    await proxy.close();
+  }
 }
 
 function redactPreviewGatewayPlan(plan: PreviewGatewayPlan): PreviewFarmGatewayPlan {
@@ -191,13 +210,16 @@ export async function resolvePreviewTarget(
     throw new Error("Preview port must be an integer between 1 and 65535.");
   }
   const configPort = explicitPort ? undefined : await readConfigPort(root, options.configPath);
-  const candidates = uniqueNumbers([
-    explicitPort,
-    normalizePort(process.env.FARM_PORT),
-    normalizePort(process.env.PORT),
-    configPort,
-    ...DEFAULT_PREVIEW_PORTS,
-  ]);
+  // A port that was asked for is the only one probed: falling back to whatever
+  // else answers would publish a different local app.
+  const candidates = explicitPort
+    ? [explicitPort]
+    : uniqueNumbers([
+        normalizePort(process.env.FARM_PORT),
+        normalizePort(process.env.PORT),
+        configPort,
+        ...DEFAULT_PREVIEW_PORTS,
+      ]);
 
   if (!candidates.length) {
     throw new Error("No preview port candidates were available.");
@@ -398,7 +420,9 @@ export async function runPreviewTunnel(
           reject(error);
         }
       });
-      child.on("exit", (code, signal) => {
+      // "close" fires after stdout and stderr are drained. "exit" can arrive
+      // first (notably on Windows pipes), before the chunk that holds the URL.
+      child.on("close", (code, signal) => {
         if (!settled) {
           settled = true;
           clearTimeout(timer);
@@ -454,9 +478,27 @@ async function isReachable(url: string, timeoutMs: number) {
   }
 }
 
+/** The app's .env files, loaded the way farm dev loads them. A broken config is ignored. */
+export async function loadPreviewEnvironment(root = process.cwd(), configPath?: string) {
+  await loadAppConfig(root, configPath).catch(() => undefined);
+}
+
+const appConfigs = new Map<string, ReturnType<typeof loadConfig>>();
+
+/** The app's config, loaded once per root for this process. */
+function loadAppConfig(root: string, configPath?: string) {
+  const key = `${root}\0${configPath ?? ""}`;
+  let config = appConfigs.get(key);
+  if (!config) {
+    config = loadConfig(root, configPath, "development");
+    appConfigs.set(key, config);
+  }
+  return config;
+}
+
 async function readConfigPort(root: string, configPath?: string) {
   try {
-    const config = await loadConfig(root, configPath, "development");
+    const config = await loadAppConfig(root, configPath);
     const vite = config?.vite;
     if (!vite || typeof vite === "function") return undefined;
     return normalizePort(vite.server?.port);

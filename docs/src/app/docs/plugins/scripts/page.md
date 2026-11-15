@@ -252,7 +252,7 @@ defineScript<VendorSDK>({
 | `preconnect`     | `false`           | Add one deduplicated cross-origin preconnect hint.                       |
 | `id`             | None              | Script element ID.                                                       |
 | `integrity`      | None              | Provider-supplied Subresource Integrity value.                           |
-| `crossOrigin`    | None              | `anonymous` or `use-credentials`.                                        |
+| `crossOrigin`    | None              | `anonymous` or `use-credentials`. `integrity` implies `anonymous`.       |
 | `referrerPolicy` | Browser default   | Standard script referrer policy.                                         |
 | `fetchPriority`  | Browser default   | `high`, `low`, or `auto` request hint.                                   |
 | `attributes`     | `{}`              | Public vendor `data-*` attributes.                                       |
@@ -341,8 +341,9 @@ They do not prevent hydration or navigation.
 
 - Every definition is serialized to the browser. URLs, IDs, attributes, and keys in this config must
   be public. Never pass a provider secret.
-- Use a provider-published `integrity` value with `crossOrigin: "anonymous"` when the provider offers
-  stable, versioned assets. A mutable latest URL cannot safely use a fixed integrity hash.
+- Use a provider-published `integrity` value when the provider offers stable, versioned assets. A
+  mutable latest URL cannot safely use a fixed integrity hash. Integrity needs a CORS request, so
+  Farm sends `crossOrigin: "anonymous"` unless you set `crossOrigin` yourself.
 - Allow the provider origin in Content Security Policy. `security.csp.nonce` gives dynamic pages a
   per-response nonce and prerendered pages per-page hashes, but an external `src` still needs its
   origin allowed. Never place a literal nonce value in Farm config.

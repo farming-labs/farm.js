@@ -1,3 +1,4 @@
+export { loadFarmDevModule, FarmDevEnvironmentError, type FarmDevModuleServer } from "./dev-module";
 import type { PluginRoutes, PluginRoutesFactory } from "./api/route";
 // Plugin factories must emit declarations through public exports, never bundled
 // declaration chunk paths, even when they only import @farm.js/core/plugin.
@@ -10,6 +11,14 @@ export type {
   RouteMethod,
 } from "./api/route";
 export type { RouteSchema } from "./api/route-schema";
+// Here as well as on the main entry: a plugin that reads Farm's devtools settings must not
+// import the main entry, which loads React and breaks Preact, Solid, Vue, and Svelte apps
+// that don't install it.
+export {
+  resolveFarmDevtoolsConfig,
+  type ResolvedFarmDevtoolsConfig,
+  type FarmDevtoolsUserConfig,
+} from "./devtools-config";
 export type { EndpointMCPMetadata, EndpointMCPOptions } from "./api/endpoint";
 // Reachable from every route a plugin declares (each endpoint carries its
 // OpenAPI metadata), so it must be nameable from this entry the same way
@@ -22,6 +31,7 @@ import type { FarmClientPlugin } from "./client/plugin";
 import { getResolvedEnv, type ResolvedFarmEnv } from "./env";
 import {
   clearRequestContext,
+  copyRequestContext,
   deleteRequestContext,
   getRequestContext,
   getRequestContextSnapshot,
@@ -29,6 +39,21 @@ import {
   setRequestContext,
 } from "./request-context";
 import { getFarmPluginIntegrationContext } from "./plugin-integration-context";
+import type { FarmSchema } from "./schema";
+import type { FarmSqlDialect } from "./schema-sql";
+import { declareSchemaTables, readSchemaTables } from "./schema-owner";
+import { pluginShortName } from "./plugin-dependencies";
+import { collectSchemaExtensions } from "./schema-extend";
+import { validateSchemaSteps, type FarmSchemaMigrationStep } from "./schema-step-types";
+import { resolveSchemaModels } from "./schema-resolve";
+import {
+  isPluginOptionsSchema,
+  parsePluginOptions,
+  type FarmPluginFactory,
+  type FarmPluginOptionsSchema,
+  type InferPluginOptionsInput,
+  type InferPluginOptionsOutput,
+} from "./plugin-options";
 import { normalizeFarmBasePath, stripFarmBasePath } from "./base-path";
 import {
   normalizeFarmPluginRuntimeEndpointPath,
@@ -363,6 +388,13 @@ export interface FarmPluginRuntimeHooks<
 > {
   /** Exact request endpoints owned by this plugin. */
   endpoints?: readonly FarmPluginRuntimeEndpoint<TState, TIntegrationInstance, TIntegrationBound>[];
+  /**
+   * Whether a response `before` lets through may be stored by a shared cache (a CDN). `before`
+   * runs for every request and may be a guard, so by default (`"private"`) Farm sends those
+   * responses with `Cache-Control: private, no-store`. Set `"public"` when `before` never
+   * decides who may read a response, as for logging or analytics.
+   */
+  cache?: "private" | "public";
   start?(
     event: FarmPluginRuntimeEventFor<
       FarmPluginRuntimeStartEvent<TState, TIntegrationInstance>,
@@ -413,7 +445,18 @@ export interface FarmPluginRuntimeRequestOptions {
   waitUntil?: (promise: Promise<unknown>) => void;
 }
 
-export type FarmPluginRuntimeRequestHandler = (request: Request) => MaybePromise<Response>;
+export interface FarmPluginRuntimeRequestScope {
+  /**
+   * Runs `runtime.error` for a failure the handler answers itself, such as an API route that
+   * threw and became a 500. `runtime.after` still runs on the response the handler returns.
+   */
+  reportError(error: unknown): Promise<void>;
+}
+
+export type FarmPluginRuntimeRequestHandler = (
+  request: Request,
+  scope: FarmPluginRuntimeRequestScope,
+) => MaybePromise<Response>;
 
 export interface FarmPluginRuntimeSession {
   request: Request;
@@ -457,10 +500,22 @@ export interface FarmPluginRenderHooks<
   TIntegrationInstance = unknown,
   TIntegrationBound extends boolean = false,
 > {
+  /**
+   * Runs for every page request, before Farm resolves it: a request a page route matches, or a
+   * GET or HEAD request that no API route, integration route, docs page, or app metadata route
+   * (such as `sitemap.ts` or a metadata image) answers. That includes a config redirect, a
+   * route-file `redirect()`, a config rewrite (once, for the URL as requested), the generated
+   * `llms.txt`, `sitemap.xml` and `robots.txt`, a Markdown mirror, and the not-found page, so the
+   * response may not be a rendered page. `render.routePattern` is `null` when no page route
+   * matches the URL. It describes the requested URL even when `runtime.before` returned a
+   * replacement `Request`, which Farm routes and renders. It does not run when a
+   * `runtime.before` hook answered the request.
+   */
   before?(
     render: RenderLifecyclePayload,
     context: FarmPluginStateContextFor<TState, TIntegrationInstance, TIntegrationBound>,
   ): MaybePromise<void>;
+  /** Transforms the HTML document a page request answers with; see `before`. */
   html?(
     html: string,
     render: RenderLifecyclePayload,
@@ -547,6 +602,28 @@ export interface FarmPlugin<
   dev?: FarmPluginDevHooks<TState, TIntegrationInstance, TIntegrationBound>;
   /** Optional browser lifecycle for this logical plugin. */
   client?: FarmPluginClientConfig<TClientState, TClientPublic>;
+  /**
+   * Tables this plugin stores data in. Farm creates them with
+   * `farm <name> migrate` (the part of the plugin name after its last `:` or
+   * `/`), includes them in `farm generate` and `farm schema check`, and
+   * reaches them through the app's `storage.client`. Mark tables the plugin
+   * only reads, such as the app's `user`, with `external: true`.
+   */
+  schema?: FarmSchema;
+  /** Where the `schema` tables live, when not in the app's `storage.client`. */
+  database?: FarmPluginDatabase;
+  /**
+   * Plugins this one needs, by name (`farm:teams` or `teams`) or integration
+   * key. The config fails to load when one is missing or they form a cycle,
+   * and migrations run dependencies first.
+   */
+  dependsOn?: readonly string[];
+  /**
+   * Ordered steps for what a release changes in its tables that Farm will not
+   * infer, such as a renamed column. Each runs once per database, through
+   * `farm <name> migrate`. Additions need no step.
+   */
+  migrations?: readonly FarmSchemaMigrationStep[];
 
   /** @internal Carries the expected integration instance type without runtime data. */
   readonly [FARM_PLUGIN_INTEGRATION_INSTANCE]?: (instance: TIntegrationInstance) => void;
@@ -817,15 +894,7 @@ export class PluginManager {
   }
 
   private copyRequestStore(source: FarmRequest | Request, target: FarmRequest | Request): void {
-    const requestContext = this.context.requestContext;
-    const values = requestContext.getAll(source);
-    const exposed = requestContext.getAll(source, { exposedOnly: true });
-
-    for (const [key, value] of values) {
-      requestContext.set(target, key, value, {
-        exposeToPage: exposed.has(key),
-      });
-    }
+    copyRequestContext(source, target);
   }
 
   private copyRuntimeRequestContext(source: Request, target: Request): void {
@@ -1320,6 +1389,67 @@ export class PluginManager {
     return this.runtimeClosePromise;
   }
 
+  private async runBeforeHooks(
+    request: Request,
+    options: FarmPluginRuntimeRequestOptions,
+    waitUntil: (promise: Promise<unknown>) => void,
+    ctx: Readonly<Record<string, unknown>>,
+  ): Promise<{ request: Request; response?: Response }> {
+    let activeRequest = request;
+    for (const plugin of this.getSortedPlugins()) {
+      const before = plugin.runtime?.before;
+      if (!before) continue;
+
+      const result = await before({
+        ...this.createRuntimeBaseEvent(plugin, activeRequest, options, waitUntil),
+        ctx,
+      });
+
+      if (result instanceof Request) {
+        this.copyRequestStore(activeRequest, result);
+        this.copyRuntimeRequestContext(activeRequest, result);
+        activeRequest = result;
+        continue;
+      }
+      if (result instanceof Response) {
+        return { request: activeRequest, response: result };
+      }
+      if (result !== undefined) {
+        throw new TypeError(
+          `Farm plugin "${plugin.name}" runtime.before must return a Request, Response, or undefined`,
+        );
+      }
+    }
+    return { request: activeRequest };
+  }
+
+  /**
+   * Runs only `runtime.before` for a request Farm re-routed internally, such as
+   * a configured rewrite, so guards also see the destination URL. The session
+   * opened for `source` keeps its context; context and after hooks don't rerun.
+   * `options` describe the destination; the session keeps the source's route.
+   */
+  async runRuntimeBeforeForRewrite(
+    source: Request,
+    request: Request,
+    options: FarmPluginRuntimeRequestOptions = {},
+  ): Promise<Request | Response> {
+    if (!this.hasRuntimeHook("before")) return request;
+    this.copyRequestContext(source, request);
+    const waitUntil = options.waitUntil
+      ? (promise: Promise<unknown>) => options.waitUntil?.(Promise.resolve(promise))
+      : (promise: Promise<unknown>) => {
+          void Promise.resolve(promise).catch(() => {});
+        };
+    const result = await this.runBeforeHooks(
+      request,
+      options,
+      waitUntil,
+      this.runtimeRequestContexts.get(request) ?? Object.freeze({}),
+    );
+    return result.response ?? result.request;
+  }
+
   async beginRuntimeRequest(
     request: Request,
     options: FarmPluginRuntimeRequestOptions = {},
@@ -1362,36 +1492,17 @@ export class PluginManager {
         waitUntil,
       );
 
-      let response: Response | undefined;
-      for (const plugin of this.getSortedPlugins()) {
-        const before = plugin.runtime?.before;
-        if (!before) continue;
-
-        const result = await before({
-          ...this.createRuntimeBaseEvent(plugin, activeRequest, activeOptions, waitUntil),
-          ctx: runtimeContext,
-        });
-
-        if (result instanceof Request) {
-          this.copyRequestStore(activeRequest, result);
-          this.copyRuntimeRequestContext(activeRequest, result);
-          activeRequest = result;
-          continue;
-        }
-        if (result instanceof Response) {
-          response = result;
-          break;
-        }
-        if (result !== undefined) {
-          throw new TypeError(
-            `Farm plugin "${plugin.name}" runtime.before must return a Request, Response, or undefined`,
-          );
-        }
-      }
+      const before = await this.runBeforeHooks(
+        activeRequest,
+        activeOptions,
+        waitUntil,
+        runtimeContext,
+      );
+      activeRequest = before.request;
 
       return {
         request: activeRequest,
-        response,
+        response: before.response,
         ctx: runtimeContext,
         startedAt,
         options: activeOptions,
@@ -1462,14 +1573,50 @@ export class PluginManager {
     );
   }
 
+  /**
+   * @internal Reports an error the handler answered to `runtime.error` and `onError`, as the
+   * runtime scope's `reportError` does, without failing the session: `after` still runs, and a
+   * later throw in it is reported too.
+   */
+  async reportRuntimeRequestError(
+    session: FarmPluginRuntimeSession,
+    error: unknown,
+  ): Promise<void> {
+    await this.runRuntimeErrorHooks(
+      session.request,
+      error,
+      session.ctx,
+      Date.now() - session.startedAt,
+      session.options,
+      session.waitUntil,
+    );
+  }
+
   async runRuntimeRequest(
     request: Request,
     handler: FarmPluginRuntimeRequestHandler,
     options: FarmPluginRuntimeRequestOptions = {},
   ): Promise<Response> {
-    const session = await this.beginRuntimeRequest(request, options);
+    return this.completeRuntimeRequest(await this.beginRuntimeRequest(request, options), handler);
+  }
+
+  /**
+   * Finishes a session `beginRuntimeRequest` opened, as `runRuntimeRequest` does: the handler
+   * answers unless `before` already did, then `after` runs. A server that has work between
+   * `before` and the handler (the dev server runs app middleware there) splits the two.
+   */
+  async completeRuntimeRequest(
+    session: FarmPluginRuntimeSession,
+    handler: FarmPluginRuntimeRequestHandler,
+  ): Promise<Response> {
     try {
-      const response = session.response ?? (await handler(session.request));
+      const response =
+        session.response ??
+        (await handler(session.request, {
+          // Not a failed session: the handler answers, so `after` runs and a later throw in it
+          // is still reported.
+          reportError: (error) => this.reportRuntimeRequestError(session, error),
+        }));
       if (!(response instanceof Response)) {
         throw new TypeError("Farm plugin runtime handlers must return a Response");
       }
@@ -1543,6 +1690,31 @@ export class PluginManager {
 
     const plugins = this.getSortedPlugins().filter(include);
 
+    if (hookName === "onError") {
+      // Reporters must not suppress each other or let cleanup race a pending
+      // report. Keep invocation order/concurrency, then surface the first
+      // observed reporter failure only after every started report has settled.
+      const failures: unknown[] = [];
+      const reports: Promise<void>[] = [];
+      for (const plugin of plugins) {
+        for (const hook of this.getPluginHooks(plugin, hookName)) {
+          reports.push(
+            (async () => {
+              try {
+                const hookContext = this.getHookContext(plugin, hookName, args);
+                await hook.apply(plugin, [...args, hookContext]);
+              } catch (error) {
+                failures.push(error);
+              }
+            })(),
+          );
+        }
+      }
+      await Promise.all(reports);
+      if (failures.length > 0) throw failures[0];
+      return false;
+    }
+
     // Run selected hooks sequentially for deterministic execution and short-circuiting.
     const sequentialHooks = new Set<keyof FarmPlugin>([
       "ready",
@@ -1592,11 +1764,18 @@ export class PluginManager {
     } else {
       // Run other hooks in parallel
       const promises: Promise<any>[] = [];
-      for (const plugin of plugins) {
-        for (const hook of this.getPluginHooks(plugin, hookName)) {
-          const hookContext = this.getHookContext(plugin, hookName, args);
-          promises.push((hook as any).apply(plugin, [...args, hookContext]));
+      try {
+        for (const plugin of plugins) {
+          for (const hook of this.getPluginHooks(plugin, hookName)) {
+            const hookContext = this.getHookContext(plugin, hookName, args);
+            promises.push((hook as any).apply(plugin, [...args, hookContext]));
+          }
         }
+      } catch (error) {
+        // A synchronous failure skips the normal Promise.all below. Observe
+        // already-started work without waiting for it or invoking later hooks.
+        void Promise.all(promises).catch(() => {});
+        throw error;
       }
       await Promise.all(promises);
     }
@@ -1616,16 +1795,35 @@ export class PluginManager {
   }
 }
 
-export function definePlugin<
+type PluginOptionsSchemaInput = FarmPluginOptionsSchema<any, any>;
+
+/** Parsed options, available to `setup` and `configure` when a plugin declares `options`. */
+type WithPluginOptions<TContext, TSchema> = TSchema extends PluginOptionsSchemaInput
+  ? TContext & { readonly options: InferPluginOptionsOutput<TSchema> }
+  : TContext;
+
+/**
+ * A plugin's state. When it declares `options` and `setup` returns nothing (or
+ * there is no `setup`), the parsed options are its state.
+ */
+type ResolvedPluginState<TState, TSchema> = TSchema extends PluginOptionsSchemaInput
+  ? [TState] extends [undefined | void]
+    ? InferPluginOptionsOutput<TSchema>
+    : TState
+  : TState;
+
+/** What `definePlugin` accepts: a plugin, optionally with an `options` schema. */
+export type FarmPluginDefinition<
   TState = undefined,
   TRequestContext extends object = Record<string, never>,
   TClientState = unknown,
   TClientPublic = undefined,
   TIntegrationInstance = unknown,
-  const TRoutes extends PluginRoutes = PluginRoutes,
->(
-  plugin: FarmPlugin<
-    TState,
+  TRoutes extends PluginRoutes = PluginRoutes,
+  TSchema extends PluginOptionsSchemaInput | undefined = undefined,
+> = Omit<
+  FarmPlugin<
+    ResolvedPluginState<TState, TSchema>,
     TRequestContext,
     TClientState,
     TClientPublic,
@@ -1633,16 +1831,220 @@ export function definePlugin<
     false,
     TRoutes
   >,
-): FarmPlugin<
+  "configure" | "setup"
+> & {
+  /**
+   * Describe the plugin's options with a Standard Schema (Zod, Valibot,
+   * ArkType, ...). `definePlugin` then returns a factory: the app passes typed
+   * options, invalid ones fail while the config loads, and the plugin receives
+   * the parsed result in `setup` and `configure`, and as its state.
+   */
+  options?: TSchema;
+  /** Transform Farm config before the development or production pipeline is created. */
+  configure?: (
+    config: FarmConfig,
+    context: WithPluginOptions<FarmPluginContextFor<TIntegrationInstance, false>, TSchema>,
+  ) => MaybePromise<FarmConfig | void>;
+  /** Initialize private plugin state once for this plugin manager. */
+  setup?: (
+    context: WithPluginOptions<FarmPluginSetupContextFor<TIntegrationInstance, false>, TSchema>,
+  ) => MaybePromise<TState>;
+};
+
+type DefinedPlugin<
   TState,
+  TRequestContext extends object,
+  TClientState,
+  TClientPublic,
+  TIntegrationInstance,
+  TRoutes extends PluginRoutes,
+  TSchema,
+> = FarmPlugin<
+  ResolvedPluginState<TState, TSchema>,
   TRequestContext,
   TClientState,
   TClientPublic,
   TIntegrationInstance,
   false,
   TRoutes
-> {
-  return plugin;
+>;
+
+/**
+ * Define a plugin. Declaring `options` turns the result into a factory:
+ *
+ * ```ts
+ * export const security = definePlugin({
+ *   name: "acme:security",
+ *   options: z.object({ frameAncestors: z.string().default("'none'") }),
+ *   runtime: {
+ *     after({ state, response }) {
+ *       // state.frameAncestors: string
+ *       return response;
+ *     },
+ *   },
+ * });
+ *
+ * // farm.config.ts
+ * plugins: [security({ frameAncestors: "'self'" })]
+ * ```
+ */
+export function definePlugin<
+  TState = undefined,
+  TRequestContext extends object = Record<string, never>,
+  TClientState = unknown,
+  TClientPublic = undefined,
+  TIntegrationInstance = unknown,
+  const TRoutes extends PluginRoutes = PluginRoutes,
+  TSchema extends PluginOptionsSchemaInput | undefined = undefined,
+>(
+  plugin: FarmPluginDefinition<
+    TState,
+    TRequestContext,
+    TClientState,
+    TClientPublic,
+    TIntegrationInstance,
+    TRoutes,
+    TSchema
+  >,
+): TSchema extends PluginOptionsSchemaInput
+  ? FarmPluginFactory<
+      InferPluginOptionsInput<TSchema>,
+      DefinedPlugin<
+        TState,
+        TRequestContext,
+        TClientState,
+        TClientPublic,
+        TIntegrationInstance,
+        TRoutes,
+        TSchema
+      >
+    >
+  : DefinedPlugin<
+      TState,
+      TRequestContext,
+      TClientState,
+      TClientPublic,
+      TIntegrationInstance,
+      TRoutes,
+      TSchema
+    > {
+  // Only a schema turns the plugin into a factory. An untyped plugin that
+  // already carries some other `options` value keeps working as before.
+  if (!isPluginOptionsSchema(plugin.options)) return declarePluginSchema(plugin) as never;
+  return createPluginFactory(
+    plugin as FarmPluginDefinition<any, any, any, any, any, any, any>,
+  ) as never;
+}
+
+function createPluginFactory(
+  definition: FarmPluginDefinition<any, any, any, any, any, any, PluginOptionsSchemaInput>,
+) {
+  const { options: schema, configure, setup, ...plugin } = definition;
+  return (input?: unknown): FarmPlugin => {
+    const options = parsePluginOptions(schema!, input);
+    // When setup returns nothing, the parsed options are the plugin's state.
+    const resolveState = (state: unknown) => (state === undefined ? options : state);
+    return declarePluginSchema({
+      ...plugin,
+      ...(configure
+        ? {
+            configure: (config: FarmConfig, context: FarmPluginContextFor<unknown, false>) =>
+              configure(config, { ...context, options }),
+          }
+        : {}),
+      setup(context: FarmPluginSetupContextFor<unknown, false>) {
+        const state = setup?.({ ...context, options });
+        return state instanceof Promise ? state.then(resolveState) : resolveState(state);
+      },
+    } as FarmPlugin);
+  };
+}
+
+/** The database a plugin's `schema` tables live in, when not `storage.client`. */
+export interface FarmPluginDatabase {
+  /**
+   * A pg, mysql2, or sqlite connection the app chose for this plugin, or a
+   * function returning one. Left undefined, the app's `storage.client` is used,
+   * so a plugin can forward an optional app setting as is.
+   */
+  client?: unknown;
+  /** Only when the dialect cannot be detected from the connection. */
+  dialect?: FarmSqlDialect;
+}
+
+/** The `farm <name> migrate` namespace for a plugin: `farm:teams` → `teams`. */
+function pluginSchemaName(pluginName: string): string {
+  const name = pluginShortName(pluginName);
+  if (!/^[a-z0-9][a-z0-9_-]*$/iu.test(name)) {
+    throw new Error(
+      `Plugin "${pluginName}" declares a schema, so its name must end in a word made of letters, numbers, "-" or "_": that word becomes \`farm <name> migrate\`.`,
+    );
+  }
+  return name;
+}
+
+/**
+ * Record the tables a plugin's `schema` describes, so migrate, generate, and
+ * check find them. Farm's own packages that record ownership themselves keep
+ * their declaration.
+ */
+function declarePluginSchema<
+  TPlugin extends {
+    name: string;
+    version?: string;
+    schema?: FarmSchema;
+    database?: FarmPluginDatabase;
+    dependsOn?: readonly string[];
+    migrations?: readonly FarmSchemaMigrationStep[];
+  },
+>(plugin: TPlugin): TPlugin {
+  if (plugin.migrations && !plugin.schema) {
+    throw new Error(
+      `Plugin "${plugin.name}" sets \`migrations\` without a \`schema\`: its steps change the schema's tables.`,
+    );
+  }
+  if (plugin.database && !plugin.schema) {
+    throw new Error(
+      `Plugin "${plugin.name}" sets \`database\` without a \`schema\`: it only says where the schema's tables live.`,
+    );
+  }
+  if (!plugin.schema || readSchemaTables(plugin)) return plugin;
+  const name = pluginSchemaName(plugin.name);
+  // Fail while the config loads, not at the first migrate or query.
+  const models = resolveSchemaModels(name, plugin.schema);
+  collectSchemaExtensions(name, plugin.schema);
+  validateSchemaSteps(name, plugin.schema, plugin.migrations);
+  const database = plugin.database;
+  return declareSchemaTables(plugin, {
+    name,
+    schema: plugin.schema,
+    // Also listed by key, which tooling from before `external` existed reads.
+    models: Object.keys(models).filter((key) => !models[key]!.external),
+    ...(plugin.dependsOn ? { dependsOn: plugin.dependsOn.map(pluginShortName) } : {}),
+    ...(plugin.version ? { version: plugin.version } : {}),
+    ...(plugin.migrations?.length ? { migrations: plugin.migrations } : {}),
+    dialect: database?.dialect,
+    resolveClient: async (config) => {
+      if (database?.client !== undefined && database.client !== null) {
+        const client =
+          typeof database.client === "function"
+            ? await (database.client as () => unknown)()
+            : database.client;
+        if (client === undefined || client === null) {
+          throw new Error(`The ${name} plugin's \`database.client\` returned no connection.`);
+        }
+        return client;
+      }
+      const { resolveIntegrationOrmRuntimeClient } = await import("./integration-orm");
+      const client = await resolveIntegrationOrmRuntimeClient({ config: config as never });
+      if (client === undefined || client === null) {
+        throw new Error(
+          `The ${name} plugin keeps its tables in the app's database: set \`storage.client\` in farm.config.`,
+        );
+      }
+      return client;
+    },
+  });
 }
 
 export namespace definePlugin {
@@ -1670,8 +2072,7 @@ export namespace definePlugin {
       TIntegrationInstance,
       true
     > {
-      return plugin;
+      return declarePluginSchema(plugin);
     };
   }
 }
-export { farmPlugin } from "./vite";

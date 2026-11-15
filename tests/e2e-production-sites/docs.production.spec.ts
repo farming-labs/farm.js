@@ -8,6 +8,61 @@ test.beforeAll(async () => {
   ]);
 });
 
+// /agents and the blog have authored Markdown sources; /telemetry is an HTML
+// mirror, whose unauthenticated sign-in form exercises real form extraction.
+for (const pathname of ["/agents.md", "/blog/0.1.0.md", "/telemetry.md"]) {
+  test(`evaluates Markdown preconditions in the emitted server at ${pathname}`, async ({
+    request,
+  }) => {
+    for (const query of ["", "?outline", "?actions", "?max_tokens=100"]) {
+      const url = `${pathname}${query}`;
+      const first = await request.get(url);
+      expect(first.status()).toBe(200);
+      const etag = first.headers().etag;
+      expect(etag).toMatch(/^W\/"/);
+      const body = await first.text();
+      if (query === "?actions") {
+        expect(first.headers()["content-type"]).toBe("application/json; charset=utf-8");
+        const actions = JSON.parse(body).actions;
+        if (pathname === "/telemetry.md")
+          expect(actions).toContainEqual(
+            expect.objectContaining({
+              method: "POST",
+              action: "/api/telemetry/dashboard/session",
+              fields: expect.arrayContaining([
+                expect.objectContaining({ name: "token", type: "password", required: true }),
+              ]),
+            }),
+          );
+        else expect(actions).toEqual([]);
+      }
+      for (const method of ["GET", "HEAD"]) {
+        for (const match of [etag, etag.slice(2), '"unrelated"']) {
+          const failed = await request.fetch(url, {
+            method,
+            headers: { "if-match": match, "if-none-match": "*" },
+          });
+          expect(failed.status()).toBe(412);
+          expect(failed.headers()["cache-control"]).toBe("no-store");
+          expect(await failed.text()).toBe("");
+        }
+        const existing = await request.fetch(url, {
+          method,
+          headers: { "if-match": "*", "if-unmodified-since": "Wed, 21 Oct 2015 07:28:00 GMT" },
+        });
+        expect(existing.status()).toBe(200);
+        expect(await existing.text()).toBe(method === "HEAD" ? "" : body);
+        const cached = await request.fetch(url, {
+          method,
+          headers: { "if-match": "*", "if-none-match": etag },
+        });
+        expect(cached.status()).toBe(304);
+        expect(await cached.text()).toBe("");
+      }
+    }
+  });
+}
+
 test("boots the emitted docs site and navigates into the guide", async ({ page }) => {
   const browserErrors: string[] = [];
   page.on("console", (message) => {
@@ -43,10 +98,23 @@ test("blog connects the index, article, contents, and Markdown mirror", async ({
   await expect(page.locator(".blog-featured h3 a > span")).toHaveCSS("display", "inline");
   await expect(page.locator(".blog-featured h3")).toHaveCSS("text-wrap", "balance");
   await expect(page.getByRole("link", { name: /Follow the releases/i })).toHaveCount(0);
-  await expect(page.locator(".blog-art-version")).toHaveAttribute("data-version", "v 0.1.0");
-  await expect(page.locator(".blog-post-meta time")).toHaveText("Oct 2026");
-  await expect(page.locator(".blog-post-meta time")).toHaveAttribute("datetime", "2026-10-01");
-  await expect(page.locator(".blog-post-meta time")).toHaveCSS("font-family", /Geist Sans/);
+  // The index features the newest post and lists the rest, so these follow the collection.
+  await expect(page.locator(".blog-featured h3 a")).toHaveAttribute(
+    "href",
+    "/blog/native-internals",
+  );
+  await expect(page.locator(".blog-featured .blog-post-meta time")).toHaveText("Nov 2026");
+  await expect(page.locator(".blog-featured .blog-post-meta time")).toHaveAttribute(
+    "datetime",
+    "2026-11-08",
+  );
+  await expect(page.locator(".blog-featured .blog-post-meta time")).toHaveCSS(
+    "font-family",
+    /Geist Sans/,
+  );
+  const listed = page.locator('.blog-post-list a[href="/blog/0.1.0"]');
+  await expect(listed).toHaveCount(1);
+  await expect(listed.locator("time")).toHaveText("Oct 2026");
   await expect(page.locator(".blog-author-profile")).toHaveAttribute(
     "href",
     "https://x.com/KinfishT",
@@ -69,7 +137,7 @@ test("blog connects the index, article, contents, and Markdown mirror", async ({
   await expect(page.locator(".blog-featured-bottom img")).toHaveAttribute("width", "36");
   await expect(page.locator(".blog-author small")).toHaveCSS("margin-top", "0px");
   await expect(page.locator(".blog-read-link")).toHaveText("Read article");
-  await expect(page.locator(".blog-read-link")).toHaveAttribute("href", "/blog/0.1.0");
+  await expect(page.locator(".blog-read-link")).toHaveAttribute("href", "/blog/native-internals");
   await expect(page.locator(".blog-explore a")).toHaveCount(2);
   await expect(page.locator(".blog-explore a").first()).toHaveAttribute(
     "href",
@@ -85,7 +153,7 @@ test("blog connects the index, article, contents, and Markdown mirror", async ({
       .getByRole("link", { name: /Blog/ }),
   ).toHaveAttribute("aria-current", "page");
 
-  await page.locator(".blog-featured").click();
+  await listed.click();
   await expect(page).toHaveURL(/\/blog\/0\.1\.0$/);
   await expect(page.getByRole("heading", { level: 1 })).toHaveCount(1);
   await expect(page.getByRole("heading", { level: 1 })).toContainText("Farm.js v0.1.0");
@@ -174,9 +242,11 @@ test("blog uses Farm.js branding, lighter reading weights, and complete launch g
   page,
 }) => {
   await page.goto("/blog");
-  await expect(page.locator(".blog-featured h3")).toContainText("Farm.js v0.1.0");
+  await expect(page.locator('.blog-post-list a[href="/blog/0.1.0"]')).toContainText(
+    "Farm.js v0.1.0",
+  );
   await expect(page.locator("body")).not.toContainText("FarmJS");
-  await page.locator(".blog-read-link").click();
+  await page.locator('.blog-post-list a[href="/blog/0.1.0"]').click();
   await expect(page).toHaveTitle("Farm.js v0.1.0: Stable, Integrated, and Agent-Native");
   await expect(page.locator("body")).not.toContainText("FarmJS");
   const prose = page.locator(".blog-prose");
@@ -272,8 +342,7 @@ test("blog uses Farm.js branding, lighter reading weights, and complete launch g
 test("blog summarizes MCP composition and links setup and policy details to the docs", async ({
   page,
 }) => {
-  await page.goto("/blog");
-  await page.locator(".blog-read-link").click();
+  await page.goto("/blog/0.1.0");
   const prose = page.locator(".blog-prose");
   await expect(prose).not.toContainText("apiMcp(");
   await expect(prose).not.toContainText('"GET /api/projects"');
@@ -336,13 +405,22 @@ test("blog enhancements survive client navigation, re-entry, and back/forward wi
     };
   });
 
-  async function checkArtwork() {
+  // Each page has its own header artwork: the index features the newest post's scripted figure,
+  // and the launch post keeps the release reel.
+  async function checkArtwork(where: "index" | "article") {
     expect(await page.evaluate(() => Reflect.get(window, "blogNavigationDocument"))).toBe(true);
-    await expect(page.locator(".blog-release-art")).toHaveAttribute("data-motion", "running");
-    await expect(page.locator(".blog-art-reel").first()).toHaveCSS(
-      "animation-name",
-      "blog-digit-roll",
-    );
+    if (where === "index") {
+      await expect(page.locator(".blog-featured [data-figure]")).toHaveAttribute("data-ready", "");
+    } else {
+      // The reel pauses when it scrolls out of view, and the post list sits below the fold, so
+      // bring it on screen before asking whether it is running.
+      await page.locator(".blog-release-art").scrollIntoViewIfNeeded();
+      await expect(page.locator(".blog-release-art")).toHaveAttribute("data-motion", "running");
+      await expect(page.locator(".blog-art-reel").first()).toHaveCSS(
+        "animation-name",
+        "blog-digit-roll",
+      );
+    }
     expect(
       await page.evaluate(() => {
         const oldArticle = Reflect.get(window, "previousBlogArticle") as HTMLElement | undefined;
@@ -362,7 +440,7 @@ test("blog enhancements survive client navigation, re-entry, and back/forward wi
 
   async function checkArticle() {
     await expect(page).toHaveURL(/\/blog\/0\.1\.0$/);
-    await checkArtwork();
+    await checkArtwork("article");
     await expect(page.locator(".blog-code-copy:visible")).toHaveCount(3);
     const nav = page.locator(".blog-contents-links").first();
     const link = nav.getByRole("link", { name: "Built with Farm: Viby" });
@@ -386,12 +464,12 @@ test("blog enhancements survive client navigation, re-entry, and back/forward wi
     .getByRole("navigation", { name: "Primary navigation" })
     .getByRole("link", { name: /Blog/ })
     .click();
-  await checkArtwork();
-  await page.locator(".blog-read-link").click();
+  await checkArtwork("index");
+  await page.locator('.blog-post-list a[href="/blog/0.1.0"]').click();
   await checkArticle();
   await page.getByRole("link", { name: "All posts", exact: true }).click();
-  await checkArtwork();
-  await page.locator(".blog-read-link").click();
+  await checkArtwork("index");
+  await page.locator('.blog-post-list a[href="/blog/0.1.0"]').click();
   await checkArticle();
   await page.getByRole("link", { name: "All posts", exact: true }).click();
   await page.goBack();
@@ -401,14 +479,14 @@ test("blog enhancements survive client navigation, re-entry, and back/forward wi
     "true",
   );
   await page.goForward();
-  await checkArtwork();
+  await checkArtwork("index");
   expect(errors).toEqual([]);
 });
 
 test("shared artwork rolls down, waves, pauses offscreen, and respects reduced motion", async ({
   page,
 }) => {
-  for (const path of ["/blog", "/blog/0.1.0"]) {
+  for (const path of ["/blog/0.1.0"]) {
     await page.setViewportSize({ width: 1440, height: 1000 });
     await page.emulateMedia({ reducedMotion: "no-preference" });
     await page.goto(path);
@@ -491,8 +569,7 @@ test("every code block copies exact source and exposes recoverable clipboard fai
   context,
 }) => {
   await context.grantPermissions(["clipboard-read", "clipboard-write"]);
-  await page.goto("/blog");
-  await page.locator(".blog-read-link").click();
+  await page.goto("/blog/0.1.0");
   const blocks = page.locator(".blog-code-block");
   await expect(blocks).toHaveCount(3);
   for (const block of await blocks.all()) {
@@ -624,198 +701,12 @@ test("article sidebar tracks native navigation, reading position, pointer, and k
   await expect(indicator).toHaveCSS("transition-duration", "0.22s");
 });
 
-test("agent waitlist validates input and confirms a saved signup after client navigation", async ({
-  page,
-}) => {
-  const submissions: unknown[] = [];
-  let finishResponse!: () => void;
-  const responseReady = new Promise<void>((resolve) => {
-    finishResponse = resolve;
-  });
-  await page.route("**/api/waitlist", async (route) => {
-    expect(route.request().method()).toBe("POST");
-    submissions.push(route.request().postDataJSON());
-    await responseReady;
-    await route.fulfill({ json: { ok: true, id: "browser-test-only" } });
-  });
-  await page.goto("/blog");
-  await page.locator(".blog-read-link").click();
-  await expect(page.locator(".blog-prose")).toContainText("It is not part of v0.1.0");
-  await expect(page.locator('input[type="email"]')).toHaveCount(0);
-  await page.getByRole("link", { name: "Explore agent infrastructure", exact: true }).click();
-  await expect(page).toHaveURL(/\/agents$/);
-  const form = page.getByRole("form", { name: "Agent infrastructure waitlist" });
-  const email = form.getByLabel("Email address");
-  const submit = form.getByRole("button");
-  await expect(form).toBeVisible();
-  const loader = submit.locator(".agent-waitlist-loader");
-  await expect(loader).toBeHidden();
-  const idleButtonSize = await submit.boundingBox();
-  await expect(page.locator("[data-agent-waitlist-unavailable]")).toBeHidden();
-  await submit.click();
-  await expect(email).toBeFocused();
-  expect(await email.evaluate((input: HTMLInputElement) => input.validity.valueMissing)).toBe(true);
-  expect(submissions).toEqual([]);
-  await email.fill("invalid-email");
-  await submit.click();
-  expect(await email.evaluate((input: HTMLInputElement) => input.validity.typeMismatch)).toBe(true);
-  expect(submissions).toEqual([]);
-  await email.fill("reader@example.com");
-  await email.press("Tab");
-  await expect(submit).toBeFocused();
-  await expect(submit).toHaveCSS("outline-style", "solid");
-  await submit.press("Enter");
-  await expect(form).toHaveAttribute("aria-busy", "true");
-  await expect(submit).toBeDisabled();
-  await expect(submit).toHaveText("Joining…");
-  await expect(loader).toBeVisible();
-  await expect(loader.locator("span")).toHaveCount(9);
-  await expect(loader.locator("span").first()).toHaveCSS(
-    "animation-name",
-    "agent-waitlist-pixel-on",
-  );
-  expect((await submit.boundingBox())!.width).toBeCloseTo(idleButtonSize!.width, 1);
-  await page.emulateMedia({ reducedMotion: "reduce" });
-  await expect(loader.locator("span").first()).toHaveCSS("animation-name", "none");
-  await page.emulateMedia({ reducedMotion: "no-preference" });
-  await expect(email).toHaveAttribute("readonly", "");
-  await expect
-    .poll(() => submissions)
-    .toEqual([
-      {
-        email: "reader@example.com",
-        description: "Agent infrastructure early access — Farm.js agents page",
-      },
-    ]);
-  finishResponse();
-  // A confirmed signup resets the form: the field clears, no message lingers, and the button is
-  // ready for another address.
-  await expect(email).toHaveValue("");
-  await expect(email).not.toHaveAttribute("readonly");
-  await expect(form.getByRole("status")).toHaveText("");
-  await expect(submit).toHaveText("Join the waitlist");
-  await expect(submit).toBeEnabled();
-  await expect(form).not.toHaveAttribute("aria-busy");
-  await expect(loader).toBeHidden();
-  expect((await submit.boundingBox())!.width).toBeCloseTo(idleButtonSize!.width, 1);
-
-  // The site banner has its own "Read the announcement" link; use the agents page's section link.
-  await page
-    .getByRole("link", { name: "Read the announcement", exact: true })
-    .and(page.locator('[href$="#agent-infrastructure"]'))
-    .click();
-  await expect(form).toHaveCount(0);
-  await page.getByRole("link", { name: "Explore agent infrastructure", exact: true }).click();
-  await expect(submit).toBeEnabled();
-  await email.fill("returning-reader@example.com");
-  await submit.click();
-  await expect.poll(() => submissions.length).toBe(2);
-  await expect(email).toHaveValue("");
-  await expect(submit).toBeEnabled();
-  const markdown = await page.request.get("/blog/0.1.0.md");
-  expect(await markdown.text()).toContain("## Agent infrastructure");
-});
-
-test("agent waitlist keeps failures recoverable and fits narrow screens", async ({ page }) => {
-  let result = "unavailable";
-  await page.route("**/api/waitlist", async (route) => {
-    if (result === "network") return route.abort("failed");
-    if (result === "rate-limited") {
-      return route.fulfill({ status: 429, json: { ok: false } });
-    }
-    if (result === "malformed") return route.fulfill({ body: "not json" });
-    return route.fulfill({
-      json: result === "success" ? { ok: true, id: "browser-test-only" } : { ok: false },
-    });
-  });
-  await page.goto("/agents");
-  const form = page.getByRole("form", { name: "Agent infrastructure waitlist" });
-  const email = form.getByLabel("Email address");
-  const submit = form.getByRole("button");
-  await email.fill("reader@example.com");
-  for (const failure of ["unavailable", "malformed", "network", "rate-limited"]) {
-    result = failure;
-    await submit.click();
-    await expect(form.getByRole("status")).toHaveText(
-      failure === "rate-limited"
-        ? "Too many attempts. Please wait a minute and try again."
-        : "We couldn't save your signup. Please try again in a moment.",
-    );
-    await expect(submit).toBeEnabled();
-    await expect(email).toBeEditable();
-    await expect(email).toHaveValue("reader@example.com");
-  }
-  for (const width of [1440, 768, 390, 320]) {
-    await page.setViewportSize({ width, height: 900 });
-    await form.scrollIntoViewIfNeeded();
-    expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(
-      true,
-    );
-    for (const control of [email, submit]) {
-      const box = await control.boundingBox();
-      expect(box!.height).toBeGreaterThanOrEqual(44);
-      expect(box!.x).toBeGreaterThanOrEqual(0);
-      expect(box!.x + box!.width).toBeLessThanOrEqual(width);
-    }
-    if (width <= 600) await expect(email).toHaveCSS("font-size", "16px");
-  }
-  result = "success";
-  await submit.click();
-  // Success after failures clears the earlier error and resets the field.
-  await expect(email).toHaveValue("");
-  await expect(form.getByRole("status")).toHaveText("");
-  await expect(submit).toBeEnabled();
-});
-
-test("waitlist demo preserves its accessible name and releases its held width", async ({
-  page,
-}) => {
-  let finishResponse!: () => void;
-  let signalRouteStarted!: () => void;
-  const routeStarted = new Promise<void>((resolve) => {
-    signalRouteStarted = resolve;
-  });
-  await page.route("**/api/waitlist", async (route) => {
-    await new Promise<void>((resolve) => {
-      finishResponse = resolve;
-      signalRouteStarted();
-    });
-    await route.fulfill({ json: { ok: true, id: "demo-label-test-only" } });
-  });
-  await page.emulateMedia({ reducedMotion: "no-preference" });
-  await page.goto("/agents");
-  const form = page.getByRole("form", { name: "Agent infrastructure waitlist" });
-  const email = form.getByLabel("Email address");
-  const submit = form.getByRole("button");
-  const label = submit.locator("[data-agent-waitlist-label]");
-  await expect(form).toBeVisible();
-  await expect(submit).toHaveAccessibleName("Join the waitlist");
-  await expect.poll(() => label.textContent(), { timeout: 10_000 }).not.toBe("Join the waitlist");
-  await expect(submit).toHaveAccessibleName("Join the waitlist");
-  await expect.poll(() => submit.evaluate((button) => button.style.minWidth)).not.toBe("");
-  await email.evaluate((input) => {
-    (input as HTMLInputElement).value = "demo-label@example.com";
-  });
-  await form.evaluate((element) => (element as HTMLFormElement).requestSubmit());
-  await expect(label).toHaveText("Joining…");
-  await expect(submit).toHaveAccessibleName("Joining…");
-  await routeStarted;
-  finishResponse();
-  await expect(label).toHaveText("Join the waitlist");
-  await expect(submit).toHaveAccessibleName("Join the waitlist");
-  await expect.poll(() => submit.evaluate((button) => button.style.minWidth)).toBe("");
-});
-
-test("agents page connects the blog, planned capabilities, Markdown, and shared waitlist", async ({
-  page,
-}) => {
+test("agents page connects the blog, planned capabilities, and Markdown", async ({ page }) => {
   const errors: string[] = [];
   page.on("pageerror", (error) => errors.push(error.message));
-  const submissions: unknown[] = [];
-  await page.route("**/api/waitlist", async (route) => {
-    submissions.push(route.request().postDataJSON());
-    await route.fulfill({ json: { ok: true, id: "agents-page-test-only" } });
-  });
+  // Exercise navigation away from the article while its isolated roots are still hydrating.
+  const cdp = await page.context().newCDPSession(page);
+  await cdp.send("Emulation.setCPUThrottlingRate", { rate: 4 });
   await page.goto("/blog/0.1.0");
   await page.evaluate(() => {
     (window as Window & { __agentsNavigation?: boolean }).__agentsNavigation = true;
@@ -837,7 +728,9 @@ test("agents page connects the blog, planned capabilities, Markdown, and shared 
   await expect(page.locator(".agents-capabilities")).toContainText(
     "compatible agents talk to your app",
   );
-  await expect(page.locator("#agents-now-title")).toHaveAccessibleName("Agent-native by default.");
+  await expect(page.locator("#agents-now-title")).toHaveAccessibleName(
+    "Agent-ready. One config block.",
+  );
   const shipped = page.locator(".agents-now article");
   await expect(shipped).toHaveCount(4);
   await expect(shipped.getByText("[ Experimental ]")).toHaveCount(2);
@@ -855,50 +748,32 @@ test("agents page connects the blog, planned capabilities, Markdown, and shared 
       .getByRole("navigation", { name: "Primary navigation" })
       .getByRole("link", { name: /Agents/ }),
   ).toHaveAttribute("aria-current", "page");
-  const form = page.getByRole("form", { name: "Agent infrastructure waitlist" });
   expect(
     await page
       .getByRole("navigation", { name: "Primary navigation" })
       .locator(".truncate")
       .evaluateAll((labels) => labels.every((label) => label.scrollWidth <= label.clientWidth)),
   ).toBe(true);
-  await expect(form).toBeVisible();
-  await form.getByLabel("Email address").fill("agents-page@example.com");
-  await form.getByRole("button").click();
-  await expect(form.getByLabel("Email address")).toHaveValue("");
-  await expect(form.getByRole("status")).toHaveText("");
-  expect(submissions).toEqual([
-    {
-      email: "agents-page@example.com",
-      description: "Agent infrastructure early access — Farm.js agents page",
-    },
-  ]);
   // The site banner has its own "Read the announcement" link; use the agents page's section link.
   await page
     .getByRole("link", { name: "Read the announcement", exact: true })
     .and(page.locator('[href$="#agent-infrastructure"]'))
     .click();
   await expect(page).toHaveURL(/\/blog\/0\.1\.0#agent-infrastructure$/);
-  await expect(form).toHaveCount(0);
   await expect(
     page.getByRole("link", { name: "Explore agent infrastructure", exact: true }),
   ).toBeVisible();
   await page.goBack();
   await expect(page).toHaveURL(/\/agents$/);
-  await expect(form).toBeVisible();
-  await expect(form.getByRole("button")).toBeEnabled();
-  await page.getByRole("link", { name: "Join the waitlist", exact: true }).click();
-  await expect(page).toHaveURL(/#waitlist$/);
-  await expect(form).toBeInViewport();
   const mirror = await page.request.get("/agents.md");
   expect(mirror.ok()).toBe(true);
   expect(await mirror.text()).toContain("# Agent infrastructure");
   expect(await mirror.text()).toContain("planned capabilities");
-  expect(await mirror.text()).toContain("## Agent-native by default");
+  expect(await mirror.text()).toContain("## Agent-ready with one config block");
   expect(errors).toEqual([]);
 });
 
-test("agents ASCII motion starts on navigation, pauses offscreen, and respects reduced motion", async ({
+test("agents ASCII motion starts in view after navigation, pauses offscreen, and respects reduced motion", async ({
   page,
 }) => {
   await page.emulateMedia({ reducedMotion: "no-preference" });
@@ -909,14 +784,20 @@ test("agents ASCII motion starts on navigation, pauses offscreen, and respects r
     .click();
   const art = page.locator(".agent-artwork");
   await expect(art).toHaveAttribute("aria-hidden", "true");
+  // The concept artwork now sits below the available-today cards, not in the
+  // hero. It should stay paused until it is scrolled into the viewport.
+  await expect(art).not.toBeInViewport();
+  await expect(art).toHaveAttribute("data-motion", "paused");
+  await art.scrollIntoViewIfNeeded();
+  await expect(art).toBeInViewport();
   await expect(art).toHaveAttribute("data-motion", "running");
   await expect(art.locator(".agent-ascii-row")).toHaveCount(54);
   const row = art.locator(".agent-ascii-row").first();
   await expect(row).toHaveCSS("animation-play-state", "running");
   await expect(row).toHaveCSS("animation-name", "agent-mesh-breathe");
   await expect(row).toHaveCSS("transform", "none");
-  // This short page can keep the hero's last pixels in a tall viewport at the
-  // bottom. Establish actual non-intersection before testing the pause state.
+  // Establish actual non-intersection before testing the pause state, even
+  // when the viewport would otherwise retain part of the artwork at the bottom.
   await page.setViewportSize({ width: 1440, height: 700 });
   await page.locator("footer").scrollIntoViewIfNeeded();
   await expect(art).not.toBeInViewport();
@@ -1071,9 +952,6 @@ test("agents page stays readable on mobile and without JavaScript", async ({
             expect(box!.x).toBeGreaterThanOrEqual(0);
             expect(box!.x + box!.width).toBeLessThanOrEqual(width);
           }
-        } else {
-          await expect(page.locator("[data-agent-waitlist]")).toBeHidden();
-          await expect(page.locator("[data-agent-waitlist-unavailable]")).toBeVisible();
         }
       }
       await page.setViewportSize({ width: 390, height: 900 });
@@ -1132,6 +1010,112 @@ test("home keeps its agents link usable without JavaScript", async ({ browser, b
   }
 });
 
+// Figure panels are fixed boxes and their type has a legibility floor, so a layout without room
+// for its text spills out of its boxes. Without JavaScript each figure shows its final frame.
+for (const width of [280, 320, 345, 360, 1440]) {
+  test(`blog and home page figures keep their text inside their boxes at ${width}px`, async ({
+    browser,
+    baseURL,
+  }) => {
+    const context = await browser.newContext({
+      baseURL,
+      viewport: { width, height: 900 },
+      javaScriptEnabled: false,
+      reducedMotion: "reduce",
+    });
+    const page = await context.newPage();
+    try {
+      for (const pathname of [
+        "/blog/0.1.0",
+        "/blog/agent-native",
+        "/blog/web-to-native",
+        "/blog/native-internals",
+        "/blog",
+        "/",
+      ]) {
+        await page.goto(pathname);
+        await page.evaluate(() => document.fonts.ready);
+        const panels = page.locator(".blog-figure[data-figure] .bf-stage .bf-panel");
+        expect(await panels.count()).toBeGreaterThan(0);
+        const spills = await panels.evaluateAll((elements) =>
+          elements.flatMap((panel) => {
+            if (!panel.getClientRects().length) return [];
+            const box = panel.getBoundingClientRect();
+            const range = document.createRange();
+            const walker = document.createTreeWalker(panel, NodeFilter.SHOW_TEXT);
+            let right = 0;
+            let bottom = 0;
+            for (let node = walker.nextNode(); node; node = walker.nextNode()) {
+              if (!node.textContent?.trim()) continue;
+              range.selectNodeContents(node);
+              for (const rect of range.getClientRects()) {
+                right = Math.max(right, rect.right - box.right);
+                bottom = Math.max(bottom, rect.bottom - box.bottom);
+              }
+            }
+            const body = panel.querySelector(".bf-body");
+            const clipped = body ? body.scrollWidth - body.clientWidth : 0;
+            if (right <= 0.5 && bottom <= 0.5 && clipped <= 0.5) return [];
+            const figure = panel.closest<HTMLElement>("[data-figure]")!.dataset.figure;
+            return [`${figure} ${(panel as HTMLElement).dataset.panel}`];
+          }),
+        );
+        expect(spills, pathname).toEqual([]);
+      }
+    } finally {
+      await context.close();
+    }
+  });
+}
+
+// A post figure wider than a phone scrolls sideways inside itself; its caption must stay in view.
+test("blog figure captions stay in view while their figures scroll sideways", async ({
+  browser,
+  baseURL,
+}) => {
+  const context = await browser.newContext({
+    baseURL,
+    viewport: { width: 390, height: 900 },
+    javaScriptEnabled: false,
+    reducedMotion: "reduce",
+  });
+  const page = await context.newPage();
+  try {
+    let scrolled = 0;
+    for (const pathname of [
+      "/blog/0.1.0",
+      "/blog/agent-native",
+      "/blog/web-to-native",
+      "/blog/native-internals",
+    ]) {
+      await page.goto(pathname);
+      const result = await page
+        .locator(".blog-figure:not(.blog-figure--fit)")
+        .evaluateAll((figures) => {
+          const hidden: string[] = [];
+          let count = 0;
+          for (const figure of figures as HTMLElement[]) {
+            const caption = figure.querySelector("figcaption");
+            if (!caption || figure.scrollWidth <= figure.clientWidth) continue;
+            count += 1;
+            figure.scrollLeft = figure.scrollWidth;
+            const box = figure.getBoundingClientRect();
+            const rect = caption.getBoundingClientRect();
+            if (rect.left < box.left - 0.5 || rect.right > box.right + 0.5) {
+              hidden.push(figure.dataset.figure ?? "");
+            }
+          }
+          return { count, hidden };
+        });
+      scrolled += result.count;
+      expect(result.hidden, pathname).toEqual([]);
+    }
+    expect(scrolled).toBeGreaterThan(0);
+  } finally {
+    await context.close();
+  }
+});
+
 for (const width of [320, 390, 768]) {
   test(`blog navigation and reading stay usable at ${width}px without JavaScript`, async ({
     browser,
@@ -1148,12 +1132,16 @@ for (const width of [320, 390, 768]) {
       await page.goto("/blog");
       await expect(page.getByRole("heading", { level: 1 })).toBeVisible();
       await page.evaluate(() => document.fonts.ready);
+      // The featured card's figure reads without script and stays inside the card.
       expect(
-        await page.locator(".blog-art-version").evaluate((version) => {
-          const text = version.getBoundingClientRect();
-          const artwork = version.closest(".blog-release-art")!.getBoundingClientRect();
-          return text.left >= artwork.left && text.right <= artwork.right;
-        }),
+        await page
+          .locator(".blog-featured [data-figure] .bf-stage")
+          .first()
+          .evaluate((stage) => {
+            const art = stage.getBoundingClientRect();
+            const card = stage.closest(".blog-featured")!.getBoundingClientRect();
+            return art.left >= card.left - 1 && art.right <= card.right + 1;
+          }),
       ).toBe(true);
       const byline = await page.locator(".blog-featured-bottom .blog-author").boundingBox();
       const action = await page.locator(".blog-read-link").boundingBox();
@@ -1165,7 +1153,7 @@ for (const width of [320, 390, 768]) {
       expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(
         true,
       );
-      await page.locator(".blog-featured").click();
+      await page.locator('.blog-post-list a[href="/blog/0.1.0"]').click();
       await expect(page).toHaveURL(/\/blog\/0\.1\.0$/);
       await expect(page.locator(".blog-breadcrumb")).toHaveCSS("height", "52px");
       await expect(page.getByRole("link", { name: "All posts", exact: true })).toHaveCSS(

@@ -33,7 +33,7 @@ describe("dev docs renders through the configured renderer", () => {
 
   it("loads the renderer's server module for a non-React renderer", () => {
     const source = docsHandlerSource();
-    expect(source).toContain("server.ssrLoadModule(docsRenderer.server)");
+    expect(source).toContain("loadFarmDevModule(server, docsRenderer.server)");
     // React keeps its built-in runtime rather than going through Vite.
     expect(source).toContain("isReactRenderer(docsRenderer)");
     expect(source).toContain('import("./renderer/react/server")');

@@ -1,0 +1,159 @@
+import { describe, expect, it } from "vitest";
+import { createFarmDefaultSitemap, resolveFarmAgentSitemap } from "../agent-sitemap";
+import { createFarmMetadataRouteResponse } from "../metadata-route";
+
+const config = resolveFarmAgentSitemap(true);
+
+describe("createFarmDefaultSitemap", () => {
+  it("lists static pages in path order with absolute URLs and lastmod", () => {
+    expect(
+      createFarmDefaultSitemap(
+        [
+          { pattern: "/pricing", lastModified: "2026-10-01T00:00:00.000Z" },
+          { pattern: "/" },
+          { pattern: "/blog/[slug]" },
+          { pattern: "/docs/[[...slug]]" },
+          { pattern: "/(.)photo" },
+          { pattern: "/pricing" },
+        ],
+        { origin: "http://localhost:3000", config },
+      ),
+    ).toEqual([
+      { url: "http://localhost:3000/" },
+      { url: "http://localhost:3000/pricing", lastModified: "2026-10-01T00:00:00.000Z" },
+    ]);
+  });
+
+  it("leaves out noindex pages and pages behind a route guard", () => {
+    expect(
+      createFarmDefaultSitemap(
+        [
+          { pattern: "/" },
+          { pattern: "/drafts", module: { metadata: { robots: { index: false } } } },
+          { pattern: "/hidden", module: { metadata: { robots: "noindex, follow" } } },
+          { pattern: "/account", module: { __farmRouteGuard: () => {} } },
+        ],
+        { origin: "https://acme.test", config },
+      ).map((entry) => entry.url),
+    ).toEqual(["https://acme.test/"]);
+  });
+
+  it("uses metadataBase over the request origin, below the basePath", () => {
+    expect(
+      createFarmDefaultSitemap([{ pattern: "/about" }], {
+        origin: "http://attacker.test",
+        config,
+        metadataBase: new URL("https://acme.test/ignored/"),
+        basePath: "/app",
+      }),
+    ).toEqual([{ url: "https://acme.test/app/about" }]);
+    // A relative or non-http metadataBase cannot make URLs absolute.
+    expect(
+      createFarmDefaultSitemap([{ pattern: "/" }], {
+        origin: "https://acme.test",
+        config,
+        metadataBase: "javascript:alert(1)",
+      }),
+    ).toEqual([{ url: "https://acme.test/" }]);
+  });
+
+  it("lists each page at the URL it answers at, as trailingSlash spells it", () => {
+    const sources = [{ pattern: "/" }, { pattern: "/about" }];
+    const urls = (options: { basePath?: string; trailingSlash?: boolean }) =>
+      createFarmDefaultSitemap(sources, { origin: "https://acme.test", config, ...options }).map(
+        (entry) => entry.url,
+      );
+    expect(urls({ basePath: "/app", trailingSlash: true })).toEqual([
+      "https://acme.test/app/",
+      "https://acme.test/app/about/",
+    ]);
+    expect(urls({ basePath: "/app" })).toEqual([
+      "https://acme.test/app",
+      "https://acme.test/app/about",
+    ]);
+    // A root-mounted app's home page is '/' either way.
+    expect(urls({ trailingSlash: true })).toEqual([
+      "https://acme.test/",
+      "https://acme.test/about/",
+    ]);
+    expect(urls({})).toEqual(["https://acme.test/", "https://acme.test/about"]);
+  });
+
+  it("lists each page in the default locale's URL, which answers without a redirect", () => {
+    const sources = [{ pattern: "/" }, { pattern: "/about" }];
+    const i18n = (routing: "prefix-always" | "prefix-except-default" | "none", enabled = true) => ({
+      enabled,
+      basePath: "/app",
+      locales: ["en", "fr"],
+      defaultLocale: "en",
+      routing,
+    });
+    const urls = (options: { trailingSlash?: boolean; i18n?: ReturnType<typeof i18n> }) =>
+      createFarmDefaultSitemap(sources, {
+        origin: "https://acme.test",
+        config,
+        basePath: "/app",
+        ...options,
+      }).map((entry) => entry.url);
+
+    // Every locale is prefixed: '/app/about' answers with a 307 to '/app/en/about'.
+    expect(urls({ i18n: i18n("prefix-always") })).toEqual([
+      "https://acme.test/app/en",
+      "https://acme.test/app/en/about",
+    ]);
+    expect(urls({ i18n: i18n("prefix-always"), trailingSlash: true })).toEqual([
+      "https://acme.test/app/en/",
+      "https://acme.test/app/en/about/",
+    ]);
+    // The default locale is unprefixed, routing "none" adds no prefix, and i18n may be off.
+    for (const config of [
+      i18n("prefix-except-default"),
+      i18n("none"),
+      i18n("prefix-always", false),
+    ]) {
+      expect(urls({ i18n: config })).toEqual([
+        "https://acme.test/app",
+        "https://acme.test/app/about",
+      ]);
+    }
+  });
+
+  it("applies include and exclude route patterns", () => {
+    const pages = ["/", "/admin", "/admin/users", "/blog", "/blog/hello"].map((pattern) => ({
+      pattern,
+    }));
+    const urls = (input: Parameters<typeof resolveFarmAgentSitemap>[0]) =>
+      createFarmDefaultSitemap(pages, {
+        origin: "https://acme.test",
+        config: resolveFarmAgentSitemap(input),
+      }).map((entry) => new URL(entry.url).pathname);
+    expect(urls({ exclude: ["/admin/[[...path]]"] })).toEqual(["/", "/blog", "/blog/hello"]);
+    expect(urls({ include: ["/blog/[...slug]"] })).toEqual(["/blog/hello"]);
+  });
+
+  it("serializes as a sitemap protocol urlset", async () => {
+    const response = createFarmMetadataRouteResponse(
+      "sitemap",
+      createFarmDefaultSitemap([{ pattern: "/", lastModified: "2026-10-01T00:00:00.000Z" }], {
+        origin: "https://acme.test",
+        config,
+      }),
+    );
+    expect(response.headers.get("content-type")).toBe("application/xml; charset=utf-8");
+    expect(await response.text()).toContain(
+      "<url>\n    <loc>https://acme.test/</loc>\n    <lastmod>2026-10-01T00:00:00.000Z</lastmod>\n  </url>",
+    );
+  });
+});
+
+describe("resolveFarmAgentSitemap", () => {
+  it("is off for false, on for true, and passes resolved config through", () => {
+    expect(resolveFarmAgentSitemap(false).enabled).toBe(false);
+    expect(resolveFarmAgentSitemap({ enabled: false, exclude: ["/a"] }).enabled).toBe(false);
+    const resolved = resolveFarmAgentSitemap({ exclude: ["/admin"] });
+    expect(resolveFarmAgentSitemap(resolved)).toEqual(resolved);
+    expect(() => resolveFarmAgentSitemap("yes" as never)).toThrow(
+      "agent.sitemap must be true, false, or an options object.",
+    );
+  });
+});

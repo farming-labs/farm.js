@@ -38,16 +38,21 @@ Open a preview in another terminal:
 farm preview --port 4324 --name checkout-test --expires 2h
 ```
 
-The first managed preview opens GitHub's device sign-in page. The CLI resumes automatically after
-authorization:
+Previews use a Farm.js Infrastructure API key. Without one, the first preview opens
+[app.farmjs.dev](https://app.farmjs.dev): sign in or create an account (email and password, or
+GitHub) and confirm the code. The CLI then asks whether to create an API key for this machine;
+answer yes and it saves the key. That key is for previews: it lasts a year, reaches the
+organization you chose, and can't send [analytics](/docs/infra-analytics):
 
 ```txt
 Creating public preview for the running app...
 Local:  http://localhost:4324
-Sign in to Farm Preview in your browser.
-Code: FARM-W7KD
-Open: https://github.com/login/device
-Signed in to Farm Preview as sam.
+Confirm this code in Farm.js Infrastructure: W7KDQ2PL
+Open: https://app.farmjs.dev/device?user_code=W7KDQ2PL
+After approving this device, return here.
+Create an API key for this machine? (Y/n) y
+Signed in to Farm Preview as your Farm.js Infrastructure account.
+This key is for farm preview. To send analytics, create a Site analytics key on the API keys page (https://app.farmjs.dev/dashboard/settings) and set it as FARMJS_API_KEY where the app runs.
 Relay: wss://preview.farmjs.dev/agent
 Opening native Farm preview tunnel...
 Preview URL ready.
@@ -56,10 +61,89 @@ Expires: Sep 30, 2026, 3:45 PM
 Forwarding requests through the native tunnel until Ctrl+C.
 ```
 
-Later previews reuse the opaque Farm account credential saved by the CLI and do not ask the
-developer to sign in again. Pass `--login` to replace that saved login. In an interactive terminal,
+Later previews reuse the saved API key and don't ask again. Pass `--login`, or run
+`farm login`, to get a new one. In an interactive terminal,
 omitting `--expires` prompts for a duration and defaults to one hour. In CI and other
 non-interactive terminals, the hosted default is used.
+
+### Farm.js Infrastructure authentication and dashboard
+
+`farm preview` needs one credential, a Farm.js Infrastructure API key:
+
+- If `FARMJS_API_KEY` is set, in your shell, your CI secrets, or the app's `.env` files, it is
+  used and there is no sign-in.
+- Otherwise `farm login`, or the first `farm preview`, signs you in at app.farmjs.dev and asks
+  whether to create an API key for this machine. Yes saves it in a file only your user can read;
+  no creates nothing. The key can start previews and nothing else, and expires after a year;
+  run `farm login` again for a new one. Earlier releases also wrote `FARMJS_PROJECT_ID` to the
+  app's `.env`; previews never read it, so sign-in no longer does.
+- If you left the organization the key was made for, Infrastructure refuses a new key and the
+  CLI prints its message: run `farm login` again and choose another organization.
+- `farm logout` forgets that saved key on this machine. The key itself stays valid until you
+  revoke it in Farm.js Infrastructure.
+
+1. With a Farm.js Infrastructure API key in `FARMJS_API_KEY` that has the `previews`
+   permission, the CLI signs in with it and never opens a browser. It reads the key from your shell or
+   your CI secrets, and from the app's `.env` files the way `farm dev` does. Set
+   `FARMJS_API_URL` too if Infrastructure isn't at `https://app.farmjs.dev`: the key is
+   only sent to a gateway that signs in through that Infrastructure. The key only goes to the
+   hosted gateway, `https://preview.farmjs.dev`, unless you pass `--trust-gateway` for a
+   gateway you run (see [Self-Hosting a Gateway](#self-hosting-a-gateway)).
+2. Without a key or saved login, the CLI opens Farm.js Infrastructure, displays a code, and waits
+   for you to confirm the matching code and explicitly authorize your terminal.
+3. Return to the CLI. Choose the preview duration when prompted, or pass `--expires`.
+4. Once the tunnel is ready, the CLI prints its public URL and a dashboard link.
+
+CI never waits for browser approval: set `FARMJS_API_KEY`, otherwise the command fails
+with instructions. For CI, create a key on the
+[API keys page](https://app.farmjs.dev/dashboard/settings) with the **CLI & previews** preset and an
+expiry, rather than a full-access key. `FARM_PREVIEW_TOKEN` is deprecated: it still works
+and prints a warning, and `FARMJS_API_KEY` replaces it. Device approval only exists to create the
+key: the CLI trades the approved sign-in for an API key and keeps nothing else.
+The gateway verifies that credential or API key whenever it issues a new, name-scoped
+grant. A grant cannot outlive the verified account session or API key expiry. API keys
+may be restricted to one project slug: pass the matching `--project` when starting a preview.
+With the matching Infra access-control gateway, revoking a key also blocks existing
+preview traffic. **Stop preview** in the detail page revokes that grant across reconnects
+without stopping your local app; start a new `farm preview` to get another grant.
+Both transports check access before forwarding. WebSocket relays also check idle connections
+every five seconds; authority requests have a five-second timeout and fail closed.
+Work already executed locally cannot be undone. Older gateways without the access hook
+only enforce key revocation on new grants, so deploy the matching Infra migrations and
+access endpoint before updating the gateway. Revoking a device account session prevents
+new grants; stop existing previews separately.
+
+The Previews dashboard shows account-owned connections, expiry, and the latest 200
+request metadata records per preview. It refreshes every five seconds and marks missing
+heartbeats as **Stale**, not live. Paths, methods, statuses, durations, and times are
+recorded; query strings, headers, and bodies are excluded. Paths may still contain app
+identifiers or embedded credentials; never put secrets in URL paths. This is best-effort activity reporting, not an audit log
+or your application's stdout/stderr. Your app still runs on your computer or CI runner.
+
+### Projects and preview details
+
+One API key can create multiple previews across multiple projects. The key authenticates
+your account; it does not define a project. Each run has its own preview ID, detail URL,
+expiry, and request history. Use a different `--name` for simultaneously running previews.
+
+```bash
+farm preview --project storefront --name checkout-review --expires 2h
+farm preview --project storefront --name payment-review --expires 1h
+farm preview --project docs --name docs-review --expires 1h
+```
+
+The managed CLI defaults the project to a normalized `package.json` name under `--root`
+(or the directory name when no package name exists). Set `--project` or
+`FARM_PREVIEW_PROJECT` to a stable lowercase slug to group runs from different checkouts.
+Projects are scoped to your account. Older clients are grouped by their preview name.
+
+Filter projects on `/dashboard/previews`, then open a preview to inspect its transport,
+credential ID (never the key itself), request paths, response statuses, and timings.
+Search requests or filter error responses without collecting payloads. The CLI's
+dashboard link opens that preview directly. Activity is retained until seven days
+after preview expiry; it is best-effort metadata, not a complete request archive.
+
+This requires matching CLI, gateway, and Infra releases plus database/environment setup.
 
 During the relay rollout, the CLI warns and falls back to compatibility gateway polling if the hosted endpoint cannot accept the native WebSocket connection. An explicitly configured `FARM_PREVIEW_RELAY_URL` is tried first as well.
 
@@ -106,10 +190,32 @@ farm preview --port 3000
 farm preview --host 127.0.0.1 --port 3000
 farm preview --url http://localhost:4319
 farm preview --name stripe-webhook
+farm preview --project storefront --name checkout-review
 farm preview --expires 2h
 farm preview --login
 farm preview --dry-run
 ```
+
+### Account commands
+
+```bash
+farm login
+farm whoami
+farm logout
+```
+
+`farm login` signs in and saves an API key for previews without starting a preview. `farm whoami` prints
+the gateway, how it signs people in, and which credential `farm preview` would send:
+`FARMJS_API_KEY` (shown by its first characters, never the whole key), the deprecated
+`FARM_PREVIEW_TOKEN`, or the saved key. It also says when `FARMJS_API_KEY` is set but not
+used, and exits with code 1 when `farm preview` would need a browser sign-in, so scripts can
+check first.
+
+`farm logout` deletes the saved key from this machine. It doesn't revoke it; revoke keys in the
+Farm.js Infrastructure dashboard.
+
+All three read the app's `.env` files the way `farm preview` does, and accept `--gateway` and
+`--root`.
 
 When no target is passed, Farm tries to detect a running app from the current project config and common development ports. Pass `--port` or `--url` when the app is running somewhere specific.
 
@@ -125,11 +231,13 @@ http://localhost:4319/console` forwards the public preview root to `/console/` a
 | `--host <host>`         | Expose a specific local host. Defaults to `localhost`.                              |
 | `--url <url>`           | Expose a full local URL.                                                            |
 | `--name <name>`         | Request a readable preview URL name.                                                |
+| `--project <slug>`      | Group managed previews under an account-owned dashboard project.                    |
 | `--expires <duration>`  | Keep the URL live for a duration such as `30m`, `2h`, or `1d`.                      |
 | `--login`               | Sign in again instead of reusing the saved Farm Preview account.                    |
 | `--dry-run`             | Validate target detection and print the preview plan without opening a session.     |
 | `--no-probe`            | Skip the local reachability check when `--port` is provided.                        |
 | `--gateway <url>`       | Advanced: use a different Farm Preview gateway.                                     |
+| `--trust-gateway`       | Advanced: send your Farm.js Infrastructure API key to a `--gateway` you run.        |
 | `--provider <provider>` | Advanced: use `farm` for the hosted gateway or `local` for a custom local provider. |
 
 ## Readable URLs
@@ -147,6 +255,10 @@ https://stripe-webhook.preview.farmjs.dev
 ```
 
 Names are best treated as temporary handles. Stop and restart the command when you want to rotate the session.
+
+A name belongs to the account that claimed it. While your preview runs, and for five minutes after it
+stops or disconnects, another account gets an "already active" error for that name, so a restart or
+dropped connection can reconnect before anyone else takes the URL. You can always reclaim your own name.
 
 ## Request Logging
 
@@ -255,7 +367,7 @@ The hosted gateway owns:
 The local CLI owns:
 
 - Local target detection.
-- GitHub device sign-in and the cached opaque Farm account credential.
+- Farm.js Infrastructure sign-in and the saved API key.
 - Native tunnel lifecycle and local reachability checks.
 - Forwarding requests to `localhost`.
 - Request and response logging.
@@ -282,19 +394,19 @@ vercel blob create-store farm-preview-gateway --access private --region iad1 --y
 vercel env add FARM_PREVIEW_DOMAIN production
 ```
 
-For managed login, create a GitHub OAuth app, enable its device flow, and configure its public client
-id. Generate the Farm signing secret once and keep it only in the hosted project:
+For managed login, generate two secrets and keep them only on the server:
 
 ```bash
 openssl rand -hex 32
-vercel env add FARM_PREVIEW_GITHUB_CLIENT_ID production
 vercel env add FARM_PREVIEW_AUTH_SECRET production
+vercel env add FARM_PREVIEW_GATEWAY_SECRET production
 ```
 
-`FARM_PREVIEW_AUTH_SECRET` signs opaque Farm account tokens and session-scoped tunnel grants. It is
-not the GitHub client secret and must never be placed on developer machines. Set both auth variables
-or neither; a partial setup fails during gateway startup. `FARM_PREVIEW_DEFAULT_TTL_MS` and
-`FARM_PREVIEW_MAX_TTL_MS` optionally control the default and maximum hosted durations.
+`FARM_PREVIEW_AUTH_SECRET` signs the short-lived tunnel grants. `FARM_PREVIEW_GATEWAY_SECRET`
+lets the gateway check API keys with Farm.js Infrastructure at app.farmjs.dev; set the same value
+there. Neither ever reaches a developer machine. `FARM_PREVIEW_DEFAULT_TTL_MS` and
+`FARM_PREVIEW_MAX_TTL_MS` optionally control the default and maximum hosted durations. See the
+gateway example README for the deployment order and activity cleanup contract.
 
 For a private domain such as `preview.example.com`, configure:
 
@@ -308,6 +420,18 @@ Then point the CLI at it:
 farm preview --gateway https://preview.example.com --name checkout-test
 ```
 
+A gateway can say it signs in through Farm.js Infrastructure, but `farm preview` doesn't take
+its word for it: it only sends `FARMJS_API_KEY`, or creates a key with `farm login`, for the
+hosted gateway. For a gateway you run, pass `--trust-gateway` to `farm preview`, `farm login`,
+and `farm whoami`:
+
+```bash
+farm preview --gateway https://preview.example.com --trust-gateway
+```
+
+A key `farm login --trust-gateway` saved for that gateway is reused there without the flag.
+The gateway must use `https`; plain `http` is only accepted on `localhost`.
+
 ## Custom Tunnel Providers
 
 If you need to integrate a private tunnel provider, set `FARM_PREVIEW_TUNNEL_COMMAND` to a command template that prints the public HTTPS URL after opening the tunnel.
@@ -318,20 +442,29 @@ FARM_PREVIEW_TUNNEL_COMMAND='farm-preview-agent tunnel --url {url} --hostname {h
 
 Available template values are `{url}`, `{port}`, `{host}`, `{name}`, and `{hostname}`.
 
+With `--provider local` (cloudflared, localtunnel, or this template), `{url}`, `{port}`, and
+`{host}` point at a loopback proxy that `farm preview` starts in front of your app, not at the app
+itself. The proxy marks each request as preview traffic, so the protections below apply to these
+tunnels too, and passes WebSocket upgrades such as Vite HMR through. Point the tunnel at the
+values it is given rather than at the app's own port, or the protections are skipped.
+
 Use this path only when the hosted Farm gateway is not appropriate for your environment.
 
 ## Environment Variables
 
-| Variable                        | Purpose                                                   |
-| ------------------------------- | --------------------------------------------------------- |
-| `FARM_PREVIEW_GATEWAY_URL`      | Override the hosted gateway URL.                          |
-| `FARM_PREVIEW_RELAY_URL`        | Override the persistent WebSocket relay URL.              |
-| `FARM_PREVIEW_DOMAIN`           | Override the preview domain used for generated hostnames. |
-| `FARM_PREVIEW_NAME`             | Provide a default readable preview name.                  |
-| `FARM_PREVIEW_PROVIDER`         | Select `farm` or `local`.                                 |
-| `FARM_PREVIEW_TUNNEL_COMMAND`   | Command template for a custom local tunnel provider.      |
-| `FARM_PREVIEW_TOKEN`            | Non-interactive Farm account credential for CI.           |
-| `FARM_PREVIEW_CREDENTIALS_PATH` | Override the local managed-preview credential file.       |
+| Variable                        | Purpose                                                                                                         |
+| ------------------------------- | --------------------------------------------------------------------------------------------------------------- |
+| `FARM_PREVIEW_GATEWAY_URL`      | Override the hosted gateway URL.                                                                                |
+| `FARM_PREVIEW_RELAY_URL`        | Override the persistent WebSocket relay URL.                                                                    |
+| `FARM_PREVIEW_DOMAIN`           | Override the preview domain used for generated hostnames.                                                       |
+| `FARM_PREVIEW_NAME`             | Provide a default readable preview name.                                                                        |
+| `FARM_PREVIEW_PROJECT`          | Stable dashboard project slug; overridden by `--project`.                                                       |
+| `FARM_PREVIEW_PROVIDER`         | Select `farm` or `local`.                                                                                       |
+| `FARM_PREVIEW_TUNNEL_COMMAND`   | Command template for a custom local tunnel provider.                                                            |
+| `FARMJS_API_KEY`                | Farm.js Infrastructure API key. Signs previews in without a browser on the hosted gateway or a trusted gateway. |
+| `FARMJS_API_URL`                | Farm.js Infrastructure's address, if it isn't `https://app.farmjs.dev`.                                         |
+| `FARM_PREVIEW_TOKEN`            | Deprecated. Use `FARMJS_API_KEY`. Still accepted, with a warning.                                               |
+| `FARM_PREVIEW_CREDENTIALS_PATH` | Override the local managed-preview credential file.                                                             |
 
 ## Troubleshooting
 
@@ -350,8 +483,8 @@ Use this path only when the hosted Farm gateway is not appropriate for your envi
 The preview URL forwards public internet traffic to your local app. Treat it like a temporary public deployment:
 
 - Stop the command when testing is finished.
-- The CLI caches only the opaque Farm account credential, never the GitHub provider token. The
-  credential file is created with user-only permissions. Use `--login` to replace it.
+- The CLI saves only the API key, in a file created with user-only permissions. Use `--login`
+  or `farm login` to replace it, and `farm logout` to remove it.
 - Tunnel grants are bound to one normalized preview name and one absolute expiry. Current polling
   control requests send session credentials in the `Authorization` header. The native agent is
   configured with one relay URL, so its name-bound grant is carried only on the outbound `/agent`
@@ -359,10 +492,34 @@ The preview URL forwards public internet traffic to your local app. Treat it lik
   still require their random session token in control-request query strings. Gateway operators
   should redact `/agent` and legacy control-request query strings from access logs.
 - Do not expose admin-only routes, local dashboards, or secret-bearing pages unless you trust the audience.
+- Keep hardcoded secrets out of source files. A preview serves your app's modules the way the dev
+  server does, so code under the source directory can be read as transformed JavaScript.
+- Don't treat the dev server's file serving as an access boundary. Farm narrows it for preview
+  traffic, described below, but the preview is still a development server.
 - Do not paste a preview URL into untrusted systems.
 - Rotate preview names after sharing sensitive routes.
 - Keep provider secrets in environment variables, not client code.
 - Remember that anyone with the URL can send requests while the session is active.
+
+### What the preview serves from your machine
+
+The preview relay, the polling gateway client, and the local-provider proxy mark every tunnelled
+request with an `x-farm-preview` header and overwrite any value a visitor sends. For marked requests, the
+dev server serves your pages, API routes, and actions as usual, plus what the browser needs to run
+the app: Vite's client, Farm's client entry, public files, dependencies under `node_modules`, and
+modules and assets inside the source directory (and layer source directories). It answers `403` for:
+
+- Files outside the source directory, such as `farm.config.ts`, `package.json`, local databases,
+  and scripts, and any workspace file reached through `/@fs/`, unless browser code already imports
+  that exact URL.
+- `?raw`, `?inline`, and `?url` requests unless app code imports that exact URL.
+- Non-asset files inside the source directory, such as `.json`, `.sqlite`, or `.yaml` files,
+  whatever the query, unless browser code imports them.
+- DevTools (`/__farm/devtools*`) and Vite's open-in-editor endpoint.
+
+Independently of preview, the dev server never serves `.farm/` (the auth database, build caches,
+and the server bundle) or a custom `distDir`. Farm adds them to Vite's `server.fs.deny` and keeps
+Vite's default entries, or appends them to your own `server.fs.deny` list.
 
 ## Production Deployments
 

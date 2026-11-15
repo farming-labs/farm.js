@@ -15,3 +15,8 @@ export { getTheme, getThemeSnapshot } from "./theme/server";
 export * from "./server-action-security";
 export * from "./layers";
 export * from "./environment";
+export { resolveFarmMCPConfig, resolveFarmMCPPlugin, type FarmMCPUserConfig } from "./mcp-config";
+/** @internal Metadata image files for the RSC pipeline, read and checked as core's build does. */
+export { inspectStaticMetadataImage, type StaticMetadataImageInfo } from "./static-metadata-image";
+/** @internal */
+export { isOptionalPeerInstalled, VERCEL_OG_INSTALL_HINT } from "./optional-peer";

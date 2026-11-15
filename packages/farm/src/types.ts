@@ -1,7 +1,10 @@
+import type { FarmServerComponentsConfig } from "./server-components-mode";
+import type { FarmSearchParams } from "./search-params";
 import type { FarmRenderer } from "./renderer";
 import type { IncomingMessage, ServerResponse } from "http";
 import type { FarmAgentUserConfig } from "./agent-config";
 import type { FarmStorageUserConfig } from "./storage/types";
+import type { FarmSchemaConfig } from "./schema";
 import type { FarmIntegrationsUserConfig } from "./integrations";
 import type { FarmDocsResolvedConfig, FarmDocsUserConfig } from "./docs/types";
 import type { FarmMarkdownResolvedConfig, FarmMarkdownUserConfig } from "./markdown";
@@ -157,8 +160,12 @@ export interface FarmConfig {
   /**
    * Component renderer used for JSX compilation, SSR, and browser hydration.
    * React is used when omitted.
+   *
+   * Set `false` for a backend-only app: API routes, middleware, and server features with no
+   * pages. Farm then builds no browser client, needs no React, and answers unmatched requests
+   * with JSON instead of an HTML page.
    */
-  renderer?: FarmRenderer;
+  renderer?: FarmRenderer | false;
   preset?: NitroPreset;
   deploy?: {
     target?: "vercel" | "cloudflare" | "netlify" | "node" | string;
@@ -182,6 +189,8 @@ export interface FarmConfig {
     };
   };
   storage?: FarmStorageUserConfig;
+  /** Rules for the tables plugins and integrations declare, such as which app tables they may add columns to. */
+  schema?: FarmSchemaConfig;
   /** Shared application data, route, ISR, and PPR cache. */
   cache?: FarmCacheUserConfig;
   integrations?: FarmIntegrationsUserConfig;
@@ -228,6 +237,13 @@ export interface FarmConfig {
   /** Farm product telemetry for deployed server runtimes. Set to false to disable. */
   telemetry?: boolean;
   /**
+   * Request and MCP tool analytics for a Farm Infra project. On only when the server
+   * environment sets `FARMJS_API_KEY` (plus `FARMJS_PROJECT_ID` for a key reaching several
+   * projects). Each request is reported with its route template and the path it asked for,
+   * never its query string. Set to false to never send them.
+   */
+  analytics?: boolean;
+  /**
    * Development-only runtime inspector. Enabled by default during `farm dev`.
    *
    * @deprecated The built-in dashboard is deprecated. Install `@farm.js/devtools` and add
@@ -243,7 +259,12 @@ export interface FarmConfig {
    */
   suppressLintOnLink?: boolean;
   experimental?: {
-    serverComponents?: boolean;
+    /**
+     * React Server Components. `true` is `{ mode: "rsc" }`: `farm dev` and `farm build` run
+     * React's Flight pipeline from `@farm.js/plugin/rsc`. `{ mode: "islands" }` is reserved for
+     * Farm's own engine (RFC 0003). Pages and layouts are server components either way.
+     */
+    serverComponents?: FarmServerComponentsConfig;
     serverActions?: boolean;
     /**
      * Enables Partial Prerendering (static-shell caching). Routes still opt in
@@ -325,7 +346,7 @@ export interface PluginContextProps {
  */
 export interface PageProps<TRoute extends FarmRoutePropsTarget = FarmRoutePropsDefault> {
   params: ResolvePageRouteParams<TRoute>;
-  searchParams: Promise<Record<string, string | string[] | undefined>>;
+  searchParams: FarmSearchParams;
   path: string;
   /**
    * Data from middleware.ts in the same directory or parent directories
@@ -351,7 +372,7 @@ export interface PageProps<TRoute extends FarmRoutePropsTarget = FarmRoutePropsD
 
 export interface LoadingProps<TRoute extends FarmRoutePropsTarget = FarmRoutePropsDefault> {
   params: ResolvePageRouteParams<TRoute>;
-  searchParams: Promise<Record<string, string | string[] | undefined>>;
+  searchParams: FarmSearchParams;
   search?: Record<string, string | string[] | undefined>;
   path: string;
   middleware?: MiddlewareProps;
@@ -529,6 +550,8 @@ export interface RouteModule<TRoute extends FarmRoutePropsTarget = FarmRouteProp
   generateStaticParams?: GenerateStaticParams<TRoute>;
   metadata?: Metadata & Record<string, any>;
   generateMetadata?: (props: MetadataProps<TRoute>) => Promise<Metadata> | Metadata;
+  viewport?: Viewport;
+  generateViewport?: (props: MetadataProps<TRoute>) => Promise<Viewport> | Viewport;
 }
 
 /** A value accepted for one static route parameter. */
@@ -579,18 +602,65 @@ export interface LayoutModule<TRoute extends FarmRoutePropsTarget = FarmRoutePro
   maxDuration?: FarmRouteMaxDuration;
   metadata?: Metadata & Record<string, any>;
   generateMetadata?: (props: LayoutMetadataProps<TRoute>) => Promise<Metadata> | Metadata;
+  viewport?: Viewport;
+  generateViewport?: (props: LayoutMetadataProps<TRoute>) => Promise<Viewport> | Viewport;
+}
+
+/** A schema.org JSON-LD object, such as `{ "@context": "https://schema.org", "@type": "Article" }`. */
+export type MetadataJsonLd = object;
+
+/** A `theme-color` entry, optionally for one `prefers-color-scheme` media query. */
+export interface ThemeColorDescriptor {
+  color: string;
+  media?: string;
+}
+
+/**
+ * The `viewport` export of a layout or page, and the return value of `generateViewport()`, as in
+ * Next.js. Layouts and the page merge from root to page over the default
+ * `width=device-width, initial-scale=1`.
+ */
+export interface Viewport {
+  width?: string | number;
+  height?: string | number;
+  initialScale?: number;
+  minimumScale?: number;
+  maximumScale?: number;
+  userScalable?: boolean;
+  viewportFit?: "auto" | "cover" | "contain";
+  interactiveWidget?: "resizes-visual" | "resizes-content" | "overlays-content";
+  themeColor?: string | ThemeColorDescriptor | ThemeColorDescriptor[];
+  colorScheme?: string;
 }
 
 export interface Metadata {
   metadataBase?: string | URL;
-  title?: string | { default?: string; template?: string };
+  /** `absolute` names a page exactly, past any parent `template` (as in Next.js). */
+  title?: string | { default?: string; template?: string; absolute?: string };
   description?: string;
   keywords?: string | string[];
+  /**
+   * schema.org structured data rendered as `<script type="application/ld+json">`,
+   * one per object. Layout entries come first, then the page's. Renders
+   * alongside the site-level `agent.jsonLd`.
+   */
+  jsonLd?: MetadataJsonLd | MetadataJsonLd[];
   author?: string;
   authors?: Array<{ name: string; url?: string }>;
   creator?: string;
+  /** Site ownership tokens for search consoles, one `<meta>` per token. */
+  verification?: {
+    /** `google-site-verification` */
+    google?: string | string[];
+    /** `msvalidate.01` */
+    bing?: string | string[];
+    /** `yandex-verification` */
+    yandex?: string | string[];
+    /** Any other verification meta name, keyed by name. */
+    other?: Record<string, string | string[]>;
+  };
   publisher?: string;
-  robots?: string | { index?: boolean; follow?: boolean };
+  robots?: string | MetadataRobots;
   openGraph?: {
     title?: string;
     description?: string;
@@ -613,8 +683,39 @@ export interface Metadata {
           type?: string;
         }>;
     image?: string;
+    /**
+     * `og:video` entries. Point `url` at the media file itself (an MP4, for
+     * example) rather than a player page; relative URLs resolve against
+     * `metadataBase` like `images`.
+     */
+    videos?:
+      | string
+      | {
+          url: string;
+          secureUrl?: string;
+          width?: number;
+          height?: number;
+          type?: string;
+        }
+      | Array<{
+          url: string;
+          secureUrl?: string;
+          width?: number;
+          height?: number;
+          type?: string;
+        }>;
     type?: string;
     locale?: string;
+    /** `article:published_time`, rendered when `type` is `"article"`. */
+    publishedTime?: string | Date;
+    /** `article:modified_time`, rendered when `type` is `"article"`. */
+    modifiedTime?: string | Date;
+    /** `article:author` profile URLs or names, rendered when `type` is `"article"`. */
+    authors?: string | string[];
+    /** `article:section`, rendered when `type` is `"article"`. */
+    section?: string;
+    /** `article:tag`, rendered when `type` is `"article"`. */
+    tags?: string | string[];
   };
   twitter?: {
     card?: "summary" | "summary_large_image" | "app" | "player";
@@ -645,6 +746,11 @@ export interface Metadata {
   alternates?: {
     canonical?: string;
     languages?: Record<string, string>;
+    /**
+     * Alternate representations keyed by MIME type, such as an RSS feed.
+     * `text/markdown` replaces the link Farm adds for a page's Markdown mirror.
+     */
+    types?: Record<string, string | Array<{ url: string; title?: string }>>;
   };
   icons?:
     | string
@@ -654,6 +760,8 @@ export interface Metadata {
         apple?: string | Array<string | { url: string; sizes?: string; type?: string }>;
       };
   manifest?: string;
+  /** Extra `<meta name content>` tags, keyed by name. An array renders one tag per value. */
+  other?: Record<string, string | number | Array<string | number>>;
 }
 
 export interface FarmRequest extends IncomingMessage {
@@ -712,4 +820,25 @@ export interface SSGCollectionResult {
   ssg: SSGPage[];
   /** Routes that will be server-rendered on each request */
   ssr: string[];
+}
+
+/** Crawler directives for a robots `<meta>` tag. Unset fields are omitted. */
+export interface MetadataRobotsDirectives {
+  index?: boolean;
+  follow?: boolean;
+  noarchive?: boolean;
+  nosnippet?: boolean;
+  noimageindex?: boolean;
+  /** Maximum text snippet length; `-1` means no limit and `0` means no snippet. */
+  "max-snippet"?: number;
+  "max-image-preview"?: "none" | "standard" | "large";
+  /** Maximum video preview length in seconds; `-1` means no limit. */
+  "max-video-preview"?: number;
+  /** Date after which the page should drop out of results, for example an ISO 8601 date. */
+  unavailable_after?: string;
+}
+
+export interface MetadataRobots extends MetadataRobotsDirectives {
+  /** Directives for a separate `<meta name="googlebot">` tag. */
+  googleBot?: string | MetadataRobotsDirectives;
 }

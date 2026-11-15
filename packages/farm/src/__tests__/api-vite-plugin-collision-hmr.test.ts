@@ -35,13 +35,19 @@ describe("standalone API collision handling during HMR", () => {
     };
     const server: any = {
       config: { root },
-      ssrLoadModule: vi.fn(async (filePath: string) =>
-        filePath === routeFile
-          ? fileModule
-          : {
-              health: rootEndpoint,
-            },
-      ),
+      environments: {
+        ssr: {
+          runner: {
+            import: vi.fn(async (filePath: string) =>
+              filePath === routeFile
+                ? fileModule
+                : {
+                    health: rootEndpoint,
+                  },
+            ),
+          },
+        },
+      },
       moduleGraph: { invalidateModule: vi.fn() },
       middlewares: { use() {} },
       watcher: { on() {} },

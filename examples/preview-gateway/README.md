@@ -46,7 +46,7 @@ vercel integration add upstash/upstash-kv \
 The integration injects `REDIS_URL`. Without it, the WebSocket relay uses only the current Function's memory, which is suitable for local development but not multi-instance Vercel traffic.
 The same Redis connection enforces a shared per-client limit on managed login exchanges. A production
 deployment with managed authentication enabled refuses to start without `REDIS_URL`, `KV_URL`, or
-`UPSTASH_REDIS_URL` so GitHub token verification cannot be exposed without shared abuse control.
+`UPSTASH_REDIS_URL` so API key verification cannot be exposed without shared abuse control.
 
 ### Compatibility polling storage
 
@@ -81,20 +81,52 @@ FARM_PREVIEW_GATEWAY_URL=https://preview.farmjs.dev
 
 ### Managed developer login
 
-Create a GitHub OAuth app with Device Flow enabled. Configure its public client id and a private Farm
-signing secret:
+Developers preview with a Farm.js Infrastructure API key that has the `previews` permission: `FARMJS_API_KEY`, or the key
+`farm login` gets them by signing in at app.farmjs.dev. Turn managed login on with two secrets:
 
-```bash
-openssl rand -hex 32
-vercel env add FARM_PREVIEW_GITHUB_CLIENT_ID production
-vercel env add FARM_PREVIEW_AUTH_SECRET production
+```txt
+FARM_PREVIEW_AUTH_SECRET=<gateway-signing-secret-at-least-32-bytes>
+FARM_PREVIEW_GATEWAY_SECRET=<separate-random-secret-at-least-32-bytes>
 ```
 
-The signing secret must contain at least 32 bytes and must not be distributed to CLI users. When
-both variables are present, the gateway exchanges a verified GitHub device login for an opaque Farm
-account token, then issues a name-bound, expiring grant for each preview. Set
+Set the identical `FARM_PREVIEW_GATEWAY_SECRET` in Infra. It authenticates the private
+identity/activity backchannel; it is not a developer API key and must never reach the
+CLI or browser. Infra is `https://app.farmjs.dev`; `FARM_INFRA_URL` overrides it only for a
+local or self-hosted Infra (HTTPS, or loopback HTTP). The integration never follows redirects
+carrying credentials.
+
+Apply Infra's auth, API-key, and preview schema migrations **before** deploying and
+enabling this gateway mode. Production auth includes a database-backed rate limiter.
+Ship the compatible CLI update as well: older clients do not understand the `device`
+provider. Keep the existing Redis and Blob configuration described above.
+
+The gateway verifies API keys/device credentials with Infra on every grant. The signed
+grant contains the verified owner, preview name, and expiry. Only that short-lived grant
+reaches the tunnel transport. Identity may include a project restriction and credential
+expiry; grants must match that project and cannot outlive the credential.
+The Infra adapter also checks `/api/previews/access` on registration and before forwarding,
+so key revocation, expiry, and dashboard **Stop preview** apply to active previews.
+The signed nonce identifies the grant across reconnects and both transports. WebSocket
+relays check idle connections every 5 seconds; polling rechecks during waits. Calls have
+a 5-second deadline and fail closed. Already executed app work cannot be undone.
+Deploy the matching Infra key/preview migrations and access endpoint first, then this gateway.
+Legacy/self-hosted gateways that omit `authorizeSession` retain their existing behavior.
+
+Optional `observer` hooks in both gateway transports report session lifecycle and
+request metadata. This example forwards them using Vercel `waitUntil`, with bounded
+concurrency and timeouts; failures never break public requests. Heartbeats are throttled
+to one report per session per 20 seconds. No request bodies, headers, or query strings
+are reported. Paths may contain identifiers or embedded credentials; never put secrets in URL paths. Reporting
+is best-effort; it is not a durable audit stream. The dashboard marks old heartbeats stale.
+
+Infra keeps the latest 200 requests per session and lists the latest 50 sessions that
+expired less than seven days ago. Configure the maintenance POST described in the Infra
+README to physically delete expired sessions and their request records. This gateway
+does not automatically provision that scheduler.
+
+The signing secret must contain at least 32 bytes and must not be distributed to CLI users. Set
 `FARM_PREVIEW_DEFAULT_TTL_MS` and `FARM_PREVIEW_MAX_TTL_MS` to override the default one-hour and
-maximum 24-hour lifetimes. Set both auth variables or neither; a partial setup fails at startup.
+maximum 24-hour lifetimes.
 
 The included Redis limiter trusts `x-forwarded-for` only when Vercel's `VERCEL=1` runtime marker is
 present, because Vercel overwrites that header at the edge. If the marker or client address is
@@ -136,11 +168,24 @@ Then point the CLI at it:
 farm preview --gateway http://localhost:3000 --name local-check
 ```
 
-For local gateway runs, the public URL uses the path fallback:
+By default, local gateway runs use the path fallback:
 
 ```txt
 http://localhost:3000/__preview/local-check
 ```
+
+For interactive websites, set `FARM_PREVIEW_DOMAIN=localhost` on the local gateway
+as well. The public URL becomes `http://local-check.localhost:3000`, preserving
+the gateway port. Each preview gets its own origin, so root-relative scripts,
+styles, API calls, and links reach that preview without rewriting the app. Use a
+browser that resolves `*.localhost` to loopback. The path fallback is useful for
+individual HTTP requests but does not relocate an app's root-relative URLs.
+
+When composing the Node adapters yourself, pass `domain: "localhost"` to
+`createNodePreviewGatewayHandler` and `publicDomain: "localhost"` to
+`createPersistentPreviewRelay`. Keep the CLI's gateway/relay endpoints on the
+gateway origin, not on a preview subdomain. Target WebSocket upgrades, including
+Vite HMR, remain subject to the limits below.
 
 ## Limits
 

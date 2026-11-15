@@ -1,3 +1,4 @@
+import { observeWeakMapSets } from "./observe-weak-map-sets";
 import React, { StrictMode, useState } from "react";
 import { act } from "react";
 import { flushSync } from "react-dom";
@@ -310,12 +311,7 @@ function lisLength(sequence: readonly number[]): number {
 
 function trackRowIndexWrites() {
   const writes = { count: 0 };
-  const originalSet = WeakMap.prototype.set;
-  vi.spyOn(WeakMap.prototype, "set").mockImplementation(function (
-    this: WeakMap<object, unknown>,
-    key: object,
-    value: unknown,
-  ) {
+  observeWeakMapSets((key, value) => {
     if (
       value !== null &&
       typeof value === "object" &&
@@ -324,7 +320,6 @@ function trackRowIndexWrites() {
     ) {
       writes.count += 1;
     }
-    return originalSet.call(this, key, value);
   });
   return writes;
 }
@@ -749,7 +744,8 @@ describe("compiled keyed-array sort hints", () => {
           harness[action]();
           await flushCompilerUpdates();
         });
-        expect(writes.count).toBe(initialItems.length);
+        // The general reconcile indexes only the rows it creates.
+        expect(writes.count).toBe(action === "mismatchedSort" ? 1 : 0);
         expect(harness.counters.keys).toBeGreaterThan(0);
         if (action === "mismatchedSort") {
           expectedItems[0] = { ...expectedItems[0], id: `${expectedItems[0].id}-replacement` };

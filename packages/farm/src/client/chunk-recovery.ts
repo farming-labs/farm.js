@@ -37,6 +37,8 @@ const CHUNK_ERROR_PATTERNS = [
   /module script failed/i,
 ];
 
+const LAZY_ROUTER_CHUNK = /\/farm-client-router-h[0-9a-f]+\.js(?:[?#]|$)/;
+
 export function isChunkLoadError(errorLike: unknown): boolean {
   const values = collectErrorText(errorLike);
   if (values.some((value) => CHUNK_ERROR_PATTERNS.some((pattern) => pattern.test(value)))) {
@@ -71,6 +73,11 @@ export function installChunkErrorRecovery(options: FarmChunkRecoveryOptions = {}
   }
 
   const recover = (errorLike: unknown) => {
+    // A link falls back to a document navigation without the lazy router, and reloading would
+    // lose the page on a mere hover.
+    if (LAZY_ROUTER_CHUNK.test(getEventTargetAssetUrl(errorLike) ?? "")) {
+      return;
+    }
     if (!isChunkLoadError(errorLike)) {
       return;
     }
@@ -172,7 +179,14 @@ function getEventTargetAssetUrl(value: unknown): string | undefined {
   }
 
   const target = (value as Event).target as
-    | (EventTarget & { src?: string; href?: string; tagName?: string })
+    | (EventTarget & {
+        src?: string;
+        href?: string;
+        tagName?: string;
+        type?: string;
+        noModule?: boolean;
+        rel?: string;
+      })
     | null
     | undefined;
   if (!target || typeof target !== "object") {
@@ -180,7 +194,18 @@ function getEventTargetAssetUrl(value: unknown): string | undefined {
   }
 
   const tagName = typeof target.tagName === "string" ? target.tagName.toLowerCase() : "";
-  if (tagName !== "script" && tagName !== "link") {
+  // Farm's client code loads as module scripts (or `nomodule` legacy builds) and its CSS and
+  // chunks as stylesheet and preload links. A classic script on the same origin, such as the
+  // `/_vercel/insights/script.js` Vercel Analytics injects, is not a Farm chunk: reloading
+  // cannot fix it, and it 404s on every visit off Vercel.
+  if (tagName === "script") {
+    if (target.type !== "module" && target.noModule !== true) return undefined;
+  } else if (tagName === "link") {
+    const rel = typeof target.rel === "string" ? target.rel.toLowerCase().split(/\s+/) : [];
+    if (!rel.some((value) => ["stylesheet", "modulepreload", "preload"].includes(value))) {
+      return undefined;
+    }
+  } else {
     return undefined;
   }
 

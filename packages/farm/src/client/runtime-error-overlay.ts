@@ -124,11 +124,15 @@ const OVERLAY_STYLES = `
 
 .farm-runtime-error__viewport .farm-default-error__row {
   min-height: 48px;
+  grid-template-columns: 112px minmax(0, 1fr);
+  column-gap: 20px;
+  padding: 0 20px;
 }
 
 .farm-runtime-error__viewport .farm-default-error__details {
-  padding-top: 16px;
-  padding-bottom: 14px;
+  /* The overlay draws a box around the panel, so its content needs the same inset as the rows. */
+  padding: 16px 20px;
+  border-bottom: 0;
 }
 
 .farm-runtime-error__viewport .farm-default-error__details-header {
@@ -146,7 +150,7 @@ const OVERLAY_STYLES = `
 }
 
 .farm-runtime-error__viewport .farm-default-error__meta {
-  margin-top: 10px;
+  margin: 12px 0 0;
 }
 
 .farm-runtime-error__viewport .farm-default-error__actions {
@@ -227,6 +231,16 @@ const OVERLAY_STYLES = `
     width: 100%;
   }
 
+  .farm-runtime-error__viewport .farm-default-error__row {
+    grid-template-columns: 1fr;
+    gap: 4px;
+    padding: 12px 16px;
+  }
+
+  .farm-runtime-error__viewport .farm-default-error__details {
+    padding: 14px 16px;
+  }
+
   .farm-runtime-error__viewport .farm-default-error__action {
     min-width: 0;
   }
@@ -262,7 +276,7 @@ const OVERLAY_STYLES = `
 
   .farm-runtime-error__viewport .farm-default-error__details {
     padding-top: 12px;
-    padding-bottom: 10px;
+    padding-bottom: 12px;
   }
 
   .farm-runtime-error__viewport .farm-default-error__actions {
@@ -379,7 +393,12 @@ class DefaultFarmRuntimeErrorOverlay implements FarmRuntimeErrorOverlay {
   }
 
   show(errorLike: unknown, context: FarmRuntimeErrorOverlayContext): void {
-    if (this.destroyed || isChunkLoadError(errorLike) || isChunkLoadError(context.sourceEvent)) {
+    if (
+      this.destroyed ||
+      isChunkLoadError(errorLike) ||
+      isChunkLoadError(context.sourceEvent) ||
+      isResizeObserverLoopNotice(context.sourceEvent)
+    ) {
       return;
     }
 
@@ -903,6 +922,19 @@ function formatDisplaySourceUrl(url: string, clientWindow: Window): string {
   } catch {
     return url.replace(/[?#].*$/, "");
   }
+}
+
+/**
+ * The browser reports a ResizeObserver whose callback changed layout again
+ * as a window error with no error object. It is a spec'd notice, delivered on
+ * the next frame, not an application failure. An app that throws an Error with
+ * the same message still reaches the overlay, because that event carries it.
+ */
+function isResizeObserverLoopNotice(event: Event | undefined): boolean {
+  if (!event || !("message" in event) || (event as ErrorEvent).error != null) return false;
+  return /^ResizeObserver loop (?:completed with undelivered notifications|limit exceeded)/.test(
+    String((event as ErrorEvent).message),
+  );
 }
 
 function isBrowserExtensionUrl(url: string): boolean {

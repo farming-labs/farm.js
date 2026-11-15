@@ -16,7 +16,7 @@ pnpm --filter farm-local-first dev
 | Writes appear instantly, before the server replies | optimistic layer in the sync store |
 | A rejected write reverts the row | layer removed on failure |
 | Offline writes wait instead of failing | `networkMode: "online"` pause/resume |
-| Reload paints from disk | `cache.client.adapter` persistence |
+| Reload reuses the rows on disk | scope-checked persistence |
 | One row, many views, one update | shared row store |
 
 ## How it is wired
@@ -63,13 +63,16 @@ model and its fields. No migration: the schema describes your database rather
 than defining it.
 
 **There is no cache-adapter file either.** Synced rows persist to the browser
-automatically so a reload paints from disk. Pass your own store to
+automatically, tagged with the scope they were synced under, so a reload asks
+only for what changed and never shows another list's rows. Pass your own store to
 `setSyncPersistence()` to use IndexedDB or OPFS instead.
 
 ## Try the local-first behavior
 
 1. **Instant writes** — add a task; it appears with no spinner and no refetch.
-2. **Warm start** — reload; the list paints from disk before the network answers.
+2. **Warm start** — reload; the list comes back with only the rows changed since
+   the last visit sent. Run `document.cookie = "farm_list=other"` in the console
+   and reload: the previous list's rows are never shown, even offline.
 3. **Offline** — go offline in devtools, mark a task done. The row updates and
    the banner shows the write waiting. Go back online and it sends itself.
 4. **Scope enforcement** — from the console, try writing to a row id from

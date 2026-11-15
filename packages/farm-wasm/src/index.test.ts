@@ -163,25 +163,64 @@ describe("real WebAssembly builds", () => {
     }
   });
 
-  it("leaves Vite's explicit URL and init imports working", async () => {
+  it.each([undefined, "es2020"])(
+    "leaves explicit URL and init imports working with target %s",
+    async (target) => {
+      const root = await fixture();
+      await writeFile(
+        path.join(root, "explicit.ts"),
+        'import url from "./math.wasm?url"; import init from "./math.wasm?init"; globalThis.wasm = { url, init };',
+      );
+      const result = (await build({
+        configFile: false,
+        root,
+        logLevel: "silent",
+        plugins: configure({ target }).plugins,
+        css: { postcss: { plugins: [] } },
+        build: {
+          write: false,
+          assetsInlineLimit: 0,
+          rollupOptions: { input: path.join(root, "explicit.ts") },
+        },
+      })) as any;
+      expect(result.output.some((file: any) => file.fileName.endsWith(".wasm"))).toBe(true);
+    },
+  );
+
+  it.each(["chrome88", ["chrome120", "safari14"]])(
+    "rejects an incompatible app target %j without a wasm target override",
+    async (target) => {
+      const root = await fixture();
+      await expect(
+        build({
+          configFile: false,
+          root,
+          logLevel: "silent",
+          plugins: configure({}, { build: { target } }).plugins,
+          css: { postcss: { plugins: [] } },
+          build: { write: false, rollupOptions: { input: path.join(root, "math.ts") } },
+        }),
+      ).rejects.toThrow(/Top-level await/);
+    },
+  );
+
+  it("rejects an incompatible target when only a worker imports Wasm", async () => {
     const root = await fixture();
+    const entry = path.join(root, "worker-only.ts");
     await writeFile(
-      path.join(root, "explicit.ts"),
-      'import url from "./math.wasm?url"; import init from "./math.wasm?init"; globalThis.wasm = { url, init };',
+      entry,
+      'globalThis.run = () => new Worker(new URL("./worker.ts", import.meta.url), { type: "module" });',
     );
-    const result = (await build({
-      configFile: false,
-      root,
-      logLevel: "silent",
-      plugins: configure().plugins,
-      css: { postcss: { plugins: [] } },
-      build: {
-        write: false,
-        assetsInlineLimit: 0,
-        rollupOptions: { input: path.join(root, "explicit.ts") },
-      },
-    })) as any;
-    expect(result.output.some((file: any) => file.fileName.endsWith(".wasm"))).toBe(true);
+    await expect(
+      build({
+        configFile: false,
+        root,
+        logLevel: "silent",
+        plugins: configure({ target: "es2020" }).plugins,
+        css: { postcss: { plugins: [] } },
+        build: { write: false, rollupOptions: { input: entry } },
+      }),
+    ).rejects.toThrow(/Top-level await/);
   });
 
   it("rejects invalid binaries and explicitly incompatible targets", async () => {

@@ -240,10 +240,11 @@ describe("renderer configuration", () => {
       await writeFile(
         path.join(packageRoot, "vite.mjs"),
         `export function createFarmRendererPlugin(options) {
-          return { name: "test:" + options.rendererOptions.compiler };
+          return { name: "test:" + options.rendererOptions.compiler, lifetime: options.buildLifetime };
         }`,
       );
 
+      const owner = new AbortController();
       const plugins = await loadFarmRendererVitePlugins(
         resolveFarmRenderer({
           name: "test",
@@ -253,10 +254,10 @@ describe("renderer configuration", () => {
           options: { compiler: "enabled" },
         }),
         root,
-        { ssr: true },
+        { ssr: true, buildLifetime: owner.signal },
       );
 
-      expect(plugins).toEqual([{ name: "test:enabled" }]);
+      expect(plugins).toEqual([{ name: "test:enabled", lifetime: owner.signal }]);
     } finally {
       await rm(root, { recursive: true, force: true });
     }

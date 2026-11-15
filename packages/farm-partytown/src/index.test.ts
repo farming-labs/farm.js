@@ -65,6 +65,22 @@ describe("partytown Farm plugin", () => {
     expect(String(response.body)).toContain('"lib":"/app/~partytown/"');
   });
 
+  it("passes malformed request URLs to the next middleware instead of rejecting", async () => {
+    const plugin = partytown();
+    const configured = (await plugin.configure?.({}, context({}))) as any;
+    let middleware: Function | undefined;
+    configured.vite.plugins[0].configureServer({
+      middlewares: {
+        use(value: Function) {
+          middleware = value;
+        },
+      },
+    });
+    const next = vi.fn();
+    await expect(middleware?.({ method: "GET", url: "//[" }, {}, next)).resolves.toBeUndefined();
+    expect(next).toHaveBeenCalledWith();
+  });
+
   it("copies assets once at the correct Nitro build boundary", async () => {
     const root = await mkdtemp(path.join(tmpdir(), "farm-partytown-plugin-"));
     const outputDir = path.join(root, ".farm", ".output");

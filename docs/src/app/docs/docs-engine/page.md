@@ -15,6 +15,16 @@ agent-discovery routes without filesystem access.
 
 ## Enable docs
 
+The docs runtime renders with `@farming-labs/docs`, which the app installs:
+
+```bash
+pnpm add @farming-labs/docs
+```
+
+When docs are enabled (in `farm.config.ts`, or by a discovered `docs.config.*` or `docs.json`) and
+the package is missing, `farm dev` and `farm build` stop with that install command. The React
+starters already declare it.
+
 **farm.config.ts**
 
 ```ts
@@ -58,8 +68,15 @@ description: "Install Farm and create your first application."
 
 Every Markdown docs page also gets a page-specific 1200 by 630 social preview automatically. Farm
 uses the title, description, section, and route to emit Open Graph and X metadata, then selects a
-technical illustration suited to the page topic. The generated SVG is accessible, resolution
-independent, content-fingerprinted, and served with immutable caching.
+technical illustration suited to the page topic. The image is content-fingerprinted and served
+with immutable caching.
+
+X, LinkedIn, Facebook, and Slack do not render SVG previews, so when the optional `sharp` package
+is installed (`pnpm add sharp`), `og:image` points at a PNG
+(`/docs/_social/<page>/opengraph-image.png`) rendered from the same design. Without `sharp`, the
+SVG is the preview. The SVG stays available at `opengraph-image.svg` either way. The PNG uses system
+fonts, because `socialImage.fonts` can only be embedded in the SVG. Edge targets render the PNGs at
+build time into the server bundle, which adds roughly 25-35 KB per page.
 
 Use frontmatter only when a page needs to override the automatic result:
 
@@ -88,6 +105,60 @@ automatically. Route wrappers are only needed when you want to override the defa
 - /api/docs?format=llms
 - /api/docs?format=sitemap-xml
 - /api/docs/agent/spec
+
+### Base path
+
+With an [application `basePath`](/docs/configuration#application-base-path) such as `/console`, the
+docs answer below it: `/console/docs`, `/console/docs/getting-started.md`, `/console/llms.txt`,
+`/console/sitemap.xml`, `/console/robots.txt`, and the other docs files. Every link the docs runtime
+generates includes the base path: the navigation, breadcrumbs, canonical and social image URLs, the
+URLs in a page's Markdown, `llms.txt`, `llms-full.txt`, the sitemaps, and search results. As app
+pages do, the docs also keep answering at the origin root.
+
+The `/api/docs` endpoints stay at `/api/docs`, as the app's API routes do. Links you write in a
+docs page are rendered as written. The routes `@farming-labs/docs` lists in `AGENTS.md`, `SKILL.md`,
+the agent manifest, and a page's `LLM index` line are root-relative, and answer at the origin root.
+An external docs adapter such as `@farming-labs/farmjs` routes and links its pages itself, and does
+not apply the base path.
+
+`/api/docs?format=config` is public, so it returns only the documented docs config fields with
+credentials replaced by `"[redacted]"`: values under `apiKey`, `token`, `secret`, `password`,
+`authorization`, or `credential` keys, and every `headers` value. The server keeps the real values
+for search, Ask AI, and Docs Cloud. `/api/docs?format=diagnostics` reports filesystem paths, so
+only `farm dev` serves it; production answers 404.
+
+### Private docs pages
+
+Guard docs pages the way you guard app pages: a `middleware.ts` in the docs folder, a config
+middleware `matcher` such as `["/docs/internal", "/docs/internal/:path*"]`, or an integration's
+`protectedRoutes`. The guard decides who reads the page. The `/api/docs` endpoints, `llms.txt`,
+`llms-full.txt`, and the sitemaps answer anyone, so they leave out every docs page a guard written
+for its path covers: search skips it, its titles stay unlisted, and `/api/docs/<slug>.md` answers
+not found. Guards that cover every path (a root `middleware.ts`, or middleware without a matcher,
+with a catch-all matcher, or with a function matcher) name no page and hide nothing, the same rule
+as the [sitemap](/docs/configuration#sitemap). A function matcher cannot be read at build time, so
+give private docs a path matcher, or guard `/api/docs` and the llms files as well.
+
+A page's `.md` URL is served only when its guard covers that URL too. `/docs/internal/:path*` never
+meets `/docs/internal.md`, so that file answers 404; name it in the matcher to serve it to signed-in
+readers. A docs response to a request with cookies or an `Authorization` header, or one middleware
+attached request data to, is sent as `Cache-Control: private, no-store`, as app pages are, so a CDN
+never hands a signed-in reader's copy to someone else.
+
+Only a page's own URL reaches it: `/docs/internal//secret`, `/docs/Internal/secret`, or
+`/api/docs?format=markdown&path=internal/./secret` answer not found rather than serving the file
+under a URL its guard never sees.
+
+An external docs adapter serves pages, Markdown, `llms-full.txt`, search, Ask AI, and MCP from its
+own index. Farm passes it the app's guards when it declares the `guarded-pages` capability, as
+`@farming-labs/farmjs` does from the release that adds it: a page a guard covers stays out of
+search, `llms.txt`, `llms-full.txt`, the sitemap, MCP, Ask AI, and the content feed, and its
+Markdown answers only at a URL the guard also covers, as with the built-in runtime. On an edge
+target the adapter serves a build-time snapshot that runs no guard, so `farm build` stops with an
+error naming the pages there; deploy guarded docs to a Node or serverless target. An adapter
+without the capability makes `farm dev` and `farm build` stop with that error on every target:
+upgrade it, move private pages out of the docs folder, or set `docs.adapter: false` to use Farm's
+built-in docs runtime.
 
 ## Configure the docs experience
 
@@ -157,6 +228,62 @@ Large documentation sites may move the serializable docs options into `docs.conf
 automatically. Values declared in `farm.config.ts` take priority, so applications can still override
 the entry or any shared setting.
 
+## Several docs roots
+
+One app can serve several independent docs sets, each under its own route, with its own content,
+navigation, and search. Declare the extra sets once, in `roots` in the docs config file; the docs
+config itself stays the first, main root.
+
+**docs.config.tsx**
+
+```tsx
+import { defineDocs } from "@farming-labs/docs";
+
+export default defineDocs({
+  entry: "docs",
+  nav: { title: "Acme Docs" },
+  roots: [
+    {
+      entry: "statewire/docs",
+      nav: { title: <span>Statewire</span> },
+      metadata: { titleTemplate: "%s – Statewire" },
+    },
+    { entry: "pinboard/docs", contentDir: "content/pinboard", nav: { title: "Pinboard" } },
+  ],
+});
+```
+
+**farm.config.ts**
+
+```ts
+import { defineConfig } from "@farm.js/core";
+
+export default defineConfig({
+  docs: {
+    entry: "/docs",
+    // Optional: serializable overrides for one root, matched by entry.
+    roots: [{ entry: "/statewire/docs", search: { enabled: false } }],
+  },
+});
+```
+
+- Each root inherits the main root's settings and replaces the fields it sets itself.
+- `docs.roots` in `farm.config.ts` takes the same flat shape. An entry there merges over the docs
+  config's root with the same `entry`, its fields winning, or adds a root of its own. From lowest to
+  highest precedence: the docs config's main fields, the `docs` options in `farm.config.ts`, the
+  docs config's root, and that root's `docs.roots` entry.
+- `contentDir` defaults to `src/app/<entry>`, as it does for the main root, and is never inherited.
+- Icons, React elements, MDX components, and callbacks in a root's docs config reach the adapter as
+  written; Farm serializes only the plain values.
+- `/sitemap.xml`, `/robots.txt`, `/llms-full.txt`, docs MCP, and the AI catalog entry come from the
+  first root.
+- Search follows the page it is opened from: it searches that page's root. `/api/docs?root=<entry>`
+  or `?pathname=<page>` names the root explicitly.
+
+Several roots need a docs adapter such as `@farming-labs/farmjs` on a Node.js deployment target,
+Vercel included. `farm dev` and `farm build` stop with an error for the built-in renderer
+(`docs.adapter: false`) and for edge targets. Each root's `entry` must be unique and cannot be `/`.
+
 ## Agent-readable output
 
 The docs runtime can serve human pages and machine-readable output from the same markdown source:
@@ -168,6 +295,12 @@ The docs runtime can serve human pages and machine-readable output from the same
 - Search metadata.
 
 That means docs content only needs to be written once.
+
+An app's own root `sitemap.ts`, `robots.ts`, `llms.ts`, or `llms-full.ts`
+[metadata route](/docs/routing#application-metadata-routes), or the same file in `public/`, takes
+`/sitemap.xml`, `/robots.txt`, `/llms.txt`, or `/llms-full.txt` from the docs runtime, and so does a
+robots.txt generated by [`agent.crawlers`](/docs/configuration#ai-crawlers). The docs runtime keeps
+its other output, such as `/sitemap.md` and `/.well-known/llms.txt`.
 
 ## Last updated dates
 
@@ -187,6 +320,13 @@ lastModified: "2026-07-16"
 Explicit frontmatter wins over generated Git metadata. When Git history is unavailable, local docs
 fall back to the source file timestamp and copied production docs fall back to the build date.
 
+A shallow clone holds only recent history, and Git lists its oldest commit as adding every file. A
+page last changed before that commit therefore shows no date, instead of the oldest commit's date
+or the build date, and `farm build` warns how many pages it left undated. Build from a full clone
+(`git fetch --unshallow`) to date every page. Vercel clones 10 commits deep; the
+`VERCEL_DEEP_CLONE=true` environment variable is widely reported to give a full clone, but Vercel
+does not document it, so check a deployment's dates after setting it.
+
 ## Override behavior
 
 When `docs.entry` is enabled in `farm.config.ts`, Farm can mount docs pages and docs API routes automatically. Add explicit route wrappers only when the app wants to override default rendering, authentication, or response behavior.
@@ -200,6 +340,42 @@ export const { GET, POST } = createDocsAPI();
 
 Add the same exports to `src/app/api/docs/[...docs]/route.ts` when the override should also own
 path-style machine routes. Most applications do not need either wrapper.
+
+## Prerender docs pages
+
+Docs pages render on request by default. Set `docs.prerender` to have `farm build` render them into
+static files on Node and serverless targets:
+
+```ts
+export default defineConfig({
+  docs: {
+    entry: "/docs",
+    prerender: true,
+    socialImage: { baseUrl: "https://docs.example.com" },
+  },
+});
+```
+
+Farm's built-in renderer (`docs.adapter: false`) prerenders every page in the docs content
+directory. A docs adapter such as `@farming-labs/farmjs` prerenders the pages it lists; an adapter
+that does not list its pages keeps rendering them on request, with a build warning.
+
+A built-in page's social metadata (`og:url`, `og:image`) is an absolute URL. Without
+`socialImage.baseUrl` its origin is the request's, which a static file would freeze at the build's,
+so those pages keep rendering on request and the build says how many. Set `socialImage.baseUrl`, or
+`socialImage: false` in a page's frontmatter, to prerender them.
+
+A docs page is a static file once prerendered, so it does not negotiate `Accept: text/markdown`;
+agents use the `.md` URL the page links to. Markdown, search, `llms.txt`, and MCP keep rendering on
+request. A page that middleware, a redirect, a rewrite, i18n, or a dynamic or cached route rule
+covers keeps rendering on request, as for static app pages; `routeRules: { "/docs/changelog": {
+prerender: false } }` keeps one page dynamic. Edge targets already serve docs pages from the build's
+docs snapshot.
+
+On Vercel, docs a sign-in guard covers can prerender too: give the guard's `middleware.ts`
+`export const config = { runtime: "edge" }`, and it runs before Vercel serves each page's file. The
+built-in renderer already keeps guarded pages out of search, `llms.txt`, and the sitemaps. See
+[Edge middleware on Vercel](/docs/middleware#edge-middleware-on-vercel).
 
 ## Production notes
 

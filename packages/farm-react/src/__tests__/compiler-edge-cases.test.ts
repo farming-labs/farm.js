@@ -140,6 +140,52 @@ describe("React AOT compiler safety boundaries", () => {
     expect(result.diagnostics[0]?.reason).toMatch(/dynamic child structures/i);
   });
 
+  it("snapshots state read by an async handler when it starts", async () => {
+    const result = await compile(`
+      import { useState } from "react";
+      export function AsyncHandler() {
+        const [count, setCount] = useState(0);
+        const increment = async () => {
+          await Promise.resolve();
+          setCount(count + 1);
+        };
+        return <button onClick={increment}>{count}</button>;
+      }
+    `);
+
+    expect(result.diagnostics).toEqual([]);
+    expect(result.compiled).toEqual(["AsyncHandler"]);
+    // The read happens before the await, as it does in React's render closure.
+    expect(result.code).toMatch(
+      /const _count = _farmState\[0\]\.get\(\);\s*await Promise\.resolve\(\);\s*_farmState\[0\]\.set\(_count \+ 1\)/,
+    );
+  });
+
+  it("compiles useState declared after unrelated derived values and handlers", async () => {
+    const result = await compile(`
+      import { useState } from "react";
+      export function LateState() {
+        const [count, setCount] = useState(0);
+        const doubled = count * 2;
+        const reset = () => {
+          setCount(0);
+          setOpen(false);
+        };
+        const [open, setOpen] = useState(false);
+        return (
+          <section className={open ? "open" : "closed"}>
+            <output>{doubled}</output>
+            <button onClick={() => setOpen(!open)}>Toggle</button>
+            <button onClick={reset}>Reset</button>
+          </section>
+        );
+      }
+    `);
+
+    expect(result.diagnostics).toEqual([]);
+    expect(result.compiled).toEqual(["LateState"]);
+  });
+
   it.each([
     {
       name: "an impure derived call",
@@ -159,13 +205,23 @@ describe("React AOT compiler safety boundaries", () => {
       reason: /can only reference earlier derived local values/i,
     },
     {
-      name: "state declared after a derived value",
+      name: "state initialized from an earlier derived value",
       body: `
         const seed = 0;
         const [next, setNext] = useState(seed);
         return <button onClick={() => setNext(next + 1)}>{count + next}</button>;
       `,
-      reason: /useState declarations must appear before derived local values/i,
+      reason: /useState initializers cannot reference another local binding/i,
+    },
+    {
+      // React would throw a ReferenceError reading next before its declaration.
+      name: "a derived value reading state declared after it",
+      body: `
+        const label = next + 1;
+        const [next, setNext] = useState(0);
+        return <button onClick={() => setNext(next + 1)}>{count + label}</button>;
+      `,
+      reason: /derived local label reads a useState declared after it/i,
     },
   ])("falls back for $name", async ({ body, reason }) => {
     const result = await compile(`
@@ -182,24 +238,19 @@ describe("React AOT compiler safety boundaries", () => {
 
   it.each([
     {
-      name: "nested props",
-      parameter: "{ user: { name } }",
-      reason: /nested component props destructuring/i,
-    },
-    {
-      name: "rest props",
-      parameter: "{ initial, ...rest }",
-      reason: /rest properties in component props destructuring/i,
-    },
-    {
       name: "computed props",
       parameter: '{ ["initial"]: initial }',
       reason: /computed component props destructuring/i,
     },
     {
+      name: "nested computed props",
+      parameter: '{ initial, options: { ["mode"]: mode } }',
+      reason: /computed component props destructuring/i,
+    },
+    {
       name: "a defaulted props object",
       parameter: "{ initial } = { initial: 0 }",
-      reason: /zero parameters, one props identifier, or flat object props destructuring/i,
+      reason: /zero parameters, one props identifier, or object props destructuring/i,
     },
   ])("falls back for $name", async ({ parameter, reason }) => {
     const result = await compile(`
@@ -217,16 +268,16 @@ describe("React AOT compiler safety boundaries", () => {
 
   it.each([
     {
-      name: "an async handler",
-      declaration: "const increment = async () => setCount(count + 1);",
-      event: "increment",
-      reason: /event handler increment must be synchronous/i,
-    },
-    {
       name: "a generator handler",
       declaration: "const increment = function* () { setCount(count + 1); };",
       event: "increment",
-      reason: /event handler increment must be synchronous/i,
+      reason: /event handler increment cannot be a generator/i,
+    },
+    {
+      name: "a generator handler declaration",
+      declaration: "function* increment() { setCount(count + 1); }",
+      event: "increment",
+      reason: /event handler increment must be a non-generator, non-generic function/i,
     },
     {
       name: "a handler exposed as a child",
@@ -317,16 +368,16 @@ describe("React AOT compiler safety boundaries", () => {
       reason: /ref requires React ownership/i,
     },
     {
-      name: "effect lifecycle",
+      name: "an async effect",
       source: `
         import { useEffect, useState } from "react";
         export function WithEffect() {
           const [count, setCount] = useState(0);
-          useEffect(() => {}, [count]);
+          useEffect(async () => {}, [count]);
           return <button onClick={() => setCount(count + 1)}>{count}</button>;
         }
       `,
-      reason: /top-level useState declarations/i,
+      reason: /useEffect needs one inline synchronous callback/i,
     },
   ])("falls back for $name", async ({ source, reason }) => {
     const result = await compile(source);

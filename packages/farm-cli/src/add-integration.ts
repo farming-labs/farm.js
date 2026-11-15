@@ -98,7 +98,12 @@ interface IntegrationProviderDefinition {
   }[];
   notes?: readonly string[];
   ui?: UIFeatureDefinition;
-  template(): string;
+  template(context: IntegrationTemplateContext): string;
+}
+
+interface IntegrationTemplateContext {
+  /** Import specifier for an app-root-relative file, from the generated integration file. */
+  importFrom(rootRelativePath: string): string;
 }
 
 const PROVIDERS: readonly IntegrationProviderDefinition[] = [
@@ -114,6 +119,7 @@ const PROVIDERS: readonly IntegrationProviderDefinition[] = [
     notes: [
       'Use @ai-sdk/react useChat with api: "/api/chat" on the client.',
       "Replace model with any AI SDK provider model or Vercel AI Gateway model id.",
+      "The chat route answers only in development until authorize checks your session: every request spends your AI credits.",
       "No farm.config integration wiring is required for this route.",
     ],
     ui: aiChatUIFeature(),
@@ -122,6 +128,10 @@ const PROVIDERS: readonly IntegrationProviderDefinition[] = [
 export const POST = aiChatRoute({
   model: "openai/gpt-4o-mini",
   system: "You are a helpful assistant.",
+  // Every request spends your AI credits. TODO: check the signed-in user, for
+  // example authorize: async ({ request }) => Boolean(await getSession(request)).
+  // Until then the route answers in development and refuses in production.
+  authorize: () => process.env.NODE_ENV === "development",
 });
 `,
   },
@@ -426,7 +436,7 @@ export const autumnIntegration = autumn({
     description: "Better Auth route adapter",
     env: ["BETTER_AUTH_SECRET", "BETTER_AUTH_URL", "BETTER_AUTH_DATABASE_PATH"],
     dependencies: {
-      "better-auth": "^1.5.5",
+      "better-auth": "^1.6.22",
       "better-sqlite3": "^12.6.2",
     },
     devDependencies: {
@@ -461,7 +471,8 @@ await migrations.runMigrations();
       {
         path: ".env.example",
         merge: "lines",
-        source: () => `BETTER_AUTH_SECRET=replace-with-at-least-32-random-characters
+        source: () => `# Generate with: openssl rand -base64 32
+BETTER_AUTH_SECRET=
 BETTER_AUTH_URL=http://localhost:3000
 BETTER_AUTH_DATABASE_PATH=better-auth.sqlite
 `,
@@ -476,8 +487,8 @@ better-auth.sqlite-wal
       },
     ],
     ui: betterAuthUIFeature(),
-    template: () => `import { betterAuth } from "@farm.js/better-auth";
-import { auth } from "../auth.ts";
+    template: ({ importFrom }) => `import { betterAuth } from "@farm.js/better-auth";
+import { auth } from "${importFrom("src/lib/auth.ts")}";
 
 export const betterAuthIntegration = betterAuth({
   instance: auth,
@@ -497,7 +508,7 @@ export const betterAuthIntegration = betterAuth({
     description: "Auth.js route adapter",
     env: ["AUTH_SECRET", "AUTH_GITHUB_ID", "AUTH_GITHUB_SECRET"],
     dependencies: {
-      "@auth/core": "0.34.3",
+      "@auth/core": "^0.41.3",
     },
     setupFiles: [
       {
@@ -514,6 +525,8 @@ const config = {
   ],
   secret: process.env.AUTH_SECRET,
   trustHost: true,
+  // @farm.js/authjs serves Auth.js at /api/auth; Auth.js expects /auth otherwise.
+  basePath: "/api/auth",
 };
 
 const handler = (request: Request) => Auth(request, config);
@@ -531,8 +544,8 @@ export const auth = {
       "The generated Auth.js instance uses GitHub OAuth through @auth/core; add or replace providers in src/lib/auth.ts.",
     ],
     ui: authjsUIFeature(),
-    template: () => `import { authjs } from "@farm.js/authjs";
-import { auth } from "../auth.ts";
+    template: ({ importFrom }) => `import { authjs } from "@farm.js/authjs";
+import { auth } from "${importFrom("src/lib/auth.ts")}";
 
 export const authjsIntegration = authjs({
   instance: auth,
@@ -652,6 +665,7 @@ export async function addFarmIntegration(
 ): Promise<AddFarmIntegrationResult> {
   const root = path.resolve(options.root || process.cwd());
   const definition = resolveProvider(options.provider);
+  if (!options.skipPackageJson) await assertReadablePackageJson(root);
 
   if (definition.provider === "ai") {
     return addAIRouteIntegration({
@@ -691,6 +705,7 @@ export async function addFarmIntegration(
   };
 
   await writeIntegrationComponent({
+    root,
     path: integrationFile,
     definition,
     force: options.force,
@@ -775,6 +790,7 @@ async function addAIRouteIntegration(input: {
   };
 
   await writeIntegrationComponent({
+    root: input.root,
     path: routeFile,
     definition: input.definition,
     force: input.force,
@@ -827,6 +843,7 @@ function assertValidIntegrationKey(key: string) {
 }
 
 async function writeIntegrationComponent(input: {
+  root: string;
   path: string;
   definition: IntegrationProviderDefinition;
   force?: boolean;
@@ -841,7 +858,11 @@ async function writeIntegrationComponent(input: {
 
   if (!input.dryRun) {
     await mkdir(path.dirname(input.path), { recursive: true });
-    await writeFile(input.path, input.definition.template(), "utf8");
+    const importFrom = (rootRelativePath: string) =>
+      toImportPath(
+        path.relative(path.dirname(input.path), path.join(input.root, rootRelativePath)),
+      );
+    await writeFile(input.path, input.definition.template({ importFrom }), "utf8");
   }
 
   if (exists) {
@@ -983,6 +1004,23 @@ async function writeIntegrationSetupFiles(input: {
   }
 }
 
+async function readPackageManifest(packageJsonPath: string) {
+  const source = await readFile(packageJsonPath, "utf8");
+  try {
+    return { source, manifest: JSON.parse(source) as PackageManifest };
+  } catch (error) {
+    throw new Error(
+      `Could not parse ${packageJsonPath}: ${error instanceof Error ? error.message : error}. Fix it, or pass --skip-package-json.`,
+    );
+  }
+}
+
+/** Fails before any file is written, so a broken package.json leaves the app untouched. */
+async function assertReadablePackageJson(root: string) {
+  const packageJsonPath = path.join(root, "package.json");
+  if (existsSync(packageJsonPath)) await readPackageManifest(packageJsonPath);
+}
+
 async function updatePackageJson(input: {
   root: string;
   definition: IntegrationProviderDefinition;
@@ -995,8 +1033,7 @@ async function updatePackageJson(input: {
     return;
   }
 
-  const source = await readFile(packageJsonPath, "utf8");
-  const manifest = JSON.parse(source) as PackageManifest;
+  const { source, manifest } = await readPackageManifest(packageJsonPath);
 
   const dependencies = missingDependencies(manifest, input.definition.dependencies);
   const devDependencies = missingDependencies(manifest, input.definition.devDependencies);

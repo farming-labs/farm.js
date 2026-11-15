@@ -1,7 +1,8 @@
+import { _withFarmResponseHeaders } from "../owned-response";
 import type { FarmPlugin, FarmPluginContext } from "../plugin";
 import type { FarmRequest, FarmResponse } from "../types";
 import { pipeline, Readable } from "node:stream";
-import { constants, createBrotliCompress, createGzip } from "node:zlib";
+import { brotliCompress, constants, createBrotliCompress, createGzip, gzip } from "node:zlib";
 
 type SupportedEncoding = "br" | "gzip";
 
@@ -90,9 +91,15 @@ function isCompressibleMediaType(mediaType: string | undefined): boolean {
   return COMPRESSIBLE_MEDIA_TYPE_SUFFIXES.some((suffix) => mediaType.endsWith(suffix));
 }
 
-function isCompressionEligible(request: Request, response: Response): boolean {
+function isCompressionEligible(
+  request: Request,
+  response: Response,
+  bufferedText: string | undefined,
+): boolean {
   if (
-    (request.method !== "HEAD" && !response.body) ||
+    // Known buffered text proves a body without reading response.body, which
+    // would create a lazy response's Web stream.
+    (request.method !== "HEAD" && bufferedText === undefined && !response.body) ||
     response.status === 204 ||
     response.status === 205 ||
     response.status === 304 ||
@@ -122,22 +129,11 @@ function appendVary(headers: Headers, value: string): void {
   headers.set("vary", values.join(", "));
 }
 
-function compressResponse(response: Response, encoding: SupportedEncoding): Response {
-  // Both compressors must flush per chunk. Without an explicit flush mode brotli
-  // buffers until its 4 MB window fills or the source ends, so a streaming SSR,
-  // RSC, or NDJSON response delivers nothing to the client until it completes -
-  // and `selectEncoding` prefers brotli on every tie, so that is the default
-  // path for an ordinary browser.
-  const compressor =
-    encoding === "br"
-      ? createBrotliCompress({ flush: constants.BROTLI_OPERATION_FLUSH })
-      : createGzip({ flush: constants.Z_SYNC_FLUSH });
-  const input = Readable.fromWeb(response.body as any);
-  const output = pipeline(input, compressor, () => {
-    // pipeline forwards source failures to the compressed body and destroys
-    // the source when the response consumer cancels it. The web stream owns
-    // observing the resulting destination error.
-  });
+// Dynamic responses need bounded compression work. Node defaults to quality
+// 11, spending substantially more CPU for a small size gain.
+const BROTLI_QUALITY = 5;
+
+function compressedHeaders(response: Response, encoding: SupportedEncoding): Headers {
   const headers = new Headers(response.headers);
 
   headers.set("content-encoding", encoding);
@@ -148,6 +144,76 @@ function compressResponse(response: Response, encoding: SupportedEncoding): Resp
   if (etag && !etag.startsWith("W/")) {
     headers.set("etag", `W/${etag}`);
   }
+  return headers;
+}
+
+// The caller proved the body is exactly this complete string (Farm built it and
+// nothing replaced the stream since), so there is nothing to flush early.
+// Compressing it in one call skips the web/Node stream bridge and per-chunk
+// flushes, which cost more than the compression itself for typical pages.
+function compressBufferedResponse(
+  response: Response,
+  text: string,
+  encoding: SupportedEncoding,
+  lazyBody: boolean,
+): Response {
+  const headers = compressedHeaders(response, encoding);
+  if (!lazyBody) response.body?.cancel().catch(() => {});
+  const input = Buffer.from(text);
+  let cancelled = false;
+  const body = new ReadableStream<Uint8Array>({
+    start(controller) {
+      const done = (error: Error | null, output: Buffer) => {
+        if (cancelled) return;
+        if (error) {
+          controller.error(error);
+          return;
+        }
+        controller.enqueue(new Uint8Array(output.buffer, output.byteOffset, output.byteLength));
+        controller.close();
+      };
+      if (encoding === "br") {
+        brotliCompress(
+          input,
+          { params: { [constants.BROTLI_PARAM_QUALITY]: BROTLI_QUALITY } },
+          done,
+        );
+      } else {
+        gzip(input, done);
+      }
+    },
+    cancel() {
+      cancelled = true;
+    },
+  });
+
+  return new Response(body, {
+    status: response.status,
+    statusText: response.statusText,
+    headers,
+  });
+}
+
+function compressResponse(response: Response, encoding: SupportedEncoding): Response {
+  // Both compressors must flush per chunk. Without an explicit flush mode brotli
+  // buffers until its 4 MB window fills or the source ends, so a streaming SSR,
+  // RSC, or NDJSON response delivers nothing to the client until it completes -
+  // and `selectEncoding` prefers brotli on every tie, so that is the default
+  // path for an ordinary browser.
+  const compressor =
+    encoding === "br"
+      ? createBrotliCompress({
+          flush: constants.BROTLI_OPERATION_FLUSH,
+          params: { [constants.BROTLI_PARAM_QUALITY]: BROTLI_QUALITY },
+        })
+      : createGzip({ flush: constants.Z_SYNC_FLUSH });
+  const input = Readable.fromWeb(response.body as any);
+  const output = pipeline(input, compressor, () => {
+    // pipeline forwards source failures to the compressed body and destroys
+    // the source when the response consumer cancels it. The web stream owns
+    // observing the resulting destination error.
+  });
+  const headers = compressedHeaders(response, encoding);
 
   return new Response(Readable.toWeb(output) as ReadableStream<Uint8Array>, {
     status: response.status,
@@ -157,24 +223,30 @@ function compressResponse(response: Response, encoding: SupportedEncoding): Resp
 }
 
 function varyIdentityResponse(response: Response): Response {
-  const headers = new Headers(response.headers);
-  appendVary(headers, "Accept-Encoding");
-
-  return new Response(response.body, {
-    status: response.status,
-    statusText: response.statusText,
-    headers,
-  });
+  return _withFarmResponseHeaders(response, (headers) => appendVary(headers, "Accept-Encoding"));
 }
 
-/** @internal Applies Farm's production response compression contract. */
-export function compressFarmResponse(request: Request, response: Response): Response {
-  if (!isCompressionEligible(request, response)) return response;
+/**
+ * @internal Applies Farm's production response compression contract.
+ * `bufferedText` is the complete body when the caller can prove it, as Farm can
+ * for documents it buffered itself; streamed bodies keep per-chunk flushing.
+ * `lazyBody` says the response has not created its Web body yet (a Node
+ * FastResponse page), so there is no stream to cancel.
+ */
+export function compressFarmResponse(
+  request: Request,
+  response: Response,
+  bufferedText?: string,
+  lazyBody = false,
+): Response {
+  if (!isCompressionEligible(request, response, bufferedText)) return response;
   if (request.method === "HEAD") return varyIdentityResponse(response);
 
   const encoding = selectEncoding(request.headers.get("accept-encoding") ?? "");
   if (!encoding) return varyIdentityResponse(response);
-  return compressResponse(response, encoding);
+  return bufferedText === undefined
+    ? compressResponse(response, encoding)
+    : compressBufferedResponse(response, bufferedText, encoding, lazyBody);
 }
 
 export function createCompressionPlugin({

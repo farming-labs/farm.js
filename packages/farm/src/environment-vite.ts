@@ -1,5 +1,17 @@
+import { existsSync, readFileSync, realpathSync } from "node:fs";
+import path from "node:path";
 import type { Plugin } from "vite";
 import type { FarmEnvironment } from "./environment";
+import { findFarmClientOnlyImport } from "./islands-react-server-exports";
+import { getFarmSourceRoots, type ResolvedFarmLayer } from "./layers";
+import {
+  findClientNodeBuiltinChain,
+  isProgrammaticRouteActionProxy,
+  type FarmProgrammaticRoutesPluginApi,
+} from "./programmatic-routes-client";
+import { PROGRAMMATIC_ROUTE_FILE_NAMES, parseProgrammaticRouteModuleId } from "./routes-shared";
+import { resolveFarmServerComponentsMode } from "./server-components-mode";
+import { getFarmClientReachableModules, hasUseClientDirective } from "./utils/client-component";
 
 type EnvironmentFunctionKind = "createServerOnlyFn" | "createClientOnlyFn" | "createIsomorphicFn";
 
@@ -90,25 +102,160 @@ export function transformEnvironmentFunctions(
   return { code: output };
 }
 
-export function farmEnvironmentFunctionsPlugin(): Plugin {
+export interface FarmEnvironmentFunctionsPluginOptions {
+  /** The app's root, srcDir, and layers: where Farm loads programmatic routes files from. */
+  root?: string;
+  srcDir?: string;
+  layers?: readonly ResolvedFarmLayer[];
+  experimental?: { serverComponents?: unknown };
+}
+
+export function farmEnvironmentFunctionsPlugin(
+  options: FarmEnvironmentFunctionsPluginOptions = {},
+): Plugin {
+  // Programmatic routes files hold server-only route hooks (guards, data, API handlers) and
+  // whatever they import. The browser copy of a route imports only its component module, so
+  // none of them, nor the modules that export route definitions, may reach the client.
+  let routesFiles = new Set<string>();
+  let farmApi: FarmProgrammaticRoutesPluginApi | undefined;
+  let isBuild = false;
+  let projectRoot = process.cwd();
+  let sources: { for: unknown; files: ReadonlySet<string> } | undefined;
+  const routeSourceFiles = (): ReadonlySet<string> => {
+    const clientRoutes = farmApi?.getProgrammaticClientRoutes();
+    if (sources?.for !== clientRoutes || !sources) {
+      sources = {
+        for: clientRoutes,
+        files: new Set([
+          ...routesFiles,
+          ...[...(clientRoutes?.routeSourceFiles ?? [])].map(resolvedFile),
+        ]),
+      };
+    }
+    return sources.files;
+  };
+  const routeSourceError = (file: string, importers: readonly string[] = []) =>
+    `[Farm.js] ${file} defines programmatic routes, but the browser bundle imports it` +
+    (importers.length > 0 ? ` (from ${importers.join(", ")})` : "") +
+    ". Routes files and the modules that define routes carry server-only guards, " +
+    "data hooks, and API handlers, so they never reach the browser. Import the component, " +
+    "server function, or helper from its own module instead.";
+
   return {
     name: "farm:environment-functions",
     enforce: "post",
 
-    transform(code, id, transformOptions) {
-      const result = transformEnvironmentFunctions({
-        code,
-        id,
-        environment: resolveBuildEnvironment(
-          this as unknown as { environment?: { name?: string } },
-          transformOptions?.ssr,
+    configResolved(config) {
+      isBuild = config.command === "build";
+      projectRoot = config.root;
+      farmApi = config.plugins.find((plugin) => plugin.name === "farm")?.api as
+        | FarmProgrammaticRoutesPluginApi
+        | undefined;
+      sources = undefined;
+      routesFiles = new Set(
+        getFarmSourceRoots({ ...options, root: options.root ?? config.root }).flatMap((source) =>
+          PROGRAMMATIC_ROUTE_FILE_NAMES.map((name) =>
+            resolvedFile(path.resolve(source.root, source.srcDir, name)),
+          ),
         ),
-        parse: (source) => this.parse(source) as unknown as AstNode,
-      });
+      );
+    },
 
+    transform(code, id, transformOptions) {
+      const environment = resolveBuildEnvironment(
+        this as unknown as { environment?: { name?: string } },
+        transformOptions?.ssr,
+      );
+      const parse = (source: string) => this.parse(source) as unknown as AstNode;
+      const result = transformEnvironmentFunctions({ code, id, environment, parse });
+      // Development serves modules one by one, so check each as the browser asks for it.
+      // A build checks the finished bundle instead, where only shipped modules count.
+      if (
+        environment === "client" &&
+        !isBuild &&
+        !parseProgrammaticRouteModuleId(id) &&
+        routeSourceFiles().has(moduleFile(id)) &&
+        !isProgrammaticRouteActionProxy(code)
+      ) {
+        this.error(routeSourceError(moduleFile(id)));
+      }
+      if (
+        environment === "server" &&
+        resolveFarmServerComponentsMode(options.experimental?.serverComponents) === "islands" &&
+        isApplicationScript(id)
+      ) {
+        const file = id.split("?", 1)[0]!;
+        // Vite ids are real paths; a symlinked root must compare as one.
+        const root = realpathSync(options.root ?? projectRoot);
+        // The whole app counts: a client module can live outside `srcDir`, and one a shared
+        // workspace package holds is outside the root, so its own directive has to count too.
+        const clientCode =
+          getFarmClientReachableModules(root, root).has(path.resolve(file)) ||
+          (existsSync(file) && hasUseClientDirective(readFileSync(file, "utf8")));
+        const reached = clientCode ? null : findFarmClientOnlyImport(code, file);
+        if (reached) {
+          const chain = reached.chain.map((step) => path.relative(root, step)).join(" -> ");
+          this.error(
+            `[Farm.js] ${path.relative(root, file)} is server code, but its import of "${reached.specifier}" reaches "client-only" (${chain}), so that package can only run in the browser. Add "use client" to this module, or import the package from a "use client" module.`,
+          );
+        }
+      }
       return result ? { code: result.code, map: null } : null;
     },
+
+    generateBundle() {
+      const context = this as unknown as { environment?: { name?: string } };
+      if (resolveBuildEnvironment(context, false) !== "client") return;
+      // Every module in the client graph counts, including one tree-shaking emptied: the
+      // modules it imports for their side effects still ship.
+      const forbidden = routeSourceFiles();
+      for (const id of this.getModuleIds()) {
+        if (parseProgrammaticRouteModuleId(id)) {
+          // Defense in depth: a component module whose static imports reach a Node builtin
+          // carries server-only code into the browser.
+          const chain = findClientNodeBuiltinChain(id, (moduleId) => {
+            return this.getModuleInfo(moduleId)?.importedIds;
+          });
+          if (chain) {
+            this.error(
+              `[Farm.js] The browser bundle reaches the server-only module "${chain.at(-1)}" ` +
+                `through the programmatic route module ${moduleFile(id)}: ${chain.map(moduleFile).join(" -> ")}. ` +
+                "Keep server-only imports in the routes file or in modules only its guard, " +
+                "data, and API handlers use.",
+            );
+          }
+          continue;
+        }
+        if (!forbidden.has(moduleFile(id))) continue;
+        const info = this.getModuleInfo(id);
+        if (isProgrammaticRouteActionProxy(info?.code)) continue;
+        this.error(routeSourceError(moduleFile(id), info?.importers.map(moduleFile)));
+      }
+    },
   };
+}
+
+/** An application's own script: not a package, a virtual module or Farm's generated code. */
+function isApplicationScript(id: string): boolean {
+  return (
+    !id.startsWith("\0") &&
+    !id.includes("/node_modules/") &&
+    !id.includes("/.farm/") &&
+    /\.[cm]?[jt]sx?(?:$|\?)/.test(id)
+  );
+}
+
+function moduleFile(id: string): string {
+  return id.split("?", 1)[0]!.replace(/\\/g, "/");
+}
+
+/** A file path as Vite ids spell it: symlinks resolved, forward slashes. */
+function resolvedFile(filePath: string): string {
+  try {
+    return moduleFile(realpathSync(filePath));
+  } catch {
+    return moduleFile(filePath);
+  }
 }
 
 function resolveBuildEnvironment(

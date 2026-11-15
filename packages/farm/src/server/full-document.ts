@@ -1,22 +1,43 @@
 // Handling for a root layout that returns a full `<html>…</html>` document.
 //
-// Farm owns the document shell — a layout is expected to return a fragment (its
-// children), like the docs example does. When a layout instead returns a whole
-// document, the dev renderer must compose that document as the response rather
-// than nesting it inside the generated shell, which would emit invalid nested
+// A root layout may return its children (Farm then renders the document shell)
+// or a whole document, as the create-app templates do. A whole document is
+// composed as the response, with Farm's assets merged into it, rather than
+// nested inside the generated shell, which would emit invalid nested
 // `<html>`/`<head>`/`<body>`. This mirrors the production (Nitro) build's
 // `hasFullDocument` path so dev and prod agree.
 
-/** Peel Farm's leading `display:contents` wrapper divs (the stream root and any
- * layout-boundary divs) so the layout's own markup is exposed for inspection. */
-function stripContentsWrappers(markup: string): string {
-  let out = markup.replace(/^\s+/, "");
-  const opener = /^<div\b[^>]*style="display\s*:\s*contents"[^>]*>/i;
+// Preact serializes the style with a trailing semicolon (`display:contents;`).
+const CONTENTS_WRAPPER = /^<div\b[^>]*style="display\s*:\s*contents;?\s*"[^>]*>/i;
+
+// React 19 hoists `<meta charSet>`, the viewport, preloads, titles, `<script async src>`, and
+// `<style precedence>` (written as `data-precedence`). When the layout's `<html>` is not the
+// render root, as when Farm's boundary divs wrap it, React writes them ahead of that markup
+// instead of inside the layout's `<head>`. The production build embeds this same pattern.
+export const HOISTED_HEAD_ELEMENT =
+  /^(?:<(?:meta|link|base)\b[^>]*>|<title\b[^>]*>[\s\S]*?<\/title>|<script\b[^>]*\basync\b[^>]*><\/script>|<style\b[^>]*\bdata-precedence\b[^>]*>[\s\S]*?<\/style>)/i;
+
+/** Peel Farm's leading `display:contents` wrapper divs (the stream root and any layout-boundary
+ * divs) and the head elements React hoisted in front of them, so the layout's own markup is
+ * exposed. The hoisted elements come back in order, to return to the document's head. */
+function peelDocumentPrefix(markup: string): { inner: string; hoisted: string } {
+  let inner = markup.replace(/^\s+/, "");
+  let hoisted = "";
   let match: RegExpExecArray | null;
-  while ((match = opener.exec(out))) {
-    out = out.slice(match[0].length).replace(/^\s+/, "");
+  while ((match = CONTENTS_WRAPPER.exec(inner) ?? HOISTED_HEAD_ELEMENT.exec(inner))) {
+    if (!/^<div/i.test(match[0])) hoisted += match[0];
+    inner = inner.slice(match[0].length).replace(/^\s+/, "");
   }
-  return out;
+  return { inner, hoisted };
+}
+
+/** Put the head elements React hoisted out of a document back at the start of its `<head>`. */
+function restoreHoistedHead(document: string, hoisted: string): string {
+  if (!hoisted) return document;
+  if (/<head[\s>]/i.test(document)) {
+    return document.replace(/<head\b[^>]*>/i, (open) => open + hoisted);
+  }
+  return document.replace(/<html\b[^>]*>/i, (open) => `${open}<head>${hoisted}</head>`);
 }
 
 /**
@@ -26,10 +47,19 @@ function stripContentsWrappers(markup: string): string {
  * otherwise return `null`.
  */
 export function extractFarmFullDocument(markup: string): string | null {
-  const inner = stripContentsWrappers(markup);
+  const { inner, hoisted } = peelDocumentPrefix(markup);
   if (!/^<!doctype/i.test(inner) && !/^<html[\s>]/i.test(inner)) return null;
   const start = markup.search(/<!doctype|<html[\s>]/i);
-  const closeIndex = markup.toLowerCase().lastIndexOf("</html>");
+  const lower = markup.toLowerCase();
+  let closeIndex = lower.lastIndexOf("</html>");
+  // Keep the existing search for length-preserving case conversion. Unicode
+  // such as İ expands when lowercased, so only then recover original offsets.
+  if (lower.length !== markup.length) {
+    closeIndex = -1;
+    const closing = /<\/html>/gi;
+    let match;
+    while ((match = closing.exec(markup))) closeIndex = match.index;
+  }
   if (start < 0 || closeIndex < 0) return null;
   const closeEnd = closeIndex + "</html>".length;
   let document = markup.slice(start, closeEnd);
@@ -43,7 +73,7 @@ export function extractFarmFullDocument(markup: string): string | null {
   if (streamedTail) {
     document = document.replace(/<\/body>/i, () => `${streamedTail}</body>`);
   }
-  return document;
+  return restoreHoistedHead(document, hoisted);
 }
 
 /** True when a rendered layout tree is (or wraps) a full HTML document. */
@@ -57,8 +87,97 @@ export function isFarmFullDocument(markup: string): boolean {
  * flushed.
  */
 export function opensFarmFullDocument(markup: string): boolean {
-  const inner = stripContentsWrappers(markup);
+  const { inner } = peelDocumentPrefix(markup);
   return /^<!doctype/i.test(inner) || /^<html[\s>]/i.test(inner);
+}
+
+/**
+ * Classify a streamed prefix: it opens a full document, renders something else, or so far
+ * holds only Farm's wrappers and hoisted head elements (React flushes those first, often as
+ * a chunk of their own), so the next chunk decides.
+ */
+export function classifyFarmDocumentPrefix(markup: string): "document" | "fragment" | "pending" {
+  const { inner } = peelDocumentPrefix(markup);
+  if (/^<!doctype/i.test(inner) || /^<html[\s>]/i.test(inner)) return "document";
+  return inner === "" ? "pending" : "fragment";
+}
+
+/**
+ * Split the head elements a component renders (`<meta>`, `<title>`, preloads) off the front of
+ * a render that is not a full document. React writes them ahead of everything else when its root
+ * is not `<html>`; they belong in the document's head, where React puts them when it renders the
+ * document itself. A full document is returned whole: its own head takes them.
+ *
+ * With `complete` false, `markup` is a streamed prefix, and null means the next chunk decides.
+ */
+export function takeFarmHoistedHead(
+  markup: string,
+  complete: boolean,
+): { head: string; body: string } | null {
+  const kind = classifyFarmDocumentPrefix(markup);
+  if (kind === "document") return { head: "", body: markup };
+  if (kind === "pending" && !complete) return null;
+  let head = "";
+  let body = markup;
+  let match: RegExpExecArray | null;
+  while ((match = HOISTED_HEAD_ELEMENT.exec(body.replace(/^\s+/, "")))) {
+    head += match[0];
+    body = body.replace(/^\s+/, "").slice(match[0].length);
+  }
+  if (!complete && endsInsideHoistable(body)) return null;
+  return { head, body };
+}
+
+// A head element the stream cut in two: its tag, or its text and closing tag, is still coming.
+function endsInsideHoistable(body: string): boolean {
+  const open = /^\s*<(meta|link|base|title|script|style)\b/i.exec(body);
+  if (!open) return false;
+  const tag = open[1]!.toLowerCase();
+  if (!body.includes(">")) return true;
+  return (
+    (tag === "title" || tag === "script" || tag === "style") &&
+    !new RegExp(`</${tag}>`, "i").test(body)
+  );
+}
+
+/** Put head elements taken from a render at the end of a document's `<head>`. */
+export function appendFarmHead(document: string, head: string): string {
+  if (!head) return document;
+  return document.replace(/<\/head>/i, () => `${head}\n</head>`);
+}
+
+/**
+ * Give a layout's document a `<head>` when it renders none. `<head>` is optional in
+ * HTML and React, but Farm's managed head assets (route props, the client runtime,
+ * styles) are inserted before `</head>`, and without one they would be dropped and
+ * the page would never hydrate. Matches the production build's helper.
+ */
+export function ensureFarmDocumentHead(markup: string): string {
+  if (/<head[\s>]/i.test(markup)) return markup;
+  return markup.replace(/<html([^>]*)>/i, (_match, attributes: string) => {
+    return `<html${attributes}><head></head>`;
+  });
+}
+
+/**
+ * Wrap the body's content in the `#root` element the client hydrates, unless the document
+ * already has one. Matches the production build's helper.
+ */
+export function ensureFarmDocumentRoot(markup: string): string {
+  // Only a #root that opens the body is the container; page content can have id="root" too, such
+  // as a heading titled "Root".
+  if (/<body\b[^>]*>\s*<div\b[^>]*\sid=["']root["']/i.test(markup)) return markup;
+  return markup
+    .replace(
+      /<body\b([^>]*)>/i,
+      (_match, attributes: string) => `<body${attributes}><div id="root">`,
+    )
+    .replace(/<\/body>/i, () => "</div></body>");
+}
+
+/** True when the markup already links a favicon. Matches the production build's helper. */
+export function hasFarmDocumentIcon(markup: string): boolean {
+  return /<link\b[^>]*\brel=["']?(?:shortcut )?icon\b/i.test(markup);
 }
 
 /** Remove document title elements before inserting a higher-priority title. */
@@ -75,6 +194,37 @@ export interface FarmFullDocumentAssets {
   htmlAttributes?: string;
   /** Existing attributes Farm owns and must replace before merging. */
   replaceHtmlAttributes?: readonly string[];
+  /**
+   * Add `<link rel="icon" href="data:,">` unless the document already links an icon, so
+   * the browser doesn't request a missing /favicon.ico. Matches the generated shell.
+   */
+  fallbackIcon?: boolean;
+  /**
+   * The route's viewport tags (renderMetadataHead's `viewport`), added at the start of the head
+   * unless the document writes its own viewport tag.
+   */
+  viewport?: string;
+}
+
+/**
+ * Start the head with `<meta charset>` and the viewport tags, as Next.js always renders both,
+ * skipping each one the layout's document already writes (a viewport, theme-color, or
+ * color-scheme tag of its own). The charset comes first because browsers only look for it in the
+ * document's first 1024 bytes. The production server uses this same function.
+ */
+export function ensureFarmDocumentMeta(markup: string, viewport = ""): string {
+  const head = /<head\b[^>]*>([\s\S]*?)<\/head>/i.exec(markup)?.[1] ?? "";
+  const hasNamedMeta = (name: string) =>
+    new RegExp(`<meta\\b[^>]*\\bname=["']?${name}(?=["'\\s/>])`, "i").test(head);
+  const tags = [
+    /<meta\b[^>]*\bcharset\s*=/i.test(head) ? "" : '<meta charset="utf-8">',
+    ...(viewport.match(/<meta\b[^>]*>/gi) ?? []).filter((tag) => {
+      const name = /\bname="([\w-]+)"/.exec(tag)?.[1];
+      return !name || !hasNamedMeta(name);
+    }),
+  ].filter(Boolean);
+  if (tags.length === 0) return markup;
+  return markup.replace(/<head\b[^>]*>/i, (open) => `${open}${tags.join("")}`);
 }
 
 /**
@@ -87,7 +237,7 @@ export function composeFarmFullDocument(
   documentHtml: string,
   assets: FarmFullDocumentAssets,
 ): string {
-  let html = documentHtml;
+  let html = ensureFarmDocumentMeta(ensureFarmDocumentHead(documentHtml), assets.viewport);
 
   if (assets.htmlAttributes) {
     html = html.replace(/<html\b([^>]*)>/i, (_match, attrs: string) => {
@@ -103,19 +253,122 @@ export function composeFarmFullDocument(
     });
   }
 
-  // Ensure a hydration root exists so the client can mount, matching the shell.
-  if (!/\sid=["']root["']/i.test(html)) {
-    html = html
-      .replace(/<body\b([^>]*)>/i, '<body$1><div id="root">')
-      .replace(/<\/body>/i, "</div></body>");
-  }
+  html = ensureFarmDocumentRoot(html);
 
-  if (assets.headAssets) {
-    html = html.replace(/<\/head>/i, () => `  ${assets.headAssets}\n</head>`);
+  const headAssets = [
+    assets.fallbackIcon && !hasFarmDocumentIcon(html) ? '<link rel="icon" href="data:,">' : "",
+    assets.headAssets,
+  ]
+    .filter(Boolean)
+    .join("\n  ");
+  if (headAssets) {
+    html = html.replace(/<\/head>/i, () => `  ${headAssets}\n</head>`);
   }
   if (assets.bodyFooter) {
     html = html.replace(/<\/body>/i, () => `  ${assets.bodyFooter}\n</body>`);
   }
 
   return /^\s*<!doctype/i.test(html) ? html : `<!DOCTYPE html>\n${html}`;
+}
+
+const STREAMED_BODY_MARK = "<!--farm-streamed-body-->";
+
+/**
+ * The opening of a streamed full document: React's output up to (and including) its `<body>`,
+ * composed with Farm's assets like a buffered document. `rootOpened` says whether Farm opened
+ * `#root` (the layout's body does not), which the stream's footer then closes.
+ */
+export function openFarmStreamedDocument(
+  opening: string,
+  assets: FarmFullDocumentAssets,
+): { html: string; rootOpened: boolean } {
+  const { hoisted } = peelDocumentPrefix(opening);
+  const start = opening.search(/<!doctype|<html[\s>]/i);
+  const document = restoreHoistedHead(opening.slice(Math.max(start, 0)), hoisted);
+  const rootOpened = !/<body\b[^>]*>\s*<div\b[^>]*\sid=["']root["']/i.test(document);
+  // Compose the whole document around a mark where the streamed body continues.
+  const composed = composeFarmFullDocument(
+    `${document}${STREAMED_BODY_MARK}</body></html>`,
+    assets,
+  );
+  return { html: composed.slice(0, composed.indexOf(STREAMED_BODY_MARK)), rootOpened };
+}
+
+/**
+ * Streams a layout's own `<html>` document: holds React's output until `<body>`, opens the
+ * document with `open`, then passes the body through. React's closing `</body></html>` (and
+ * Farm's wrapper `</div>`s after it) is dropped: Suspense content React streams later belongs
+ * inside the body, before the footer the caller writes. The production entry does the same
+ * (`createFarmFullDocumentStream`).
+ *
+ * A route expected to render a document may not (its layout changed): output that starts as a
+ * fragment goes out after `fragmentShell`, Farm's usual shell, and `end()` reports `fragment`.
+ */
+export function createFarmStreamedDocumentTransform(
+  open: (opening: string) => { html: string; rootOpened: boolean },
+  fragmentShell: string,
+): {
+  write(text: string): string;
+  end(): { text: string; document: boolean; rootOpened: boolean };
+} {
+  let opening = "";
+  let mode: "pending" | "document" | "fragment" = "pending";
+  let opened = false;
+  let closed = false;
+  let rootOpened = false;
+  const write = (text: string): string => {
+    if (mode === "fragment") return text;
+    if (!opened) {
+      opening += text;
+      if (mode === "pending") {
+        const prefix = classifyFarmDocumentPrefix(opening);
+        if (prefix === "pending") return "";
+        if (prefix === "fragment") {
+          mode = "fragment";
+          const held = opening;
+          opening = "";
+          return fragmentShell + held;
+        }
+        mode = "document";
+      }
+      if (!/<body\b[^>]*>/i.test(opening)) return "";
+      opened = true;
+      text = opening;
+      opening = "";
+      const closeAt = text.search(/<\/body>/i);
+      const head = closeAt >= 0 ? text.slice(0, closeAt) : text;
+      const document = open(head);
+      rootOpened = document.rootOpened;
+      text = document.html + (closeAt >= 0 ? text.slice(closeAt) : "");
+    }
+    if (!closed) {
+      const closeAt = text.search(/<\/body>/i);
+      if (closeAt >= 0) {
+        closed = true;
+        text =
+          text.slice(0, closeAt) +
+          text.slice(closeAt).replace(/^<\/body>\s*(?:<\/html>)?(?:\s*<\/div>)*/i, "");
+      }
+    }
+    return text;
+  };
+  return {
+    write,
+    end() {
+      if (mode === "pending") {
+        // Too little output to tell: it is no document.
+        mode = "fragment";
+        const held = opening;
+        opening = "";
+        return { text: fragmentShell + held, document: false, rootOpened: false };
+      }
+      if (mode === "fragment") return { text: "", document: false, rootOpened: false };
+      if (opened) return { text: "", document: true, rootOpened };
+      // A document that never reached <body> still opens, so the footer lands in a document.
+      const held = opening;
+      opening = "";
+      const text = write(`${held}<body>`);
+      return { text, document: true, rootOpened };
+    },
+  };
 }

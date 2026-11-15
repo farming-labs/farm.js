@@ -1,5 +1,6 @@
 import { createClerkClient, type ClerkClient } from "@clerk/backend";
-import { defineIntegration, type FarmIntegrationLogger } from "@farm.js/core";
+import type { FarmIntegrationLogger } from "@farm.js/core";
+import { defineIntegration } from "@farm.js/core/integrations";
 import {
   createDocumentNavigationMatchers,
   integrationConfig,

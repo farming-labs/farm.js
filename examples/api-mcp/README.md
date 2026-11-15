@@ -37,3 +37,9 @@ curl http://localhost:3000/api/mcp \
 Both forms return application JSON under `result.structuredContent.result`. Endpoint-backed calls
 retain their `params`, `query`, `body`, and `headers` input groups; standalone calls use their own
 object shape.
+
+Run `MCP_OBSERVABILITY=1 pnpm dev` to log each completed tool callback's name, outcome and duration
+through Farm's existing observability event bus. Tool errors are reported independently of the HTTP
+status. The log omits arguments, results and credentials. Authorization/SDK rejections before a
+callback are not completed executions; this is not a complete HTTP access log or an agent run log.
+The example exports no data to a remote service.

@@ -2,6 +2,8 @@
 
 import fs from "node:fs";
 import path from "node:path";
+import React from "react";
+import * as ReactDOMServer from "react-dom/server";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { isFarmNotFoundError, isFarmRedirectError, notFound, redirect } from "../navigation-errors";
 
@@ -13,7 +15,17 @@ type RenderedElement = {
 };
 
 type StreamRenderer = {
-  renderFarmElement: (ReactDOMServer: unknown, element: unknown) => Promise<RenderedElement>;
+  renderFarmElement: (
+    ReactDOMServer: unknown,
+    element: unknown,
+    routeKey?: string,
+    flushToken?: string,
+  ) => Promise<RenderedElement>;
+  renderFarmCompleteDocument: (
+    ReactDOMServer: unknown,
+    element: unknown,
+    documentKey: string,
+  ) => Promise<string>;
 };
 
 // The production stream renderer only exists inside the generated-entry
@@ -22,12 +34,16 @@ type StreamRenderer = {
 // streaming primitives the generated entry resolves for the target runtime.
 function instantiateStreamRenderer(
   streamingCapabilities = { node: true, web: true },
+  primitives = { TextEncoder, TextDecoder, ReadableStream },
+  reactSyncRender = true,
 ): StreamRenderer {
   const source = fs.readFileSync(
     path.join(process.cwd(), "src", "nitro", "universal-build.ts"),
     "utf-8",
   );
-  const start = source.indexOf("async function renderFarmElement(ReactDOMServer, element)");
+  const start = source.indexOf(
+    'async function renderFarmElement(ReactDOMServer, element, routeKey, flushToken = "")',
+  );
   const end = source.indexOf("function createFarmDocumentStream(");
   expect(start).toBeGreaterThan(-1);
   expect(end).toBeGreaterThan(start);
@@ -35,10 +51,320 @@ function instantiateStreamRenderer(
     "isFarmRedirectError",
     "isFarmNotFoundError",
     "farmRendererStreamingCapabilities",
-    `${source.slice(start, end)}\nreturn { renderFarmElement, renderFarmElementToString };`,
+    "farmReactSyncRender",
+    "TextEncoder",
+    "TextDecoder",
+    "ReadableStream",
+    "_resolveCurrentCspNonce",
+    "getFarmRendererRenderOptions",
+    "farmFormState",
+    `${source.slice(start, end)}\nreturn { renderFarmElement, renderFarmCompleteDocument };`,
   );
-  return factory(isFarmRedirectError, isFarmNotFoundError, streamingCapabilities) as StreamRenderer;
+  return factory(
+    isFarmRedirectError,
+    isFarmNotFoundError,
+    streamingCapabilities,
+    reactSyncRender,
+    primitives.TextEncoder,
+    primitives.TextDecoder,
+    primitives.ReadableStream,
+    () => undefined,
+    () => undefined,
+    () => undefined,
+  ) as StreamRenderer;
 }
+
+function countedPrimitives() {
+  const counts = { TextEncoder: 0, TextDecoder: 0, ReadableStream: 0 };
+  function counted<T extends object>(key: keyof typeof counts, constructor: T): T {
+    // Only instrument the extracted renderer, not the fixture or React itself.
+    return new Proxy(constructor, {
+      construct(target, args) {
+        counts[key]++;
+        return Reflect.construct(target, args);
+      },
+    });
+  }
+  return {
+    counts,
+    primitives: {
+      TextEncoder: counted("TextEncoder", TextEncoder),
+      TextDecoder: counted("TextDecoder", TextDecoder),
+      ReadableStream: counted("ReadableStream", ReadableStream),
+    },
+  };
+}
+
+type Destination = { write(chunk: unknown): boolean; end(): void; destroy(error: Error): void };
+
+function controlledNodeServer(chunks: unknown[], complete: boolean) {
+  let destination!: Destination;
+  const abort = vi.fn();
+  return {
+    abort,
+    get destination() {
+      return destination;
+    },
+    renderToPipeableStream(
+      _element: unknown,
+      options: { onShellReady(): void; onAllReady(): void },
+    ) {
+      if (complete) options.onAllReady();
+      queueMicrotask(options.onShellReady);
+      return {
+        abort,
+        pipe(target: Destination) {
+          destination = target;
+          for (const chunk of chunks) target.write(chunk);
+          if (complete) target.end();
+          return target;
+        },
+      };
+    },
+  };
+}
+
+describe("generated renderer allocation eligibility", () => {
+  it.each(["node", "web"])(
+    "buffers %s byte chunks without unused helpers and decodes split UTF-8",
+    async (runtime) => {
+      const { counts, primitives } = countedPrimitives();
+      const bytes = new TextEncoder().encode("<p>🌱</p>");
+      const chunks = [bytes.slice(0, 5), bytes.slice(5)];
+      const server =
+        runtime === "node"
+          ? controlledNodeServer(chunks, true)
+          : {
+              renderToReadableStream: () =>
+                Object.assign(
+                  new ReadableStream({
+                    start(controller) {
+                      chunks.forEach((chunk) => controller.enqueue(chunk));
+                      controller.close();
+                    },
+                  }),
+                  { allReady: Promise.resolve() },
+                ),
+            };
+      const rendered = await instantiateStreamRenderer(
+        { node: runtime === "node", web: runtime === "web" },
+        primitives,
+      ).renderFarmElement(server, null);
+      expect(rendered.html).toBe("<p>🌱</p>");
+      expect(rendered.shellHtml).toBe(rendered.html);
+      expect(rendered.stream).toBeUndefined();
+      expect(counts).toEqual({ TextEncoder: 0, TextDecoder: 1, ReadableStream: 0 });
+    },
+  );
+
+  it("creates one encoder when string chunks actually need it", async () => {
+    const { counts, primitives } = countedPrimitives();
+    const rendered = await instantiateStreamRenderer(
+      { node: true, web: false },
+      primitives,
+    ).renderFarmElement(controlledNodeServer(["<p>", "🌱", "</p>"], true), null);
+    expect(rendered.html).toBe("<p>🌱</p>");
+    expect(counts).toEqual({ TextEncoder: 1, TextDecoder: 1, ReadableStream: 0 });
+  });
+
+  it("allocates no stream helpers for non-streaming renderer fallbacks", async () => {
+    const { counts, primitives } = countedPrimitives();
+    const renderer = instantiateStreamRenderer({ node: false, web: false }, primitives);
+    expect(
+      await renderer.renderFarmElement({ renderToString: () => "<p>plain</p>" }, null),
+    ).toMatchObject({ html: "<p>plain</p>" });
+    expect(
+      await renderer.renderFarmElement(
+        { renderToStringWithHead: () => ({ html: "<p>head</p>", head: "<title>Farm</title>" }) },
+        null,
+      ),
+    ).toMatchObject({ html: "<p>head</p>", head: "<title>Farm</title>" });
+    expect(counts).toEqual({ TextEncoder: 0, TextDecoder: 0, ReadableStream: 0 });
+  });
+
+  it("delivers the shell before completion and preserves late bytes and cancellation", async () => {
+    const { counts, primitives } = countedPrimitives();
+    const server = controlledNodeServer([new TextEncoder().encode("shell")], false);
+    const rendered = await instantiateStreamRenderer(
+      { node: true, web: false },
+      primitives,
+    ).renderFarmElement(server, null);
+    expect(counts).toEqual({ TextEncoder: 0, TextDecoder: 1, ReadableStream: 1 });
+    expect(rendered.shellHtml).toBe("shell");
+    const reader = rendered.stream!.getReader();
+    expect(new TextDecoder().decode((await reader.read()).value)).toBe("shell");
+    server.destination.write("🌱");
+    expect(new TextDecoder().decode((await reader.read()).value)).toBe("🌱");
+    await reader.cancel("navigation");
+    expect(server.abort).toHaveBeenCalledExactlyOnceWith("navigation");
+  });
+
+  it("forwards late completion and fatal errors", async () => {
+    for (const fail of [false, true]) {
+      const server = controlledNodeServer(["shell"], false);
+      const rendered = await instantiateStreamRenderer({
+        node: true,
+        web: false,
+      }).renderFarmElement(server, null);
+      const reader = rendered.stream!.getReader();
+      await reader.read();
+      if (fail) {
+        const error = new Error("late failure");
+        server.destination.destroy(error);
+        await expect(reader.read()).rejects.toBe(error);
+      } else {
+        server.destination.end();
+        expect((await reader.read()).done).toBe(true);
+      }
+    }
+  });
+
+  it("renders a route with renderToString after a streaming render finished, with the same markup", async () => {
+    const renderer = instantiateStreamRenderer({ node: true, web: false });
+    const page = () =>
+      React.createElement(
+        "html",
+        { lang: "en" },
+        React.createElement("body", null, React.createElement("p", null, "🌱 ", 1)),
+      );
+    let syncCalls = 0;
+    const counted = {
+      ...ReactDOMServer,
+      renderToString(element: React.ReactNode) {
+        syncCalls++;
+        return ReactDOMServer.renderToString(element);
+      },
+    };
+
+    const streamed = await renderer.renderFarmElement(counted, page(), "/doc");
+    expect(syncCalls).toBe(0);
+    expect(streamed.html?.startsWith("<!DOCTYPE html>")).toBe(true);
+
+    const sync = await renderer.renderFarmElement(counted, page(), "/doc");
+    expect(syncCalls).toBe(1);
+    expect(sync.html).toBe(streamed.html);
+  });
+
+  it("goes back to streaming for good once a learned route suspends", async () => {
+    const renderer = instantiateStreamRenderer({ node: true, web: false });
+    let suspend = false;
+    let release!: () => void;
+    const pending = new Promise<void>((done) => {
+      release = done;
+    });
+    function Child() {
+      if (suspend) throw pending;
+      return React.createElement("p", null, "ready");
+    }
+    const page = () =>
+      React.createElement(
+        React.Suspense,
+        { fallback: React.createElement("p", null, "loading") },
+        React.createElement(Child),
+      );
+    let syncCalls = 0;
+    const counted = {
+      ...ReactDOMServer,
+      renderToString(element: React.ReactNode) {
+        syncCalls++;
+        return ReactDOMServer.renderToString(element);
+      },
+    };
+
+    await renderer.renderFarmElement(counted, page(), "/flip");
+    suspend = true;
+    const fallback = await renderer.renderFarmElement(counted, page(), "/flip");
+    expect(syncCalls).toBe(1);
+    expect(fallback.html).toBeUndefined();
+    expect(fallback.stream).toBeDefined();
+    release();
+    suspend = false;
+    await new Response(fallback.stream).text();
+
+    await renderer.renderFarmElement(counted, page(), "/flip");
+    expect(syncCalls).toBe(1);
+  });
+
+  it("preserves real React synchronous output and Suspense streaming", async () => {
+    const renderer = instantiateStreamRenderer({ node: true, web: false });
+    expect(
+      await renderer.renderFarmElement(ReactDOMServer, React.createElement("p", null, "🌱")),
+    ).toMatchObject({ html: "<p>🌱</p>" });
+    let ready = false;
+    let resolve!: () => void;
+    const pending = new Promise<void>((done) => {
+      resolve = done;
+    });
+    function Child() {
+      if (!ready) throw pending;
+      return React.createElement("p", null, "resolved 🌱");
+    }
+    const rendered = await renderer.renderFarmElement(
+      ReactDOMServer,
+      React.createElement(
+        "main",
+        null,
+        React.createElement("h1", null, "shell"),
+        React.createElement(
+          React.Suspense,
+          { fallback: React.createElement("p", null, "loading") },
+          React.createElement(Child),
+        ),
+      ),
+    );
+    expect(rendered.stream).toBeDefined();
+    // React may flush the first chunk after the renderer returns its stream.
+    // Read it before resolving the boundary to prove progressive delivery.
+    const reader = rendered.stream!.getReader();
+    let html = new TextDecoder().decode((await reader.read()).value);
+    expect(html).toContain("loading");
+    ready = true;
+    resolve();
+    while (true) {
+      const chunk = await reader.read();
+      if (chunk.done) break;
+      html += new TextDecoder().decode(chunk.value);
+    }
+    expect(html).toContain("loading");
+    expect(html).toContain("resolved 🌱");
+    expect(rendered.streamErrors).toEqual([]);
+  });
+
+  it.each(["node", "web"])(
+    "lets a browser cancel a %s stream with Suspense content still pending",
+    async (runtime) => {
+      const errors = vi.spyOn(console, "error").mockImplementation(() => {});
+      try {
+        const renderer = instantiateStreamRenderer({
+          node: runtime === "node",
+          web: runtime === "web",
+        });
+        function Pending(): never {
+          throw new Promise(() => {});
+        }
+        const rendered = await renderer.renderFarmElement(
+          ReactDOMServer,
+          React.createElement(
+            "main",
+            null,
+            React.createElement(
+              React.Suspense,
+              { fallback: React.createElement("p", null, "loading") },
+              React.createElement(Pending),
+            ),
+          ),
+        );
+        const reader = rendered.stream!.getReader();
+        expect(new TextDecoder().decode((await reader.read()).value)).toContain("loading");
+        await reader.cancel();
+        await new Promise((resolve) => setTimeout(resolve, 0));
+        expect(errors).not.toHaveBeenCalled();
+      } finally {
+        errors.mockRestore();
+      }
+    },
+  );
+});
 
 function captureThrown(throwing: () => never): unknown {
   try {
@@ -175,6 +501,175 @@ function latePipeableServer(lateError: unknown) {
     },
   };
 }
+
+// The not-found and error documents go out whole, with their status. renderToString threw "A
+// component suspended while responding to synchronous input" for a layout holding a lazy
+// component, and Farm sent its bare fallback 404 instead of the app's not-found page.
+describe("generated complete document renderer", () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  function countedServer() {
+    const calls = { sync: 0, node: 0, web: 0 };
+    return {
+      calls,
+      server: {
+        ...ReactDOMServer,
+        renderToString(element: React.ReactNode) {
+          calls.sync++;
+          return ReactDOMServer.renderToString(element);
+        },
+        renderToPipeableStream(element: React.ReactNode, options: any) {
+          calls.node++;
+          return ReactDOMServer.renderToPipeableStream(element, options);
+        },
+        renderToReadableStream(element: React.ReactNode, options: any) {
+          calls.web++;
+          return ReactDOMServer.renderToReadableStream(element, options);
+        },
+      },
+    };
+  }
+
+  function suspendingDocument() {
+    const settle = <T>(value: T) =>
+      new Promise<T>((resolve) => setTimeout(() => resolve(value), 5));
+    const Nav = React.lazy(() =>
+      settle({ default: () => React.createElement("nav", null, "lazy nav") }),
+    );
+    const release = settle("release 7");
+    function Release() {
+      return React.createElement("footer", null, React.use(release));
+    }
+    return React.createElement(
+      "html",
+      null,
+      React.createElement(
+        "body",
+        null,
+        // Outside any boundary: renderToString throws.
+        React.createElement(Nav),
+        React.createElement("main", null, "not found"),
+        // Inside one: renderToString leaves it to the client.
+        React.createElement(
+          React.Suspense,
+          { fallback: React.createElement("p", null, "release fallback") },
+          React.createElement(Release),
+        ),
+      ),
+    );
+  }
+
+  it.each(["node", "web"] as const)(
+    "waits on the %s stream for every boundary, then keeps that renderer for the document",
+    async (runtime) => {
+      const renderer = instantiateStreamRenderer({
+        node: runtime === "node",
+        web: runtime === "web",
+      });
+      const { calls, server } = countedServer();
+      for (let request = 1; request <= 2; request++) {
+        const html = await renderer.renderFarmCompleteDocument(
+          server,
+          suspendingDocument(),
+          "not-found",
+        );
+        expect(html).toContain("<nav>lazy nav</nav>");
+        expect(html).toContain("<main>not found</main>");
+        expect(html).toContain("<footer>release 7</footer>");
+        expect(html).not.toContain("release fallback");
+        expect(html).not.toContain("$RC");
+        // One synchronous attempt finds the suspension; later requests stream straight away.
+        expect(calls).toEqual({
+          sync: 1,
+          node: runtime === "node" ? request : 0,
+          web: runtime === "web" ? request : 0,
+        });
+      }
+    },
+  );
+
+  it("renders a document that does not suspend with renderToString alone", async () => {
+    const renderer = instantiateStreamRenderer({ node: true, web: false });
+    const { calls, server } = countedServer();
+    const document = () =>
+      React.createElement(
+        "html",
+        null,
+        React.createElement(
+          "body",
+          null,
+          React.createElement(
+            React.Suspense,
+            { fallback: "loading" },
+            React.createElement("main", null, "not found"),
+          ),
+        ),
+      );
+    for (let request = 0; request < 3; request++) {
+      expect(await renderer.renderFarmCompleteDocument(server, document(), "plain")).toBe(
+        ReactDOMServer.renderToString(document()),
+      );
+    }
+    expect(calls).toEqual({ sync: 3, node: 0, web: 0 });
+  });
+
+  it("leaves a boundary that fails to the client and still sends the document", async () => {
+    const errors = vi.spyOn(console, "error").mockImplementation(() => {});
+    const renderer = instantiateStreamRenderer({ node: true, web: false });
+    function ClientOnly(): React.ReactNode {
+      throw new Error("window is not defined");
+    }
+    const html = await renderer.renderFarmCompleteDocument(
+      ReactDOMServer,
+      React.createElement(
+        "main",
+        null,
+        "not found",
+        React.createElement(
+          React.Suspense,
+          { fallback: React.createElement("p", null, "client fallback") },
+          React.createElement(ClientOnly),
+        ),
+      ),
+      "client-boundary",
+    );
+    expect(html).toContain("not found");
+    expect(html).toContain("<!--$!-->");
+    expect(html).toContain("client fallback");
+    expect(errors).toHaveBeenCalledWith("[Farm SSR stream]", expect.any(Error));
+  });
+
+  it("still fails a document whose shell throws", async () => {
+    vi.spyOn(console, "error").mockImplementation(() => {});
+    const renderer = instantiateStreamRenderer({ node: true, web: false });
+    function Broken(): React.ReactNode {
+      throw new Error("layout failed");
+    }
+    await expect(
+      renderer.renderFarmCompleteDocument(ReactDOMServer, React.createElement(Broken), "broken"),
+    ).rejects.toThrow("layout failed");
+  });
+
+  it("lets other renderers wait for async content in their own renderToString", async () => {
+    const renderer = instantiateStreamRenderer(
+      { node: true, web: true },
+      { TextEncoder, TextDecoder, ReadableStream },
+      false,
+    );
+    const server = {
+      renderToString: vi.fn(async () => "<main>vue not found</main>"),
+      renderToPipeableStream: vi.fn(),
+      renderToReadableStream: vi.fn(),
+    };
+    expect(await renderer.renderFarmCompleteDocument(server, null, "not-found")).toBe(
+      "<main>vue not found</main>",
+    );
+    expect(server.renderToPipeableStream).not.toHaveBeenCalled();
+    expect(server.renderToReadableStream).not.toHaveBeenCalled();
+  });
+});
 
 describe("generated production stream renderer control-flow errors", () => {
   afterEach(() => {
@@ -325,5 +820,105 @@ describe("generated production stream renderer control-flow errors", () => {
     expect(calls).toEqual(["node", "web"]);
     expect(nodeTarget.html).toBe("<div>node</div>");
     expect(edgeTarget.html).toBe("<div>web</div>");
+  });
+});
+
+describe("streamed navigation flush markers", () => {
+  const encoder = new TextEncoder();
+  const token = "0123456789abcdef0123456789abcdef";
+  const marker = `<!--farm-flush:${token}-->`;
+
+  it("marks the end of each React flush on the readable-stream path", async () => {
+    let late!: ReadableStreamDefaultController<Uint8Array>;
+    const server = {
+      renderToReadableStream: async () => {
+        const stream = new ReadableStream<Uint8Array>({
+          start(controller) {
+            late = controller;
+            // One flush can enqueue several chunks: all of them are the shell.
+            controller.enqueue(encoder.encode("<main>"));
+            controller.enqueue(encoder.encode("shell</main>"));
+          },
+        });
+        return Object.assign(stream, { allReady: new Promise(() => {}) });
+      },
+    };
+    const { renderFarmElement } = instantiateStreamRenderer({ node: false, web: true });
+    const rendered = await renderFarmElement(server, null, "/stream", token);
+    const reader = rendered.stream!.getReader();
+    const decoder = new TextDecoder();
+    // Reads up to the next marker (or the end). React's next flush is only released once the
+    // previous one has been read, so a slow consumer cannot find two flushes already queued.
+    const readFlush = async () => {
+      let text = "";
+      while (!text.endsWith(marker)) {
+        const result = await reader.read();
+        if (result.done) break;
+        text += decoder.decode(result.value, { stream: true });
+      }
+      return text;
+    };
+    expect(await readFlush()).toBe(`<main>shell</main>${marker}`);
+    late.enqueue(encoder.encode('<div hidden id="S:0">a</div>'));
+    late.enqueue(encoder.encode("<script>$RC(0)</script>"));
+    expect(await readFlush()).toBe(`<div hidden id="S:0">a</div><script>$RC(0)</script>${marker}`);
+    late.enqueue(encoder.encode('<div hidden id="S:1">b</div>'));
+    late.close();
+    // The last flush ends with the stream, not a marker.
+    expect(await readFlush()).toBe('<div hidden id="S:1">b</div>');
+  });
+
+  it("marks the shell and each flush() React calls on the pipeable path", async () => {
+    const server = controlledNodeServer(["<main>", "shell</main>"], false);
+    const { renderFarmElement } = instantiateStreamRenderer({ node: true, web: false });
+    const rendered = await renderFarmElement(server, null, "/stream", token);
+    const destination = server.destination as typeof server.destination & { flush(): void };
+    destination.write('<div hidden id="S:0">a</div>');
+    destination.flush();
+    // A flush that wrote nothing adds no marker.
+    destination.flush();
+    destination.write('<div hidden id="S:1">b</div>');
+    destination.end();
+    expect(await new Response(rendered.stream).text()).toBe(
+      `<main>shell</main>${marker}` +
+        `<div hidden id="S:0">a</div>${marker}` +
+        '<div hidden id="S:1">b</div>',
+    );
+  });
+
+  it("writes no marker unless asked", async () => {
+    const server = controlledNodeServer(["<main>shell</main>"], false);
+    const rendered = await instantiateStreamRenderer({ node: true, web: false }).renderFarmElement(
+      server,
+      null,
+    );
+    const destination = server.destination as typeof server.destination & { flush(): void };
+    destination.write("<p>late</p>");
+    destination.flush();
+    destination.end();
+    expect(await new Response(rendered.stream).text()).toBe("<main>shell</main><p>late</p>");
+  });
+
+  it("draws a random token per streamed navigation and sends it in F-Flush", () => {
+    const source = fs.readFileSync(
+      path.join(process.cwd(), "src", "nitro", "universal-build.ts"),
+      "utf-8",
+    );
+    const start = source.indexOf("function createFarmFlushToken()");
+    const end = source.indexOf("async function renderFarmElement(");
+    expect(start).toBeGreaterThan(-1);
+    const createFarmFlushToken = new Function(
+      `${source.slice(start, end)}\nreturn createFarmFlushToken;`,
+    )() as () => string;
+    const first = createFarmFlushToken();
+    // The browser accepts exactly this shape (readFarmNavigationStream).
+    expect(first).toMatch(/^[0-9a-f]{32}$/);
+    expect(createFarmFlushToken()).not.toBe(first);
+    // A page with defer() data arrives whole, with the snapshot its props are revived from.
+    expect(source).toContain(
+      'request.headers.get("f-stream") === "flush" && farmDeferredData.records.length === 0\n            ? createFarmFlushToken()',
+    );
+    expect(source).toContain('...(farmFlushToken ? { "F-Flush": farmFlushToken } : {})');
+    expect(source).not.toContain('"<!--farm-flush-->"');
   });
 });

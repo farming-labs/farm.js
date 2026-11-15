@@ -129,6 +129,26 @@ describe("production-site telemetry reporting", () => {
     expect(send).not.toHaveBeenCalled();
   });
 
+  it("reads the reporting environment on the first request, not on every one", () => {
+    process.env.FARM_TELEMETRY = "0";
+    const send = vi.fn<typeof fetch>();
+    const reporter = createFarmProductionSiteReporter({ renderer: "react", fetch: send });
+
+    reporter.report("https://example.com");
+    // A deployment's environment does not change while it serves traffic.
+    delete process.env.FARM_TELEMETRY;
+    reporter.report("https://example.com");
+
+    expect(send).not.toHaveBeenCalled();
+  });
+
+  it("answers no for other paths before reading the environment", () => {
+    const reporter = createFarmProductionSiteReporter({ renderer: "react" });
+    process.env.FARM_TELEMETRY = "0";
+
+    expect(reporter.handleAttestation(new Request("https://example.com/pricing"))).toBeNull();
+  });
+
   it("accepts an HTTP IPv6 loopback endpoint for local development", async () => {
     const send = vi.fn<typeof fetch>().mockResolvedValue(new Response(null, { status: 202 }));
     const deliveries: Promise<unknown>[] = [];

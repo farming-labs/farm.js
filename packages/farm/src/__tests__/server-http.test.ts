@@ -3,6 +3,12 @@
 import { Readable } from "node:stream";
 import { describe, expect, it } from "vitest";
 import { invokeAPIRouteEndpoint } from "../api/runtime";
+import { getCurrentRequest } from "../server/request";
+import {
+  getRequestContext,
+  getRequestContextSnapshot,
+  setRequestContext,
+} from "../request-context";
 import {
   bufferFarmRequestBody,
   matchesFarmIfNoneMatch,
@@ -11,6 +17,27 @@ import {
 } from "../server-http";
 
 describe("Farm server HTTP policy", () => {
+  it("preserves private request context and exposure flags when buffering a POST", async () => {
+    const request = new Request("https://example.com/api/tool", { method: "POST", body: "hello" });
+    const metadata = { id: "server-owned-request" };
+    setRequestContext(request, "telemetry", metadata);
+    setRequestContext(request, "theme", "dark", { exposeToPage: true });
+    const response = await invokeAPIRouteEndpoint(async (buffered: Request) => {
+      expect(buffered).not.toBe(request);
+      expect(getCurrentRequest()).toBe(buffered);
+      expect(getRequestContext(buffered, "telemetry")).toBe(metadata);
+      expect(getRequestContextSnapshot(buffered, { exposedOnly: true })).toEqual(
+        new Map([["theme", "dark"]]),
+      );
+      expect(await buffered.text()).toBe("hello");
+      setRequestContext(buffered, "handler-only", true);
+      expect(getRequestContext(request, "handler-only")).toBeUndefined();
+      return new Response("ok");
+    }, request);
+    expect(response.status).toBe(200);
+    expect(getRequestContext(new Request(request.url), "telemetry")).toBeUndefined();
+  });
+
   it("matches wildcard, weak, listed, and quoted-comma entity tags", () => {
     expect(matchesFarmIfNoneMatch("*", '"farm"')).toBe(true);
     expect(matchesFarmIfNoneMatch('W/"farm"', '"farm"')).toBe(true);
@@ -138,6 +165,25 @@ describe("Farm server HTTP policy", () => {
       code: "BODY_TOO_LARGE",
       status: 413,
     });
+  });
+
+  it("gives a second reader of a Node request the body the first one read", async () => {
+    // A guard reads the body, then the route handler reads it again; the stream ended after
+    // the first read, so a second read of the stream itself would wait forever.
+    const request = Readable.from([Buffer.from('{"input":'), Buffer.from("{}}")]) as Readable & {
+      headers: Record<string, string>;
+    };
+    request.headers = {};
+
+    const first = await readNodeRequestBody(request as any, 1024);
+    const second = await Promise.race([
+      readNodeRequestBody(request as any, 1024),
+      new Promise<"hung">((resolve) => setTimeout(() => resolve("hung"), 500)),
+    ]);
+    expect(first.toString()).toBe('{"input":{}}');
+    expect(second).not.toBe("hung");
+    expect((second as Buffer).toString()).toBe('{"input":{}}');
+    await expect(readNodeRequestBody(request as any, 5)).rejects.toMatchObject({ status: 413 });
   });
 
   it("returns 413 before invoking an API route or upload handler", async () => {

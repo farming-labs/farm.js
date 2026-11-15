@@ -16,6 +16,7 @@ Use an [integration](/docs/integrations) for a product or service such as authen
 | -------------------------------------- | ------------------------------------------------------------------------------------------------- |
 | [API MCP](/docs/plugins/mcp)           | Expose opted-in typed API routes as authenticated Streamable HTTP tools.                          |
 | [Analyzer](/docs/plugins/analyzer)     | Explain page, client, and server build size and enforce readable CI limits.                       |
+| [Bot Protection](/docs/plugins/bot)    | Stop bots at your forms with a captcha or your own checker, verified on the server.               |
 | [Content](/docs/plugins/content)       | Validate local Markdown, MDX, JSON, and YAML as typed server collections.                         |
 | [DevTools](/docs/plugins/devtools)     | Inspect routes, runtime configuration, diagnostics, and browser module output during development. |
 | [Federation](/docs/plugins/federation) | Publish and load independently deployed browser modules while server capabilities stay local.     |
@@ -24,6 +25,7 @@ Use an [integration](/docs/integrations) for a product or service such as authen
 | [MSW](/docs/plugins/msw)               | Share request handlers across development SSR and the browser without shipping production mocks.  |
 | [Partytown](/docs/plugins/partytown)   | Move explicitly opted-in third-party scripts from the main thread into a web worker.              |
 | [PWA](/docs/plugins/pwa)               | Generate a route-aware service worker for offline navigation, caching, and safe updates.          |
+| [Progress](/docs/plugins/progress)     | Show a top progress bar while a client navigation is in flight.                                   |
 | [Search](/docs/plugins/search)         | Generate a chunked browser search index from emitted static pages.                                |
 | [Scripts](/docs/plugins/scripts)       | Load external browser SDKs with typed handles, timing, consent, dependencies, and retries.        |
 | [Sentry](/docs/plugins/sentry)         | Report server errors with Farm event and route context, trace requests, and flush on shutdown.    |
@@ -32,6 +34,14 @@ Use an [integration](/docs/integrations) for a product or service such as authen
 | [WebMCP](/docs/plugins/webmcp)         | Expose explicit, typed browser tools to agents through the experimental WebMCP API.               |
 
 Each published plugin has its own setup page in this section. Use [Create a Plugin](/docs/plugins/create-plugin) when the behavior is specific to your application or package.
+
+## Community plugins
+
+Community plugins are maintained by their authors outside the Farm project.
+
+| Plugin                     | Purpose                                                                                    |
+| -------------------------- | ------------------------------------------------------------------------------------------ |
+| [Blyp](/docs/plugins/blyp) | Record request-scoped logs, propagate traces, and collect lifecycle and browser telemetry. |
 
 ## Plugin authoring
 
@@ -178,6 +188,36 @@ Only define the groups your plugin needs.
 
 Both hooks receive Farm's plugin context. `setup` additionally receives the resolved `env`. Its returned state is private to that plugin instance and is not serialized to the browser.
 
+Framework `onError` dispatch invokes every selected reporter in plugin order and awaits
+all returned promises, even if another reporter throws or rejects. Reporters can run
+concurrently. After all settle, the first observed reporter failure is surfaced to the
+dispatch caller; startup and request handling report it separately from the original
+failure. Keep error reporters finite: they are awaited before the caller continues.
+
+Other parallel hooks remain fail-fast: a synchronous throw stops dispatch before later
+hooks are invoked and rejects with the same thrown value. Farm still observes promises
+from already-started hooks so their later rejections are handled. This does not wait for
+or cancel that work; asynchronous failures retain normal `Promise.all` behavior.
+
+In development, a native Vite restart keeps the same Farm plugin runtime and instrumentation
+alive; it does not rerun `setup` or dispose resources registered with `lifecycle.onShutdown()`.
+Awaiting the Farm dev server's `close()` waits for an in-progress restart, closes the current
+Vite server, and then awaits plugin cleanup and instrumentation shutdown exactly once. Cleanup
+errors reject `close()`. New restart requests are rejected once final shutdown begins.
+
+If initial development-server creation fails, Farm awaits cleanup of the resources it has
+created before rejecting: Vite's server once `configureServer` begins (even if a Vite hook
+fails before the server is returned), registered plugin shutdown hooks and disposers, and
+instrumentation. This includes failures in `configureServer`, its returned post hook, and
+middleware-mode `buildStart`. A failing `onError` hook or cleanup step is reported
+separately and does not replace the original startup error or skip the remaining cleanup.
+
+Development startup failures are sent to `onError` before cleanup: errors during creation
+use `phase: "createServer"`, while errors when listening (such as an occupied port) or
+running `runtime.start` use `phase: "startDevServer"`. A creation failure is not reported
+again by the startup wrapper. Async error hooks are awaited while plugin resources are
+still available; a failed error hook does not prevent cleanup or replace the startup error.
+
 ### Runtime hooks
 
 | Hook                | Runs                                                         | May return                                                       |
@@ -191,7 +231,9 @@ Both hooks receive Farm's plugin context. `setup` additionally receives the reso
 | `runtime.close`     | During graceful shutdown in long-running Node output.        | Nothing.                                                         |
 
 Runtime request hooks apply to page, API, server-action, integration, docs, asset, and general
-requests. Use `runtime.endpoints` when a plugin owns a small exact URL and should not make unrelated
+requests, including Farm's built-in endpoints (`/.well-known/farmjs.json`, the API and AI catalogs,
+`/mcp`, `llms.txt`, `sitemap.xml`, Markdown mirrors, and OpenAPI routes), in development and
+production. Use `runtime.endpoints` when a plugin owns a small exact URL and should not make unrelated
 static pages dynamic. Endpoint paths are application-relative, automatically honor `basePath`, and
 do not accept route parameters or wildcards.
 
@@ -215,6 +257,9 @@ inside the current request; they do not create another plugin request lifecycle.
 | `waitUntil()` | Runtime request hooks                   | Registers non-blocking work with hosts that support background tasks.   |
 | `durationMs`  | After, error                            | Elapsed request time at that lifecycle phase.                           |
 
+An app metadata route (`sitemap.ts`, `robots.ts`, `manifest.ts`, `llms.ts`, or a metadata image)
+is an `asset` request whose `route.pattern` is the metadata route's, in development and production.
+
 ### Router hooks
 
 | Hook                | Purpose                                                                   |
@@ -234,6 +279,21 @@ Router hooks are useful for diagnostics, conventions, manifests, and instrumenta
 | `render.html`   | Inspect or transform the completed HTML document. | Replacement HTML or nothing. |
 
 Adding `render.html` requires Farm to buffer the final document. Prefer `render.before` when observation is enough and preserving streaming matters.
+
+Render hooks run for every page request, in development and production: a request a page route
+matches, or a `GET` or `HEAD` request that no API route, integration route, docs page, or app
+metadata route (`sitemap.ts`, `robots.ts`, `manifest.ts`, a metadata image) answers. That includes a
+config redirect, a route-file `redirect()` from `defineRoutes`, a config rewrite (once, for the URL
+as requested, not again for its destination), the generated `llms.txt`, `sitemap.xml`, and
+`robots.txt`, the app manifest, a Markdown mirror (and the page it reads), and the not-found page.
+`render.before` runs before Farm resolves the request, so the response may be a redirect or a text
+file rather than a rendered page. Its `routePattern` and `params` describe the page route the
+requested URL matches; `routePattern` is `null` when none does, so check it before doing page-only
+work. The router and render hooks describe the requested URL even when a `runtime.before` hook
+returns a replacement `Request`; Farm routes and renders the replacement, and `runtime.after` sees
+it. Render hooks do not run when a `runtime.before` hook answers the request, and `render.html` sees
+only HTML responses. The React Server Components pipeline does not run render hooks yet; see
+[Server rendering](/docs/server-rendering#react-server-components).
 
 ### Build hooks
 
@@ -282,14 +342,40 @@ For each application request, Farm runs the runtime hooks in this order:
 
 1. An exact `runtime.endpoints` match runs before ordinary request context and routing.
 2. Otherwise, every `runtime.context` creates request-local values.
-3. Every `runtime.before` runs in plugin order.
-4. Farm calls the page, API route, or integration handler unless a plugin returned a `Response`.
-5. Every `runtime.after` can transform the response, including an endpoint response.
-6. `runtime.error` observes an error if any preceding phase throws.
+3. Every `runtime.before` runs in plugin order, before app
+   [middleware](/docs/middleware). A `Response` returned here skips middleware.
+4. App middleware runs, then Farm calls the page, API route, or integration handler.
+   Integration routes answer before app middleware. A path under the API base path that no route
+   matches gets Farm's JSON 404 here.
+5. Every `runtime.after` can transform the response, including an endpoint response and a
+   response app middleware answered with.
+6. `runtime.error` observes an error if any preceding phase throws. When an API or integration
+   route throws, `runtime.error` observes the throw, Farm answers `500`, and every
+   `runtime.after` still sees that response. A throw from `runtime.context`, `runtime.before`, or
+   `runtime.after` skips the remaining `runtime.after` hooks and fails the request with a `500`:
+   the JSON body `{"error":"Internal Server Error"}` under the API base path or in a
+   `renderer: false` app, and a plain-text `Internal Server Error` for a page. That `500` is a
+   new response: it carries your `headers()` config, but no header or cookie that middleware or
+   the route had set. In production, a `500` from a hook that runs after the app answered (such
+   as `runtime.after` or an HTML transform) is sent with `Cache-Control: private, no-store` when
+   middleware or a `runtime.before` hook let the request through, as the response it replaces
+   would be.
+
+This order is the same in `farm dev` and in a production build. A thrown route error reaches the
+flat `onError` hook once, with `phase: "runtime"` and `meta.kind` naming the request kind (such as
+`"api"` or `"integration"`).
 
 `runtime.before` may return a new `Request`, return a `Response` to short-circuit, or return nothing. A short-circuit response still passes through `runtime.after`. `runtime.after` may return a new `Response` or return nothing.
 
-Runtime hooks use Web APIs, so the same plugin works in development and universal production builds. The event includes `kind`, route metadata, the request `AbortSignal`, and `waitUntil()` for background work supported by the host.
+`runtime.before` runs for every request and may be a guard, so in production a response it lets
+through is sent with `Cache-Control: private, no-store` instead of a shared policy, as for
+[middleware](/docs/middleware#caching). A plugin whose `before` decides nothing about access, such
+as logging or analytics, declares `runtime: { cache: "public", before() {} }` to keep the app's
+shared caching.
+
+When a configured rewrite sends the request to an internal destination, every `runtime.before` runs again with the destination `Request` and the same `ctx`, so a guard on `/admin/*` also covers a rewrite that lands there. `runtime.context` and `runtime.after` run once per request. Only that second `runtime.before` gets the destination's `route`; every other runtime hook gets the `route` of the URL as requested.
+
+Runtime hooks don't run for files in `public/`, which are served as static assets first; serve a protected file from a route instead. Runtime hooks use Web APIs, so the same plugin works in development and universal production builds. The event includes `kind`, route metadata, the request `AbortSignal`, and `waitUntil()` for background work supported by the host.
 
 An endpoint is intentionally isolated from `runtime.context` and `runtime.before`. Perform any
 endpoint-specific authentication inside its handler. Global `runtime.after` and `runtime.error`
@@ -322,7 +408,7 @@ runtime: {
 },
 ```
 
-Only values marked `exposeToPage: true` appear in `props.context?.data`. Farm preserves the request store when a plugin returns a transformed `Request`.
+Only values marked `exposeToPage: true` appear in `props.context?.data`. Farm preserves the request store when a plugin returns a transformed `Request`, buffers a request body, or clones a request for production dispatch. Private values stay private; these replacements do not expose them to page props or another request.
 
 ## Ordering
 
@@ -374,6 +460,11 @@ encoded response body, adds `Vary: Accept-Encoding`, and removes the identity `C
 Responses that are already encoded, partial, marked `no-transform`, or sent as server-sent events
 are left unchanged.
 
+Dynamic Brotli responses use compression quality 5 to balance response latency and transfer size.
+Both Brotli and gzip flush each chunk so streaming content can arrive before the response finishes.
+Gzip keeps its existing compression level; this setting does not change precompressed static assets
+or compression managed by a deployment platform.
+
 Compression applies to media types that actually shrink: every `text/*` type, `application/json`,
 `application/javascript`, `application/xml`, `application/wasm`, `application/x-ndjson`, any
 `+json` or `+xml` type such as `image/svg+xml` or `application/manifest+json`, and the
@@ -383,6 +474,36 @@ compressed payloads are skipped, so images, video, audio, archives, PDFs, Office
 identity `Content-Length` and strong `ETag` intact. A response with no `Content-Type` is also left
 alone, since its bytes may already be compressed. Set a `Content-Type` when a route returns text
 that should be compressed.
+
+### Request logging
+
+`createLoggerPlugin` writes one line per request through the portable `runtime.after` hook, so it behaves the same in development, Node output, and edge runtimes. The development server already prints its own `[FARM]` line for every request, so Farm does not register the logger for you; add it when you want structured output, redaction, or sampling.
+
+```ts
+import { defineConfig } from "@farm.js/core";
+import { createLoggerPlugin } from "@farm.js/core/plugin/server";
+
+export default defineConfig({
+  plugins: [
+    createLoggerPlugin({
+      headers: ["user-agent", "x-request-id"],
+      redact: ["x-session"],
+      sample: 0.25,
+    }),
+  ],
+});
+```
+
+| Option    | Default                           | Description                                                                                                                                               |
+| --------- | --------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `format`  | `"text"` in dev, `"json"` in prod | `text` prints `GET /about 200 12ms`; `json` prints one `{ time, level, method, path, status, durationMs, headers? }` object per line for log collectors.  |
+| `headers` | none                              | Request headers to include in each entry. Nothing is logged from the request unless it is listed here.                                                    |
+| `redact`  | built-in list                     | Header and query-string names, matched case-insensitively, whose values are logged as `[redacted]`. These add to the built-in list below.                 |
+| `sample`  | `1`                               | Fraction of requests to log, from `0` to `1`. Responses with a `5xx` status are always logged, so sampling thins routine traffic without hiding failures. |
+
+The built-in redaction list is `authorization`, `cookie`, `set-cookie`, `proxy-authorization`, `x-api-key`, `api_key`, `apikey`, `access_token`, `token`, `password`, and `secret`. It applies to query-string values in the logged path and to any header you select with `headers`; repeated keys and the original encoding of other query values are preserved. `4xx` responses log at level `warn` and `5xx` responses at `error` (written to `stderr`); everything else is `info`.
+
+The `beforeRequest` and `afterResponse` callback options still work as deprecated aliases for the Node-only flat hooks. New code should write a plugin with `runtime.before` or `runtime.after` instead.
 
 ## Legacy hooks
 

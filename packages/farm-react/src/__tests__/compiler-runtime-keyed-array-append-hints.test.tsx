@@ -2,7 +2,7 @@ import React, { StrictMode, useState } from "react";
 import { act } from "react";
 import { createRoot, hydrateRoot, type Root } from "react-dom/client";
 import { renderToString } from "react-dom/server";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   createCompiledComponentWithFeatures,
   createCompilerKeyedArrayAppend,
@@ -13,6 +13,7 @@ import {
   createCompilerKeyedArraySlice,
   createCompilerKeyedArrayStructuralAppend,
   createCompilerKeyedArrayStructuralAppendMapPipeline,
+  keyedRowsAppendOnlyRuntimeFeature,
   keyedRowsStructuralAppendMapHintedRuntimeFeature,
   type CompilerKeyedRowElement,
 } from "../compiler-runtime";
@@ -45,6 +46,7 @@ afterEach(async () => {
     for (const root of roots.splice(0)) root.unmount();
   });
   document.body.replaceChildren();
+  vi.restoreAllMocks();
 });
 
 async function flushCompilerUpdates(): Promise<void> {
@@ -111,6 +113,7 @@ function createAppendHarness(
   initialItems: Item[],
   readsCollection = false,
   structuralAppend = false,
+  feature = keyedRowsStructuralAppendMapHintedRuntimeFeature,
 ) {
   const counters: Counters = {
     executions: 0,
@@ -364,7 +367,7 @@ function createAppendHarness(
       },
       bindings: [{ kind: "block", id: 0, dependencies: [0] }],
     },
-    [keyedRowsStructuralAppendMapHintedRuntimeFeature],
+    [feature],
   );
   return {
     Inventory,
@@ -444,6 +447,93 @@ function createAppendHarness(
 }
 
 describe("compiled keyed-array append hints", () => {
+  it.each(
+    [keyedRowsStructuralAppendMapHintedRuntimeFeature, keyedRowsAppendOnlyRuntimeFeature].flatMap(
+      (feature) =>
+        (
+          [
+            ["key", "id", 1],
+            ["descriptor", "label", 1],
+            ["binding", "label", 2],
+            ["committed duplicate", "id", 0],
+            ["incoming duplicate", "id", 0],
+          ] as const
+        ).map(([phase, field, failAt]) => ({ feature, phase, field, failAt })),
+    ),
+  )(
+    "$feature.name keeps the owned map and DOM untouched when append preparation rejects a $phase",
+    async ({ feature, phase, field, failAt }) => {
+      const maps = new Set<Map<unknown, { element: Element }>>();
+      const originalSet = Map.prototype.set;
+      vi.spyOn(Map.prototype, "set").mockImplementation(
+        function (this: Map<unknown, unknown>, key, value) {
+          if (value?.element instanceof Element)
+            maps.add(this as Map<unknown, { element: Element }>);
+          return originalSet.call(this, key, value);
+        },
+      );
+      const harness = createAppendHarness([{ id: "a", label: "Alpha" }], false, false, feature);
+      const container = document.createElement("div");
+      document.body.append(container);
+      const root = createRoot(container);
+      roots.push(root);
+      await act(async () => root.render(<harness.Inventory />));
+      const retained = container.querySelector("li")!;
+      const ownedMaps = [...maps].filter((map) =>
+        [...map.values()].some((row) => row.element === retained),
+      );
+      expect(ownedMaps.length).toBeGreaterThan(0);
+      let reads = 0;
+      let snapshot: { sizes: number[]; rows: Element[] } | undefined;
+      const rejected: Item = { id: "c", label: "Gamma" };
+      Object.defineProperty(rejected, field, {
+        get() {
+          reads += 1;
+          if (reads === (failAt || 1)) {
+            snapshot = {
+              sizes: ownedMaps.map((map) => map.size),
+              rows: [...container.querySelectorAll("li")],
+            };
+            if (failAt) throw new Error(`Rejected ${phase}`);
+          }
+          if (phase === "committed duplicate") return "a";
+          if (phase === "incoming duplicate") return "b";
+          return field === "id" ? "c" : "Gamma";
+        },
+      });
+      const errors = vi.spyOn(console, "error").mockImplementation(() => {});
+      await act(async () => {
+        harness.append([{ id: "b", label: "Beta" }, rejected]);
+        await flushCompilerUpdates();
+      });
+      expect(snapshot).toEqual({ sizes: ownedMaps.map(() => 1), rows: [retained] });
+      expect([...container.querySelectorAll("li")].map((row) => row.textContent)).toEqual([
+        "Alpha",
+        "Beta",
+        "Gamma",
+      ]);
+      if (failAt) {
+        expect(container.querySelector("li")).toBe(retained);
+        expect(errors).not.toHaveBeenCalled();
+      } else {
+        // Duplicate keys deliberately hand the complete list back to React.
+        expect(harness.counters.listRenders).toBeGreaterThan(1);
+        expect(errors.mock.calls.every((args) => String(args[0]).includes("same key"))).toBe(true);
+      }
+      // Recovery must not retain a detached, partially prepared row in the map.
+      await act(async () => {
+        harness.append([{ id: "d", label: "Delta" }]);
+        await flushCompilerUpdates();
+      });
+      expect([...container.querySelectorAll("li")].map((row) => row.textContent)).toEqual([
+        "Alpha",
+        "Beta",
+        "Gamma",
+        "Delta",
+      ]);
+    },
+  );
+
   it("creates only appended rows while preserving every existing DOM identity", async () => {
     const initialItems = Array.from(
       { length: 2_048 },
@@ -1299,56 +1389,59 @@ describe("compiled keyed-array append hints", () => {
     expect(harness.counters.keyReads).toBe(3);
   });
 
-  it("keeps custom iterators and revoked proxies on behavior-preserving fallback", async () => {
-    const initialItems: Item[] = [{ id: "a", label: "Alpha" }];
-    const harness = createAppendHarness(initialItems);
-    const container = document.createElement("div");
-    document.body.append(container);
-    const root = createRoot(container);
-    roots.push(root);
-    await act(async () => root.render(<harness.Inventory />));
-    Object.defineProperty(initialItems, Symbol.iterator, {
-      configurable: true,
-      value: function* () {
-        yield { id: "x", label: "Iterator row" };
-      },
-    });
+  it.each([keyedRowsStructuralAppendMapHintedRuntimeFeature, keyedRowsAppendOnlyRuntimeFeature])(
+    "$name keeps custom iterators and revoked proxies on behavior-preserving fallback",
+    async (feature) => {
+      const initialItems: Item[] = [{ id: "a", label: "Alpha" }];
+      const harness = createAppendHarness(initialItems, false, false, feature);
+      const container = document.createElement("div");
+      document.body.append(container);
+      const root = createRoot(container);
+      roots.push(root);
+      await act(async () => root.render(<harness.Inventory />));
+      Object.defineProperty(initialItems, Symbol.iterator, {
+        configurable: true,
+        value: function* () {
+          yield { id: "x", label: "Iterator row" };
+        },
+      });
 
-    await act(async () => {
-      harness.append([{ id: "b", label: "Beta" }]);
-      await flushCompilerUpdates();
-    });
+      await act(async () => {
+        harness.append([{ id: "b", label: "Beta" }]);
+        await flushCompilerUpdates();
+      });
 
-    expect([...container.querySelectorAll("li")].map((row) => row.textContent)).toEqual([
-      "Iterator row",
-      "Beta",
-    ]);
+      expect([...container.querySelectorAll("li")].map((row) => row.textContent)).toEqual([
+        "Iterator row",
+        "Beta",
+      ]);
 
-    const { proxy, revoke } = Proxy.revocable([], {});
-    revoke();
-    const next: Item[] = [{ id: "safe", label: "Safe" }];
-    expect(() => createCompilerKeyedArrayAppend(proxy, next)).not.toThrow();
-    expect(createCompilerKeyedArrayAppend(proxy, next)).toBe(next);
-    expect(() => createCompilerKeyedArrayStructuralAppend(proxy, next)).not.toThrow();
-    expect(createCompilerKeyedArrayStructuralAppend(proxy, next)).toBe(next);
-    expect(() => createCompilerKeyedArrayMappedStructuralAppend(proxy, next)).not.toThrow();
-    expect(createCompilerKeyedArrayMappedStructuralAppend(proxy, next)).toBe(next);
-    expect(() =>
-      createCompilerKeyedArrayStructuralAppendMapPipeline(proxy, () => next),
-    ).not.toThrow();
-    expect(createCompilerKeyedArrayStructuralAppendMapPipeline(proxy, () => next)).toBe(next);
+      const { proxy, revoke } = Proxy.revocable([], {});
+      revoke();
+      const next: Item[] = [{ id: "safe", label: "Safe" }];
+      expect(() => createCompilerKeyedArrayAppend(proxy, next)).not.toThrow();
+      expect(createCompilerKeyedArrayAppend(proxy, next)).toBe(next);
+      expect(() => createCompilerKeyedArrayStructuralAppend(proxy, next)).not.toThrow();
+      expect(createCompilerKeyedArrayStructuralAppend(proxy, next)).toBe(next);
+      expect(() => createCompilerKeyedArrayMappedStructuralAppend(proxy, next)).not.toThrow();
+      expect(createCompilerKeyedArrayMappedStructuralAppend(proxy, next)).toBe(next);
+      expect(() =>
+        createCompilerKeyedArrayStructuralAppendMapPipeline(proxy, () => next),
+      ).not.toThrow();
+      expect(createCompilerKeyedArrayStructuralAppendMapPipeline(proxy, () => next)).toBe(next);
 
-    const source = [{ id: "source", label: "Source" }];
-    const customMap = function (this: Item[], mapper: (item: Item) => Item) {
-      return this.map(mapper);
-    };
-    const customResult = createCompilerKeyedArrayStructuralAppendMapPipeline(
-      source,
-      (current, applyMap) =>
-        applyMap(current, customMap, (item: Item) => ({ ...item, label: "Custom" })),
-    );
-    expect(customResult).toEqual([{ id: "source", label: "Custom" }]);
-  });
+      const source = [{ id: "source", label: "Source" }];
+      const customMap = function (this: Item[], mapper: (item: Item) => Item) {
+        return this.map(mapper);
+      };
+      const customResult = createCompilerKeyedArrayStructuralAppendMapPipeline(
+        source,
+        (current, applyMap) =>
+          applyMap(current, customMap, (item: Item) => ({ ...item, label: "Custom" })),
+      );
+      expect(customResult).toEqual([{ id: "source", label: "Custom" }]);
+    },
+  );
 
   it("keeps complete reconciliation when existing rows read collection state", async () => {
     const harness = createAppendHarness(
@@ -1483,57 +1576,61 @@ describe("compiled keyed-array append hints", () => {
     expect(keyReads).toBe(4);
   });
 
-  it("matches React through 2,000 deterministic appends", async () => {
-    const initialItems: Item[] = [{ id: "seed", label: "Seed" }];
-    const harness = createAppendHarness(initialItems);
-    let appendReact: (item: Item) => void = () => undefined;
-    function Normal() {
-      const [items, setItems] = useState(initialItems);
-      appendReact = (item) => setItems((previous) => [...previous, item]);
-      return (
-        <ol data-owner="react">
-          {items.map((item) => (
-            <li data-key={item.id} key={item.id}>
-              {item.label}
-            </li>
-          ))}
-        </ol>
+  it.each([keyedRowsStructuralAppendMapHintedRuntimeFeature, keyedRowsAppendOnlyRuntimeFeature])(
+    "$name matches React through 2,000 deterministic appends",
+    async (feature) => {
+      const initialItems: Item[] = [{ id: "seed", label: "Seed" }];
+      const harness = createAppendHarness(initialItems, false, false, feature);
+      let appendReact: (item: Item) => void = () => undefined;
+      function Normal() {
+        const [items, setItems] = useState(initialItems);
+        appendReact = (item) => setItems((previous) => [...previous, item]);
+        return (
+          <ol data-owner="react">
+            {items.map((item) => (
+              <li data-key={item.id} key={item.id}>
+                {item.label}
+              </li>
+            ))}
+          </ol>
+        );
+      }
+      const container = document.createElement("div");
+      document.body.append(container);
+      const root = createRoot(container);
+      roots.push(root);
+      await act(async () =>
+        root.render(
+          <>
+            <div data-owner="compiled">
+              <harness.Inventory />
+            </div>
+            <Normal />
+          </>,
+        ),
       );
-    }
-    const container = document.createElement("div");
-    document.body.append(container);
-    const root = createRoot(container);
-    roots.push(root);
-    await act(async () =>
-      root.render(
-        <>
-          <div data-owner="compiled">
-            <harness.Inventory />
-          </div>
-          <Normal />
-        </>,
-      ),
-    );
 
-    let random = 0x12345678;
-    for (let batch = 0; batch < 100; batch += 1) {
-      await act(async () => {
-        for (let update = 0; update < 20; update += 1) {
-          random = (Math.imul(random, 1_664_525) + 1_013_904_223) >>> 0;
-          const item = { id: `row-${batch}-${update}`, label: `Value ${random % 10_000}` };
-          harness.append([item]);
-          appendReact(item);
-        }
-        await flushCompilerUpdates();
-      });
-      expect(
-        [...container.querySelectorAll('[data-owner="compiled"] li')].map((row) => row.outerHTML),
-      ).toEqual(
-        [...container.querySelectorAll('[data-owner="react"] li')].map((row) => row.outerHTML),
-      );
-    }
-    expect(harness.counters.executions).toBe(1);
-  }, 15_000);
+      let random = 0x12345678;
+      for (let batch = 0; batch < 100; batch += 1) {
+        await act(async () => {
+          for (let update = 0; update < 20; update += 1) {
+            random = (Math.imul(random, 1_664_525) + 1_013_904_223) >>> 0;
+            const item = { id: `row-${batch}-${update}`, label: `Value ${random % 10_000}` };
+            harness.append([item]);
+            appendReact(item);
+          }
+          await flushCompilerUpdates();
+        });
+        expect(
+          [...container.querySelectorAll('[data-owner="compiled"] li')].map((row) => row.outerHTML),
+        ).toEqual(
+          [...container.querySelectorAll('[data-owner="react"] li')].map((row) => row.outerHTML),
+        );
+      }
+      expect(harness.counters.executions).toBe(1);
+    },
+    15_000,
+  );
 
   it("matches React across 2,000 randomized structural removals, appends, and maps", async () => {
     const initialItems = Array.from(

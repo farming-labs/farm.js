@@ -2,7 +2,7 @@
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
-import { AnnouncementBar } from "./site-chrome";
+import { AnnouncementBar, SiteFooter } from "./site-chrome";
 
 describe("release announcement", () => {
   it("links to the launch post instead of advertising the build's beta version", () => {
@@ -23,5 +23,22 @@ describe("release announcement", () => {
     expect(link).toMatch(/\bunderline\b/);
     expect(link).toContain("focus-visible:outline");
     expect(html.match(/<a\b/g)).toHaveLength(1);
+  });
+});
+
+describe("site footer", () => {
+  it("links to the design page beside the source", () => {
+    const html = renderToStaticMarkup(createElement(SiteFooter));
+    const link = html.match(/<a\b[^>]*href="\/design"[^>]*>[\s\S]*?<\/a>/)?.[0];
+
+    expect(link).toBeDefined();
+    expect(link).toContain("Design");
+  });
+
+  it("links to the privacy notice and the terms", () => {
+    const html = renderToStaticMarkup(createElement(SiteFooter));
+
+    expect(html).toMatch(/<a\b[^>]*href="\/privacy"[^>]*>Privacy<\/a>/);
+    expect(html).toMatch(/<a\b[^>]*href="\/terms"[^>]*>Terms<\/a>/);
   });
 });

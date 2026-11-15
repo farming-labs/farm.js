@@ -30,7 +30,8 @@ function contained(root: string, file: string): boolean {
 /** Only already-transformed browser modules are eligible. Never transform or execute on request. */
 export function createModuleInspector(server: ViteDevServer) {
   const root = path.resolve(server.config.root);
-  const rootReal = realpath(root);
+  // Resolved on first inspection, so a missing root never rejects while nothing awaits it.
+  let rootReal: Promise<string> | undefined;
   function entries() {
     return [...server.moduleGraph.idToModuleMap.values()]
       .filter(
@@ -57,7 +58,10 @@ export function createModuleInspector(server: ViteDevServer) {
   async function safe(module: ModuleNode): Promise<string | undefined> {
     try {
       const canonical = await realpath(module.file!);
-      const realRoot = await rootReal;
+      const realRoot = await (rootReal ??= realpath(root).catch((error) => {
+        rootReal = undefined;
+        throw error;
+      }));
       return contained(realRoot, canonical) &&
         SOURCE_EXTENSION.test(canonical) &&
         !path
@@ -102,15 +106,19 @@ export function createModuleInspector(server: ViteDevServer) {
         const stat = await file.stat();
         if (!stat.isFile() || stat.size > SOURCE_LIMIT)
           throw new ModuleInspectionError("Source exceeds the 1 MiB inspection limit", 413);
-        const buffer = Buffer.alloc(SOURCE_LIMIT + 1);
+        // One spare byte detects a file that grew after stat.
+        const buffer = Buffer.alloc(stat.size + 1);
         let bytesRead = 0;
         while (bytesRead < buffer.length) {
           const chunk = await file.read(buffer, bytesRead, buffer.length - bytesRead, bytesRead);
           if (!chunk.bytesRead) break;
           bytesRead += chunk.bytesRead;
         }
-        if (bytesRead > SOURCE_LIMIT)
-          throw new ModuleInspectionError("Source exceeds the 1 MiB inspection limit", 413);
+        if (bytesRead > stat.size)
+          throw new ModuleInspectionError(
+            "Module changed while it was read. Refresh Inspect and try again.",
+            409,
+          );
         return {
           ...summary(module),
           source: buffer.subarray(0, bytesRead).toString("utf8"),

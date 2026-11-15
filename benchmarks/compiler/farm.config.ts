@@ -9,11 +9,9 @@ export default defineConfig({
   srcDir: "src",
   preset: "node-server",
   renderer: react({
-    experimental: {
-      // report: true writes .farm/react-compiler.json so the runner can prove
-      // the workload component actually compiled instead of falling back.
-      compiler: compiler ? { report: true } : false,
-    },
+    // report: true writes .farm/react-compiler.json so the runner can prove
+    // the workload component actually compiled instead of falling back.
+    compiler: compiler ? { report: true } : false,
   }),
   routeRules: {
     "/": {

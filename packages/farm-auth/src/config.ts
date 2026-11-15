@@ -56,7 +56,8 @@ export function resolveFarmAuthConfig(
   return resolved;
 }
 
-function normalizeBasePath(value: string | undefined): string {
+/** `auth.basePath` as the server mounts it. Shared with the native client. */
+export function normalizeBasePath(value: string | undefined): string {
   const route = (value || "/api/auth").trim();
   if (!route) return "/api/auth";
   assertStableBasePath(route);

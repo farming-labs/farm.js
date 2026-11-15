@@ -3,15 +3,21 @@
 import { Writable } from "node:stream";
 import {
   defineRendererDescriptorConformance,
+  defineRendererNativeTreeConformance,
   defineRendererServerConformance,
+  defineRendererServerQueryConformance,
 } from "@farm.js/renderer-tests";
-import { defineComponent, h } from "vue";
+import { createFarmNativeTreeResponse } from "@farm.js/core/internal/production-runtime";
+import { defineComponent, h, type FunctionalComponent } from "vue";
 import { describe, expect, it } from "vitest";
+import type { ServerQuery } from "@farm.js/core/server-query";
+import { useServerQuery } from "../bindings";
 import { vue } from "../index";
 import * as serverRuntime from "../server";
 import {
   createElement,
   generateHydrationScript,
+  markFunctionComponent,
   renderToPipeableStream,
   renderToReadableStream,
   renderToString,
@@ -34,6 +40,37 @@ defineRendererDescriptorConformance({
 });
 
 defineRendererServerConformance(serverRuntime);
+defineRendererNativeTreeConformance(serverRuntime, async (html) => {
+  // As a mobile app's server answers a native-tier screen: the page's HTML read into a tree.
+  const response = await createFarmNativeTreeResponse({
+    request: new Request("https://app.example/trails", {
+      headers: { accept: "application/vnd.farm.native+json" },
+    }),
+    renderPage: () =>
+      new Response(
+        `<!DOCTYPE html><html><head><title>Trails</title></head><body><div id="__farm_page__">${html}</div></body></html>`,
+        { headers: { "content-type": "text/html; charset=utf-8" } },
+      ),
+    loadStylesheet: () => "",
+  });
+  return response.json();
+});
+
+defineRendererServerQueryConformance({
+  name: "vue",
+  renderQuery(query) {
+    const Account = defineComponent({
+      setup() {
+        const account = useServerQuery(
+          query as unknown as ServerQuery<undefined, { email: string }>,
+          undefined,
+        );
+        return () => h("p", `account=${account.data.value?.email ?? "loading"}`);
+      },
+    });
+    return renderToString(createElement(Account, null));
+  },
+});
 
 describe("Vue renderer", () => {
   it("streams FARMJS elements through Vue's Node adapter", async () => {
@@ -83,8 +120,9 @@ describe("Vue renderer", () => {
   });
 
   it("materializes plain function components before handing them to Vue", async () => {
-    const Layout = ({ children }: { children?: unknown }) =>
-      createElement("section", { class: "function-layout" }, children);
+    const Layout = markFunctionComponent(({ children }: { children?: unknown }) =>
+      createElement("section", { class: "function-layout" }, children),
+    );
 
     const html = await renderToString(
       createElement(Layout, { children: createElement("p", null, "Function route") }),
@@ -94,11 +132,28 @@ describe("Vue renderer", () => {
   });
 
   it("reports async function components instead of rendering a promise", async () => {
-    const AsyncComponent = async () => createElement("p", null, "not supported");
+    const AsyncComponent = markFunctionComponent(async () =>
+      createElement("p", null, "not supported"),
+    );
 
     await expect(renderToString(createElement(AsyncComponent, null))).rejects.toThrow(
       "does not support async function components",
     );
+  });
+
+  it("renders native Vue functional components with their slots and attrs", async () => {
+    const Emphasis: FunctionalComponent = (_props, ctx) =>
+      h("em", ctx.attrs, ctx.slots.default?.());
+
+    const html = await renderToString(
+      createElement(
+        Emphasis,
+        { className: "native", "data-kind": "functional" },
+        createElement("span", null, "slotted"),
+      ),
+    );
+
+    expect(html).toContain('<em data-kind="functional" class="native"><span>slotted</span></em>');
   });
 
   it("reports a render error as a shell error", async () => {

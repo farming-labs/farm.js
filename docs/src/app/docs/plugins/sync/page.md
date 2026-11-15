@@ -8,7 +8,8 @@ section: "Plugin Ecosystem"
 
 `@farm.js/sync` gives a model rows that live in the browser. Reads render from a
 local store, writes apply before the server answers, edits made offline queue
-until the connection returns, and a revisit paints from disk.
+until the connection returns, and a revisit reuses the rows already on the
+device.
 
 It is a layer over your existing data, not a replacement for it: every read and
 write goes through your database, filtered by a rule you control on the server.
@@ -48,13 +49,13 @@ export const schema = defineSchema({
 
 Field metadata does real work, so configuration does not repeat it:
 
-| Declaration                  | What it decides                                                    |
-| ---------------------------- | ------------------------------------------------------------------ |
-| `primaryKey: true`           | the row key                                                        |
-| `type: "enum"` + `values`    | the column's type, and validation before the optimistic write      |
-| `reference`                  | relationships between models                                       |
-| `datetime` named `updatedAt` | incremental sync — after the first load only changed rows are sent |
-| `name` on a model or field   | the real table or column name in an existing database              |
+| Declaration                  | What it decides                                                   |
+| ---------------------------- | ----------------------------------------------------------------- |
+| `primaryKey: true`           | the row key                                                       |
+| `type: "enum"` + `values`    | the column's type, and validation before the optimistic write     |
+| `reference`                  | relationships between models                                      |
+| `datetime` named `updatedAt` | incremental sync: after the first load only changed rows are sent |
+| `name` on a model or field   | the real table or column name in an existing database             |
 
 ## Configure the plugin
 
@@ -229,6 +230,22 @@ server's row filter.
 
 `useRow("tasks", id)` subscribes to a single row.
 
+### Deletions and scope changes
+
+With an `updatedAt` cursor, a load after the first asks only for rows changed
+since the last one. A delta cannot describe a row that no longer exists, so the
+server also sends the key of every row the caller can still see, read with the
+same row filter as the list. The browser drops any row it holds whose key is
+missing. That covers rows deleted by another client, rows deleted straight in
+the database, and rows that left the caller's scope, for example a task moved
+to another organization.
+
+Rows written in the browser are safe from this: an insert the server has not
+confirmed yet is never dropped, and neither is a row confirmed while the load
+was in flight. The key list costs one extra key-only query per incremental
+load. Without an `updatedAt` field every load is a full snapshot, which already
+replaces the rows on the device.
+
 ## Write
 
 Reading and writing are separate surfaces: `useLiveQuery` observes, and
@@ -275,6 +292,7 @@ surface as an unhandled rejection.
 | Network error or 5xx | retried with backoff; the row stays on screen throughout                |
 | Offline              | the write pauses, `paused` increments, and it sends itself on reconnect |
 | Reload while pending | the pending write is lost; optimistic state is in memory only           |
+| Deleting a gone row  | treated as done, so the row stays removed instead of reappearing        |
 
 A rejected write reverts on screen, but it does not vanish: it lands in the
 model's `failures` queue with the exact input that failed, the reason, and two
@@ -310,25 +328,38 @@ A client calling `db.tasks.update({ id: "another-org-row" })` produces a query
 filtered by both the id and the scope, so it matches nothing and returns
 `not_found`. Three consequences follow:
 
-- **Columns named by `where` are server-owned.** They are injected on insert and
-  ignored when a client sends them, so no separate read-only list is needed.
+- **Columns named by `where` are server-owned.** Every field the filter names,
+  including inside `AND`, `OR`, and `NOT`, is ignored when a client sends it,
+  and inserts stamp the filter's values, so no separate read-only list is
+  needed.
 - **Synced rows are scoped too.** A device only holds rows that passed the
-  filter, so the local store cannot leak another tenant's data offline.
-- **A writable model with no filter fails the build.** Set `where: false` on a
-  model to expose every row deliberately.
+  filter, saved with a fingerprint of the scope they were synced under. After
+  a reload they are reused only once the server reports the same scope, so
+  the next account on a shared device never sees them, even offline. See
+  [persistence](#persistence).
+- **A model with no filter fails the build**, whether it is `"write"` or
+  `"read"`: an unfiltered read model would hand every row to any caller,
+  signed in or not. Set `where: false` on a model, for example
+  `{ access: "read", where: false }`, to expose every row to every caller
+  deliberately.
 
-The context `where` reads comes from your own middleware, the same kind used by
-server functions:
+The context `where` reads comes from your own middleware: functions that
+receive `{ request, context }` and return the fields to add. They run in order
+before every operation:
 
 ```ts
-const withOrg = createServerMiddleware({
-  async handler({ request, next }) {
-    const session = await getSession(request);
-    if (!session.user) throw new UnauthorizedError();
-    return next({ context: { org: await loadOrg(session.user.orgId) } });
-  },
-});
+import type { SyncMiddleware } from "@farm.js/sync";
+
+const withOrg: SyncMiddleware = async ({ request }) => {
+  const session = await getSession(request);
+  // A throw answers 500 before any query runs.
+  if (!session.user) throw new Error("Not signed in");
+  return { org: await loadOrg(session.user.orgId) };
+};
 ```
+
+`createServerMiddleware()` objects belong to server functions; `sync()` rejects
+them at startup.
 
 Sync never inspects authentication itself; it reads the object your middleware
 built, so any auth provider works.
@@ -339,11 +370,49 @@ simple request that skips the CORS preflight — is rejected with `403` before
 the body is read. A trusted second origin, such as a separate marketing site
 embedding the app, goes in `allowedOrigins`.
 
+### Filter shapes
+
+`where` returns an ORM filter: field values, the operators `eq`, `in`, `not`,
+`contains`, `gt`, `gte`, `lt`, and `lte`, and the combinators `AND`, `OR`, and
+`NOT`. Every read, update, and delete applies the whole filter. Inserts need to
+know the new row's values, so they only work when the filter is plain equality,
+optionally combined with `AND`:
+
+```ts
+// Inserts stamp orgId and ownerId on the new row.
+where: ({ context }) => ({ AND: [{ orgId: context.org.id }, { ownerId: context.user.id }] });
+
+// Reads, updates, and deletes work; inserts are refused, because "own or shared"
+// does not say which owner a new row gets. Insert through a server action.
+where: ({ context }) => ({ OR: [{ ownerId: context.user.id }, { shared: true }] });
+```
+
+Sync fails closed on a filter it cannot enforce. A request returns
+`server_error` (500) before any query runs when the filter:
+
+- gives a field `undefined`, such as `context.user?.id` for a signed-out
+  caller. Use `null` to match rows with no value, or reject the request in
+  middleware.
+- names something that is not a schema field, such as the column name
+  `owner_id` instead of the field `ownerId`.
+- passes an object that is not one of the operators above.
+
+Some drivers would otherwise drop such a condition and return every row.
+
 ## Persistence
 
-Rows are stored in the browser so a revisit paints before the network answers.
-Entries load stale-but-visible and are revalidated on the first read, so disk
-data is never treated as fresh.
+Rows are stored in the browser with a fingerprint of the scope they were
+synced under, a hash of the filter's values that the server reports with every
+list. What a revisit does with them depends on the model:
+
+- **A model with `where: false`** has one scope for everyone, so its rows paint
+  before the network answers, stale-but-visible, and are revalidated on the
+  first read.
+- **A scoped model** waits for its first list. The server only sends what
+  changed since the saved cursor when the scope still matches; otherwise it
+  sends a full snapshot and the saved rows are discarded. A reload after a
+  sign-out never shows the previous account's rows, online or offline, and an
+  offline start shows no rows until the server answers.
 
 Only server-confirmed rows are written; an optimistic guess in flight never
 reaches disk. Set `persist: false` to disable it, or replace the store:
@@ -355,7 +424,8 @@ setSyncPersistence(myIndexedDbStore);
 clearSyncedRows(); // whenever the session changes
 ```
 
-Call `clearSyncedRows()` whenever the session changes without a page reload:
+Call `clearSyncedRows()` whenever the session changes without a page reload
+(across a reload, the fingerprint covers it):
 sign-out, signing in as someone else, or switching organization. It clears
 what is on disk and in memory, including the incremental cursor, and drops any
 load or write still in flight for the previous session. Each model then
@@ -387,6 +457,12 @@ const complete = useSyncAction(completeTask, "tasks", {
 
 complete({ id: task.id }); // fire and forget, like any other write
 ```
+
+Keep such columns off write models. Every schema column of a `"write"` model,
+apart from the key, the cursor, and the columns `where` names, is writable by
+any caller in scope: a `status` the server is meant to rule on can be set to
+`"done"` with a plain `db.tasks.update()`. Expose the model as `"read"` and
+change it only through actions like the one above.
 
 The optimistic patch shows the transition instantly; the row the handler
 returns replaces it when the server confirms, and a refusal rolls it back into
@@ -426,6 +502,8 @@ export const exportBoard = createServerFn({
   after your own writes; another user's change appears on the next load.
 - **A pending write does not survive a reload.** Durable offline queueing is
   tracked separately.
+- **Scoped models do not paint from disk before the first list.** Only the
+  server knows whose session it is; see [persistence](#persistence).
 - **`storage` mounts are key-value.** Point `client` at a database when you need
   your existing relational tables.
 - **Tables are never created or altered.** Sync only reads and writes rows; see

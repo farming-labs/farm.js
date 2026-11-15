@@ -4,17 +4,23 @@ import "./panel.css";
 import type { FarmDevtoolsSnapshot } from "@farm.js/core";
 import type { InspectedModule, ModuleDetails } from "./types.js";
 import { DEVTOOLS_PATH } from "./types.js";
-import { codeBlock, escapeHtml as esc, heading, property } from "./ui.js";
+import { codeBlock, createShortcutMatcher, escapeHtml as esc, heading, property } from "./ui.js";
 import { icon } from "./icons.js";
 
 export function startPanel(root: HTMLElement) {
   const window = root.ownerDocument.defaultView!;
   const document = root.ownerDocument;
+  // Only the toggle shortcut is forwarded to the host page, never other keystrokes.
+  const matchesShortcut = createShortcutMatcher(
+    root.dataset.shortcut ?? "",
+    /Mac|iPhone|iPad|iPod/.test(window.navigator.platform),
+  );
   const views = [
     ["overview", "Overview", "overview"],
     ["routes", "Routes", "route"],
     ["api", "API", "api"],
     ["systems", "Systems", "layers"],
+    ["plugins", "Plugins", "blocks"],
     ["runtime", "Runtime", "runtime"],
     ...(root.dataset.inspect === "true" ? [["inspect", "Inspect", "search"]] : []),
     ["diagnostics", "Diagnostics", "activity"],
@@ -33,6 +39,8 @@ export function startPanel(root: HTMLElement) {
   let disposed = false;
   let controller: AbortController | undefined;
   let moduleController: AbortController | undefined;
+  let hmrPending = false;
+  let staleNotice = "";
   const copyValues = new Map<string, string>();
   let theme = "system";
   try {
@@ -75,7 +83,8 @@ export function startPanel(root: HTMLElement) {
     if (!views.some(([key]) => key === next)) return;
     view = next;
     window.history.replaceState(null, "", `#${view}`);
-    render();
+    if (view === "inspect" && staleNotice && !hmrPending) void refresh();
+    else render();
   }
   async function get<T>(path: string, signal: AbortSignal): Promise<T> {
     const response = await window.fetch(path, {
@@ -94,6 +103,7 @@ export function startPanel(root: HTMLElement) {
     return response.json() as Promise<T>;
   }
   async function refresh() {
+    if (hmrPending) return;
     const sequence = ++refreshSequence;
     controller?.abort();
     controller = new AbortController();
@@ -109,6 +119,7 @@ export function startPanel(root: HTMLElement) {
           "Unexpected DevTools snapshot. Check that core and the plugin are up to date.",
         );
       snapshot = next;
+      staleNotice = "";
       selectedRoute = Math.min(selectedRoute, Math.max(0, next.routes.length - 1));
       selectedApi = Math.min(selectedApi, Math.max(0, next.apiRoutes.length - 1));
       status.textContent = `${next.project.name} · Updated ${new Date(next.generatedAt).toLocaleTimeString()}`;
@@ -128,24 +139,26 @@ export function startPanel(root: HTMLElement) {
       snapshot!.diagnostics
         .map(
           (item) =>
-            `<article class="fd-diagnostic"><span class="${item.severity === "error" ? "fd-danger" : "fd-amber"}">${icon(item.severity === "error" ? "activity" : "shield")}</span><div><div class="fd-label">${esc(item.code)} · ${esc(item.severity)}</div><h3>${esc(item.title)}</h3><p>${esc(item.message)}</p>${item.action ? `<p>${esc(item.action)}</p>` : ""}</div></article>`,
+            `<article class="fd-diagnostic" data-severity="${esc(item.severity)}"><span class="${item.severity === "error" ? "fd-danger" : "fd-amber"}">${icon("activity")}</span><div><div class="fd-diagnostic-head"><h3>${esc(item.title)}</h3><span class="fd-tag" data-tone="${item.severity === "error" ? "bad" : item.severity === "warning" ? "warn" : "info"}">${esc(item.severity)}</span></div><div class="fd-label">${esc(item.code)}</div><p>${esc(item.message)}</p>${item.action ? `<p class="fd-diagnostic-action">${esc(item.action)}</p>` : ""}</div></article>`,
         )
         .join("") ||
-      `<div class="fd-diagnostic"><span class="fd-green">${icon("shield")}</span><div><h3>Framework checks passed</h3><p>No runtime configuration diagnostics in this snapshot.</p></div></div>`
+      `<div class="fd-diagnostic" data-severity="ok"><span class="fd-green">${icon("shield")}</span><div><h3>Framework checks passed</h3><p>No runtime configuration diagnostics in this snapshot.</p></div></div>`
     );
   }
   function overview() {
     const data = snapshot!;
     main.innerHTML =
       heading("Overview", `${data.project.name} · ${data.project.srcDir}`, "Development") +
-      `<div class="fd-stats">${[
-        ["PAGES", data.counts.pages],
-        ["API ROUTES", data.counts.apiRoutes],
-        ["INTEGRATIONS", data.counts.integrations],
-      ]
+      `<div class="fd-stats">${(
+        [
+          ["Pages", data.counts.pages, "route"],
+          ["API routes", data.counts.apiRoutes, "api"],
+          ["Integrations", data.counts.integrations, "blocks"],
+        ] as const
+      )
         .map(
-          ([name, value]) =>
-            `<div class="fd-stat"><span class="fd-label">${name}</span><span class="fd-stat-value">${value}</span></div>`,
+          ([name, value, image]) =>
+            `<div class="fd-stat"><span class="fd-label">${icon(image)}${name}</span><span class="fd-stat-value">${value}</span></div>`,
         )
         .join(
           "",
@@ -159,7 +172,7 @@ export function startPanel(root: HTMLElement) {
               `<button type="button" class="fd-preview-row" data-route="${index}">${inlineCode(route.pattern)}<span class="fd-preview-meta">${esc(runtime(route.runtime))}</span>${icon("chevron")}</button>`,
           )
           .join("") || empty("No page routes discovered.")
-      }</div></section><section class="fd-section"><div class="fd-section-heading"><h3>Diagnostics</h3><button type="button" class="fd-link-button" data-go="diagnostics"><span class="fd-button-label">${data.counts.diagnostics} notices</span>${icon("external")}</button></div>${diagnosticRows()}</section>`;
+      }</div></section><section class="fd-section"><div class="fd-section-heading"><h3>Diagnostics</h3><button type="button" class="fd-link-button" data-go="diagnostics"><span class="fd-button-label">${data.counts.diagnostics} ${data.counts.diagnostics === 1 ? "notice" : "notices"}</span>${icon("external")}</button></div>${diagnosticRows()}</section>`;
     main.querySelectorAll<HTMLButtonElement>("[data-route]").forEach(
       (button) =>
         (button.onclick = () => {
@@ -239,7 +252,7 @@ export function startPanel(root: HTMLElement) {
     const data = snapshot!;
     main.innerHTML =
       heading("Systems", "Configured integrations, middleware, and storage.") +
-      `<section class="fd-section fd-flush-top"><div class="fd-section-heading"><h3>Integrations</h3><span class="fd-label">${data.integrations.length} REGISTERED</span></div>${data.integrations.map((item) => `<details><summary>${esc(item.key)} <span class="fd-muted">/ ${esc(item.type)}</span></summary><dl class="fd-properties">${property("Category", item.category)}${property("Runtime", item.serverRuntime ? "Server" : "Platform")}${property("Middleware", String(item.middlewareCount))}${property("Providers", String(item.providerCount))}${property("Schema models", String(item.schemaModelCount))}</dl>${item.routes.map((route) => `<div class="fd-tree-item">${inlineCode(route.methods.join(" / ") + " " + route.path)}</div>`).join("")}</details>`).join("") || empty("No integrations configured.")}</section><section class="fd-section"><h3>Request middleware</h3>${data.middleware.map((item) => `<div class="fd-system-row">${icon("shield")}<div>${inlineCode(item.path)}<p>${esc(item.filePath || item.source)}</p></div><span class="fd-tag">${item.handlerCount} handlers</span></div>`).join("") || empty("No request middleware configured.")}</section><section class="fd-section"><h3>KV mounts</h3>${data.storage.map((item) => `<div class="fd-system-row">${icon("database")}<div>${inlineCode(item.mount)}<p>${esc(item.driver)}</p></div><span class="fd-tag">${item.default ? "Default" : "Configured"}</span></div>`).join("") || empty("No storage mounts.")}</section>`;
+      `<section class="fd-section fd-flush-top"><div class="fd-section-heading"><h3>Integrations</h3><span class="fd-label">${data.integrations.length} REGISTERED</span></div>${data.integrations.map((item) => `<details><summary>${esc(item.key)} <span class="fd-muted">/ ${esc(item.type)}</span></summary><dl class="fd-properties">${property("Category", item.category)}${property("Runtime", item.serverRuntime ? "Server" : "Platform")}${property("Middleware", String(item.middlewareCount))}${property("Providers", String(item.providerCount))}${property("Schema models", String(item.schemaModelCount))}</dl>${item.routes.map((route) => `<div class="fd-tree-item">${inlineCode(route.methods.join(" / ") + " " + route.path)}</div>`).join("")}</details>`).join("") || empty("No integrations configured.")}</section><section class="fd-section"><h3>Request middleware</h3>${data.middleware.map((item) => `<div class="fd-system-row">${icon("shield")}<div>${inlineCode(item.path)}<p>${esc(item.filePath || item.source)}</p></div><span class="fd-tag">${item.handlerCount} ${item.handlerCount === 1 ? "handler" : "handlers"}</span></div>`).join("") || empty("No request middleware configured.")}</section><section class="fd-section"><h3>KV mounts</h3>${data.storage.map((item) => `<div class="fd-system-row">${icon("database")}<div>${inlineCode(item.mount)}<p>${esc(item.driver)}</p></div><span class="fd-tag">${item.default ? "Default" : "Configured"}</span></div>`).join("") || empty("No storage mounts.")}</section>`;
   }
   function renderRuntime() {
     const data = snapshot!;
@@ -251,7 +264,26 @@ export function startPanel(root: HTMLElement) {
         .map(([key, value]) => property(key, value ? "On" : "Off"))
         .join("")}</dl></details></section>`;
   }
+  function renderPlugins() {
+    const plugins = snapshot!.plugins ?? [];
+    const hookList = (hooks: string[]) =>
+      hooks.length
+        ? hooks.map((hook) => `<div class="fd-tree-item">${inlineCode(hook)}</div>`).join("")
+        : '<p class="fd-subtitle">No hooks declared.</p>';
+    main.innerHTML =
+      heading(
+        "Plugins",
+        "Active Farm plugins in execution order. Pre → normal → post.",
+        `${plugins.length} registered`,
+      ) +
+      `<section class="fd-section fd-flush-top"><p class="fd-subtitle">Hook names describe registration, not a trace of calls. Parallel lifecycle hooks may finish in a different order. Config, public data, and private state are not included.</p>${plugins.map((plugin) => `<details class="fd-plugin"><summary><span class="fd-mono">${plugin.order}.</span> ${esc(plugin.name)} <span class="fd-tag">${esc(plugin.enforce)}</span></summary><dl class="fd-properties">${property("Version", plugin.version || "Not declared")}${property("API routes", plugin.routes ? "Declared" : "None")}</dl><div class="fd-runtime-grid"><section><h3>Server hooks</h3>${hookList(plugin.serverHooks)}</section><section><h3>Client hooks</h3>${hookList(plugin.clientHooks)}</section></div></details>`).join("") || empty("No active Farm plugins. Register a plugin in farm.config.ts to see its lifecycle here.")}</section>`;
+  }
   async function inspect() {
+    if (hmrPending) {
+      main.innerHTML =
+        heading("Inspect", "Browser source and cached Vite output.") + empty(staleNotice);
+      return;
+    }
     const sequence = ++moduleSequence;
     moduleController?.abort();
     moduleController = new AbortController();
@@ -314,7 +346,7 @@ export function startPanel(root: HTMLElement) {
       if (disposed || sequence !== moduleSequence || view !== "inspect") return;
       copyValues.set("module-source", detail.source);
       copyValues.set("module-output", detail.transformed);
-      target.innerHTML = `<div class="fd-pipeline"><span class="fd-label">SOURCE → VITE OUTPUT</span><p class="fd-subtitle">Current file on disk and the latest cached browser transform. Refresh the app after edits.</p></div><div class="fd-comparison">${codeBlock(detail.source, "Source", "module-source")}${codeBlock(detail.transformed, "Served JavaScript", "module-output")}</div><section class="fd-section"><details><summary>Imports (${detail.imports.length})</summary>${detail.imports.map((item) => `<div class="fd-tree-item">${inlineCode(item)}</div>`).join("") || empty("No imports.")}</details><details><summary>Importers (${detail.importers.length})</summary>${detail.importers.map((item) => `<div class="fd-tree-item">${inlineCode(item)}</div>`).join("") || empty("No importers.")}</details></section>`;
+      target.innerHTML = `<div class="fd-pipeline"><span class="fd-label">SOURCE → VITE OUTPUT</span><p class="fd-subtitle" data-module-state role="status">${esc(staleNotice || "Current file on disk and cached browser output. Refreshes after HMR.")}</p></div><div class="fd-comparison">${codeBlock(detail.source, "Source", "module-source")}${codeBlock(detail.transformed, "Served JavaScript", "module-output")}</div><section class="fd-section"><details><summary>Imports (${detail.imports.length})</summary>${detail.imports.map((item) => `<div class="fd-tree-item">${inlineCode(item)}</div>`).join("") || empty("No imports.")}</details><details><summary>Importers (${detail.importers.length})</summary>${detail.importers.map((item) => `<div class="fd-tree-item">${inlineCode(item)}</div>`).join("") || empty("No importers.")}</details></section>`;
     } catch (error) {
       if (disposed || sequence !== moduleSequence || view !== "inspect") return;
       target.innerHTML = empty((error as Error).message);
@@ -334,6 +366,7 @@ export function startPanel(root: HTMLElement) {
       routes: snapshot.routes.length,
       api: snapshot.apiRoutes.length,
       diagnostics: snapshot.diagnostics.length,
+      plugins: snapshot.plugins?.length ?? 0,
     };
     root
       .querySelectorAll<HTMLElement>("[data-count]")
@@ -354,6 +387,9 @@ export function startPanel(root: HTMLElement) {
         break;
       case "systems":
         systems();
+        break;
+      case "plugins":
+        renderPlugins();
         break;
       case "runtime":
         renderRuntime();
@@ -420,7 +456,7 @@ export function startPanel(root: HTMLElement) {
         controls[0]?.focus();
       }
     }
-    if (window.parent !== window)
+    if (window.parent !== window && matchesShortcut(event))
       window.parent.postMessage(
         {
           type: "farm:devtools:keydown",
@@ -436,6 +472,46 @@ export function startPanel(root: HTMLElement) {
         },
         window.location.origin,
       );
+  };
+  const onHmr = (event: MessageEvent) => {
+    if (
+      disposed ||
+      window.parent === window ||
+      event.source !== window.parent ||
+      event.origin !== window.location.origin ||
+      event.data?.type !== "farm:devtools:hmr"
+    )
+      return;
+    const state = event.data.state;
+    if (!["pending", "ready", "error", "disconnected"].includes(state)) return;
+    hmrPending = state === "pending" || state === "disconnected";
+    if (state === "ready") {
+      if (view === "inspect") void refresh();
+      else {
+        staleNotice = "App updated. Refresh to capture the latest workspace.";
+        status.textContent = staleNotice;
+      }
+      return;
+    }
+    // In-flight reads belong to the previous revision. Keep visible code labeled
+    // stale until Vite confirms the update, without clearing the user's selection.
+    controller?.abort();
+    moduleController?.abort();
+    ++refreshSequence;
+    ++moduleSequence;
+    root.removeAttribute("aria-busy");
+    staleNotice =
+      state === "pending"
+        ? "HMR pending · Showing previous source and output"
+        : state === "error"
+          ? "HMR failed · Showing previous source and output"
+          : "Disconnected · Showing previous source and output";
+    status.textContent = staleNotice;
+    const label = main.querySelector<HTMLElement>("[data-module-state]");
+    if (label) {
+      label.textContent = staleNotice;
+      label.classList.add("fd-amber");
+    }
   };
   root
     .querySelectorAll<HTMLButtonElement>("[data-view]")
@@ -456,6 +532,7 @@ export function startPanel(root: HTMLElement) {
   systemTheme.addEventListener("change", applyTheme);
   root.addEventListener("click", onClick);
   document.addEventListener("keydown", onKeydown);
+  window.addEventListener("message", onHmr);
   root.querySelector<HTMLButtonElement>("[data-close]")!.focus();
   void refresh();
   return {
@@ -465,6 +542,7 @@ export function startPanel(root: HTMLElement) {
       moduleController?.abort();
       root.removeEventListener("click", onClick);
       document.removeEventListener("keydown", onKeydown);
+      window.removeEventListener("message", onHmr);
       systemTheme.removeEventListener("change", applyTheme);
     },
   };

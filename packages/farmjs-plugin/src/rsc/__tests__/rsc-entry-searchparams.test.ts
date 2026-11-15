@@ -18,7 +18,7 @@ describe("RSC entry search params", () => {
     // ?tag=a&tag=b reached RSC pages as { tag: "b" } while every other
     // environment delivers { tag: ["a", "b"] }.
     expect(entrySource).toContain(
-      "import { _runWithAPIRequestRuntime, _runWithCurrentRequest, searchParamsToObject } from '@farm.js/core/internal/production-runtime';",
+      "import { _runWithAPIRequestRuntime, _runWithCurrentRequest, cloneFarmRequestWithContext, searchParamsToObject } from '@farm.js/core/internal/production-runtime';",
     );
     expect(entrySource).toContain("const searchParams = searchParamsToObject(url.searchParams);");
     expect(entrySource).toContain(
@@ -27,10 +27,13 @@ describe("RSC entry search params", () => {
     expect(entrySource).not.toContain("Object.fromEntries(url.searchParams)");
   });
 
-  it("keeps repeated values in the legacy development fallback", () => {
-    expect(fallbackSource).toMatch(/const \{[^}]*searchParamsToObject[^}]*\} = require_\(/);
-    expect(fallbackSource).toContain('"@farm.js/core/internal/production-runtime"');
-    expect(fallbackSource).toContain("const searchParams = searchParamsToObject(");
+  it("has no legacy development renderer that could flatten repeated values", () => {
+    // A failed RSC render used to fall back to a page-guessing SSR renderer.
+    // It now answers with the error page, so every page goes through the entry.
+    expect(fallbackSource).not.toContain("fall back to legacy SSR");
+    expect(fallbackSource).toContain(
+      "res.end(createRscDevErrorDocument(rscError, method, pathname))",
+    );
     expect(fallbackSource).not.toContain(
       'Object.fromEntries(new URLSearchParams(url.split("?")[1] || ""))',
     );

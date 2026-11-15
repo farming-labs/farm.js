@@ -44,4 +44,12 @@ describe("federation plugin", () => {
       }),
     ).toThrow("one federation() instance");
   });
+
+  it("explains that a backend-only app has no browser components to share", () => {
+    const plugin = federation({ name: "api" });
+    expect(() =>
+      plugin.configure?.({ root: "/app", renderer: false, plugins: [plugin], vite: {} }),
+    ).toThrow("Remove `renderer: false` to use it.");
+    expect(upstream).not.toHaveBeenCalled();
+  });
 });

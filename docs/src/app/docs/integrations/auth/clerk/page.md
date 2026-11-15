@@ -46,7 +46,7 @@ The keys can be omitted from the call when the environment variables are set.
 | `CLERK_PUBLISHABLE_KEY`             | Alternative | Fallback environment name for the publishable key. |
 | `CLERK_SECRET_KEY`                  | Yes         | Used by `@clerk/backend` to authenticate requests. |
 
-Install `@clerk/react` and `@clerk/backend` in the application. Farm loads the React provider at render time and the backend client inside protected-route middleware.
+Install `@clerk/react` in the application. `@farm.js/clerk` already depends on `@clerk/backend`, so add it to the application only when the application constructs its own backend client, as shown below. Farm loads the React provider at render time and the backend client inside protected-route middleware.
 
 ## Choose SDK ownership
 
