@@ -3,7 +3,12 @@ import type { ViteDevServer } from "vite";
 import { resolveFarmPlatform, validateFarmDesktopConfig } from "../desktop/config";
 import { farmDesktopDevGuardPlugin } from "../desktop/dev-guard-plugin";
 import type { FarmConfig } from "../types";
-import { farmI18nClientBridgePlugin, farmPlugin, farmServerOnlyEntriesPlugin } from "../vite";
+import {
+  farmI18nClientBridgePlugin,
+  farmIslandContainersPlugin,
+  farmPlugin,
+  farmServerOnlyEntriesPlugin,
+} from "../vite";
 import { logger } from "../utils";
 import { readSchemaTables } from "../schema-owner";
 import {
@@ -406,6 +411,7 @@ export async function createServer(
             createDevDependencyStubsPlugin(),
             farmI18nClientBridgePlugin(),
             farmServerOnlyEntriesPlugin({ prebundleServerPackages: true }),
+            farmIslandContainersPlugin(finalConfig),
             farmPlugin(finalConfig, pluginManager, deferredSetup),
             farmEnvironmentFunctionsPlugin(finalConfig),
             createBrandingPlugin(),

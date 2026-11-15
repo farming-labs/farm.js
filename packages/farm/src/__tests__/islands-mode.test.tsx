@@ -13,6 +13,7 @@ import {
 } from "../utils/client-component";
 import { getFarmServerTreeLayoutPatterns } from "../routing/layout-selector";
 import { transformIsolatedClientBoundaryModule } from "../vite";
+import { wrapFarmIslandContainers } from "../islands-containers";
 
 const roots: string[] = [];
 afterEach(() => {
@@ -117,20 +118,45 @@ describe("islands mode", () => {
       "row.tsx": '"use client";\nexport function Row() { return <tr><td>row</td></tr>; }\n',
     };
 
-    it("never hydrates the server page whole, which would ship its server code", () => {
-      const page = plan(
-        'import { Row } from "../row";\nimport { secret } from "../secret";\nexport default function Page() { return <table><tbody><Row />{secret()}</tbody></table>; }\n',
-        row,
-      );
-      expect(page).toMatchObject({
-        shouldHydrate: false,
-        islandStrategy: null,
-        hasIsolatedClientBoundaries: false,
-        isolatedBoundaries: [],
-      });
-      expect(page.islandsError).toBe(
-        'the client boundary imported from ../row renders inside <table>, where the HTML parser relocates its hydration marker. Move "use client" up to a component that renders the whole <table>, or render it inside a <td>, <th> or <caption>',
-      );
+    it("grows the island to the element that can hold it (RFC 0006)", () => {
+      for (const [body, files] of [
+        ["<table><tbody><Row /></tbody></table>", row],
+        [
+          "<ul><Item /></ul>",
+          { "item.tsx": '"use client";\nexport function Item() { return <li>item</li>; }\n' },
+        ],
+        [
+          "<select><Option /></select>",
+          {
+            "option.tsx":
+              '"use client";\nexport function Option() { return <option>one</option>; }\n',
+          },
+        ],
+        [
+          "<svg><Shape /></svg>",
+          { "shape.tsx": '"use client";\nexport function Shape() { return <circle r={1} />; }\n' },
+        ],
+      ] as const) {
+        const name = /<(Row|Item|Option|Shape)/.exec(body)![1]!;
+        const file = Object.keys(files)[0]!;
+        const page = plan(
+          `import { ${name} } from "../${file.replace(".tsx", "")}";\nimport { secret } from "../secret";\nexport default function Page() { return <main>${body}{secret()}</main>; }\n`,
+          files,
+        );
+        const own = page.isolatedBoundaries.find((boundary) =>
+          boundary.modulePath.endsWith(path.join("src", file)),
+        );
+        expect(own, body).toBeDefined();
+        const root = path.dirname(path.dirname(own!.modulePath));
+        expect(page.islandsError, body).toBeUndefined();
+        expect(page.asyncOwnerIslands, body).toBe(true);
+        expect(page.isolatedBoundaries.map((boundary) => boundary.modulePath).sort(), body).toEqual(
+          [
+            path.join(root, ".farm/client-references/farm.js+core/__island-container.tsx"),
+            path.join(root, "src", file),
+          ].sort(),
+        );
+      }
     });
 
     it("reports `export *`, whose names live in another module", () => {
@@ -519,5 +545,48 @@ describe("islands mode", () => {
       ]);
       expect([...patterns].sort()).toEqual(["/", "/shop", "/shop/[id]"]);
     });
+  });
+});
+
+describe("islands containers (RFC 0006)", () => {
+  const wrap = (code: string, bindings: string[] = ["Row"]) =>
+    wrapFarmIslandContainers({
+      code,
+      file: "/app/src/app/page.tsx",
+      bindings,
+      reference: "/c.tsx",
+    });
+
+  it("wraps the outermost element the parser or CSS ties the component to", () => {
+    expect(
+      wrap(
+        'import { Row } from "../row";\nexport default function Page() { return <main><table><tbody>{rows.map((r) => <Row key={r} />)}</tbody></table></main>; }\n',
+      ),
+    ).toBe(
+      'import { FarmIslandContainer as __FarmIslandContainer__ } from "/c.tsx";\nimport { Row } from "../row";\nexport default function Page() { return <main><__FarmIslandContainer__><table><tbody>{rows.map((r) => <Row key={r} />)}</tbody></table></__FarmIslandContainer__></main>; }\n',
+    );
+  });
+
+  it("leaves components in flow content (a cell, an li, a foreignObject) as islands of their own", () => {
+    for (const body of [
+      "<table><tbody><tr><td><Row /></td></tr></tbody></table>",
+      "<ul><li><Row /></li></ul>",
+      "<svg><foreignObject><Row /></foreignObject></svg>",
+      "<main><Row /></main>",
+    ]) {
+      expect(wrap(`export default function Page() { return ${body}; }\n`), body).toBeNull();
+    }
+  });
+
+  it("keeps the directive prologue first and wraps each container once", () => {
+    const code = wrap(
+      '"use cache";\nexport default function Page() { return <><ul><Row /><Row /></ul><ol><Row /></ol></>; }\n',
+    )!;
+    expect(code.startsWith('"use cache";\nimport { FarmIslandContainer')).toBe(true);
+    expect(code.match(/<__FarmIslandContainer__>/g)).toHaveLength(2);
+  });
+
+  it("does not wrap a container around components that are not client components", () => {
+    expect(wrap("export default function Page() { return <ul><Item /></ul>; }\n")).toBeNull();
   });
 });

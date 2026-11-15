@@ -155,6 +155,7 @@ import {
   getIslandStrategyExport,
   collectFarmServerBundledPackageInfo,
   getFarmClientReachableModules,
+  getFarmClientRenderingBindings,
   hasUseClientDirective,
   invalidateFarmClientReachableModules,
   isFarmPackageClientBoundary,
@@ -247,6 +248,11 @@ import {
   parseFarmResolveFrom,
   rewriteFarmPackageClientImports,
 } from "./islands-package-references";
+import {
+  ensureFarmIslandContainerReference,
+  farmIslandContainerReferencePath,
+  wrapFarmIslandContainers,
+} from "./islands-containers";
 import {
   invalidateFarmClientOnlyScan,
   farmRelativeImportFiles,
@@ -525,6 +531,45 @@ function createFarmServerPrebundleConfig(bundledPackages: readonly FarmServerBun
   };
 }
 
+/**
+ * Islands mode (RFC 0006): a client component in a position that cannot hold `<f-island>` (a row in
+ * a table, an option in a select, a shape in an svg, an item in a list) makes the element around it
+ * the island. Runs before JSX compiles, on the server module's source.
+ */
+export function farmIslandContainersPlugin(config: {
+  root?: string;
+  experimental?: FarmVitePluginOptions["experimental"];
+}): Plugin {
+  let root = config.root ?? process.cwd();
+  return {
+    name: "farm:island-containers",
+    enforce: "pre",
+    configResolved(resolved) {
+      root = config.root || resolved.root;
+    },
+    transform(code, id) {
+      if (resolveFarmServerComponentsMode(config.experimental?.serverComponents) !== "islands") {
+        return null;
+      }
+      if (id.startsWith("\0") || id.includes("/node_modules/") || !/\.[jt]sx(?:$|\?)/.test(id)) {
+        return null;
+      }
+      if (hasUseClientDirective(code)) return null;
+      const file = id.split("?", 1)[0]!;
+      const bindings = getFarmClientRenderingBindings(code, file, root);
+      if (bindings.length === 0) return null;
+      const grown = wrapFarmIslandContainers({
+        code,
+        file,
+        bindings,
+        reference: farmIslandContainerReferencePath(root),
+      });
+      if (grown === null) return null;
+      ensureFarmIslandContainerReference(root);
+      return { code: grown, map: null };
+    },
+  };
+}
 /**
  * Fail a browser graph that imports a server-only core entry, instead of
  * bundling its server runtime (for `@farm.js/core/og`, the `@vercel/og` wasm
@@ -9108,6 +9153,7 @@ export async function defineConfig(config: FarmVitePluginOptions = {}): Promise<
       viteBrowserExternalPlugin,
       farmI18nClientBridgePlugin(),
       farmServerOnlyEntriesPlugin(),
+      farmIslandContainersPlugin(config),
       farmPlugin(config),
       farmEnvironmentFunctionsPlugin(config),
       farmBrandingPlugin,

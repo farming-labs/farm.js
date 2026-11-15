@@ -1817,11 +1817,13 @@ const MOBILE_SCREENS: MobileScreen[] = [
 ];
 const MOBILE_LANE = (i: number) => i * 92; // top of each route pill
 const MOBILE_HUB = 176; // where the four connectors meet the phone
-// The route pills are only as wide as their text; with the phone they sit centred on the stage.
+// The route pills are as wide as their text needs; with the phone they sit centred on the stage.
+// Below its 13px cap the card's type scales with the card, so on any phone a pill must hold its
+// icon, its longest kicker ("Native screen") and its check: about 153 units.
 const MOBILE_PILL_X = 8;
-const MOBILE_PILL_W = 130;
-const MOBILE_PHONE_X = 182;
-const MOBILE_PHONE_W = 250;
+const MOBILE_PILL_W = 164;
+const MOBILE_PHONE_X = 212;
+const MOBILE_PHONE_W = 220;
 const MOBILE_H = 340;
 const MOBILE_JOIN_X = (MOBILE_PILL_X + MOBILE_PILL_W + MOBILE_PHONE_X) / 2;
 const MOBILE_START = 0.6;
