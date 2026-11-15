@@ -42,7 +42,7 @@
     "type-check": "tsc --noEmit"
   },
   "dependencies": {
-    "agent-unit": "^0.3.0"
+    "agent-unit": "^0.4.0"
   },
   "devDependencies": {
     "@farm.js/core": "workspace:*",
