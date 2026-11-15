@@ -1012,7 +1012,7 @@ test("home keeps its agents link usable without JavaScript", async ({ browser, b
 
 // Figure panels are fixed boxes and their type has a legibility floor, so a layout without room
 // for its text spills out of its boxes. Without JavaScript each figure shows its final frame.
-for (const width of [320, 360, 1440]) {
+for (const width of [320, 345, 360, 1440]) {
   test(`blog and home page figures keep their text inside their boxes at ${width}px`, async ({
     browser,
     baseURL,
