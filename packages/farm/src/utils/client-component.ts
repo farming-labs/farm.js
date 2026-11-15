@@ -278,7 +278,7 @@ export function hasUseClientDirective(content: string | null): boolean {
   // Directive-prologue semantics allow comments and other directives (e.g.
   // "use strict") before "use client". Scan the leading string-literal
   // statements with the comment-aware tokenizer.
-  for (const token of tokenizeModuleSource(content)) {
+  for (const token of scanModuleSourceTokens(content, true)) {
     if (token.kind === "string") {
       if (token.value === "use client") {
         return true;
@@ -431,7 +431,8 @@ function isIdentifierPartCode(code: number): boolean {
   return isIdentifierStartCode(code) || (code >= 48 && code <= 57);
 }
 
-function scanModuleSourceTokens(content: string): ModuleSourceToken[] {
+/** With `prologueOnly`, stops at the first token that cannot belong to a directive prologue. */
+function scanModuleSourceTokens(content: string, prologueOnly = false): ModuleSourceToken[] {
   const tokens: ModuleSourceToken[] = [];
   let index = 0;
   let line = 1;
@@ -517,10 +518,12 @@ function scanModuleSourceTokens(content: string): ModuleSourceToken[] {
       const start = index++;
       while (index < content.length && isIdentifierPartCode(content.charCodeAt(index))) index++;
       tokens.push({ kind: "identifier", value: content.slice(start, index), line });
+      if (prologueOnly) return tokens;
       continue;
     }
 
     tokens.push({ kind: "punctuation", value: character, line });
+    if (prologueOnly && character !== ";") return tokens;
     index++;
   }
 

@@ -89,6 +89,9 @@ describe("client component path resolution", () => {
     expect(hasUseClientDirective(afterBlockComment)).toBe(true);
     expect(hasUseClientDirective(afterLineComment)).toBe(true);
     expect(hasUseClientDirective(afterUseStrict)).toBe(true);
+    expect(hasUseClientDirective('"use strict";;\n;"use client"\nconst copy = "use client";')).toBe(
+      true,
+    );
 
     expect(stripUseClientDirective(afterBlockComment)).toBe(
       "/* Copyright 2026 Acme */\n             \nexport default function Counter() { return null; }\n",
