@@ -1498,9 +1498,9 @@ export default function Layout() { return <><Counter />{labels.join(",")}</>; }
         serverTreeLayout: true,
         hasIsolatedClientBoundaries: false,
       });
-      expect(islands[1]!.metadata.isolatedBoundaries.map((boundary) => boundary.modulePath)).toEqual(
-        [path.join(appDir, "star-button.tsx")],
-      );
+      expect(
+        islands[1]!.metadata.isolatedBoundaries.map((boundary) => boundary.modulePath),
+      ).toEqual([path.join(appDir, "star-button.tsx")]);
       expect(
         getFarmServerTreeLayoutPatterns(
           islands.map(({ pattern, metadata }) => ({ pattern, ...metadata })),
