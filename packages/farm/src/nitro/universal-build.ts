@@ -64,7 +64,11 @@ import {
   removeFarmMobileClientManifest,
 } from "./mobile-client";
 import type { RouteManager, ApplicationMetadataRouteEntry } from "../routing/route-manager";
-import { compareRoutePatternSpecificity } from "../routing/specificity";
+import {
+  compareRoutePatternSpecificity,
+  compareRouteSpecificity,
+  getRoutePatternSpecificity,
+} from "../routing/specificity";
 import {
   getFarmServerTreeLayoutPatterns,
   layoutsCanCoverSamePage,
@@ -12908,19 +12912,26 @@ function escapeRoutePattern(value: string): string {
 }
 
 function middlewarePatternMatches(pattern: string | RegExp, pathname: string): boolean {
+  return createMiddlewarePatternMatcher(pattern)(pathname);
+}
+
+/** `middlewarePatternMatches` for one pattern, compiled once for every pathname it tests. */
+function createMiddlewarePatternMatcher(pattern: string | RegExp): (pathname: string) => boolean {
   if (pattern instanceof RegExp) {
-    pattern.lastIndex = 0;
-    return pattern.test(pathname);
+    return (pathname) => {
+      pattern.lastIndex = 0;
+      return pattern.test(pathname);
+    };
   }
 
-  if (pattern === "*" || pattern === "/(.*)") return true;
+  if (pattern === "*" || pattern === "/(.*)") return () => true;
   if (pattern.endsWith("(.*)")) {
     const prefix = pattern.slice(0, -4);
-    return pathname === prefix || pathname.startsWith(`${prefix}/`);
+    return (pathname) => pathname === prefix || pathname.startsWith(`${prefix}/`);
   }
 
   const segments = pattern.split("/").filter(Boolean);
-  if (segments.length === 0) return pathname === "/";
+  if (segments.length === 0) return (pathname) => pathname === "/";
   const expression = segments
     .map((segment) => {
       if (segment === "**") return "(?:/.*)?";
@@ -12938,7 +12949,8 @@ function middlewarePatternMatches(pattern: string | RegExp, pathname: string): b
       return `/${escapeRoutePattern(segment).replace(/\\\*/g, "[^/]*")}`;
     })
     .join("");
-  return new RegExp(`^${expression}/?$`).test(pathname);
+  const regex = new RegExp(`^${expression}/?$`);
+  return (pathname) => regex.test(pathname);
 }
 
 /**
@@ -12967,16 +12979,39 @@ function getEffectiveRouteRule(config: ResolvedFarmConfig, pathname: string) {
     .reduce<Record<string, unknown>>((resolved, [, rule]) => Object.assign(resolved, rule), {});
 }
 
-function getManifestPageEntry(
+interface ManifestPageMatcher {
+  entry: FarmRouteRuntimeManifestEntry;
+  matches: (pathname: string) => boolean;
+}
+
+const manifestPageMatchers = new WeakMap<
+  readonly FarmRouteRuntimeManifestEntry[],
+  ManifestPageMatcher[]
+>();
+
+/** @internal The runtime manifest's page entry that answers `pathname`: the most specific one. */
+export function getManifestPageEntry(
   manifest: FarmRouteRuntimeManifest,
   pathname: string,
 ): FarmRouteRuntimeManifestEntry | undefined {
-  return (
-    manifest.routes
-      .filter((entry) => entry.kind === "page" && middlewarePatternMatches(entry.pattern, pathname))
-      // Page patterns, so this uses the shared file-route ordering contract too.
-      .sort((left, right) => compareRoutePatternSpecificity(left.pattern, right.pattern))[0]
-  );
+  // The build asks once per prerendered page, so the page patterns are compiled and ordered once
+  // per manifest: per call, a 1,000-page app compiled a million patterns.
+  let pages = manifestPageMatchers.get(manifest.routes);
+  if (!pages) {
+    pages = manifest.routes
+      .filter((entry) => entry.kind === "page")
+      .map((entry) => ({
+        entry,
+        matches: createMiddlewarePatternMatcher(entry.pattern),
+        specificity: getRoutePatternSpecificity(entry.pattern),
+      }))
+      // Page patterns, so this uses the shared file-route ordering contract too. The sort is
+      // stable, so the first match is the most specific one, first in manifest order among equals.
+      .sort((left, right) => compareRouteSpecificity(left.specificity, right.specificity))
+      .map(({ entry, matches }) => ({ entry, matches }));
+    manifestPageMatchers.set(manifest.routes, pages);
+  }
+  return pages.find((page) => page.matches(pathname))?.entry;
 }
 
 /**
