@@ -700,7 +700,7 @@ export class FarmDataCache {
   ): Promise<number> {
     const normalized = normalizeCacheTag(tag);
     const count = this.invalidateTag(normalized) + (this.shells?.invalidateTag(normalized) ?? 0);
-    await this.adapter?.invalidateTags?.([this.createAdapterTag(normalized)]);
+    await this.invalidateAdapterTags([this.createAdapterTag(normalized)]);
     emitFarmEvent(
       options.source === "updateTag"
         ? { type: "cache.updateTag", tag: normalized, count }
@@ -737,7 +737,7 @@ export class FarmDataCache {
       this.countEntriesForTags([pathTag, "ppr"]) +
       (this.shells?.countEntriesForTags([pathTag, "ppr"]) ?? 0);
     const count = this.invalidateTag(pathTag) + (this.shells?.invalidateTag(pathTag) ?? 0);
-    await this.adapter?.invalidateTags?.([this.createAdapterTag(pathTag)]);
+    await this.invalidateAdapterTags([this.createAdapterTag(pathTag)]);
     emitFarmEvent({ type: "cache.revalidatePath", path: normalizedPath, count });
 
     if (pprCount > 0) {
@@ -1013,16 +1013,51 @@ export class FarmDataCache {
     return `${this.namespace}:tag:${tag}`;
   }
 
+  /**
+   * Bump the shared versions of these tags, so an entry captured with an older version is stale
+   * on every server. An adapter without `invalidateTags` keeps each tag's version as an entry of
+   * its own, through `get` and `set`.
+   */
+  private async invalidateAdapterTags(physicalTags: readonly string[]): Promise<void> {
+    const adapter = this.adapter;
+    if (!adapter) return;
+    if (adapter.invalidateTags) {
+      await adapter.invalidateTags(physicalTags);
+      return;
+    }
+    await Promise.all(
+      physicalTags.map(async (tag) => {
+        const current = normalizeAdapterVersion((await adapter.get<number>(tag))?.value);
+        const createdAt = Date.now();
+        await adapter.set<number>(tag, {
+          key: tag,
+          value: Math.max(createdAt, current + 1),
+          tags: [],
+          createdAt,
+          revalidate: false,
+        });
+      }),
+    );
+  }
+
   private async getAdapterTagVersions(
     tags: readonly string[],
     adapter = this.adapter,
     namespace = this.namespace,
   ): Promise<Readonly<Record<string, number>>> {
-    if (!adapter?.getTagVersions || tags.length === 0) return {};
+    if (!adapter || tags.length === 0) return {};
 
     const normalized = tags.map(normalizeCacheTag);
     const physicalTags = normalized.map((tag) => `${namespace}:tag:${tag}`);
-    const versions = await adapter.getTagVersions(physicalTags);
+    const versions: Readonly<Record<string, unknown>> = adapter.getTagVersions
+      ? await adapter.getTagVersions(physicalTags)
+      : Object.fromEntries(
+          await Promise.all(
+            physicalTags.map(
+              async (tag) => [tag, (await adapter.get<number>(tag))?.value] as const,
+            ),
+          ),
+        );
     return Object.fromEntries(
       normalized.map((tag, index) => [
         tag,

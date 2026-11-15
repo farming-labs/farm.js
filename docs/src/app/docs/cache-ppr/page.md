@@ -286,6 +286,9 @@ export const adapter: FarmCacheAdapter = {
 ```
 
 `getTagVersions` and `invalidateTags` coordinate invalidation without scanning every cached entry.
+An adapter without them still invalidates: Farm keeps each tag's version as an entry of its own
+through `get` and `set`, under a `<namespace>:tag:` key that no cached value uses. That costs a read
+per tag on each lookup and is not atomic, so implement both when the backend can.
 Provider-specific adapters should use atomic increments or transactions when their backing service
 supports them. Lease-capable adapters return an ownership token from `acquireLease` and only
 release the lease when `releaseLease(key, token)` still matches that owner.
