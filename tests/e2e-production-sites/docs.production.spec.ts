@@ -1025,7 +1025,14 @@ for (const width of [320, 345, 360, 1440]) {
     });
     const page = await context.newPage();
     try {
-      for (const pathname of ["/blog/web-to-native", "/blog/native-internals", "/blog", "/"]) {
+      for (const pathname of [
+        "/blog/0.1.0",
+        "/blog/agent-native",
+        "/blog/web-to-native",
+        "/blog/native-internals",
+        "/blog",
+        "/",
+      ]) {
         await page.goto(pathname);
         await page.evaluate(() => document.fonts.ready);
         const panels = page.locator(".blog-figure[data-figure] .bf-stage .bf-panel");

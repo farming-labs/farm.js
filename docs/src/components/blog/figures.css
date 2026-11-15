@@ -358,9 +358,10 @@
 }
 
 /* verbatim code inside merged figures */
+/* Bleeds to the body's edges: past its 1.2em padding, the body's overflow clips the accent bar. */
 .bf-add {
-  margin: 0 -1.3em;
-  padding: 0 1.3em;
+  margin: 0 -1.2em;
+  padding: 0 1.2em;
   background: rgb(255 255 255 / 0.06);
   box-shadow: inset 2px 0 0 #ededed;
   color: #fff;
