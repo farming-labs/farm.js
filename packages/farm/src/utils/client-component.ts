@@ -1022,6 +1022,7 @@ interface FarmIsolatedHydrationRoutePlan {
   isolatedBoundaries: IsolatedClientBoundaryReference[];
   costGuardExceeded?: true;
   fallbackReason?: string;
+  serverTreeLayout?: true;
 }
 
 interface FarmIsolatedHydrationRouteOwner {
@@ -1132,6 +1133,16 @@ export function enforceFarmIsolatedHydrationRouteBudget(
         layoutAppliesToRoute(ancestor.pattern, layout.pattern),
     );
     if (hasRouteWideAncestor && layout.metadata.hasIsolatedClientBoundaries) {
+      if (options.serverOwners && !layout.metadata.asyncOwnerIslands) {
+        // Islands mode: the ancestor's root rebuilds this server layout from its tree, as
+        // getClientModuleHydrationPlan plans a layout that hydrates as one root. Its module stays
+        // on the server instead of joining the client entry of every page.
+        layout.metadata.shouldHydrate = layout.metadata.legacyShouldHydrate;
+        layout.metadata.islandStrategy = layout.metadata.legacyIslandStrategy;
+        layout.metadata.hasIsolatedClientBoundaries = false;
+        layout.metadata.serverTreeLayout = true;
+        continue;
+      }
       restoreRouteWideHydration(layout.metadata);
     }
   }

@@ -4,6 +4,7 @@ import os from "os";
 import path from "path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { resolveConfig } from "../config";
+import { getFarmServerTreeLayoutPatterns } from "../routing/layout-selector";
 import { logger } from "../utils";
 import {
   describeSuppressedAsyncHydration,
@@ -1456,6 +1457,65 @@ export default function Layout() { return <><Counter />{labels.join(",")}</>; }
       expect(page).toMatchObject({ hasIsolatedClientBoundaries: true, asyncOwnerIslands: true });
       expect(page.isolatedBoundaries.length).toBeGreaterThan(0);
       expect(page.suppressedAsyncHydration).toBeUndefined();
+    });
+
+    it("renders a nested server layout from its tree below a layout that hydrates as one root", () => {
+      const root = fs.mkdtempSync(path.join(os.tmpdir(), "farm-client-tree-layout-"));
+      tempDirs.push(root);
+      const appDir = path.join(root, "src", "app");
+      fs.mkdirSync(path.join(appDir, "(catalog)"), { recursive: true });
+      fs.writeFileSync(
+        path.join(appDir, "shell.tsx"),
+        '"use client";\nexport function Shell({ nav, children }) { return <div>{nav}{children}</div>; }\n',
+      );
+      fs.writeFileSync(
+        path.join(appDir, "star-button.tsx"),
+        '"use client";\nexport function StarButton({ count }) { return <button>{count}</button>; }\n',
+      );
+      fs.writeFileSync(
+        path.join(appDir, "layout.tsx"),
+        'import { Shell } from "./shell";\nexport default function RootLayout({ children }) { return <Shell nav={<nav />}>{children}</Shell>; }\n',
+      );
+      fs.writeFileSync(
+        path.join(appDir, "(catalog)", "layout.tsx"),
+        'import { StarButton } from "../star-button";\nexport default function CatalogLayout({ children }) { return <section><StarButton count={1} />{children}</section>; }\n',
+      );
+      const options = { asyncOwnerIslands: true, serverTreeLayouts: true };
+      const plan = (file: string) =>
+        getClientModuleHydrationPlan(path.join(appDir, file), root, "enabled", options);
+      const owners = () => [
+        { pattern: "/", depth: 0, metadata: plan("layout.tsx") },
+        { pattern: "/(catalog)", depth: 1, metadata: plan("(catalog)/layout.tsx") },
+      ];
+
+      const islands = owners();
+      expect(islands[0]!.metadata).toMatchObject({ shouldHydrate: true, serverTreeLayout: true });
+      expect(islands[1]!.metadata.hasIsolatedClientBoundaries).toBe(true);
+      enforceFarmIsolatedHydrationRouteBudget(islands, [], () => true, { serverOwners: true });
+      // The root's React root rebuilds the nested layout, so the client entry never imports it.
+      expect(islands[1]!.metadata).toMatchObject({
+        shouldHydrate: true,
+        serverTreeLayout: true,
+        hasIsolatedClientBoundaries: false,
+      });
+      expect(islands[1]!.metadata.isolatedBoundaries.map((boundary) => boundary.modulePath)).toEqual(
+        [path.join(appDir, "star-button.tsx")],
+      );
+      expect(
+        getFarmServerTreeLayoutPatterns(
+          islands.map(({ pattern, metadata }) => ({ pattern, ...metadata })),
+        ),
+      ).toEqual(new Set(["/", "/(catalog)"]));
+
+      // Without server owners the nested layout still joins the root route-wide.
+      const routeWide = owners();
+      enforceFarmIsolatedHydrationRouteBudget(routeWide, [], () => true);
+      expect(routeWide[1]!.metadata).toMatchObject({
+        shouldHydrate: true,
+        hasIsolatedClientBoundaries: false,
+        isolatedBoundaries: [],
+      });
+      expect(routeWide[1]!.metadata.serverTreeLayout).toBeUndefined();
     });
 
     it("suppresses an overflowing async layout before keeping a route island", () => {
