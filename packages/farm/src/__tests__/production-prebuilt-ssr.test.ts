@@ -246,6 +246,11 @@ async function readAllClientJavaScript(root: string): Promise<string> {
   return readDirectory(path.join(root, ".farm", "client"));
 }
 
+/**
+ * The browser halves of these tests run only where Chromium is installed. CI
+ * sets FARM_REQUIRE_TEST_BROWSER=1 in the job that installs it, so a missing
+ * browser fails there instead of skipping those assertions unnoticed.
+ */
 async function resolveInstalledChromiumExecutable(): Promise<string | null> {
   const configured = process.env.FARM_TEST_CHROMIUM_EXECUTABLE_PATH;
   if (configured) return configured;
@@ -254,7 +259,13 @@ async function resolveInstalledChromiumExecutable(): Promise<string | null> {
     const executablePath = chromium.executablePath();
     await fs.access(executablePath);
     return executablePath;
-  } catch {
+  } catch (error) {
+    if (process.env.FARM_REQUIRE_TEST_BROWSER === "1") {
+      throw new Error(
+        "Chromium is required when FARM_REQUIRE_TEST_BROWSER=1. Install it with `pnpm exec playwright install chromium` or set FARM_TEST_CHROMIUM_EXECUTABLE_PATH.",
+        { cause: error },
+      );
+    }
     return null;
   }
 }
@@ -4528,11 +4539,19 @@ await server.listen(Number(process.env.PORT));
             await expect
               .poll(() => page.locator("[data-stable-counter]").textContent())
               .toBe("stable:1");
+            await page.locator('[data-live-counter="first"]').evaluate((element) => {
+              (
+                window as typeof window & { __farmParityFirstCounter?: Element }
+              ).__farmParityFirstCounter = element;
+            });
 
             await fs.writeFile(
               path.join(developmentRoot, "src", "components", "live-counter.tsx"),
               isolatedParityCounterSource("after"),
             );
+            // React Fast Refresh, on by default in development, swaps the edited
+            // component inside every live boundary and keeps its state, as it does
+            // for route-wide client components.
             await expect
               .poll(
                 () =>
@@ -4541,7 +4560,17 @@ await server.listen(Number(process.env.PORT));
                     .evaluateAll((elements) => elements.map((element) => element.textContent)),
                 { timeout: 10_000 },
               )
-              .toEqual(["after:first:0", "after:second:0"]);
+              .toEqual(["after:first:1", "after:second:0"]);
+            expect(
+              await page
+                .locator('[data-live-counter="first"]')
+                .evaluate(
+                  (element) =>
+                    element ===
+                    (window as typeof window & { __farmParityFirstCounter?: Element })
+                      .__farmParityFirstCounter,
+                ),
+            ).toBe(true);
 
             expect(await page.locator("[data-stable-counter]").textContent()).toBe("stable:1");
             expect(
@@ -4583,7 +4612,7 @@ await server.listen(Number(process.env.PORT));
               await page
                 .locator("[data-live-counter]")
                 .evaluateAll((elements) => elements.map((element) => element.textContent)),
-            ).toEqual(["after:first:0", "after:second:0"]);
+            ).toEqual(["after:first:1", "after:second:0"]);
             expect(
               await page.evaluate(() =>
                 (
