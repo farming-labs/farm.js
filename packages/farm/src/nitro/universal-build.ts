@@ -7580,6 +7580,7 @@ function renderFarmServerTreeLayout(Layout, props, outlets) {
   resolveFarmInstrumentationRuntime,
   resolveFarmPreviewDeployment,
   resolveFarmWebRequestOrigin,
+  _withFarmTrustedProxyOrigin,
   fetchFarmExternalRewrite,
   runWithFarmRequestSpan,
   createFarmSearchParams,
@@ -12832,7 +12833,14 @@ export async function fetch(request, context) {${
   }
 }
 
-async function handleFarmFetch(request, context) {
+async function handleFarmFetch(request, context) {${
+    config.server.trustProxy
+      ? `
+  // server.trustProxy: middleware, pages, and API routes read the URL the visitor requested,
+  // at the origin the trusted proxy forwards, as in development.
+  request = _withFarmTrustedProxyOrigin(request);`
+      : ""
+  }
   const healthResponse = await farmProductionLifecycle.handleHealthRequest(request);
   if (healthResponse) return healthResponse;
 

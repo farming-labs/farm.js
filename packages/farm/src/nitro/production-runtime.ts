@@ -48,6 +48,7 @@ export {
   _getRequestReadCount,
   _runWithCurrentRequest,
   _runWithFarmCspNonce,
+  _withFarmTrustedProxyOrigin,
   getCurrentRequest,
   resolveFarmWebRequestOrigin,
 } from "../server/request";
