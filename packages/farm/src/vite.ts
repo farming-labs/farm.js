@@ -124,6 +124,11 @@ import {
 } from "./route-label";
 import { registerFarmMCPServer } from "./mcp-catalog";
 import {
+  _listFarmRegisteredMCPServerTools,
+  _observeFarmRegisteredMCPResponse,
+  _readFarmRegisteredMCPCalls,
+} from "./registered-mcp";
+import {
   createFarmApiCatalogResponse,
   FARM_API_CATALOG_PATH,
   resolveFarmApiCatalogInput,
@@ -320,7 +325,11 @@ import { FARM_CONFIG_REDIRECTS_PLUGIN_NAME, getConfigRedirectMatcher } from "./p
 import { FARM_CONFIG_REWRITES_PLUGIN_NAME } from "./plugins/rewrites";
 import { isFarmPreviewDeploymentEnvironment } from "./deployment-environment";
 import { FARM_PREVIEW_ROBOTS_TAG } from "./preview-noindex";
-import { parseFarmRequestTarget, resolveFarmRequestURL } from "./server/request";
+import {
+  _runWithCurrentRequest,
+  parseFarmRequestTarget,
+  resolveFarmRequestURL,
+} from "./server/request";
 import { reportOpenAPIDevGenerationResult } from "./openapi/dev-status";
 
 /** Paths `agent.llmsTxt` serves without a route file. */
@@ -3433,6 +3442,17 @@ window.__FARM_MANIFEST__ = ${inlineValue({
             options.agent?.manifest !== false &&
             isFarmAppManifestPath(stripFarmBasePath(requestPathname, farmConfig.basePath))
           ) {
+            const manifestGuardCoversPath = (path: string) =>
+              farmPathGuardCoversEndpoint(
+                {
+                  config: farmConfig,
+                  middlewareRoutes: middlewareManager
+                    .getMiddlewares()
+                    .filter((entry) => entry.source !== "config"),
+                },
+                path,
+                apiServerBasePath,
+              );
             await serveBuiltInRoute(async () => {
               farmAppPackages ??= resolveFarmAppPackages(farmConfig.root ?? process.cwd());
               const manifest = await createFarmAppManifestResponse(
@@ -3451,17 +3471,17 @@ window.__FARM_MANIFEST__ = ${inlineValue({
                   }),
                   defaultMCP: () => farmApp.getServerRenderer().getDefaultMCPServer(),
                   // A guard written for an MCP server's path keeps its tools out of the public view.
-                  guardCoversPath: (path) =>
-                    farmPathGuardCoversEndpoint(
-                      {
-                        config: farmConfig,
-                        middlewareRoutes: middlewareManager
-                          .getMiddlewares()
-                          .filter((entry) => entry.source !== "config"),
-                      },
-                      path,
-                      apiServerBasePath,
-                    ),
+                  guardCoversPath: manifestGuardCoversPath,
+                  // A docs runtime's MCP server lists its tools when asked, read on each request.
+                  ...(farmDocsHandler
+                    ? {
+                        registeredMCP: (request: Request) =>
+                          _listFarmRegisteredMCPServerTools(farmDocsHandler, request, {
+                            basePath: farmConfig.basePath,
+                            guardCoversPath: manifestGuardCoversPath,
+                          }),
+                      }
+                    : {}),
                 },
               );
               return manifest;
@@ -3542,7 +3562,13 @@ window.__FARM_MANIFEST__ = ${inlineValue({
               requestMethod === "GET" || requestMethod === "HEAD"
                 ? {}
                 : { body: createFarmNodeRequestBodyStream(req), duplex: "half" };
-            const docsResponse = await farmDocsHandler(new Request(docsRequest, docsBodyInit));
+            const docsHandlerRequest = new Request(docsRequest, docsBodyInit);
+            // Tool calls to a docs runtime's MCP server emit mcp.tool.complete, as in production.
+            const registeredMCPCalls = await _readFarmRegisteredMCPCalls(
+              docsHandlerRequest,
+              farmConfig.basePath,
+            );
+            const docsResponse = await farmDocsHandler(docsHandlerRequest);
             if (docsResponse) {
               const docsPage = docsResponse.headers
                 .get("content-type")
@@ -3550,7 +3576,16 @@ window.__FARM_MANIFEST__ = ${inlineValue({
                 .includes("text/html");
               await serveBuiltInRoute(
                 async (request) => {
-                  if (!docsPage) return wrapFarmDocsResponseWithLayouts(docsRequest, docsResponse);
+                  if (!docsPage) {
+                    const response = await wrapFarmDocsResponseWithLayouts(
+                      docsRequest,
+                      docsResponse,
+                    );
+                    // Inside the runtime request, so analytics ties each tool call to it.
+                    return _runWithCurrentRequest(request, () =>
+                      _observeFarmRegisteredMCPResponse(response, registeredMCPCalls),
+                    );
+                  }
                   // A docs page is a page document: it names this deployment, and a navigation
                   // from another deployment's page is refused, as for an app page.
                   const deploymentMismatch = getFarmDeploymentMismatch(

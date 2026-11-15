@@ -91,8 +91,8 @@ Removing `FARMJS_API_KEY` also turns it off.
 - For each request: a random ID, the matched route **template** (such as `/users/[id]`), or a
   docs page's own path, the **path** that was requested (such as `/users/42`), the method, the
   response status and the time until Farm returned the response.
-- For each registered MCP tool call: the tool name, whether it succeeded, and its duration, linked
-  to its request.
+- For each registered MCP tool call, including calls to the [docs engine](/docs/docs-engine)'s
+  MCP endpoint: the tool name, whether it succeeded, and its duration, linked to its request.
 - A self-reported agent category when the user-agent declares one of OpenAI's or Anthropic's
   crawlers or agents (GPTBot, OAI-SearchBot, ChatGPT-User, ClaudeBot, Claude-SearchBot,
   Claude-User). This is the user-agent's claim, not a verified identity. Anything else is
@@ -151,7 +151,8 @@ including the ones nothing has called yet, without the app sending anything. It 
   title, description, whether it's an API endpoint, `defineTool` or a server function, the
   read-only, destructive, idempotent and open-world hints, and the input and output JSON Schemas),
   its resources (name, URI or template, MIME type) and its prompts (name, description, argument
-  schema).
+  schema). The [docs engine](/docs/docs-engine)'s MCP endpoint is listed too, with the tools it
+  lists over `tools/list` as standalone tools, without resources or prompts.
 - `webmcp`: whether `@farm.js/webmcp` is on, and the browser tools the app's source defines with
   `defineWebMCPTool` or `registerWebMCPTool`: name, title, description, hints, and the input schema
   when it's written out (`inputSchemaSource: "literal"`). A schema built at runtime, such as

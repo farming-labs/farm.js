@@ -648,8 +648,12 @@ moved by `api.basePath`, and Farm serves its card at `<path>/server-card`. Use `
 endpoint on another origin; the catalog then points at `<url>/server-card`, which that host serves.
 Pass `protocolVersions` to list the versions the endpoint accepts in its card. Registering the same
 endpoint again replaces the entry. Registered servers appear in the AI catalog, `ard.json`, and
-`llms.txt`, but not in the `/.well-known/farmjs.json` manifest, which lists the tools Farm serves itself.
-The [docs engine](/docs/docs-engine)'s MCP endpoint is listed this way when its adapter registers it.
+`llms.txt`. The [docs engine](/docs/docs-engine)'s MCP endpoint is listed this way when its adapter
+registers it, and because the docs engine serves it inside the app, Farm also asks it for its tools
+with `tools/list`, in process. The `/.well-known/farmjs.json` manifest lists them as standalone
+tools (`source: "defineTool"`, like the default server's), and each `tools/call` the endpoint answers
+emits `mcp.tool.complete`, so [Farm Infra](/docs/infra-analytics) shows its tools and calls. A
+server served elsewhere, like the agent above, appears only in the catalogs.
 
 ## Observe tool executions
 
@@ -674,6 +678,10 @@ The event contains the configured MCP `server` name, transport `route`, register
 trace metadata. Endpoint failures, execution failures and output validation failures report
 `error` even when MCP responds with HTTP 200. An `isError` property inside returned application
 data is not an MCP error envelope.
+
+For the docs engine's endpoint, Farm reads each outcome from the JSON-RPC response: a result
+with `isError: true` reports `error`, and a JSON-RPC error (an unknown tool, invalid arguments)
+means the tool never ran, so it reports nothing. The duration runs until the result arrives.
 
 These are **tool callback outcomes**, not agent runs, HTTP request totals or proof that the client
 received a response. Authorization failures, hidden/unknown tools and inputs rejected by the MCP
