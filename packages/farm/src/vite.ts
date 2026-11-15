@@ -11,7 +11,7 @@ import {
   loadFarmDevModule,
 } from "./dev-module";
 import { createBundledEnv } from "./env";
-import { parseSync } from "vite";
+import { createRunnableDevEnvironment, parseSync } from "vite";
 import { initSync as initModuleLexer, parse as lexModule } from "es-module-lexer";
 import type {
   AliasOptions,
@@ -1973,6 +1973,28 @@ export function farmPlugin(
               : {}),
             deny: getFarmDevFsDeny(userConfig.server?.fs?.deny, options),
           },
+        },
+      };
+    },
+
+    configEnvironment(name, environmentConfig, env) {
+      // Vite's default server module runner turns on Node's source map support for the whole
+      // process, which then parses the source map of every module Node or the runner loads. The
+      // prepareStackTrace interceptor maps the same app frames when a stack is read. An
+      // environment a plugin creates keeps its own runner.
+      if (
+        env.command !== "serve" ||
+        (name !== "ssr" && name !== "rsc") ||
+        environmentConfig.dev?.createEnvironment
+      ) {
+        return;
+      }
+      return {
+        dev: {
+          createEnvironment: (environmentName, config) =>
+            createRunnableDevEnvironment(environmentName, config, {
+              runnerOptions: { sourcemapInterceptor: "prepareStackTrace" },
+            }),
         },
       };
     },
