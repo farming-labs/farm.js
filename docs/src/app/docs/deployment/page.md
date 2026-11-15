@@ -85,6 +85,14 @@ export default defineConfig({
 
 `farm dev` is unchanged: Vite serves modules with its own caching.
 
+### Prerendered pages on Cloudflare
+
+Cloudflare's asset server answers a directory index such as `about/index.html` at the
+trailing-slash URL and redirects the other spelling to it. Farm therefore writes a prerendered page
+as `about.html`, served at `/about` together with its `headers()` rules from `_headers`, unless
+`trailingSlash: true` asks for `/about/`, in which case it writes `about/index.html`. Netlify and
+Vercel builds write prerendered pages the same way.
+
 ### Guarded static pages on Vercel
 
 A page that middleware guards renders on request on every target. On Vercel, a middleware file with
