@@ -98,6 +98,9 @@ because request-bound work in transitive imports cannot be proven safe from the 
 Farm serves generated HTML only for `GET` and `HEAD` requests. Other request methods continue through
 the live route instead of receiving a cached page document.
 
+A static page that calls `redirect()` or `permanentRedirect()` while it renders has no HTML to save.
+The build keeps it server-handled, so each request gets its 307 or 308 with the `Location` header.
+
 The build prerenders up to eight pages at once, or as many as the machine has CPU cores when that is
 fewer. Each page renders as its own request, as it would on the production server, so the output does
 not depend on this number. To lower it, for example when pages call a rate-limited API, set Nitro's
@@ -297,9 +300,7 @@ Islands have the same limits as [isolated client leaves](#isolated-client-leaves
   elsewhere that one client component keeps its server HTML and Farm logs it once.
 - A client component must export each component by name (`export function Name`,
   `export { Name }`, `export { Name } from "./name"`, or `export default`), not through
-  `export *`, and must not sit where the HTML parser moves it: directly inside `<table>`, `<tbody>`,
-  `<tr>`, `<select>` or `<svg>`. Inside a `<td>`, `<th>`, `<caption>` or `<foreignObject>` it is
-  fine.
+  `export *`.
 - An integration provider that wraps the whole route, and does not declare
   `supportsIsolatedHydration: true`, keeps its routes route-wide.
 
@@ -307,6 +308,15 @@ When one of these applies, the route stays server-rendered, its client component
 interactive, and Farm logs a warning naming the module and the reason. Fix the reason, or render
 the interactive part from a synchronous page. Preact, Solid, Vue, and Svelte keep async pages
 server-only.
+
+A client component directly inside `<table>`, `<thead>`, `<tbody>`, `<tfoot>`, `<tr>`,
+`<select>`, `<optgroup>`, `<datalist>`, `<svg>`, `<ul>` or `<ol>` cannot have an `<f-island>`
+around it: the HTML parser moves or drops it there, and `ul > li` selectors stop matching. Farm
+makes the outermost such element the island instead, so the browser gets the same table, options,
+SVG shapes and list items as under React Server Components. The element's server-rendered parts
+travel as a server tree, so moving `"use client"` up to a component that renders the whole
+element is still the cheaper choice for a large table. Inside a `<td>`, `<th>`, `<caption>`,
+`<li>` or `<foreignObject>` a client component is an island of its own.
 
 In [islands mode](#react-server-components) every page is a server component, so hydrating a page whole
 would ship its module and its server-only imports to the browser. Islands mode never does that:
@@ -376,7 +386,9 @@ around server content, reaches the consumers in it) and keep their own state, an
 not render at first (a tab, a closed panel) is there when it does. `useId` returns the ids in the
 server HTML, unique across client components. A server page under a
 layout that hydrates (a client provider, say) hydrates inside that layout's tree, so its client
-components read the provider's context. That layout, and the other server layouts on its pages,
+components read the provider's context. So do a Markdown page's MDX components, and client
+components that declare a deferred `island` strategy: inside the tree they hydrate with the
+layout instead of waiting. That layout, and the other server layouts on its pages,
 render as server trees too: the browser rebuilds them from the HTML, so their modules and their
 server-only imports never reach it, and a navigation keeps the provider's state. A provider
 imported straight from a package fails the build; render it from a local `"use client"` module

@@ -911,7 +911,13 @@ export function applyProductionMiddlewareHeaders(
       if (headers.has(key)) continue;
       headers.set(key, value);
     }
-    for (const cookie of setCookies) {
+    if (setCookies.length === 0) return;
+    // Middleware cookies were set before the response existed, so they go first and the
+    // response's own cookies win for the same name, as in the dev runtime: a returned Response
+    // that clears a session another middleware refreshed logs the visitor out.
+    const responseCookies = headers.getSetCookie();
+    headers.delete("Set-Cookie");
+    for (const cookie of [...setCookies, ...responseCookies]) {
       headers.append("Set-Cookie", cookie);
     }
   });

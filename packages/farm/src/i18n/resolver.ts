@@ -1,3 +1,4 @@
+import { normalizeFarmTrailingSlashPathname } from "../trailing-slash";
 import { decodeCookieName } from "../request-cookies";
 import { localizeFarmPathname, resolveFarmLocalePath } from "./routing";
 import { stripFarmBasePath } from "../base-path";
@@ -89,8 +90,12 @@ export function resolveFarmLocaleRequest(
     locale: detected.locale,
     source: detected.source,
     pathname: pathMatch.pathname,
+    // Straight to the locale page's canonical URL, with the app's trailingSlash, not a second hop.
     redirect: shouldRedirect
-      ? `${localizeFarmPathname(pathMatch.pathname, detected.locale, config)}${url.search}${url.hash}`
+      ? `${normalizeFarmTrailingSlashPathname(
+          localizeFarmPathname(pathMatch.pathname, detected.locale, config),
+          config.trailingSlash === true,
+        )}${url.search}${url.hash}`
       : undefined,
     persist: detected.source !== "default",
   };

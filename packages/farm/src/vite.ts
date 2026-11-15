@@ -11,7 +11,7 @@ import {
   loadFarmDevModule,
 } from "./dev-module";
 import { createBundledEnv } from "./env";
-import { parseSync } from "vite";
+import { createRunnableDevEnvironment, parseSync } from "vite";
 import { initSync as initModuleLexer, parse as lexModule } from "es-module-lexer";
 import type {
   AliasOptions,
@@ -104,6 +104,8 @@ import {
   farmRequestWantsMarkdown,
   isFarmMarkdownPageFile,
   normalizeFarmMarkdownRoutePath,
+  resolveFarmMdxComponentsModulePath,
+  resolveMdxConfig,
 } from "./app-markdown";
 import {
   applyWebResponseHeaders,
@@ -121,6 +123,11 @@ import {
   setFarmRouteLabel,
 } from "./route-label";
 import { registerFarmMCPServer } from "./mcp-catalog";
+import {
+  _listFarmRegisteredMCPServerTools,
+  _observeFarmRegisteredMCPResponse,
+  _readFarmRegisteredMCPCalls,
+} from "./registered-mcp";
 import {
   createFarmApiCatalogResponse,
   FARM_API_CATALOG_PATH,
@@ -148,6 +155,7 @@ import {
   getIslandStrategyExport,
   collectFarmServerBundledPackageInfo,
   getFarmClientReachableModules,
+  getFarmClientRenderingBindings,
   hasUseClientDirective,
   invalidateFarmClientReachableModules,
   isFarmPackageClientBoundary,
@@ -155,7 +163,10 @@ import {
   resolveFarmIsolatedClientHydrationMode,
   stripUseClientDirective,
 } from "./utils/client-component";
-import { resolvePackageClientBoundaryCacheFile } from "./utils/package-client-boundary-cache";
+import {
+  dropLatestPackageClientBoundaryCache,
+  resolvePackageClientBoundaryCacheFile,
+} from "./utils/package-client-boundary-cache";
 import {
   dispatchIntegrationRequest,
   getFarmIntegrationPluginOwner,
@@ -182,7 +193,7 @@ import * as path from "path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import type { FarmUserConfig } from "./config";
 import { getFarmAppDirectories, getFarmLayerAliases, getFarmSourceRoots } from "./layers";
-import { getRouteGroupScope, stripRouteGroups } from "./routing/route-groups";
+import { createFarmDevClientManifest } from "./server/dev-client-manifest";
 import { farmEnvironmentFunctionsPlugin } from "./environment-vite";
 import { FARM_VERSION } from "./version";
 import { createDeferredDataResponse } from "./deferred";
@@ -242,6 +253,11 @@ import {
   rewriteFarmPackageClientImports,
 } from "./islands-package-references";
 import {
+  ensureFarmIslandContainerReference,
+  farmIslandContainerReferencePath,
+  wrapFarmIslandContainers,
+} from "./islands-containers";
+import {
   invalidateFarmClientOnlyScan,
   farmRelativeImportFiles,
   rewriteFarmReactServerClientModuleImports,
@@ -295,7 +311,11 @@ import type { FarmRenderer } from "./renderer";
 import { createFarmReactRefreshPlugins, isFarmReactRefreshActive } from "./react-refresh";
 import { generateFarmIntegrationProviderClientCode } from "./integration-provider-build";
 import type { FarmIslandStrategy } from "./island";
-import { inferFarmIslandStrategy, resolveFarmRouteRootStrategy } from "./island-inference";
+import {
+  inferFarmIslandStrategy,
+  invalidateFarmRouteRootInferences,
+  resolveFarmRouteRootStrategy,
+} from "./island-inference";
 import { resolveRouteRenderingConfig } from "./ssg";
 import {
   createFarmRouteRenderPlan,
@@ -315,7 +335,11 @@ import { FARM_CONFIG_REDIRECTS_PLUGIN_NAME, getConfigRedirectMatcher } from "./p
 import { FARM_CONFIG_REWRITES_PLUGIN_NAME } from "./plugins/rewrites";
 import { isFarmPreviewDeploymentEnvironment } from "./deployment-environment";
 import { FARM_PREVIEW_ROBOTS_TAG } from "./preview-noindex";
-import { parseFarmRequestTarget, resolveFarmRequestURL } from "./server/request";
+import {
+  _runWithCurrentRequest,
+  parseFarmRequestTarget,
+  resolveFarmRequestURL,
+} from "./server/request";
 import { reportOpenAPIDevGenerationResult } from "./openapi/dev-status";
 
 /** Paths `agent.llmsTxt` serves without a route file. */
@@ -511,6 +535,45 @@ function createFarmServerPrebundleConfig(bundledPackages: readonly FarmServerBun
   };
 }
 
+/**
+ * Islands mode (RFC 0006): a client component in a position that cannot hold `<f-island>` (a row in
+ * a table, an option in a select, a shape in an svg, an item in a list) makes the element around it
+ * the island. Runs before JSX compiles, on the server module's source.
+ */
+export function farmIslandContainersPlugin(config: {
+  root?: string;
+  experimental?: FarmVitePluginOptions["experimental"];
+}): Plugin {
+  let root = config.root ?? process.cwd();
+  return {
+    name: "farm:island-containers",
+    enforce: "pre",
+    configResolved(resolved) {
+      root = config.root || resolved.root;
+    },
+    transform(code, id) {
+      if (resolveFarmServerComponentsMode(config.experimental?.serverComponents) !== "islands") {
+        return null;
+      }
+      if (id.startsWith("\0") || id.includes("/node_modules/") || !/\.[jt]sx(?:$|\?)/.test(id)) {
+        return null;
+      }
+      if (hasUseClientDirective(code)) return null;
+      const file = id.split("?", 1)[0]!;
+      const bindings = getFarmClientRenderingBindings(code, file, root);
+      if (bindings.length === 0) return null;
+      const grown = wrapFarmIslandContainers({
+        code,
+        file,
+        bindings,
+        reference: farmIslandContainerReferencePath(root),
+      });
+      if (grown === null) return null;
+      ensureFarmIslandContainerReference(root);
+      return { code: grown, map: null };
+    },
+  };
+}
 /**
  * Fail a browser graph that imports a server-only core entry, instead of
  * bundling its server runtime (for `@farm.js/core/og`, the `@vercel/og` wasm
@@ -1864,7 +1927,36 @@ export function farmPlugin(
     publicDir: options.publicDir,
   });
   let farmApp: FarmApp;
+  // Files Farm writes under its output directory (client references, caches), as a POSIX path.
+  const isFarmGeneratedOutput = (file: string): boolean => {
+    const root = farmApp?.getConfig().root ?? options.root;
+    if (!root) return file.includes("/.farm/");
+    const output = toPosixPath(path.resolve(root, options.distDir || ".farm"));
+    return file === output || file.startsWith(`${output}/`);
+  };
   let serverFnTransformActive = false;
+  // The modules a page render evaluates on the server: route modules and the MDX components.
+  const getFarmRenderedServerModules = (): Set<string> => {
+    const routeManager = farmApp?.getRouteManager();
+    if (!routeManager) return new Set();
+    const files = new Set<string>();
+    for (const entries of [
+      routeManager.getRoutes(),
+      routeManager.getLayouts(),
+      routeManager.getLoadings(),
+      routeManager.getErrors(),
+      routeManager.getRouteSlots(),
+    ]) {
+      for (const entry of entries.values()) files.add(entry.modulePath);
+    }
+    const config = farmApp.getConfig();
+    const mdxComponents = resolveFarmMdxComponentsModulePath(
+      resolveMdxConfig(config.mdx),
+      config.root,
+    );
+    if (mdxComponents) files.add(mdxComponents);
+    return files;
+  };
   // Islands mode runs server functions on islx's actions: no @farm.js/plugin/rsc needed.
   const islandsServerFns = () => {
     const config = (farmApp?.getConfig() ?? options) as FarmVitePluginOptions;
@@ -1975,6 +2067,28 @@ export function farmPlugin(
       };
     },
 
+    configEnvironment(name, environmentConfig, env) {
+      // Vite's default server module runner turns on Node's source map support for the whole
+      // process, which then parses the source map of every module Node or the runner loads. The
+      // prepareStackTrace interceptor maps the same app frames when a stack is read. An
+      // environment a plugin creates keeps its own runner.
+      if (
+        env.command !== "serve" ||
+        (name !== "ssr" && name !== "rsc") ||
+        environmentConfig.dev?.createEnvironment
+      ) {
+        return;
+      }
+      return {
+        dev: {
+          createEnvironment: (environmentName, config) =>
+            createRunnableDevEnvironment(environmentName, config, {
+              runnerOptions: { sourcemapInterceptor: "prepareStackTrace" },
+            }),
+        },
+      };
+    },
+
     async configResolved(config) {
       if (typeof fontImports.configResolved === "function") {
         await fontImports.configResolved.call(this, config);
@@ -2055,6 +2169,8 @@ export function farmPlugin(
             options.distDir || ".farm",
           ),
         );
+      // A replan after an edit reuses the plans of route modules that read no edited file.
+      farmApp.getRouteManager().trackSourceChanges();
 
       await farmApp.initialize();
 
@@ -3407,6 +3523,17 @@ window.__FARM_MANIFEST__ = ${inlineValue({
             options.agent?.manifest !== false &&
             isFarmAppManifestPath(stripFarmBasePath(requestPathname, farmConfig.basePath))
           ) {
+            const manifestGuardCoversPath = (path: string) =>
+              farmPathGuardCoversEndpoint(
+                {
+                  config: farmConfig,
+                  middlewareRoutes: middlewareManager
+                    .getMiddlewares()
+                    .filter((entry) => entry.source !== "config"),
+                },
+                path,
+                apiServerBasePath,
+              );
             await serveBuiltInRoute(async () => {
               farmAppPackages ??= resolveFarmAppPackages(farmConfig.root ?? process.cwd());
               const manifest = await createFarmAppManifestResponse(
@@ -3425,17 +3552,17 @@ window.__FARM_MANIFEST__ = ${inlineValue({
                   }),
                   defaultMCP: () => farmApp.getServerRenderer().getDefaultMCPServer(),
                   // A guard written for an MCP server's path keeps its tools out of the public view.
-                  guardCoversPath: (path) =>
-                    farmPathGuardCoversEndpoint(
-                      {
-                        config: farmConfig,
-                        middlewareRoutes: middlewareManager
-                          .getMiddlewares()
-                          .filter((entry) => entry.source !== "config"),
-                      },
-                      path,
-                      apiServerBasePath,
-                    ),
+                  guardCoversPath: manifestGuardCoversPath,
+                  // A docs runtime's MCP server lists its tools when asked, read on each request.
+                  ...(farmDocsHandler
+                    ? {
+                        registeredMCP: (request: Request) =>
+                          _listFarmRegisteredMCPServerTools(farmDocsHandler, request, {
+                            basePath: farmConfig.basePath,
+                            guardCoversPath: manifestGuardCoversPath,
+                          }),
+                      }
+                    : {}),
                 },
               );
               return manifest;
@@ -3516,7 +3643,13 @@ window.__FARM_MANIFEST__ = ${inlineValue({
               requestMethod === "GET" || requestMethod === "HEAD"
                 ? {}
                 : { body: createFarmNodeRequestBodyStream(req), duplex: "half" };
-            const docsResponse = await farmDocsHandler(new Request(docsRequest, docsBodyInit));
+            const docsHandlerRequest = new Request(docsRequest, docsBodyInit);
+            // Tool calls to a docs runtime's MCP server emit mcp.tool.complete, as in production.
+            const registeredMCPCalls = await _readFarmRegisteredMCPCalls(
+              docsHandlerRequest,
+              farmConfig.basePath,
+            );
+            const docsResponse = await farmDocsHandler(docsHandlerRequest);
             if (docsResponse) {
               const docsPage = docsResponse.headers
                 .get("content-type")
@@ -3524,7 +3657,16 @@ window.__FARM_MANIFEST__ = ${inlineValue({
                 .includes("text/html");
               await serveBuiltInRoute(
                 async (request) => {
-                  if (!docsPage) return wrapFarmDocsResponseWithLayouts(docsRequest, docsResponse);
+                  if (!docsPage) {
+                    const response = await wrapFarmDocsResponseWithLayouts(
+                      docsRequest,
+                      docsResponse,
+                    );
+                    // Inside the runtime request, so analytics ties each tool call to it.
+                    return _runWithCurrentRequest(request, () =>
+                      _observeFarmRegisteredMCPResponse(response, registeredMCPCalls),
+                    );
+                  }
                   // A docs page is a page document: it names this deployment, and a navigation
                   // from another deployment's page is refused, as for an app page.
                   const deploymentMismatch = getFarmDeploymentMismatch(
@@ -4037,13 +4179,19 @@ window.__FARM_MANIFEST__ = ${inlineValue({
               if (req.method !== "GET" && req.method !== "HEAD") {
                 body = await readNodeRequestBody(req as any, currentServerConfig.bodySizeLimit);
               }
-              // Like production, the handler can see the client go away.
-              return new Request(`http://${req.headers.host || "localhost:3000"}${req.url}`, {
-                method: req.method,
-                headers,
-                body: toRequestBody(body),
-                signal: createFarmNodeRequestAbortSignal(req, res),
-              });
+              // Like production, the handler can see the client go away. Under
+              // server.trustProxy it reads the public URL, as pages and middleware do.
+              return new Request(
+                resolveFarmRequestURL(req as FarmRequest, {
+                  trustProxy: currentServerConfig.trustProxy,
+                }),
+                {
+                  method: req.method,
+                  headers,
+                  body: toRequestBody(body),
+                  signal: createFarmNodeRequestAbortSignal(req, res),
+                },
+              );
             };
             const isDocsAPIRequest = Boolean(
               farmDocsAPIHandler && farmDocsDevRuntime?.isFarmDocsAPIRequest(pathname),
@@ -5269,8 +5417,7 @@ window.__FARM_MANIFEST__ = ${inlineValue({
         return generateServerCode();
       }
 
-      // Virtual manifest module - TanStack Start pattern
-      // Manifest is generated at build time and inlined
+      // The development client route manifest (FARM_DEV_CLIENT_MANIFEST_MODULE)
       if (id === "/@farm/manifest") {
         const routeManager = farmApp?.getRouteManager();
         if (!routeManager) {
@@ -5285,71 +5432,30 @@ export const getManifest = () => ({
 `;
         }
 
-        const manifest = routeManager.generateClientManifest(server.config.root);
         const globalStylesheetHref = resolveDevGlobalStylesheetHref(
           server.config.root,
           farmApp?.getConfig().srcDir,
         );
+        const fullManifest = createFarmDevClientManifest(
+          routeManager.generateClientManifest(server.config.root),
+          {
+            sharedAssets: globalStylesheetHref
+              ? [{ tag: "link", attrs: { rel: "stylesheet", href: globalStylesheetHref } }]
+              : [],
+          },
+        );
 
-        // Convert to full manifest format
-        const fullManifest = {
-          clientEntry: "/@farm/client.js",
-          routes: {} as Record<string, any>,
-          layouts: {} as Record<string, any>,
-          slots: [] as Array<Record<string, any>>,
-          sharedAssets: globalStylesheetHref
-            ? [{ tag: "link", attrs: { rel: "stylesheet", href: globalStylesheetHref } }]
-            : [],
+        // The whole client manifest, which a document's client imports the first time a
+        // navigation needs a route the document did not inline (see dev-client-manifest.ts).
+        // Parsed from a string: V8 parses large JSON faster than an object literal. No source
+        // map: one would repeat the manifest several times over.
+        return {
+          code: `const manifest = JSON.parse(${JSON.stringify(JSON.stringify(fullManifest))});
+export const getManifest = () => manifest;
+export { manifest };
+`,
+          map: { mappings: "" },
         };
-
-        // Convert routes array to object keyed by pattern
-        for (const route of manifest.routes) {
-          fullManifest.routes[route.pattern] = {
-            modulePath: route.modulePath,
-            pattern: route.pattern,
-            ...(route.directory ? { directory: route.directory } : {}),
-            segments: route.segments,
-            search: route.search,
-            isClientComponent: route.isClientComponent,
-            shouldHydrate: route.shouldHydrate,
-            islandStrategy: route.islandStrategy,
-            renderPlan: route.renderPlan,
-            preloads: [route.modulePath], // In dev, preload is just the module
-            assets: [],
-          };
-        }
-
-        // Convert layouts array to object keyed by pattern
-        for (const layout of manifest.layouts) {
-          const groupScope = getRouteGroupScope(layout.pattern);
-          fullManifest.layouts[layout.pattern] = {
-            modulePath: layout.modulePath,
-            pattern: layout.pattern,
-            ...(groupScope ? { urlPattern: stripRouteGroups(layout.pattern), groupScope } : {}),
-            shouldHydrate: layout.shouldHydrate,
-            islandStrategy: layout.islandStrategy,
-            // Islands mode: rebuilt from its server tree, so its module is never preloaded.
-            ...(layout.serverTree ? { serverTree: true } : {}),
-            preloads: layout.serverTree ? [] : [layout.modulePath],
-            assets: [],
-          };
-        }
-
-        for (const slot of manifest.slots) {
-          fullManifest.slots.push({
-            ...slot,
-            preloads: [slot.modulePath],
-            assets: [],
-          });
-        }
-
-        return `
-// Auto-generated manifest for SPA navigation (TanStack Start pattern)
-// This manifest is inlined in the server bundle - no file on disk
-// Client receives this via window.__FARM_MANIFEST__ in HTML
-export const getManifest = () => (${JSON.stringify(fullManifest, null, 2)});
-export const manifest = getManifest();
-`;
       }
     },
 
@@ -5424,12 +5530,20 @@ export const manifest = getManifest();
             rewrotePackageImports = true;
           }
         }
-        const referenced = rewriteFarmPackageClientImports({
-          code,
-          file,
-          root: projectRoot,
-          isClientPackage: (specifier) => isFarmPackageClientBoundary(file, specifier, projectRoot),
-        });
+        const rewritePackageImports = (source: string) =>
+          rewriteFarmPackageClientImports({
+            code: source,
+            file,
+            root: projectRoot,
+            isClientPackage: (specifier) =>
+              isFarmPackageClientBoundary(file, specifier, projectRoot),
+          });
+        // Each module that imports a package would otherwise read the package's whole entry graph.
+        const routeManager = farmApp?.getRouteManager();
+        const source = code;
+        const referenced = routeManager
+          ? routeManager.inspectPackages(() => rewritePackageImports(source))
+          : rewritePackageImports(source);
         if (referenced !== null) {
           code = referenced;
           rewrotePackageImports = true;
@@ -5843,10 +5957,18 @@ if (import.meta.hot) {
       }
     },
 
-    watchChange() {
+    watchChange(id, change) {
+      // The next hydration plan replans only the route modules that read an edited source file.
+      // Generated output (client references, caches, Vite's deps) is not the app's source.
+      const watched = toPosixPath(id);
+      if (!watched.includes("/node_modules/") && !isFarmGeneratedOutput(watched)) {
+        farmApp?.getRouteManager().noteSourceChange(id, change.event);
+      }
       // A module that gains or loses "use client", or an import, changes what client code reaches.
       invalidateFarmClientReachableModules();
       invalidateFarmClientOnlyScan();
+      invalidateFarmRouteRootInferences();
+      dropLatestPackageClientBoundaryCache();
     },
     async handleHotUpdate(ctx: HmrContext) {
       // A file changed while a deferred setup still discovers routes: handle it against the result.
@@ -5951,13 +6073,16 @@ if (import.meta.hot) {
 
       const isolatedHydrationMode = currentFarmConfig?.experimental?.isolatedClientHydration;
       const planRouteManager = farmApp?.getRouteManager();
+      // A source module outside src (a workspace package's) can be a client boundary too. A replan
+      // recomputes only the route modules that read the edited file, so it costs nothing for a
+      // module no plan read.
       const isHydrationPlanSource =
-        currentSrcRoot !== null &&
-        normalizedFile.startsWith(`${currentSrcRoot}/`) &&
-        /\.[cm]?[jt]sx?$/.test(normalizedFile);
+        /\.[cm]?[jt]sx?$/.test(normalizedFile) &&
+        !normalizedFile.includes("/node_modules/") &&
+        !isFarmGeneratedOutput(normalizedFile);
       // Any source module can become an async owner's client boundary. Replan
       // React source updates even when the previous plan had no islands, but
-      // keep CSS, generated output and files outside src off this static pass.
+      // keep CSS and generated output off this static pass.
       const tracksAsyncOwnerIslands =
         isReactRenderer(currentFarmConfig?.renderer) && planRouteManager !== undefined;
       // Set once the plan below is rebuilt from this edit, so it is not rebuilt again right after.
@@ -5969,7 +6094,14 @@ if (import.meta.hot) {
           tracksAsyncOwnerIslands)
       ) {
         const routeManager = planRouteManager;
-        if (routeManager) {
+        // An edit inside a client component (its markup, state or handlers) changes no plan, so
+        // React Fast Refresh applies it without the replan; the next replan reads the file again.
+        if (routeManager?.isEditPlanNeutral(file)) {
+          clientPlanCurrent = true;
+        } else if (routeManager) {
+          // Vite reported the change to watchChange first; say it again for a caller that runs
+          // this hook alone, so the replan recomputes every route module that read the file.
+          routeManager.noteSourceChange(file, "update");
           try {
             const previousPlan = JSON.stringify(
               routeManager.generateClientManifest(currentFarmConfig.root),
@@ -6061,6 +6193,20 @@ if (import.meta.hot) {
 
           return [];
         }
+      }
+
+      // A server component a page or layout renders, such as one imported only by server
+      // modules in islands mode: the browser holds none of its code, so no hot update reached
+      // the open page, which kept the old server output until a manual reload. Run the new code
+      // on the next render and reload the page, as an edit to the page itself does.
+      if (
+        /\.[cm]?[jt]sx?$/.test(normalizedFile) &&
+        !server.environments.client?.moduleGraph.getModulesByFile(normalizedFile)?.size &&
+        invalidateFarmDevDependents(server, file, getFarmRenderedServerModules()).length > 0
+      ) {
+        logUpdate("PAGE", `updated ${path.basename(file)}`);
+        server.ws.send({ type: "full-reload", path: "*" });
+        return [];
       }
 
       return modules;
@@ -6916,6 +7062,35 @@ function wrapFarmClientRouteGraph(element) {
 // Get manifest from window (inlined by server in HTML)
 // Fallback to empty manifest if not available yet
 const getManifest = () => window.__FARM_MANIFEST__ || { routes: {}, layouts: {}, slots: [], clientEntry: '', sharedAssets: [] };
+
+// A document inlines only the entries its page boots with and names the module that has the
+// whole manifest (manifest.module), as production keeps its route table out of the HTML. Code
+// that matches another route awaits this first; it imports the module once. A failed import
+// keeps the inlined entries, so the router treats other routes as it treats an unknown one.
+let farmManifestLoad = null;
+function ensureFarmManifest() {
+  const inlined = window.__FARM_MANIFEST__;
+  if (!inlined || typeof inlined.module !== 'string') return Promise.resolve();
+  if (!farmManifestLoad) {
+    farmManifestLoad = import(/* @vite-ignore */ new URL(inlined.module, location.origin).href)
+      .then((loaded) => {
+        const manifest = loaded.getManifest();
+        if (window.__FARM_MANIFEST__ !== inlined) return;
+        const { module: _module, ...boot } = inlined;
+        window.__FARM_MANIFEST__ = {
+          ...boot,
+          routes: manifest.routes,
+          layouts: manifest.layouts,
+          slots: manifest.slots,
+        };
+      })
+      .catch((error) => {
+        farmManifestLoad = null;
+        console.warn('[Farm.js] Could not load the route manifest: ' + inlined.module, error);
+      });
+  }
+  return farmManifestLoad;
+}
 
 // ====== CLIENT-SIDE ROUTE MATCHING ======
 // Matches URL to route using manifest (no server request!)
@@ -8133,6 +8308,7 @@ async function fetchFarmNavigationDocument(path, context) {
   // A prefetch reads the page whole for the router's cache, and leaves a page that streams alone.
   if (!context.prefetch) farmNavigationStreamGeneration++;
   const url = new URL(path, window.location.href);
+  await ensureFarmManifest();
   const match = farmDocumentNavigationRoute(url.pathname);
   const container = document.getElementById('root');
   if (!match || !container) return null;
@@ -8289,6 +8465,9 @@ async function renderPage(pageData, info) {
     return;
   }
 
+  // Page data carries the route's render plan, which the manifest entry only backs up. Islands
+  // mode also reads which layouts render as server trees (loadLayoutComponents).
+  if (${islandValues ? "true" : "!pageData.renderPlan"}) await ensureFarmManifest();
   const manifestRoute = findRoute(window.location.pathname)?.route;
   const renderPlan = pageData.renderPlan || manifestRoute?.renderPlan;
   const hydrationMode = renderPlan?.hydration;
@@ -9022,6 +9201,7 @@ export async function defineConfig(config: FarmVitePluginOptions = {}): Promise<
       viteBrowserExternalPlugin,
       farmI18nClientBridgePlugin(),
       farmServerOnlyEntriesPlugin(),
+      farmIslandContainersPlugin(config),
       farmPlugin(config),
       farmEnvironmentFunctionsPlugin(config),
       farmBrandingPlugin,

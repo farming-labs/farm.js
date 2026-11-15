@@ -172,9 +172,7 @@ export function IndexedLabel({
 }) {
   return (
     <span className="farm-indexed-label font-mono">
-      <span aria-hidden className="text-white/26">
-        {index}
-      </span>
+      <span aria-hidden>{index}</span>
       <span aria-hidden className="text-white/18">
         /
       </span>
@@ -224,7 +222,7 @@ function BrandLockup() {
 export function AnnouncementBar() {
   return (
     <div className="farm-announcement flex min-h-7 flex-wrap items-center justify-center gap-x-2 border-b border-white/12 px-4 font-mono text-[10px] font-normal uppercase tracking-normal">
-      <span className="text-white/76">Farm.js v0.1.0 is released</span>
+      <span>Farm.js v0.1.0 is released</span>
       <a
         className="inline-flex min-h-7 shrink-0 items-center text-white/80 underline decoration-white/40 underline-offset-2 hover:text-white hover:decoration-white active:text-white/60 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-white"
         href={launchPost.href}
@@ -374,7 +372,7 @@ function FooterLinksGroup({ title, links }: { title: string; links: readonly Foo
 export function SiteFooter() {
   return (
     <footer className="w-full">
-      <div className="grid grid-cols-1 divide-y divide-white/12 md:grid-cols-4 md:divide-x md:divide-y-0">
+      <div className="grid grid-cols-1 *:not-first:border-t *:not-first:border-white/12 md:grid-cols-4 md:*:not-first:border-t-0 md:*:not-first:border-l">
         <div>
           <div className="flex h-12 items-center border-b border-white/12 px-4">
             <BrandLockup />

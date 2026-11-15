@@ -407,8 +407,12 @@ async function buildClient(
   srcDir: string,
   outputDir: string,
 ) {
-  const { farmI18nClientBridgePlugin, farmPlugin, farmServerOnlyEntriesPlugin } =
-    await import("../vite");
+  const {
+    farmI18nClientBridgePlugin,
+    farmIslandContainersPlugin,
+    farmPlugin,
+    farmServerOnlyEntriesPlugin,
+  } = await import("../vite");
   const { PluginManager } = await import("../plugin");
 
   const pluginManager = new PluginManager({
@@ -430,6 +434,7 @@ async function buildClient(
     plugins: [
       farmI18nClientBridgePlugin(),
       farmServerOnlyEntriesPlugin(),
+      farmIslandContainersPlugin(config),
       farmPlugin(config, pluginManager),
       farmEnvironmentFunctionsPlugin(config),
     ],
@@ -447,7 +452,8 @@ async function buildSSR(
   srcDir: string,
   outputDir: string,
 ) {
-  const { farmI18nClientBridgePlugin, farmPlugin } = await import("../vite");
+  const { farmI18nClientBridgePlugin, farmIslandContainersPlugin, farmPlugin } =
+    await import("../vite");
   const { PluginManager } = await import("../plugin");
 
   const pluginManager = new PluginManager({
@@ -476,6 +482,7 @@ async function buildSSR(
     },
     plugins: [
       farmI18nClientBridgePlugin(),
+      farmIslandContainersPlugin(config),
       farmPlugin(config, pluginManager),
       farmEnvironmentFunctionsPlugin(config),
     ],

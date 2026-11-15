@@ -107,12 +107,49 @@ function escapeRegExp(value: string): string {
   return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
+/** The longest `src` Vercel's Build Output API accepts on a route. */
+export const FARM_VERCEL_ROUTE_SOURCE_MAX_LENGTH = 4096;
+
+/**
+ * Groups regex alternatives into as few `^(?:a|b|…)$` sources as fit Vercel's limit on a route's
+ * `src`, in order. A site with a few hundred prerendered pages outgrows one source, and Vercel
+ * then refuses the whole deployment ("Builder returned invalid routes").
+ */
+export function groupFarmVercelRouteAlternatives<T>(
+  items: readonly T[],
+  alternative: (item: T) => string,
+): Array<{ src: string; items: T[] }> {
+  const groups: Array<{ src: string; items: T[] }> = [];
+  let current: { parts: string[]; items: T[]; length: number } | null = null;
+  // "^(?:" and ")$"
+  const frame = 6;
+  for (const item of items) {
+    const part = alternative(item);
+    if (part.length + frame > FARM_VERCEL_ROUTE_SOURCE_MAX_LENGTH) {
+      throw new Error(
+        `Farm cannot route ${JSON.stringify(part.slice(0, 80))}… on Vercel: its pattern is longer than Vercel's ${FARM_VERCEL_ROUTE_SOURCE_MAX_LENGTH}-character limit for a route. Shorten the page's path.`,
+      );
+    }
+    if (current && current.length + 1 + part.length > FARM_VERCEL_ROUTE_SOURCE_MAX_LENGTH) {
+      groups.push({ src: `^(?:${current.parts.join("|")})$`, items: current.items });
+      current = null;
+    }
+    if (!current) current = { parts: [], items: [], length: frame - 1 };
+    current.parts.push(part);
+    current.items.push(item);
+    current.length += 1 + part.length;
+  }
+  if (current) groups.push({ src: `^(?:${current.parts.join("|")})$`, items: current.items });
+  return groups;
+}
+
 /**
  * The route that sends the other trailing-slash spelling of each prerendered page to Farm's
  * server. Vercel can answer either spelling with the page's `index.html`, so without it a static
  * page answers both, where Farm's server answers the spelling `trailingSlash` does not
  * choose with a 308 to the one it does (keeping the query), as it does for every dynamic page.
  * `publicPaths` are the URLs the pages were prerendered at, already in the configured spelling.
+ * Many pages take several routes: Vercel limits the length of each.
  */
 export function createFarmVercelCanonicalSlashRoutes(
   publicPaths: readonly string[],
@@ -125,6 +162,8 @@ export function createFarmVercelCanonicalSlashRoutes(
         .filter((pathname) => pathname !== ""),
     ),
   ];
-  if (otherSpellings.length === 0) return [];
-  return [{ src: `^(?:${otherSpellings.map(escapeRegExp).join("|")})$`, dest: "/__nitro" }];
+  return groupFarmVercelRouteAlternatives(otherSpellings, escapeRegExp).map((group) => ({
+    src: group.src,
+    dest: "/__nitro",
+  }));
 }

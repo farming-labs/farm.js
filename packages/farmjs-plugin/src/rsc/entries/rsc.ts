@@ -600,6 +600,8 @@ const farmPageLastModified = ${JSON.stringify(ctx.pageLastModified ?? {})};
 } from '@farm.js/core/server-action-security';
 
 const serverActionSecurity = ${JSON.stringify(ctx.serverActions)};
+// Under server.trustProxy, a proxy's forwarded origin is the origin a same-origin action posts from.
+const serverActionRequestOptions = { trustProxy: ${JSON.stringify(ctx.server?.trustProxy === true)} };
 `;
   }
 
@@ -1441,7 +1443,7 @@ ${
     ctx.actionsEnabled
       ? `if (request.method === 'POST' && !isInitialApiRequest) {
     try {
-      validateServerActionRequest(request, serverActionSecurity);
+      validateServerActionRequest(request, serverActionSecurity, serverActionRequestOptions);
     } catch (error) {
       const rejection = createServerActionRequestErrorResponse(error);
       if (rejection) return rejection;
@@ -1572,6 +1574,7 @@ ${
         serverActionSecurity,
         actionId ? 'javascript' : 'form',
         actionId,
+        serverActionRequestOptions,
       );
     } catch (error) {
       if (request.signal.aborted) {
@@ -1676,6 +1679,18 @@ ${
           return new Response(null, {
             status: 303,
             headers: { location: ${i18n ? "localizeFarmRedirectUrl(formRedirect.url)" : "formRedirect.url"}, 'Cache-Control': 'no-store' },
+          });
+        }
+        // notFound() is control flow too: the plain 404 a page that calls it gets, not a crash.
+        if (isFarmNotFoundError(e)) {
+          debug('Form action not found');
+          return new Response('Not Found', {
+            status: 404,
+            headers: {
+              'Cache-Control': 'no-store',
+              'Content-Type': 'text/plain; charset=utf-8',
+              'X-Content-Type-Options': 'nosniff',
+            },
           });
         }
         const actionError = sanitizeServerActionError(e);
@@ -2158,8 +2173,9 @@ async function handleFarmLlmsTxtRequest(request, context) {
 function getFarmAgentListedPages() {
   const guard = {
     config: { middleware: farmConfigMiddleware },
+    // With its module, so a root middleware.ts's own config.matcher names the pages it guards.
     middlewareRoutes: Object.keys(middlewares)
-      .map((filePath) => ({ path: middlewarePathToRoute(filePath) }))
+      .map((filePath) => ({ path: middlewarePathToRoute(filePath), module: middlewares[filePath] }))
       .filter((route) => route.path !== null),
   };
   const listed = new Map();

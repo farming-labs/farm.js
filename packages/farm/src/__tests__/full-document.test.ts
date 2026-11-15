@@ -18,6 +18,8 @@ import {
   HOISTED_HEAD_ELEMENT,
   isFarmFullDocument,
   opensFarmFullDocument,
+  takeFarmHoistedHead,
+  appendFarmHead,
   removeFarmDocumentTitles,
 } from "../server/full-document";
 
@@ -610,5 +612,56 @@ describe("streamed full documents", () => {
     const empty = transform();
     expect(empty.write("")).toBe("");
     expect(empty.end()).toMatchObject({ document: false });
+  });
+});
+
+describe("head elements a component renders outside a full document", () => {
+  async function render(element: React.ReactElement) {
+    let html = "";
+    const sink = new Writable({
+      write(chunk, _encoding, callback) {
+        html += chunk.toString();
+        callback();
+      },
+    });
+    renderToPipeableStream(element, { onAllReady() {} }).pipe(sink);
+    await finished(sink);
+    return html;
+  }
+
+  it("takes the <meta> and <title> React writes ahead of the render", async () => {
+    const html = await render(
+      React.createElement(
+        "div",
+        null,
+        React.createElement("meta", { name: "status", content: "count 0" }),
+        React.createElement("title", null, "Inbox"),
+        React.createElement("p", null, "body"),
+      ),
+    );
+    expect(html.startsWith("<meta")).toBe(true);
+    const split = takeFarmHoistedHead(html, true)!;
+    expect(split.head).toBe('<meta name="status" content="count 0"/><title>Inbox</title>');
+    expect(split.body).toBe("<div><p>body</p></div>");
+    expect(appendFarmHead("<html><head><title>x</title></head>", split.head)).toBe(
+      '<html><head><title>x</title><meta name="status" content="count 0"/><title>Inbox</title>\n</head>',
+    );
+  });
+
+  it("leaves a full document whole, for its own head to take them", () => {
+    const markup = '<meta name="a" content="b"/><html><head></head><body></body></html>';
+    expect(takeFarmHoistedHead(markup, true)).toEqual({ head: "", body: markup });
+  });
+
+  it("waits for the next chunk while a streamed prefix could still be a head element", () => {
+    expect(takeFarmHoistedHead('<meta name="a" content="b"/>', false)).toBeNull();
+    expect(takeFarmHoistedHead('<meta name="a"', false)).toBeNull();
+    expect(takeFarmHoistedHead("<title>In", false)).toBeNull();
+    expect(takeFarmHoistedHead('<meta name="a" content="b"/><title>In', false)).toBeNull();
+    expect(takeFarmHoistedHead('<meta name="a" content="b"/><div>', false)).toEqual({
+      head: '<meta name="a" content="b"/>',
+      body: "<div>",
+    });
+    expect(takeFarmHoistedHead("<div>", false)).toEqual({ head: "", body: "<div>" });
   });
 });

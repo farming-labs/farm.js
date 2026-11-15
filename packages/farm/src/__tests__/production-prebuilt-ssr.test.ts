@@ -246,6 +246,11 @@ async function readAllClientJavaScript(root: string): Promise<string> {
   return readDirectory(path.join(root, ".farm", "client"));
 }
 
+/**
+ * The browser halves of these tests run only where Chromium is installed. CI
+ * sets FARM_REQUIRE_TEST_BROWSER=1 in the job that installs it, so a missing
+ * browser fails there instead of skipping those assertions unnoticed.
+ */
 async function resolveInstalledChromiumExecutable(): Promise<string | null> {
   const configured = process.env.FARM_TEST_CHROMIUM_EXECUTABLE_PATH;
   if (configured) return configured;
@@ -254,7 +259,13 @@ async function resolveInstalledChromiumExecutable(): Promise<string | null> {
     const executablePath = chromium.executablePath();
     await fs.access(executablePath);
     return executablePath;
-  } catch {
+  } catch (error) {
+    if (process.env.FARM_REQUIRE_TEST_BROWSER === "1") {
+      throw new Error(
+        "Chromium is required when FARM_REQUIRE_TEST_BROWSER=1. Install it with `pnpm exec playwright install chromium` or set FARM_TEST_CHROMIUM_EXECUTABLE_PATH.",
+        { cause: error },
+      );
+    }
     return null;
   }
 }
@@ -2768,7 +2779,9 @@ export function CopyButton({ text }) {
           { FARMJS_API_KEY: key, FARMJS_API_URL: `http://127.0.0.1:${receiverPort}` },
         );
         expect(received[0]!.headers.authorization).toBe(`Bearer ${key}`);
-        expect(received[0]!.body).not.toContain("private");
+        // The path, never its query string or the request's cookies.
+        expect(received[0]!.body).not.toContain("private-query");
+        expect(received[0]!.body).not.toContain("private-cookie");
         expect(JSON.parse(received[0]!.body)).toEqual({
           schemaVersion: 1,
           events: [
@@ -2778,10 +2791,16 @@ export function CopyButton({ text }) {
               timestamp: expect.any(String),
               kind: "request",
               route: "/users/[id]",
+              path: "/users/private-customer",
               method: "GET",
               status: 200,
               durationMs: expect.any(Number),
-              agent: { family: "anthropic", category: "agent", identity: "self-reported" },
+              agent: {
+                family: "anthropic",
+                category: "agent",
+                identity: "self-reported",
+                name: "Claude-User",
+              },
             },
           ],
         });
@@ -3039,7 +3058,19 @@ export default {
       expect(requests().filter((line) => line.includes("/[unmatched]"))).toEqual([
         "GET /[unmatched] 404",
       ]);
-      expect(received.join("")).not.toContain("private");
+      // Templates never carry the request's own segments; each path is what was asked for.
+      const events = received.flatMap((body) => JSON.parse(body).events);
+      expect(events.map(({ route }) => route).join(" ")).not.toContain("private");
+      expect(events.filter(({ kind }) => kind === "request").map(({ path }) => path)).toEqual(
+        expect.arrayContaining([
+          "/blog/private-post.md",
+          "/docs/private-missing",
+          "/blog/private-post",
+          "/private-missing",
+          "/mcp",
+        ]),
+      );
+      expect(received.join("")).not.toContain("private-query");
     } finally {
       await new Promise((resolve) => receiver.close(resolve));
       await fs.rm(root, { recursive: true, force: true });
@@ -4513,11 +4544,19 @@ await server.listen(Number(process.env.PORT));
             await expect
               .poll(() => page.locator("[data-stable-counter]").textContent())
               .toBe("stable:1");
+            await page.locator('[data-live-counter="first"]').evaluate((element) => {
+              (
+                window as typeof window & { __farmParityFirstCounter?: Element }
+              ).__farmParityFirstCounter = element;
+            });
 
             await fs.writeFile(
               path.join(developmentRoot, "src", "components", "live-counter.tsx"),
               isolatedParityCounterSource("after"),
             );
+            // React Fast Refresh, on by default in development, swaps the edited
+            // component inside every live boundary and keeps its state, as it does
+            // for route-wide client components.
             await expect
               .poll(
                 () =>
@@ -4526,7 +4565,17 @@ await server.listen(Number(process.env.PORT));
                     .evaluateAll((elements) => elements.map((element) => element.textContent)),
                 { timeout: 10_000 },
               )
-              .toEqual(["after:first:0", "after:second:0"]);
+              .toEqual(["after:first:1", "after:second:0"]);
+            expect(
+              await page
+                .locator('[data-live-counter="first"]')
+                .evaluate(
+                  (element) =>
+                    element ===
+                    (window as typeof window & { __farmParityFirstCounter?: Element })
+                      .__farmParityFirstCounter,
+                ),
+            ).toBe(true);
 
             expect(await page.locator("[data-stable-counter]").textContent()).toBe("stable:1");
             expect(
@@ -4568,7 +4617,7 @@ await server.listen(Number(process.env.PORT));
               await page
                 .locator("[data-live-counter]")
                 .evaluateAll((elements) => elements.map((element) => element.textContent)),
-            ).toEqual(["after:first:0", "after:second:0"]);
+            ).toEqual(["after:first:1", "after:second:0"]);
             expect(
               await page.evaluate(() =>
                 (

@@ -65,6 +65,7 @@ export type RoutePath =
   | "/compat/workspace-ui"
   | "/context"
   | `/context/${string}`
+  | "/context/deferred"
   | "/guarded"
   | "/hooks"
   | "/inline"
@@ -165,6 +166,7 @@ export type RoutePattern =
   | "/compat/workspace-ui"
   | "/context"
   | "/context/[item]"
+  | "/context/deferred"
   | "/guarded"
   | "/hooks"
   | "/inline"
@@ -266,6 +268,7 @@ export type RouteModulePattern =
   | "/compat/workspace-ui"
   | "/context"
   | "/context/[item]"
+  | "/context/deferred"
   | "/guarded"
   | "/hooks"
   | "/inline"

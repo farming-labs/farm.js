@@ -50,6 +50,8 @@
     "benchmark:frameworks": "node benchmarks/frameworks/run.mjs",
     "benchmark:client-chunking": "node benchmarks/client-chunking/run.mjs",
     "benchmark:app-scale": "NODE_OPTIONS=--max-old-space-size=12288 pnpm --filter @farm.js/core build:runtime && pnpm --filter @farm.js/cli build && node benchmarks/app-scale/run.mjs",
+    "benchmark:dev-scale": "NODE_OPTIONS=--max-old-space-size=12288 pnpm --filter @farm.js/core build:runtime && pnpm --filter @farm.js/cli build && node benchmarks/dev-scale/run.mjs",
+    "benchmark:build-scale": "NODE_OPTIONS=--max-old-space-size=12288 pnpm --filter @farm.js/core build:runtime && pnpm --filter @farm.js/cli build && node benchmarks/build-scale/run.mjs",
     "benchmark:compiler": "node benchmarks/compiler/run.mjs",
     "benchmark:react-optimizer": "node benchmarks/react-optimizer/run.mjs",
     "benchmark:isolated-hydration": "node benchmarks/isolated-hydration/run.mjs",

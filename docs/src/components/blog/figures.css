@@ -184,7 +184,9 @@
   display: flex;
   flex-direction: column;
   gap: 0.75em;
-  padding: 0 0.4em;
+  /* A bubble's tail pokes 11px past it (.bf-tail). On small type, this padding and the body's
+     1.2em must still hold it, or the body's overflow clips its tip. */
+  padding: 0 max(0.4em, calc(11px - 1.2em));
 }
 /* Message bubbles: dark, hairline border, a small curved tail on the sender's side. */
 .bf-bubble {
@@ -356,9 +358,10 @@
 }
 
 /* verbatim code inside merged figures */
+/* Bleeds to the body's edges: past its 1.2em padding, the body's overflow clips the accent bar. */
 .bf-add {
-  margin: 0 -1.3em;
-  padding: 0 1.3em;
+  margin: 0 -1.2em;
+  padding: 0 1.2em;
   background: rgb(255 255 255 / 0.06);
   box-shadow: inset 2px 0 0 #ededed;
   color: #fff;
@@ -478,7 +481,10 @@
 .blog-figure:not([data-state="playing"]) .bf-toggle .bf-icon-pause {
   display: none;
 }
+/* A figure that scrolls sideways keeps its caption in view, as it does its controls. */
 .blog-figure figcaption {
+  position: sticky;
+  left: 0;
   margin-top: 0.4rem;
   text-align: center;
   font-family: var(--font-geist-mono), ui-monospace, monospace;
@@ -809,7 +815,9 @@
    connectors at a legible size, instead of a 600px stage that scrolls sideways. */
 .bf-stage--narrow {
   display: none;
-  min-width: 0;
+  /* Where its type reaches the 9px floor (the font-size above), the stage stops shrinking and
+     scrolls sideways like the wide stage, so the text keeps the room its panels were drawn for. */
+  min-width: calc(9px / (0.0162 * var(--bf-scale, 1)));
 }
 .bf-stage--narrow .bf-panel--code .bf-body {
   white-space: pre-wrap;

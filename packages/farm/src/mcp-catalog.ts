@@ -6,7 +6,8 @@
  * Kept free of Node built-ins: the mirror runs on edge runtimes too.
  *
  * MCP servers Farm does not serve, such as a docs runtime's endpoint, join the AI
- * catalog through `registerFarmMCPServer` instead; they publish no tools here.
+ * catalog through `registerFarmMCPServer` instead; they publish no tools here. Farm asks a
+ * docs runtime's server for its tools over MCP instead (see registered-mcp.ts).
  */
 import { matchAPIRoute } from "./api/route-pattern";
 import { resolveFarmAPICanonicalPathname, resolveFarmAPIServerRoutePath } from "./api/server-path";
@@ -91,8 +92,9 @@ interface FarmMCPServerRegistrationBase {
 /**
  * An MCP server that Farm lists in `/.well-known/ai-catalog.json`, `/.well-known/ard.json`,
  * and the generated `/llms.txt`, but does not serve: a docs runtime's endpoint, an agent
- * runtime, or a server on another host. It is not part of the `/.well-known/farmjs.json`
- * manifest, which lists the tools Farm itself serves.
+ * runtime, or a server on another host. When a docs runtime serves it at a `path`, the
+ * `/.well-known/farmjs.json` manifest lists it with the tools it lists to anonymous clients,
+ * and Farm Infra analytics reports its tool calls.
  */
 export type FarmMCPServerRegistration = FarmMCPServerRegistrationBase &
   (

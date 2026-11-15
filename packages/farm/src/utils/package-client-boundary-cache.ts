@@ -380,5 +380,33 @@ export function runWithPackageClientBoundaryCacheFile<T>(file: string, operation
   cache.load(file);
   const result = getStorage().run(cache, operation);
   cache.persistSync();
+  latestDevCache = { file, cache };
   return result;
+}
+
+// The inspections of the dev server's latest plan, which its transforms and renders reuse until
+// the next plan or watched change.
+let latestDevCache: { file: string; cache: PackageClientBoundaryCache } | undefined;
+
+/**
+ * @internal Run `operation` (synchronous) with the inspections of the latest dev plan backed by
+ * `file`, as the dev server's transforms and renders inspect the packages a module imports. Each
+ * of those inspections otherwise read the whole package entry graph again: every module that
+ * imports an icon barrel read each of its icon modules. A plan still starts from the persisted
+ * file, so a dependency installed during development is read again by the next plan. Inside a
+ * build's scope the build's cache is used as it is.
+ */
+export function runWithLatestPackageClientBoundaryCache<T>(file: string, operation: () => T): T {
+  if (getPackageClientBoundaryCache()) return operation();
+  if (latestDevCache?.file !== file) {
+    const cache = new PackageClientBoundaryCache();
+    cache.load(file);
+    latestDevCache = { file, cache };
+  }
+  return getStorage().run(latestDevCache.cache, operation);
+}
+
+/** @internal Forget the latest dev plan's inspections, as the dev server does on a watched change. */
+export function dropLatestPackageClientBoundaryCache(): void {
+  latestDevCache = undefined;
 }

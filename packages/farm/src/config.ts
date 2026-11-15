@@ -1465,7 +1465,12 @@ export async function resolveConfig(
     performance: resolveFarmPerformanceConfig(userConfig.performance),
     theme: resolveFarmThemeConfig(userConfig.theme, basePath),
     publicDir: userConfig.publicDir || "public",
-    i18n: resolveFarmI18nConfig(userConfig.i18n, { root, mode, basePath }),
+    i18n: resolveFarmI18nConfig(userConfig.i18n, {
+      root,
+      mode,
+      basePath,
+      trailingSlash: userConfig.trailingSlash ?? false,
+    }),
     openapi,
     middleware: validateMiddlewareConfig(userConfig.middleware) || {},
     notFound: userConfig.notFound || {},

@@ -292,10 +292,11 @@ test("a prop holding </script> and line separators reaches the client unchanged 
 test("a meta tag a client component renders is hoisted into the head and follows its state, as React 19 hoists it", async ({
   page,
 }) => {
-  test.fail(
-    mode === "islands",
-    "an island's React root is its <f-island>, not the document, so React keeps the meta tag in the island",
-  );
+  // The server sends it in the head, before any JavaScript runs.
+  const html = await (await page.request.get("/battle/shapes")).text();
+  const head = html.slice(0, html.indexOf("</head>"));
+  expect(head).toContain('<meta name="battle-island" content="count 0"/>');
+  expect(html.indexOf('name="battle-island"')).toBe(html.lastIndexOf('name="battle-island"'));
   const errors = collectErrors(page);
   await page.goto("/battle/shapes");
   await page.waitForLoadState("networkidle");
@@ -346,10 +347,44 @@ test("a client component that renders a list item hydrates inside the list", asy
 test("a client component's list item is a direct child of the server's list, as React Server Components render it", async ({
   page,
 }) => {
-  test.fail(
-    mode === "islands",
-    "islands wrap each client component in <f-island>, so its <li> is not a direct child of the <ul>",
-  );
+  const errors = collectErrors(page);
   await page.goto("/battle/structure");
+  await page.waitForLoadState("networkidle");
   await expect(page.locator("[data-testid=list] > li")).toHaveCount(1);
+  await page.getByTestId("item-first").click();
+  await expect(page.getByTestId("item-first")).toHaveText("first done");
+  expect(errors).toEqual([]);
+});
+
+test("client components render table rows, select options and svg shapes where the server placed them", async ({
+  page,
+  request,
+}) => {
+  // The HTML parser keeps each element where the server wrote it: no marker inside the table,
+  // the select or the svg for it to move or drop.
+  const html = await (await request.get("/battle/structure")).text();
+  const table = /<table data-testid="table">([\s\S]*?)<\/table>/.exec(html)![1]!;
+  const select = /<select[^>]*data-testid="select"[^>]*>([\s\S]*?)<\/select>/.exec(html)![1]!;
+  const svg = /<svg[^>]*data-testid="svg"[^>]*>([\s\S]*?)<\/svg>/.exec(html)![1]!;
+  for (const inner of [table, select, svg]) expect(inner).not.toMatch(/<f-[a-z]/);
+
+  const errors = collectErrors(page);
+  await page.goto("/battle/structure");
+  await page.waitForLoadState("networkidle");
+  await expect(page.locator("[data-testid=table] > tbody > tr")).toHaveCount(2);
+  await page.getByTestId("row-beta").click();
+  await page.getByTestId("row-beta").click();
+  await expect(page.getByTestId("row-beta")).toHaveText("beta 2");
+  await expect(page.getByTestId("row-alpha")).toHaveText("alpha 0");
+
+  await expect(page.locator("[data-testid=select] > option")).toHaveCount(2);
+  await page.getByTestId("select").selectOption("mint");
+  await expect(page.getByTestId("select")).toHaveValue("mint");
+
+  const shape = page.locator("[data-testid=svg] > circle");
+  await expect(shape).toHaveCount(1);
+  expect(await shape.evaluate((node) => node.namespaceURI)).toBe("http://www.w3.org/2000/svg");
+  await shape.click();
+  await expect(shape).toHaveAttribute("r", "8");
+  expect(errors).toEqual([]);
 });

@@ -30,6 +30,25 @@ function alternates(html: string): Record<string, string> {
 }
 
 describe("renderFarmLocaleAlternateLinks", () => {
+  it("gives every alternate the app's trailingSlash, as its canonical URL has", () => {
+    const config = { ...locales, basePath: "/app", trailingSlash: true };
+    expect(
+      alternates(renderFarmLocaleAlternateLinks("/about", config, { origin: "https://farm.test" })),
+    ).toEqual({
+      en: "https://farm.test/app/about/",
+      fr: "https://farm.test/app/fr/about/",
+      "x-default": "https://farm.test/app/about/",
+    });
+    // The home page in each locale too.
+    expect(
+      alternates(renderFarmLocaleAlternateLinks("/", config, { origin: "https://farm.test" })),
+    ).toEqual({
+      en: "https://farm.test/app/",
+      fr: "https://farm.test/app/fr/",
+      "x-default": "https://farm.test/app/",
+    });
+  });
+
   it("resolves every locale and x-default against the request origin", () => {
     expect(
       alternates(

@@ -70,6 +70,7 @@ export class FarmI18nRuntime {
       defaultLocale: this.config.defaultLocale,
       routing: this.config.routing,
       basePath: this.config.basePath,
+      trailingSlash: this.config.trailingSlash,
       cookie: this.config.cookie,
       direction: getFarmLocaleDirection(resolution.locale, this.config.direction),
       messages: {

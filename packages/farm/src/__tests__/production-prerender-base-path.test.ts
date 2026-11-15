@@ -248,6 +248,28 @@ describe("Vercel routes for a prerendered page's other trailing-slash spelling",
     expect(createFarmVercelCanonicalSlashRoutes(["/"])).toEqual([]);
   });
 
+  it("splits the spellings of many pages into routes Vercel accepts", () => {
+    // About 270 pages outgrew one route on a real site: Vercel refused the deployment with
+    // "Builder returned invalid routes: should NOT be longer than 4096 characters".
+    const pages = Array.from({ length: 300 }, (_, i) => `/idea/a-long-prerendered-page-${i}`);
+    const routes = createFarmVercelCanonicalSlashRoutes(pages);
+    expect(routes.length).toBeGreaterThan(1);
+    for (const route of routes) {
+      expect(route.src!.length).toBeLessThanOrEqual(4096);
+      expect(route.dest).toBe("/__nitro");
+    }
+    for (const page of pages) {
+      expect(
+        routes.some((route) => new RegExp(route.src!).test(`${page}/`)),
+        page,
+      ).toBe(true);
+      expect(
+        routes.some((route) => new RegExp(route.src!).test(page)),
+        page,
+      ).toBe(false);
+    }
+  });
+
   it("runs after routing middleware and before Vercel serves static files", () => {
     const middleware = { src: "^/docs$", middlewarePath: "_farm_middleware", continue: true };
     const [canonical] = createFarmVercelCanonicalSlashRoutes(["/docs"]);

@@ -109,7 +109,7 @@ function FileTreeItem({ node, path, depth, activePath, onSelect }: FileTreeItemP
           "farm-file-tree-item group/file font-mono",
           isFolder && !isSelected && "text-white/62 hover:bg-white/[0.035] hover:text-white/88",
           !isFolder && !isSelected && "text-white/40 hover:bg-white/[0.035] hover:text-white/72",
-          isSelected && "bg-white/[0.055] text-white/92",
+          isSelected && "bg-white/[0.055]",
         )}
         onClick={() => {
           if (isFolder) setIsOpen((current) => !current);
@@ -143,10 +143,7 @@ function FileTreeItem({ node, path, depth, activePath, onSelect }: FileTreeItemP
         <span className="min-w-0 flex-1 truncate">{node.name}</span>
         {node.meta ? (
           <span
-            className={cn(
-              "ml-2 shrink-0 text-[8px] uppercase",
-              isSelected ? "text-white/64" : "text-white/28",
-            )}
+            className={cn("ml-2 shrink-0 text-[8px] uppercase", !isSelected && "text-white/28")}
           >
             {node.meta}
           </span>

@@ -90,6 +90,21 @@ test("a client component reads context from a client provider in a server layout
   expect(errors).toEqual([]);
 });
 
+test("a client component that defers its hydration reads its layout's provider", async ({
+  page,
+}) => {
+  const errors = collectErrors(page);
+  await page.goto("/context/deferred");
+  await hydrated(page);
+  await page.getByTestId("theme-later").scrollIntoViewIfNeeded();
+  await expect(page.getByTestId("theme-later")).toHaveText("Later theme: light");
+  await page.getByRole("button", { name: "Toggle theme" }).click();
+  // Both consumers read the one provider: a deferred island is not a root outside it.
+  await expect(page.getByTestId("theme-label")).toHaveText("Theme: dark");
+  await expect(page.getByTestId("theme-later")).toHaveText("Later theme: dark");
+  expect(errors).toEqual([]);
+});
+
 test("a server layout around a client provider keeps its code on the server", async ({ page }) => {
   const scripts: string[] = [];
   page.on("response", async (response) => {
@@ -380,6 +395,38 @@ test("client navigation keeps a layout's client state and does not reload the do
   expect(await page.evaluate(() => (window as { __contract?: number }).__contract)).toBe(1);
   await page.goBack();
   await expect(page.getByRole("heading", { name: "Nav page A" })).toBeVisible();
+  expect(errors).toEqual([]);
+});
+
+test("a dev document inlines its own route, and navigation loads the others", async ({
+  page,
+  request,
+}) => {
+  test.skip(!dev || mode !== "islands", "development documents inline the client manifest");
+  // Every route's entry made each document grow with the app (about 650 KB at 1,000 routes).
+  const html = await (await request.get("/nav/a")).text();
+  const inlined = JSON.parse(html.match(/window\.__FARM_MANIFEST__ = (.*);\n/)![1]!);
+  expect(Object.keys(inlined.routes)).toEqual(["/nav/a"]);
+  expect(Object.keys(inlined.layouts).sort()).toEqual(["/", "/nav"]);
+  expect(inlined.module).toBe("/@farm/manifest");
+
+  const errors = collectErrors(page);
+  await page.goto("/nav/a");
+  await hydrated(page);
+  await page.evaluate(() => ((window as { __contract?: number }).__contract = 1));
+  await page.getByRole("button", { name: "Layout clicks: 0" }).click();
+  await page.getByRole("link", { name: "Page B" }).click();
+  await expect(page.getByRole("heading", { name: "Nav page B" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Layout clicks: 1" })).toBeVisible();
+  const routes = await page.evaluate(() =>
+    Object.keys((window as { __FARM_MANIFEST__?: { routes: object } }).__FARM_MANIFEST__!.routes),
+  );
+  expect(routes).toEqual(expect.arrayContaining(["/", "/nav/a", "/nav/b", "/stream"]));
+  await page.goBack();
+  await expect(page.getByRole("heading", { name: "Nav page A" })).toBeVisible();
+  await page.goForward();
+  await expect(page.getByRole("heading", { name: "Nav page B" })).toBeVisible();
+  expect(await page.evaluate(() => (window as { __contract?: number }).__contract)).toBe(1);
   expect(errors).toEqual([]);
 });
 

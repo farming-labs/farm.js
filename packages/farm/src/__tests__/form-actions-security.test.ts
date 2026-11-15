@@ -15,8 +15,9 @@ function actionRequest(
   id: string,
   headers: Record<string, string>,
   value = "saved",
+  url = "https://app.test/todos",
 ) {
-  return new Request("https://app.test/todos", {
+  return new Request(url, {
     method: "POST",
     headers: {
       ...headers,
@@ -35,6 +36,9 @@ const origins: {
   name: string;
   headers: Record<string, string>;
   allowedOrigins?: string[];
+  /** The URL the adapter rebuilt, behind a TLS-terminating proxy. */
+  url?: string;
+  trustProxy?: boolean;
   allowed: boolean;
 }[] = [
   { name: "same origin", headers: { origin: "https://app.test" }, allowed: true },
@@ -75,6 +79,48 @@ const origins: {
     allowed: false,
   },
   {
+    name: "a trusted TLS proxy's forwarded scheme",
+    url: "http://app.test/todos",
+    headers: { origin: "https://app.test", host: "app.test", "x-forwarded-proto": "https" },
+    trustProxy: true,
+    allowed: true,
+  },
+  {
+    name: "a trusted proxy's forwarded host and scheme",
+    url: "http://127.0.0.1:3000/todos",
+    headers: {
+      origin: "https://app.test",
+      host: "127.0.0.1:3000",
+      "x-forwarded-host": "app.test",
+      "x-forwarded-proto": "https",
+    },
+    trustProxy: true,
+    allowed: true,
+  },
+  {
+    name: "forwarded headers without trustProxy",
+    url: "http://127.0.0.1:3000/todos",
+    headers: {
+      origin: "https://app.test",
+      host: "127.0.0.1:3000",
+      "x-forwarded-host": "app.test",
+      "x-forwarded-proto": "https",
+    },
+    allowed: false,
+  },
+  {
+    name: "foreign origin behind a trusted proxy",
+    url: "http://127.0.0.1:3000/todos",
+    headers: {
+      origin: "https://evil.test",
+      host: "127.0.0.1:3000",
+      "x-forwarded-host": "app.test",
+      "x-forwarded-proto": "https",
+    },
+    trustProxy: true,
+    allowed: false,
+  },
+  {
     name: "explicitly trusted cross-site origin",
     headers: { origin: "https://forms.test", "sec-fetch-site": "cross-site" },
     allowedOrigins: ["https://forms.test"],
@@ -112,13 +158,14 @@ describe.each<Transport>(["javascript", "form"])("islands %s action security", (
     const action = vi.fn(async () => "saved");
     registerFarmFormAction(action, id);
     const config = resolveServerActionsConfig({ allowedOrigins: scenario.allowedOrigins });
-    const request = actionRequest(transport, id, scenario.headers);
-    const validateRsc = () => validateServerActionRequest(request, config);
+    const request = actionRequest(transport, id, scenario.headers, "saved", scenario.url);
+    const options = { trustProxy: scenario.trustProxy };
+    const validateRsc = () => validateServerActionRequest(request, config, options);
 
     if (scenario.allowed) expect(validateRsc).not.toThrow();
     else expect(validateRsc).toThrow();
 
-    const response = await handleFarmFormActionRequest(request, config);
+    const response = await handleFarmFormActionRequest(request, config, request.url, options);
     expect(response?.status).toBe(scenario.allowed ? (transport === "form" ? 303 : 200) : 403);
     expect(action).toHaveBeenCalledTimes(scenario.allowed ? 1 : 0);
     expect(response?.headers.get("cache-control")).toBe("no-store");

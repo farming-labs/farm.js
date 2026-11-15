@@ -16,7 +16,11 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
 }
 
 export function ThemeLabel() {
-  return <p data-testid="theme-label">{`Theme: ${useContext(ThemeContext).theme}`}</p>;
+  return <p data-testid="theme-label">{`Theme: ${useTheme()}`}</p>;
+}
+
+export function useTheme(): string {
+  return useContext(ThemeContext).theme;
 }
 
 export function ThemeToggle() {

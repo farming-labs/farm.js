@@ -3,7 +3,12 @@ import type { ViteDevServer } from "vite";
 import { resolveFarmPlatform, validateFarmDesktopConfig } from "../desktop/config";
 import { farmDesktopDevGuardPlugin } from "../desktop/dev-guard-plugin";
 import type { FarmConfig } from "../types";
-import { farmI18nClientBridgePlugin, farmPlugin, farmServerOnlyEntriesPlugin } from "../vite";
+import {
+  farmI18nClientBridgePlugin,
+  farmIslandContainersPlugin,
+  farmPlugin,
+  farmServerOnlyEntriesPlugin,
+} from "../vite";
 import { logger } from "../utils";
 import { readSchemaTables } from "../schema-owner";
 import {
@@ -28,7 +33,6 @@ import {
   createHeadersPlugin,
   createRewritesPlugin,
   createCompressionPlugin,
-  createLoggerPlugin,
 } from "../plugins";
 import { createFarmInfraAnalyticsPlugin } from "../plugins/infra-analytics";
 import {
@@ -353,13 +357,6 @@ export async function createServer(
       resolvedConfig.analytics !== false ? createFarmInfraAnalyticsPlugin() : null;
     if (infraAnalytics) pluginManager.addPlugin(infraAnalytics);
 
-    if (mode === "development") {
-      const hasLogger = pluginManager.getPlugins().some((p) => p.name === "farm:logger");
-      if (!hasLogger) {
-        pluginManager.addPlugin(createLoggerPlugin());
-      }
-    }
-
     // Run config hooks
     await pluginManager.runHookParallel("init");
 
@@ -406,6 +403,7 @@ export async function createServer(
             createDevDependencyStubsPlugin(),
             farmI18nClientBridgePlugin(),
             farmServerOnlyEntriesPlugin({ prebundleServerPackages: true }),
+            farmIslandContainersPlugin(finalConfig),
             farmPlugin(finalConfig, pluginManager, deferredSetup),
             farmEnvironmentFunctionsPlugin(finalConfig),
             createBrandingPlugin(),

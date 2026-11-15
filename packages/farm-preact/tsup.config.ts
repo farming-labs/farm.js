@@ -21,6 +21,8 @@ export default defineConfig({
     "@farm.js/core/server-fn/client",
     "@farm.js/core/server-query/client",
     "@farm.js/core/theme/client",
+    "@farm.js/react",
+    "@farm.js/react/vite",
     "@preact/preset-vite",
     "preact",
     "preact/compat",

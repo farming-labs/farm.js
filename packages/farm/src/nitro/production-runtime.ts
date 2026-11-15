@@ -48,6 +48,7 @@ export {
   _getRequestReadCount,
   _runWithCurrentRequest,
   _runWithFarmCspNonce,
+  _withFarmTrustedProxyOrigin,
   getCurrentRequest,
   resolveFarmWebRequestOrigin,
 } from "../server/request";
@@ -105,6 +106,11 @@ export { collectFarmDefaultMCPPages, resolveFarmDefaultMCPServer } from "../agen
 export { handleFarmDefaultMCPRequest } from "../agent-mcp-handler";
 export { createFarmAiCatalogResponse, listFarmMCPLlmsTxtLinks } from "../ai-catalog";
 export { registerFarmMCPServer } from "../mcp-catalog";
+export {
+  _listFarmRegisteredMCPServerTools,
+  _observeFarmRegisteredMCPResponse,
+  _readFarmRegisteredMCPCalls,
+} from "../registered-mcp";
 export { createFarmApiCatalogResponse } from "../api-catalog";
 export {
   collectFarmLlmsTxtPages,

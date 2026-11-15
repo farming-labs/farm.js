@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { resolveFarmI18nConfig } from "../i18n/config";
 import { FarmI18nRuntime } from "../i18n/runtime";
+import { stripFarmLocaleFromPathname } from "../i18n/routing";
 import { getFarmI18nClientSnapshot } from "../i18n/server";
 import { ServerRenderer } from "../server/renderer";
 
@@ -10,7 +11,15 @@ function createRenderer(routing: "none" | "prefix-except-default" = "none") {
     { root: "/test", mode: "production" },
   );
   const config = { root: "/test", srcDir: "src", outDir: "dist", basePath: "/", i18n };
-  const renderer = new ServerRenderer(config as any, {} as any, new FarmI18nRuntime(i18n));
+  // The route manager's own route path: the locale prefix stripped, as the real one does.
+  const routeManager = {
+    toRoutePathname: (pathname: string) => stripFarmLocaleFromPathname(pathname, i18n),
+  };
+  const renderer = new ServerRenderer(
+    config as any,
+    routeManager as any,
+    new FarmI18nRuntime(i18n),
+  );
   return renderer as any;
 }
 

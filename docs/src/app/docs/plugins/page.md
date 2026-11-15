@@ -475,6 +475,36 @@ identity `Content-Length` and strong `ETag` intact. A response with no `Content-
 alone, since its bytes may already be compressed. Set a `Content-Type` when a route returns text
 that should be compressed.
 
+### Request logging
+
+`createLoggerPlugin` writes one line per request through the portable `runtime.after` hook, so it behaves the same in development, Node output, and edge runtimes. The development server already prints its own `[FARM]` line for every request, so Farm does not register the logger for you; add it when you want structured output, redaction, or sampling.
+
+```ts
+import { defineConfig } from "@farm.js/core";
+import { createLoggerPlugin } from "@farm.js/core/plugin/server";
+
+export default defineConfig({
+  plugins: [
+    createLoggerPlugin({
+      headers: ["user-agent", "x-request-id"],
+      redact: ["x-session"],
+      sample: 0.25,
+    }),
+  ],
+});
+```
+
+| Option    | Default                           | Description                                                                                                                                               |
+| --------- | --------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `format`  | `"text"` in dev, `"json"` in prod | `text` prints `GET /about 200 12ms`; `json` prints one `{ time, level, method, path, status, durationMs, headers? }` object per line for log collectors.  |
+| `headers` | none                              | Request headers to include in each entry. Nothing is logged from the request unless it is listed here.                                                    |
+| `redact`  | built-in list                     | Header and query-string names, matched case-insensitively, whose values are logged as `[redacted]`. These add to the built-in list below.                 |
+| `sample`  | `1`                               | Fraction of requests to log, from `0` to `1`. Responses with a `5xx` status are always logged, so sampling thins routine traffic without hiding failures. |
+
+The built-in redaction list is `authorization`, `cookie`, `set-cookie`, `proxy-authorization`, `x-api-key`, `api_key`, `apikey`, `access_token`, `token`, `password`, and `secret`. It applies to query-string values in the logged path and to any header you select with `headers`; repeated keys and the original encoding of other query values are preserved. `4xx` responses log at level `warn` and `5xx` responses at `error` (written to `stderr`); everything else is `info`.
+
+The `beforeRequest` and `afterResponse` callback options still work as deprecated aliases for the Node-only flat hooks. New code should write a plugin with `runtime.before` or `runtime.after` instead.
+
 ## Legacy hooks
 
 Existing flat hooks such as `beforeRequest`, `afterResponse`, `beforeApiHandler`, `afterRender`, `beforeBundle`, and `shutdown` remain supported. They are deprecated where a structured equivalent exists. New plugins should use the grouped interface; do not define both versions of the same phase in one plugin because Farm will run both.

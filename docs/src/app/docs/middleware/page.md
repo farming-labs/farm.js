@@ -46,7 +46,9 @@ Data and headers written during middleware are request-scoped:
 
 Cookies set by multiple matching middleware handlers are accumulated into separate `Set-Cookie`
 headers. They are also preserved when the short-circuiting `Response` supplies its own cookies, so
-a returned response does not replace cookies already written through `ctx.cookies`.
+a returned response does not replace cookies already written through `ctx.cookies`. The response's
+own `Set-Cookie` headers come after them, so for a cookie both set, such as a session one handler
+refreshes and a logout response clears, the response's value is the one the browser keeps.
 
 A middleware handler that throws (other than `redirect()` or `notFound()`) fails the request. In a
 production build outside the RSC pipeline, a request under the API base path, or

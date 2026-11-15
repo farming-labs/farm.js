@@ -663,9 +663,11 @@ the page's file last changed, read when the server builds. Dynamic routes, pages
 says `robots: { index: false }` (their own, or a layout's when the page sets no `robots`), pages
 behind a route [`guard`](/docs/routing#route-guards), and
 pages a guard written for their path covers are left out: a `middleware.ts` in the page's folder or
-a parent below the root, a config middleware `matcher` that names the path, or an integration's
-`protectedRoutes`. Guards that cover every path (a root `middleware.ts`, middleware without a
-matcher or with a catch-all or function matcher, a plugin's `runtime.before` hook) hide nothing,
+a parent below the root, a root `middleware.ts` whose own `config.matcher` names the path (such as
+`matcher: ["/dashboard/:path*"]`), a config middleware `matcher` that names the path, or an
+integration's `protectedRoutes`. Guards that cover every path (a root `middleware.ts` without such a
+matcher, middleware without a matcher or with a catch-all or function matcher, a plugin's
+`runtime.before` hook) hide nothing,
 since they name no page; the content behind them stays private, because pages are read as a
 signed-out visitor. URLs use the root layout's `metadataBase`, or the request's origin when it has
 none, the same origin the generated `llms.txt` links to; set `metadataBase` so crawlers and caches
@@ -799,7 +801,8 @@ such as the [docs engine](/docs/docs-engine)'s endpoint, join the catalog throug
 
 Every app serves `/.well-known/farmjs.json` (and, for Farm 0.1.34's readers, `/.well-known/farmjs`)
 to any client: Farm's version and the installed `@farm.js/*` packages, the renderer and base path,
-the MCP tools Farm serves with their JSON Schemas, WebMCP browser tools, each integration's
+the MCP tools Farm serves with their JSON Schemas (and the docs engine's, which Farm asks for over
+MCP), WebMCP browser tools, each integration's
 category and provider (never its configuration), plugin names, and the site's public origin from
 `FARM_SITE_URL` or the host's production address.
 [Farm Infra analytics](/docs/infra-analytics) lists every field, and
@@ -1212,7 +1215,7 @@ The RSC development bridge applies these limits too. `POST`, `PUT`, `PATCH`, `DE
 bodies keep their original bytes, including multipart uploads and binary data. `GET` and `HEAD`
 remain bodyless. Action origin validation runs before buffering an action body.
 
-`trustProxy` defaults to `false`. Enable it only when the app is behind a trusted reverse proxy that removes client-supplied forwarding headers and writes its own `X-Forwarded-For`, `X-Forwarded-Host`, and `X-Forwarded-Proto` values. Farm uses those headers for the client address and public request URL only when the proxy is trusted. The client address is the last `X-Forwarded-For` hop, the one your proxy appended: a proxy that appends (nginx `$proxy_add_x_forwarded_for`, most load balancers) keeps whatever the client sent ahead of it, so earlier hops are never trusted. Behind a chain of proxies that address is the one the closest proxy saw; pass a rate-limit `keyGenerator` if you need an outer proxy's view. A directly exposed Farm server must leave it disabled so a client cannot spoof the address or authority used by rate limits, redirects, authentication callbacks, logs, or access policy.
+`trustProxy` defaults to `false`. Enable it only when the app is behind a trusted reverse proxy that removes client-supplied forwarding headers and writes its own `X-Forwarded-For`, `X-Forwarded-Host`, and `X-Forwarded-Proto` values. Farm uses those headers for the client address and public request URL only when the proxy is trusted. With `trustProxy` on, `request.url` in middleware (and `ctx.url`), pages (`getCurrentRequest()`), and API routes is that public URL, in development and production alike, so `new URL("/sign-in", request.url)` points at the origin visitors use. The client address is the last `X-Forwarded-For` hop, the one your proxy appended: a proxy that appends (nginx `$proxy_add_x_forwarded_for`, most load balancers) keeps whatever the client sent ahead of it, so earlier hops are never trusted. Behind a chain of proxies that address is the one the closest proxy saw; pass a rate-limit `keyGenerator` if you need an outer proxy's view. A directly exposed Farm server must leave it disabled so a client cannot spoof the address or authority used by rate limits, redirects, authentication callbacks, logs, or access policy.
 
 Workflow runner secrets are accepted only through `Authorization: Bearer <secret>` or `X-Farm-Workflow-Secret`. Farm does not accept secrets in query strings because URLs are commonly retained in logs, browser history, and referrer data.
 
@@ -1265,6 +1268,8 @@ serverActions: {
 ```
 
 Do not use `allowedOrigins` as a replacement for CORS or as a public API allowlist. Browser action requests must provide a matching `Origin` or `Referer`; Farm accepts `Sec-Fetch-Site: same-origin` when both are unavailable. Explicitly configured origins can cross a trusted proxy boundary.
+
+With [`server.trustProxy`](#server-http-policy) on, an action's origin is checked against the public origin the proxy's `X-Forwarded-Host` and `X-Forwarded-Proto` name, in RSC and islands apps, in development and production. An app behind a TLS-terminating proxy needs no `allowedOrigins` entry for its own public origin.
 
 `bodySizeLimit` accepts bytes or strings such as `"500kb"`, `"2mb"`, and `"2MiB"`. Farm checks `Content-Length` when present and also counts streamed bytes, so chunked requests cannot bypass the limit.
 
@@ -1538,7 +1543,8 @@ retention, preview-environment, opt-out, and static-export details.
 
 An app whose server environment sets `FARMJS_API_KEY` to a Site analytics key reports request and
 MCP tool analytics to that key's Farm Infra project. A key reaching several projects also needs
-`FARMJS_PROJECT_ID`. Set `analytics: false` to never send them. See
+`FARMJS_PROJECT_ID`. Each request is reported with its route template and the path it asked for
+(never its query string). Set `analytics: false` to never send them. See
 [Farm Infra analytics](/docs/infra-analytics) for what is sent and how.
 
 ## Deployment config

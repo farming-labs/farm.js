@@ -1012,8 +1012,8 @@ test("home keeps its agents link usable without JavaScript", async ({ browser, b
 
 // Figure panels are fixed boxes and their type has a legibility floor, so a layout without room
 // for its text spills out of its boxes. Without JavaScript each figure shows its final frame.
-for (const width of [360, 1440]) {
-  test(`native posts keep figure text inside its boxes at ${width}px`, async ({
+for (const width of [280, 320, 345, 360, 1440]) {
+  test(`blog and home page figures keep their text inside their boxes at ${width}px`, async ({
     browser,
     baseURL,
   }) => {
@@ -1025,7 +1025,14 @@ for (const width of [360, 1440]) {
     });
     const page = await context.newPage();
     try {
-      for (const pathname of ["/blog/web-to-native", "/blog/native-internals"]) {
+      for (const pathname of [
+        "/blog/0.1.0",
+        "/blog/agent-native",
+        "/blog/web-to-native",
+        "/blog/native-internals",
+        "/blog",
+        "/",
+      ]) {
         await page.goto(pathname);
         await page.evaluate(() => document.fonts.ready);
         const panels = page.locator(".blog-figure[data-figure] .bf-stage .bf-panel");
@@ -1060,6 +1067,54 @@ for (const width of [360, 1440]) {
     }
   });
 }
+
+// A post figure wider than a phone scrolls sideways inside itself; its caption must stay in view.
+test("blog figure captions stay in view while their figures scroll sideways", async ({
+  browser,
+  baseURL,
+}) => {
+  const context = await browser.newContext({
+    baseURL,
+    viewport: { width: 390, height: 900 },
+    javaScriptEnabled: false,
+    reducedMotion: "reduce",
+  });
+  const page = await context.newPage();
+  try {
+    let scrolled = 0;
+    for (const pathname of [
+      "/blog/0.1.0",
+      "/blog/agent-native",
+      "/blog/web-to-native",
+      "/blog/native-internals",
+    ]) {
+      await page.goto(pathname);
+      const result = await page
+        .locator(".blog-figure:not(.blog-figure--fit)")
+        .evaluateAll((figures) => {
+          const hidden: string[] = [];
+          let count = 0;
+          for (const figure of figures as HTMLElement[]) {
+            const caption = figure.querySelector("figcaption");
+            if (!caption || figure.scrollWidth <= figure.clientWidth) continue;
+            count += 1;
+            figure.scrollLeft = figure.scrollWidth;
+            const box = figure.getBoundingClientRect();
+            const rect = caption.getBoundingClientRect();
+            if (rect.left < box.left - 0.5 || rect.right > box.right + 0.5) {
+              hidden.push(figure.dataset.figure ?? "");
+            }
+          }
+          return { count, hidden };
+        });
+      scrolled += result.count;
+      expect(result.hidden, pathname).toEqual([]);
+    }
+    expect(scrolled).toBeGreaterThan(0);
+  } finally {
+    await context.close();
+  }
+});
 
 for (const width of [320, 390, 768]) {
   test(`blog navigation and reading stay usable at ${width}px without JavaScript`, async ({
