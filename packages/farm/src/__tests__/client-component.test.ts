@@ -1885,7 +1885,7 @@ export function Chart() {}
       "utf-8",
     );
     const docsRoutesStart = source.indexOf("if (syntheticDocsEntry)");
-    const docsRoutesEnd = source.indexOf("\n\n  const clientRouteSlots", docsRoutesStart);
+    const docsRoutesEnd = source.indexOf("\n\n    const clientRouteSlots", docsRoutesStart);
     expect(docsRoutesStart).toBeGreaterThan(-1);
     expect(docsRoutesEnd).toBeGreaterThan(docsRoutesStart);
 
@@ -1893,8 +1893,8 @@ export function Chart() {}
     expect(docsRoutes).toContain("layout.shouldHydrate || layout.hasIsolatedClientBoundaries");
     expect(docsRoutes).toContain("hasIsolatedClientBoundaries: applicableClientLayouts.some(");
     expect(docsRoutes).toContain(".flatMap((layout) => layout.isolatedBoundaries)");
-    const budgetStart = source.indexOf("\n  enforceFarmIsolatedHydrationRouteBudget(");
-    const budgetEnd = source.indexOf("\n  );", budgetStart);
+    const budgetStart = source.indexOf("\n    enforceFarmIsolatedHydrationRouteBudget(");
+    const budgetEnd = source.indexOf("\n    );", budgetStart);
     expect(budgetStart).toBeGreaterThan(-1);
     expect(budgetEnd).toBeGreaterThan(budgetStart);
     expect(source.slice(budgetStart, budgetEnd)).toContain(

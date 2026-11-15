@@ -123,6 +123,7 @@ import {
   createMarkdownPageHydrationPlanner,
   resolveFarmIsolatedClientHydrationMode,
   usesFarmServerTree,
+  withFarmSourceSnapshot,
   type ClientModuleHydrationPlan,
   type FarmClientHydrationPlanOptions,
   type IsolatedClientBoundaryReference,
@@ -2012,52 +2013,6 @@ async function buildClient(
     serverTreeLayouts: pagePlanOptions.serverOwners,
   };
 
-  const clientLayouts = layoutRoutes.map((layout) => {
-    try {
-      const metadata = getCachedClientModuleHydrationPlan(
-        layout.modulePath,
-        root,
-        isolatedMode,
-        hydrationPlanCache,
-        layoutPlanOptions,
-      );
-      return {
-        ...layout,
-        shouldHydrate: metadata.shouldHydrate,
-        islandStrategy: metadata.islandStrategy,
-        legacyShouldHydrate: metadata.legacyShouldHydrate,
-        legacyIslandStrategy: metadata.legacyIslandStrategy,
-        mode: metadata.mode,
-        estimatedIsolatedRootCount: metadata.estimatedIsolatedRootCount,
-        hasIsolatedClientBoundaries: metadata.hasIsolatedClientBoundaries,
-        isolatedHydrationEligible: metadata.isolatedHydrationEligible,
-        isolatedBoundaries: metadata.isolatedBoundaries,
-        asyncOwnerIslands: metadata.asyncOwnerIslands,
-        suppressedAsyncHydration: metadata.suppressedAsyncHydration,
-        fallbackReason: metadata.fallbackReason,
-        serverTreeLayout: metadata.serverTreeLayout,
-      };
-    } catch (error) {
-      logger.warn(`⚠️  Could not inspect layout file ${layout.modulePath}: ${error}`);
-      return {
-        ...layout,
-        shouldHydrate: false,
-        islandStrategy: null,
-        legacyShouldHydrate: false,
-        legacyIslandStrategy: null,
-        mode: isolatedMode,
-        estimatedIsolatedRootCount: 0,
-        hasIsolatedClientBoundaries: false,
-        isolatedHydrationEligible: false,
-        isolatedBoundaries: [],
-        asyncOwnerIslands: undefined,
-        suppressedAsyncHydration: undefined,
-        fallbackReason: undefined,
-        serverTreeLayout: undefined,
-      };
-    }
-  });
-
   // Pages are compared by directory so a layout inside a route group applies only
   // to the pages in that group. Docs pages sit in no group.
   const layoutAppliesToRoute = routeBoundaryCoversDirectory;
@@ -2092,206 +2047,260 @@ async function buildClient(
       : [syntheticDocsEntry, `${syntheticDocsEntry}/[...slug]`]
     : [];
 
-  const markdownPagePlan = createMarkdownPageHydrationPlanner(
-    resolveFarmMdxComponentsModulePath(resolveMdxConfig(config.mdx), root),
-    root,
-    isolatedMode,
-    { ...planOptions, packageReferences: pagePlanOptions.serverOwners },
-  );
-  const routePlans = pageRoutes.map((route) => ({
-    route,
-    metadata: isFarmMarkdownPageFile(route.modulePath)
-      ? markdownPagePlan()
-      : getCachedClientModuleHydrationPlan(
-          route.modulePath,
+  // One source snapshot for every plan: routes share most of their import graphs (the layouts, a
+  // component library and its barrels, the packages they import), which each route otherwise
+  // read, parsed and resolved again. Planning is synchronous, so no file changes while it runs.
+  const { clientLayouts, clientRouteSlots } = withFarmSourceSnapshot(() => {
+    const clientLayouts = layoutRoutes.map((layout) => {
+      try {
+        const metadata = getCachedClientModuleHydrationPlan(
+          layout.modulePath,
           root,
           isolatedMode,
           hydrationPlanCache,
-          pagePlanOptions,
-        ),
-  }));
-
-  enforceFarmIsolatedHydrationRouteBudget(
-    clientLayouts.map((layout) => ({
-      pattern: layout.pattern,
-      depth: layout.pattern.split("/").filter(Boolean).length,
-      metadata: layout,
-    })),
-    [
-      ...routePlans.map(({ route, metadata }) => ({
-        pattern: routeDirectory(route),
-        depth: getRouteDirectoryDepth(routeDirectory(route)),
-        metadata,
-      })),
-      ...syntheticDocsPatterns.map((pattern) => ({
-        pattern,
-        depth: pattern.split("/").filter(Boolean).length,
-        metadata: {
-          mode: isolatedMode,
+          layoutPlanOptions,
+        );
+        return {
+          ...layout,
+          shouldHydrate: metadata.shouldHydrate,
+          islandStrategy: metadata.islandStrategy,
+          legacyShouldHydrate: metadata.legacyShouldHydrate,
+          legacyIslandStrategy: metadata.legacyIslandStrategy,
+          mode: metadata.mode,
+          estimatedIsolatedRootCount: metadata.estimatedIsolatedRootCount,
+          hasIsolatedClientBoundaries: metadata.hasIsolatedClientBoundaries,
+          isolatedHydrationEligible: metadata.isolatedHydrationEligible,
+          isolatedBoundaries: metadata.isolatedBoundaries,
+          asyncOwnerIslands: metadata.asyncOwnerIslands,
+          suppressedAsyncHydration: metadata.suppressedAsyncHydration,
+          fallbackReason: metadata.fallbackReason,
+          serverTreeLayout: metadata.serverTreeLayout,
+        };
+      } catch (error) {
+        logger.warn(`⚠️  Could not inspect layout file ${layout.modulePath}: ${error}`);
+        return {
+          ...layout,
           shouldHydrate: false,
           islandStrategy: null,
           legacyShouldHydrate: false,
           legacyIslandStrategy: null,
+          mode: isolatedMode,
           estimatedIsolatedRootCount: 0,
           hasIsolatedClientBoundaries: false,
-          isolatedBoundaries: [] as IsolatedClientBoundaryReference[],
-        },
-      })),
-    ],
-    layoutAppliesToRoute,
-    { serverOwners: islandsMode },
-  );
-
-  for (const layout of clientLayouts) {
-    const matchesBuiltRoute =
-      pageRoutes.some((route) => layoutAppliesToRoute(layout.pattern, routeDirectory(route))) ||
-      docsEntries.some((docsEntry) => layoutAppliesToRoute(layout.pattern, docsEntry));
-    if (matchesBuiltRoute && layout.suppressedAsyncHydration) {
-      logger.warn(`⚠️  ${describeSuppressedAsyncHydration(layout.pattern, layout.fallbackReason)}`);
-    }
-  }
-
-  if (isolatedMode === "analyze") {
-    for (const { entry, metadata } of [
-      ...clientLayouts.map((layout) => ({ entry: layout, metadata: layout })),
-      ...routePlans.map(({ route, metadata }) => ({ entry: route, metadata })),
-    ]) {
-      if (!("isolatedHydrationEligible" in metadata) || !metadata.isolatedHydrationEligible) {
-        continue;
+          isolatedHydrationEligible: false,
+          isolatedBoundaries: [],
+          asyncOwnerIslands: undefined,
+          suppressedAsyncHydration: undefined,
+          fallbackReason: undefined,
+          serverTreeLayout: undefined,
+        };
       }
-      logger.info(
-        `📊 Isolated hydration analysis: ${entry.modulePath} can exclude its server owner and hydrate ${metadata.isolatedBoundaries.length} client ${metadata.isolatedBoundaries.length === 1 ? "boundary" : "boundaries"}.`,
-      );
-    }
-  }
+    });
 
-  // A server route slot's client components are islands of the pages its layout wraps.
-  const serverSlotPlans = islandsMode
-    ? routeSlots.flatMap((slot) => {
-        const plan = getCachedClientModuleHydrationPlan(
-          slot.modulePath,
-          root,
-          isolatedMode,
-          hydrationPlanCache,
-          { ...pagePlanOptions, serverOwners: true },
+    const markdownPagePlan = createMarkdownPageHydrationPlanner(
+      resolveFarmMdxComponentsModulePath(resolveMdxConfig(config.mdx), root),
+      root,
+      isolatedMode,
+      { ...planOptions, packageReferences: pagePlanOptions.serverOwners },
+    );
+    const routePlans = pageRoutes.map((route) => ({
+      route,
+      metadata: isFarmMarkdownPageFile(route.modulePath)
+        ? markdownPagePlan()
+        : getCachedClientModuleHydrationPlan(
+            route.modulePath,
+            root,
+            isolatedMode,
+            hydrationPlanCache,
+            pagePlanOptions,
+          ),
+    }));
+
+    enforceFarmIsolatedHydrationRouteBudget(
+      clientLayouts.map((layout) => ({
+        pattern: layout.pattern,
+        depth: layout.pattern.split("/").filter(Boolean).length,
+        metadata: layout,
+      })),
+      [
+        ...routePlans.map(({ route, metadata }) => ({
+          pattern: routeDirectory(route),
+          depth: getRouteDirectoryDepth(routeDirectory(route)),
+          metadata,
+        })),
+        ...syntheticDocsPatterns.map((pattern) => ({
+          pattern,
+          depth: pattern.split("/").filter(Boolean).length,
+          metadata: {
+            mode: isolatedMode,
+            shouldHydrate: false,
+            islandStrategy: null,
+            legacyShouldHydrate: false,
+            legacyIslandStrategy: null,
+            estimatedIsolatedRootCount: 0,
+            hasIsolatedClientBoundaries: false,
+            isolatedBoundaries: [] as IsolatedClientBoundaryReference[],
+          },
+        })),
+      ],
+      layoutAppliesToRoute,
+      { serverOwners: islandsMode },
+    );
+
+    for (const layout of clientLayouts) {
+      const matchesBuiltRoute =
+        pageRoutes.some((route) => layoutAppliesToRoute(layout.pattern, routeDirectory(route))) ||
+        docsEntries.some((docsEntry) => layoutAppliesToRoute(layout.pattern, docsEntry));
+      if (matchesBuiltRoute && layout.suppressedAsyncHydration) {
+        logger.warn(
+          `⚠️  ${describeSuppressedAsyncHydration(layout.pattern, layout.fallbackReason)}`,
         );
-        return plan.isClientComponent ? [] : [{ slot, plan }];
-      })
-    : [];
+      }
+    }
 
-  for (const { route, metadata } of routePlans) {
-    // The adapter imports and hydrates its compiled MDX modules itself. Keeping
-    // the same files in Farm's generic route table duplicates the docs runtime
-    // and can pull server-only Markdown dependencies into the browser bundle.
-    if (isAdapterDocsRoute(route.pattern)) continue;
+    if (isolatedMode === "analyze") {
+      for (const { entry, metadata } of [
+        ...clientLayouts.map((layout) => ({ entry: layout, metadata: layout })),
+        ...routePlans.map(({ route, metadata }) => ({ entry: route, metadata })),
+      ]) {
+        if (!("isolatedHydrationEligible" in metadata) || !metadata.isolatedHydrationEligible) {
+          continue;
+        }
+        logger.info(
+          `📊 Isolated hydration analysis: ${entry.modulePath} can exclude its server owner and hydrate ${metadata.isolatedBoundaries.length} client ${metadata.isolatedBoundaries.length === 1 ? "boundary" : "boundaries"}.`,
+        );
+      }
+    }
 
-    try {
+    // A server route slot's client components are islands of the pages its layout wraps.
+    const serverSlotPlans = islandsMode
+      ? routeSlots.flatMap((slot) => {
+          const plan = getCachedClientModuleHydrationPlan(
+            slot.modulePath,
+            root,
+            isolatedMode,
+            hydrationPlanCache,
+            { ...pagePlanOptions, serverOwners: true },
+          );
+          return plan.isClientComponent ? [] : [{ slot, plan }];
+        })
+      : [];
+
+    for (const { route, metadata } of routePlans) {
+      // The adapter imports and hydrates its compiled MDX modules itself. Keeping
+      // the same files in Farm's generic route table duplicates the docs runtime
+      // and can pull server-only Markdown dependencies into the browser bundle.
+      if (isAdapterDocsRoute(route.pattern)) continue;
+
+      try {
+        const applicableClientLayouts = clientLayouts.filter(
+          (layout) =>
+            (layout.shouldHydrate || layout.hasIsolatedClientBoundaries) &&
+            layoutAppliesToRoute(layout.pattern, routeDirectory(route)),
+        );
+        if (metadata.suppressedAsyncHydration) {
+          logger.warn(
+            `⚠️  ${describeSuppressedAsyncHydration(route.pattern, metadata.fallbackReason)}`,
+          );
+        }
+        const slotBoundaries = serverSlotPlans
+          .filter(({ slot }) =>
+            layoutAppliesToRoute(slot.ownerDirectory ?? slot.ownerPattern, routeDirectory(route)),
+          )
+          .flatMap(({ plan }) => plan.isolatedBoundaries);
+        if (
+          metadata.shouldHydrate ||
+          metadata.hasIsolatedClientBoundaries ||
+          applicableClientLayouts.length > 0 ||
+          slotBoundaries.length > 0
+        ) {
+          const relativePath = route.modulePath.replace(root, "").replace(/^\//, "");
+          const islandStrategy = resolveFarmRouteRootStrategy(
+            route,
+            metadata,
+            clientLayouts,
+            root,
+            islandsMode,
+          );
+          clientPages.push({
+            ...route,
+            relativePath,
+            pageShouldHydrate: metadata.shouldHydrate,
+            islandStrategy,
+            hasIsolatedClientBoundaries:
+              metadata.hasIsolatedClientBoundaries ||
+              applicableClientLayouts.some((layout) => layout.hasIsolatedClientBoundaries) ||
+              slotBoundaries.length > 0,
+            isolatedBoundaries: [
+              ...(metadata.hasIsolatedClientBoundaries ? metadata.isolatedBoundaries : []),
+              ...slotBoundaries,
+              ...applicableClientLayouts
+                // A server-tree layout's client components load from its tree.
+                .filter((layout) => layout.hasIsolatedClientBoundaries || layout.serverTreeLayout)
+                .flatMap((layout) => layout.isolatedBoundaries),
+            ],
+            // The server renders a server tree only below a hydrating layout.
+            ...(usesFarmServerTree(metadata) &&
+            applicableClientLayouts.some((layout) => layout.shouldHydrate)
+              ? { serverTree: true as const }
+              : {}),
+          });
+          logger.info(`📱 Found hydratable route: ${route.pattern} -> ${route.modulePath}`);
+        }
+      } catch (error) {
+        logger.warn(`⚠️  Could not inspect route file ${route.modulePath}: ${error}`);
+      }
+    }
+
+    if (syntheticDocsEntry) {
+      const docsEntry = syntheticDocsEntry;
       const applicableClientLayouts = clientLayouts.filter(
         (layout) =>
           (layout.shouldHydrate || layout.hasIsolatedClientBoundaries) &&
-          layoutAppliesToRoute(layout.pattern, routeDirectory(route)),
+          layoutAppliesToRoute(layout.pattern, docsEntry),
       );
-      if (metadata.suppressedAsyncHydration) {
-        logger.warn(
-          `⚠️  ${describeSuppressedAsyncHydration(route.pattern, metadata.fallbackReason)}`,
+      if (applicableClientLayouts.length > 0) {
+        const hydrationStrategies = applicableClientLayouts.flatMap((layout) =>
+          layout.islandStrategy ? [layout.islandStrategy] : [],
         );
-      }
-      const slotBoundaries = serverSlotPlans
-        .filter(({ slot }) =>
-          layoutAppliesToRoute(slot.ownerDirectory ?? slot.ownerPattern, routeDirectory(route)),
+        const islandStrategy = hydrationStrategies.every(
+          (strategy) => strategy === hydrationStrategies[0],
         )
-        .flatMap(({ plan }) => plan.isolatedBoundaries);
-      if (
-        metadata.shouldHydrate ||
-        metadata.hasIsolatedClientBoundaries ||
-        applicableClientLayouts.length > 0 ||
-        slotBoundaries.length > 0
-      ) {
-        const relativePath = route.modulePath.replace(root, "").replace(/^\//, "");
-        const islandStrategy = resolveFarmRouteRootStrategy(
-          route,
-          metadata,
-          clientLayouts,
-          root,
-          islandsMode,
-        );
-        clientPages.push({
-          ...route,
-          relativePath,
-          pageShouldHydrate: metadata.shouldHydrate,
+          ? (hydrationStrategies[0] ?? "load")
+          : "load";
+        const docsClientRoutes = syntheticDocsPatterns.map((pattern) => ({
+          pattern,
+          docs: true as const,
+          modulePath: "",
+          relativePath: "",
+          pageShouldHydrate: false,
           islandStrategy,
-          hasIsolatedClientBoundaries:
-            metadata.hasIsolatedClientBoundaries ||
-            applicableClientLayouts.some((layout) => layout.hasIsolatedClientBoundaries) ||
-            slotBoundaries.length > 0,
-          isolatedBoundaries: [
-            ...(metadata.hasIsolatedClientBoundaries ? metadata.isolatedBoundaries : []),
-            ...slotBoundaries,
-            ...applicableClientLayouts
-              // A server-tree layout's client components load from its tree.
-              .filter((layout) => layout.hasIsolatedClientBoundaries || layout.serverTreeLayout)
-              .flatMap((layout) => layout.isolatedBoundaries),
-          ],
-          // The server renders a server tree only below a hydrating layout.
-          ...(usesFarmServerTree(metadata) &&
-          applicableClientLayouts.some((layout) => layout.shouldHydrate)
-            ? { serverTree: true as const }
-            : {}),
-        });
-        logger.info(`📱 Found hydratable route: ${route.pattern} -> ${route.modulePath}`);
+          hasIsolatedClientBoundaries: applicableClientLayouts.some(
+            (layout) => layout.hasIsolatedClientBoundaries,
+          ),
+          isolatedBoundaries: applicableClientLayouts
+            .filter((layout) => layout.hasIsolatedClientBoundaries || layout.serverTreeLayout)
+            .flatMap((layout) => layout.isolatedBoundaries),
+        }));
+
+        // Docs requests take precedence over app page routes on the server, so
+        // their synthetic layout-only entries must take precedence in the client
+        // route table as well.
+        clientPages.unshift(...docsClientRoutes);
       }
-    } catch (error) {
-      logger.warn(`⚠️  Could not inspect route file ${route.modulePath}: ${error}`);
     }
-  }
 
-  if (syntheticDocsEntry) {
-    const docsEntry = syntheticDocsEntry;
-    const applicableClientLayouts = clientLayouts.filter(
-      (layout) =>
-        (layout.shouldHydrate || layout.hasIsolatedClientBoundaries) &&
-        layoutAppliesToRoute(layout.pattern, docsEntry),
-    );
-    if (applicableClientLayouts.length > 0) {
-      const hydrationStrategies = applicableClientLayouts.flatMap((layout) =>
-        layout.islandStrategy ? [layout.islandStrategy] : [],
-      );
-      const islandStrategy = hydrationStrategies.every(
-        (strategy) => strategy === hydrationStrategies[0],
-      )
-        ? (hydrationStrategies[0] ?? "load")
-        : "load";
-      const docsClientRoutes = syntheticDocsPatterns.map((pattern) => ({
-        pattern,
-        docs: true as const,
-        modulePath: "",
-        relativePath: "",
-        pageShouldHydrate: false,
-        islandStrategy,
-        hasIsolatedClientBoundaries: applicableClientLayouts.some(
-          (layout) => layout.hasIsolatedClientBoundaries,
-        ),
-        isolatedBoundaries: applicableClientLayouts
-          .filter((layout) => layout.hasIsolatedClientBoundaries || layout.serverTreeLayout)
-          .flatMap((layout) => layout.isolatedBoundaries),
-      }));
-
-      // Docs requests take precedence over app page routes on the server, so
-      // their synthetic layout-only entries must take precedence in the client
-      // route table as well.
-      clientPages.unshift(...docsClientRoutes);
-    }
-  }
-
-  const clientRouteSlots = routeSlots.filter((slot) => {
-    try {
-      const metadata = getClientModuleMetadata(slot.modulePath, root);
-      // In islands mode a server slot stays on the server; its client components are islands.
-      return metadata.shouldHydrate && (!islandsMode || metadata.isClientComponent);
-    } catch (error) {
-      logger.warn(`⚠️  Could not inspect route slot ${slot.modulePath}: ${error}`);
-      return false;
-    }
+    const clientRouteSlots = routeSlots.filter((slot) => {
+      try {
+        const metadata = getClientModuleMetadata(slot.modulePath, root);
+        // In islands mode a server slot stays on the server; its client components are islands.
+        return metadata.shouldHydrate && (!islandsMode || metadata.isClientComponent);
+      } catch (error) {
+        logger.warn(`⚠️  Could not inspect route slot ${slot.modulePath}: ${error}`);
+        return false;
+      }
+    });
+    return { clientLayouts, clientRouteSlots };
   });
 
   logger.info(
@@ -7090,36 +7099,41 @@ function renderFarmServerTreeLayout(Layout, props, outlets) {
     serverOwners:
       resolveFarmServerComponentsMode(config.experimental?.serverComponents) === "islands",
   };
-  const layoutHydrationPlans = layoutRoutes.map((layout) => ({
-    ...layout,
-    hydration: getCachedClientModuleHydrationPlan(
-      layout.modulePath,
+  // One source snapshot for every plan, as in buildClient. These plans fill the cache the client
+  // build shares when the SSR build plans first or alone (`renderer: false` has no client build).
+  const { layoutHydrationPlans, pageHydrationPlans } = withFarmSourceSnapshot(() => {
+    const layoutHydrationPlans = layoutRoutes.map((layout) => ({
+      ...layout,
+      hydration: getCachedClientModuleHydrationPlan(
+        layout.modulePath,
+        config.root,
+        isolatedHydrationMode,
+        hydrationPlanCache,
+        { ...hydrationPlanOptions, serverTreeLayouts: pageHydrationPlanOptions.serverOwners },
+      ),
+    }));
+    const markdownPagePlan = createMarkdownPageHydrationPlanner(
+      resolveFarmMdxComponentsModulePath(resolveMdxConfig(config.mdx), config.root),
       config.root,
       isolatedHydrationMode,
-      hydrationPlanCache,
-      { ...hydrationPlanOptions, serverTreeLayouts: pageHydrationPlanOptions.serverOwners },
-    ),
-  }));
-  const markdownPagePlan = createMarkdownPageHydrationPlanner(
-    resolveFarmMdxComponentsModulePath(resolveMdxConfig(config.mdx), config.root),
-    config.root,
-    isolatedHydrationMode,
-    { ...hydrationPlanOptions, packageReferences: pageHydrationPlanOptions.serverOwners },
-  );
-  const pageHydrationPlans = new Map(
-    pageRoutes.map((route) => [
-      route.modulePath,
-      isFarmMarkdownPageFile(route.modulePath)
-        ? markdownPagePlan()
-        : getCachedClientModuleHydrationPlan(
-            route.modulePath,
-            config.root,
-            isolatedHydrationMode,
-            hydrationPlanCache,
-            pageHydrationPlanOptions,
-          ),
-    ]),
-  );
+      { ...hydrationPlanOptions, packageReferences: pageHydrationPlanOptions.serverOwners },
+    );
+    const pageHydrationPlans = new Map(
+      pageRoutes.map((route) => [
+        route.modulePath,
+        isFarmMarkdownPageFile(route.modulePath)
+          ? markdownPagePlan()
+          : getCachedClientModuleHydrationPlan(
+              route.modulePath,
+              config.root,
+              isolatedHydrationMode,
+              hydrationPlanCache,
+              pageHydrationPlanOptions,
+            ),
+      ]),
+    );
+    return { layoutHydrationPlans, pageHydrationPlans };
+  });
 
   enforceFarmIsolatedHydrationRouteBudget(
     layoutHydrationPlans.map((layout) => ({
