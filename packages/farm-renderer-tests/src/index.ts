@@ -27,6 +27,8 @@ export interface RendererServerFixture {
   createElement(type: unknown, props?: unknown, ...children: unknown[]): unknown;
   isValidElement(value: unknown): boolean;
   markFunctionComponent?<T>(component: T): T;
+  /** The server boundary Farm wraps a route with an `error.*` file in, during development. */
+  ErrorBoundary?: unknown;
   renderToString(element: unknown): string | Promise<string>;
   renderToStringWithHead?(
     element: unknown,
@@ -118,6 +120,33 @@ export function defineRendererServerConformance(runtime: RendererServerFixture):
       expect(html).toContain("&amp; content");
       expect(html).not.toContain("<unsafe>");
       expect(html.indexOf("<h1")).toBeLessThan(html.indexOf("<p"));
+    });
+
+    it("lets a throw inside the server ErrorBoundary fail the render", async () => {
+      if (!runtime.ErrorBoundary) return;
+      // The server renderer cannot render a boundary again after a throw, so the boundary passes
+      // its children through and Farm answers with the route's error page and status, and a
+      // redirect() or notFound() still reaches it, as in production.
+      const thrown = Object.assign(new Error("boundary throw"), { digest: "FARM_NOT_FOUND" });
+      const Throws = () => {
+        throw thrown;
+      };
+      const Fallback = () => runtime.createElement("p", null, "fallback rendered");
+      const element = runtime.createElement(
+        runtime.ErrorBoundary,
+        { Fallback, fallbackProps: {} },
+        runtime.createElement(runtime.markFunctionComponent?.(Throws) ?? Throws, null),
+      );
+
+      let rendered: string | undefined;
+      let caught: unknown;
+      try {
+        rendered = await runtime.renderToString(element);
+      } catch (error) {
+        caught = error;
+      }
+      expect(rendered).toBeUndefined();
+      expect(caught).toBe(thrown);
     });
 
     it("renders plain function components through the compatibility layer", async () => {

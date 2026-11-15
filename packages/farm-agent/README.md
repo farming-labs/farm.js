@@ -101,7 +101,27 @@ agent({
 Set `authorize`, or a middleware guard on `basePath`, before anyone else can reach the app. Without
 one, any caller can list, read, answer, and start runs. A guard should let agent-unit's internal
 continue and sweep requests through; they carry `AGENT_UNIT_SECRET` as a bearer token, which
-agent-unit checks itself.
+agent-unit checks itself. The same goes for Farm.js Infra's wake, answer, and cancel calls, signed
+with `FARMJS_API_KEY` in a `farmjs-signature` header.
+
+## Run an agent on a schedule
+
+A task with `agent` starts a run of that agent once per scheduled time, on the target's scheduler.
+A retried cron call gets the run the first call started:
+
+```ts
+agent({
+  tasks: {
+    "morning-digest": { schedule: "0 8 * * *", agent: "digest", input: { team: "support" } },
+  },
+});
+```
+
+## Approve runs in Farm.js Infra
+
+With `FARMJS_API_KEY` set where the server runs, the interrupts runs wait on show up under Agents >
+Approvals in Farm.js Infra, where an organization owner or admin approves, rejects, or cancels the
+run.
 
 ## Options
 
@@ -115,7 +135,7 @@ agent-unit checks itself.
 | `presets`   |                      | Settings per deploy target, over the top-level ones.         |
 | `authorize` |                      | Decides every request.                                       |
 | `name`      | package name         | The name in the manifest, MCP, and A2A card.                 |
-| `tasks`     |                      | Scheduled tasks run by the target's scheduler.               |
+| `tasks`     |                      | Scheduled tasks: an `agent` to run or a `handler` module.    |
 | `budget`    | per target           | How long a run works before it yields and continues.         |
 | `retention` | kept                 | How long finished runs are kept.                             |
 | `sweep`     | every minute         | The sweep's cron schedule, or `false`.                       |

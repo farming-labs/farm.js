@@ -355,7 +355,10 @@ test("generateMetadata sets the head", async ({ request }) => {
 
 test("static pages are prerendered at build time", async ({ request }) => {
   test.skip(dev, "build output only");
-  expect(existsSync(path.join(publicDir, "static/a/index.html"))).toBe(true);
+  // Cloudflare serves a directory index at the trailing-slash URL, so the page is written as
+  // static/a.html there and answers at /static/a.
+  const prerendered = target === "cloudflare" ? "static/a.html" : "static/a/index.html";
+  expect(existsSync(path.join(publicDir, prerendered))).toBe(true);
   expect(await (await request.get("/static/b")).text()).toContain("Static b");
 });
 
@@ -1211,6 +1214,25 @@ test("a page that hydrates loads the router only when a navigation needs it", as
   await expect(page.getByRole("heading", { name: "Stream" })).toBeVisible();
   expect(await page.evaluate(() => "__farmSameDocument" in window)).toBe(true);
   expect(routerRequests).toHaveLength(1);
+  expect(errors).toEqual([]);
+});
+
+test("Links in server components prefetch once the router loads", async ({ page }) => {
+  test.skip(mode !== "islands", "rsc mode's router has no prefetch");
+  const errors = collectErrors(page);
+  const fetched: string[] = [];
+  page.on("request", (request) => {
+    if (request.resourceType() === "fetch") fetched.push(new URL(request.url()).pathname);
+  });
+  await page.goto("/");
+  await hydrated(page);
+  // Nothing hydrates here at load: a first hover loads the client entry, and the next one the
+  // production router (dev loads both with the page). From then on each Link follows its mode:
+  // the nav's Links use the default, intent and viewport, and are in view.
+  await page.getByRole("link", { name: "Stream", exact: true }).hover();
+  await expect.poll(() => page.evaluate(() => "__FARM_SPA_ROUTER__" in window)).toBe(true);
+  await page.getByRole("link", { name: "Async", exact: true }).hover();
+  await expect.poll(() => fetched.includes("/meta")).toBe(true);
   expect(errors).toEqual([]);
 });
 

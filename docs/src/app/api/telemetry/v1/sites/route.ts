@@ -14,6 +14,10 @@ import {
 import { verifyFarmProductionSiteAttestation } from "../../../../../lib/telemetry-site-attestation";
 import { z } from "zod";
 
+// Only @farm.js/core production servers report here, so the endpoint stays out
+// of /openapi.json.
+export const openapi = { hidden: true };
+
 const MAX_BODY_BYTES = 8 * 1024;
 const GLOBAL_RATE_LIMIT = 1_000;
 const SITE_RATE_LIMIT = 30;

@@ -46,6 +46,7 @@ export type RoutePath =
   | `/optional-catchall/${string}`
   | "/ppr-demo"
   | "/prefetch-e2e"
+  | "/prefetch-e2e/static"
   | "/query-demo"
   | "/redirect-e2e"
   | "/redirect-e2e/async"
@@ -94,6 +95,7 @@ export type RoutePattern =
   | "/optional-catchall/[[...slug]]"
   | "/ppr-demo"
   | "/prefetch-e2e"
+  | "/prefetch-e2e/static"
   | "/query-demo"
   | "/redirect-e2e"
   | "/redirect-e2e/async"
@@ -142,6 +144,7 @@ export type RouteModulePattern =
   | "/optional-catchall/[[...slug]]"
   | "/ppr-demo"
   | "/prefetch-e2e"
+  | "/prefetch-e2e/static"
   | "/query-demo"
   | "/redirect-e2e"
   | "/redirect-e2e/async"

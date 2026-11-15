@@ -188,12 +188,19 @@ for (const cleanupFails of [false, true]) {
 }
 
 for (const aggregate of [false, true]) {
-  test(`readiness still retries only refused connections (aggregate=${aggregate})`, async () => {
+  // A server that has not bound yet refuses or resets the connection; `localhost` resolves to
+  // both ::1 and 127.0.0.1, so the real pre-listen failure is an AggregateError carrying one of
+  // each. Everything that is not a connection failure stays fatal: this loop runs before the
+  // server has ever answered, and measurement uses requestPage directly, not this path.
+  test(`readiness retries connection failures only (aggregate=${aggregate})`, async () => {
     const refusal = Object.assign(new Error("not listening"), { code: "ECONNREFUSED" });
     const refused = aggregate ? new AggregateError([refusal]) : refusal;
+    const reset = aggregate
+      ? connectionError()
+      : Object.assign(new Error("reset"), { code: "ECONNRESET" });
     for (const error of [
       refused,
-      connectionError(),
+      reset,
       Object.assign(new Error("deadline"), { name: "TimeoutError" }),
       new Error("invalid encoding"),
     ]) {
@@ -215,7 +222,7 @@ for (const aggregate of [false, true]) {
         },
       );
       const task = wait({}, { value: "" }, "http://localhost/", 0, { onResponse: () => {} });
-      if (error === refused) {
+      if (error === refused || error === reset) {
         await task;
         assert.equal(calls, 2);
       } else {

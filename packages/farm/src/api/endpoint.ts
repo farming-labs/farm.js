@@ -2,13 +2,13 @@ import { createEndpoint as betterCallEndpoint } from "better-call";
 import { applyFarmCacheInvalidationTargets, type FarmCacheInvalidationTarget } from "../cache";
 import { isMultipartSchema, type MultipartSchema, type TypedFormData } from "./transport";
 import type { RouteSchema, RouteSchemaInput, RouteSchemaOutput } from "./route-schema";
-import type { EndpointOpenAPIMetadata } from "../openapi/types";
+import type { EndpointOpenAPIMetadata, RouteOpenAPIConfig } from "../openapi/types";
 
 // Part of every endpoint's public shape (`openapi` and `__openapi` below). An
 // interface cannot be inlined into a consumer's declarations, so it has to be
 // nameable from the entry a consumer imports. `export *` in api/index.ts exposes
 // it as @farm.js/core/api; plugin.ts re-exports it for plugin authors.
-export type { EndpointOpenAPIMetadata };
+export type { EndpointOpenAPIMetadata, RouteOpenAPIConfig };
 
 // Share the route factory's Zod and Standard Schema contract.
 type AnySchema = RouteSchema;

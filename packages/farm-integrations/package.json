@@ -1,6 +1,6 @@
 {
   "name": "@farm.js/integrations",
-  "version": "0.1.73",
+  "version": "0.1.74",
   "description": "Compatibility package that re-exports official Farm.js integrations",
   "license": "MIT",
   "repository": {
@@ -111,6 +111,10 @@
     "./strapi": {
       "types": "./dist/strapi/index.d.ts",
       "import": "./dist/strapi/index.js"
+    },
+    "./strapi/schema": {
+      "types": "./dist/strapi/schema.d.ts",
+      "import": "./dist/strapi/schema.js"
     },
     "./unkey": {
       "types": "./dist/unkey/index.d.ts",

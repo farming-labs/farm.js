@@ -100,6 +100,7 @@ import type { Rollup, UserConfig as ViteUserConfig } from "vite";
 import os from "os";
 import path from "path";
 import { constants as fsConstants, existsSync, readFileSync, realpathSync, statSync } from "fs";
+import { initSync as initModuleLexer, parse as lexModule } from "es-module-lexer";
 import { readRouteRenderingDirectiveFromFile } from "../ssg";
 import {
   FARM_LAYOUT_ELEMENT_CLIENT_SOURCE,
@@ -1131,6 +1132,23 @@ export async function minifyFarmServerChunk(
   return restoreLiteralModuleSpecifiers(result.code, fileName, rolldownUtils);
 }
 
+let moduleLexerReady = false;
+
+/** The source ranges of a module's import() arguments, or null when es-module-lexer cannot read it. */
+function lexDynamicImportArguments(code: string): Array<{ start: number; end: number }> | null {
+  if (!moduleLexerReady) {
+    initModuleLexer();
+    moduleLexerReady = true;
+  }
+  try {
+    return lexModule(code)[0]
+      .filter((entry) => entry.d > -1)
+      .map((entry) => ({ start: entry.s, end: entry.e }));
+  } catch {
+    return null;
+  }
+}
+
 /**
  * Oxc prints whichever quote is shortest, so `import("./chunk.mjs")` comes out
  * as import(`./chunk.mjs`). The value is the same, but Miniflare/workerd and
@@ -1147,43 +1165,34 @@ export function restoreLiteralModuleSpecifiers(
   const hasRequireTemplate = code.includes("require(`");
   if (!hasImportTemplate && !hasRequireTemplate) return code;
 
-  const parsed = parseSync(fileName, code, { lang: "js", sourceType: "module" });
-  if (parsed.errors.length > 0) {
-    throw new Error(`Failed to minify ${fileName}: ${parsed.errors[0].message}`);
-  }
   const replacements: Array<{ start: number; end: number; text: string }> = [];
 
-  // Fast path: the module record lists every import() argument without
-  // materializing the AST in JavaScript, which is most of the cost on a large
-  // server chunk. A template with no escapes, line breaks or substitutions is
-  // its own value. Anything else, and require() calls, which the module record
-  // does not list, take the AST path. Rolldown's CommonJS interop helper prints
-  // as `__require(`, which the AST path leaves alone, so only a `require(` that
-  // no identifier character precedes needs it.
+  // Fast path: es-module-lexer lists every import() argument without parsing
+  // the chunk, which is most of the cost on a large server chunk. A template
+  // with no escapes, line breaks or substitutions is its own value. Anything
+  // else, code the lexer cannot read, and require() calls, which it does not
+  // list, take the AST path. Rolldown's CommonJS interop helper prints as
+  // `__require(`, which the AST path leaves alone, so only a `require(` that no
+  // identifier character precedes needs it.
   let needsAst = hasRequireTemplate && /(?<![\w$])require\(`/.test(code);
-  if (!needsAst) {
-    // Oxc can list one import() twice: a parenthesized destructuring such as
-    // `({ a } = await import(...))` is parsed as a cover grammar first.
-    const seenStarts = new Set<number>();
-    for (const { moduleRequest } of parsed.module.dynamicImports) {
-      if (seenStarts.has(moduleRequest.start)) continue;
-      seenStarts.add(moduleRequest.start);
-      const source = code.slice(moduleRequest.start, moduleRequest.end);
-      if (!source.startsWith("`")) continue;
-      const value = source.slice(1, -1);
-      if (source.length < 2 || !source.endsWith("`") || /[\\\r\n`]|\$\{/.test(value)) {
-        needsAst = true;
-        break;
-      }
-      replacements.push({
-        start: moduleRequest.start,
-        end: moduleRequest.end,
-        text: toAsciiStringLiteral(value),
-      });
+  const dynamicImports = needsAst ? null : lexDynamicImportArguments(code);
+  if (!dynamicImports) needsAst = true;
+  for (const { start, end } of dynamicImports ?? []) {
+    const source = code.slice(start, end);
+    if (!source.startsWith("`")) continue;
+    const value = source.slice(1, -1);
+    if (source.length < 2 || !source.endsWith("`") || /[\\\r\n`]|\$\{/.test(value)) {
+      needsAst = true;
+      break;
     }
+    replacements.push({ start, end, text: toAsciiStringLiteral(value) });
   }
   if (needsAst) {
     replacements.length = 0;
+    const parsed = parseSync(fileName, code, { lang: "js", sourceType: "module" });
+    if (parsed.errors.length > 0) {
+      throw new Error(`Failed to minify ${fileName}: ${parsed.errors[0].message}`);
+    }
     const restore = (node: { type: string; start: number; end: number } | undefined) => {
       if (node?.type !== "TemplateLiteral") return;
       const template = node as import("rolldown/utils").ESTree.TemplateLiteral;
@@ -3984,7 +3993,7 @@ function isFarmDocsPath() {
 // Farm.js Client Runtime (no client components)
 ${cssImport}
 ${layoutImports}
-import { createClientCancellation, createClientPluginManager, createPluginlessClientRuntime, getFarmIslandValueHeaders, getHashTargetElement, installChunkErrorRecovery, isFarmBlockedNavigationURL, isFarmExternalNavigationURL, reconcileFarmDocumentHead, runFarmNavigationDelegates, setFarmBasePath, setFarmTrailingSlashPreference, stripFarmBasePath } from "@farm.js/core/internal/client-runtime";
+import { createClientCancellation, createClientPluginManager, createPluginlessClientRuntime, getFarmIslandValueHeaders, getHashTargetElement, installChunkErrorRecovery, installFarmLinkPrefetch, isFarmBlockedNavigationURL, isFarmExternalNavigationURL, reconcileFarmDocumentHead, runFarmNavigationDelegates, setFarmBasePath, setFarmTrailingSlashPreference, stripFarmBasePath } from "@farm.js/core/internal/client-runtime";
 import { createFarmDeploymentMismatchError, createFarmDeploymentRequestHeaders, isFarmDeploymentMismatchResponse } from "@farm.js/core/deployment";
 ${clientPluginEntry.imports}
 ${clientCachePersistence.imports}
@@ -4269,6 +4278,9 @@ document.addEventListener("click", function(e) {
   e.preventDefault();
   spaRouter.navigate(href);
 });
+
+// Link anchors on a page that does not hydrate prefetch through the router as Link would.
+installFarmLinkPrefetch();
 `.trim();
   }
 
@@ -4385,7 +4397,7 @@ ${layoutImports}
 ${rendererClientImports}
 ${isolatedHydrationImport}
 ${providerClientCode.imports}
-import { createClientCancellation, createClientPluginManager, createPluginlessClientRuntime, getFarmIslandValueHeaders, getHashTargetElement, installChunkErrorRecovery, isFarmBlockedNavigationURL, isFarmExternalNavigationURL, reconcileFarmDocumentHead, runFarmNavigationDelegates, scheduleFarmIslandHydration, createFarmSearchParams, searchParamsToObject, setFarmBasePath, setFarmTrailingSlashPreference, stripFarmBasePath } from "@farm.js/core/internal/client-runtime";
+import { createClientCancellation, createClientPluginManager, createPluginlessClientRuntime, getFarmIslandValueHeaders, getHashTargetElement, installChunkErrorRecovery, installFarmLinkPrefetch, isFarmBlockedNavigationURL, isFarmExternalNavigationURL, reconcileFarmDocumentHead, runFarmNavigationDelegates, scheduleFarmIslandHydration, createFarmSearchParams, searchParamsToObject, setFarmBasePath, setFarmTrailingSlashPreference, stripFarmBasePath } from "@farm.js/core/internal/client-runtime";
 import { createFarmDeploymentMismatchError, createFarmDeploymentRequestHeaders, isFarmDeploymentMismatchResponse } from "@farm.js/core/deployment";
 import { createFarmRouter, isFarmRouteActive, matchFarmRoute } from "@farm.js/core/router";
 ${clientPluginEntry.imports}
@@ -5779,6 +5791,9 @@ void farmClientRuntime.start();
 /*farm-router-start*/
 spaRouter.initializeHistory();
 window.__FARM_SPA_ROUTER__ = spaRouter;
+// Link anchors on a page that does not hydrate prefetch through the router as Link would. In
+// islands mode this runs once the router loads, so a page still loads it only when it needs it.
+installFarmLinkPrefetch();
 /*farm-router-end*/
 
 window.addEventListener("beforeunload", function(event) {
@@ -5984,6 +5999,7 @@ async function buildSSRInMemory(
     const openAPIManager = new OpenAPIManager(appDirs, config.openapi, {
       mode: "production",
       apiBaseURL: config.api.baseURL,
+      routes: () => apiRouteManager.getRoutes().values(),
       loadModule: (filePath) => apiRouteManager.loadModule(filePath),
     });
     const spec = await openAPIManager.generateSpec();
@@ -13986,6 +14002,13 @@ function toFarmNodeResponse(request, response) {
             // in flight overlaps the worker's rendering with this thread's per-route work.
             concurrency: Math.min(os.availableParallelism(), 8),
             routes: prerenderRoutes.map(toPrerenderPublicPath),
+            // Cloudflare's asset server answers a directory index (about/index.html) at the
+            // trailing-slash URL and redirects the other spelling to it, so a page is written as
+            // about.html unless trailingSlash asks for the slash, as Nitro's Netlify and Vercel
+            // presets already write it.
+            ...(preset.startsWith("cloudflare")
+              ? { autoSubfolderIndex: config.trailingSlash === true }
+              : {}),
           },
         }
       : {}),

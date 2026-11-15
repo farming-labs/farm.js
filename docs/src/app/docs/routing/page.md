@@ -246,8 +246,13 @@ schemes such as `customapp:open` are validated from their URI grammar and work w
 Viewport prefetch uses a short scroll guard and is cancelled if its link unmounts before the guard
 expires. Intent prefetches are deduplicated while active; after an attempt settles, a later hover,
 focus, or touch can retry while successful route data remains deduplicated by the router cache.
-In a production islands build, the client router loads when a viewport-prefetch link first nears
-the viewport, or on the first link hover, focus, tap, or navigation, and then prefetches.
+A `Link` prefetches the same way on a page that never hydrates, such as a page with no client
+component or a server component in islands mode. It writes a mode other than the default into its
+HTML (`data-farm-prefetch="intent"`, and `data-farm-prefetch-delay` for a `prefetchDelay` other
+than 50ms), and the router follows it.
+In a production islands build, the client router loads when a viewport-prefetch link in a hydrated
+island first nears the viewport, or on the first link hover, focus, tap, or navigation, and then
+prefetches. `Link`s in server components follow their modes once the router has loaded.
 The development page-data router reuses a successfully decoded JSON prefetch response when
 navigation overlaps it with the same URL, interception origin, and active layout chain.
 Refreshes and different contexts fetch independently, and failed prefetches are retried by
@@ -552,7 +557,7 @@ export async function saveProduct(id: string, name: string) {
 
 `staleTime` accepts a number of milliseconds or a duration string such as `"500ms"`, `"30s"`, `"5m"`, or `"1h"`. Omit `staleTime` when data should stay cached until invalidated. A `staleTime` of `0` (or `"0ms"`) means "always revalidate": `data.main` runs for every request and its result is never cached or shared, as with `createServerQuery`. Any other value, such as a negative number or `"5 minutes"`, throws when the route is defined.
 
-Farm also tags route data by the rendered path, so `revalidatePath("/products/123")` invalidates the matching route data entry. Use `tags` or `paths` when one mutation should refresh more than one route:
+Farm also tags route data by the rendered path, so `revalidatePath("/products/123")` invalidates the matching route data entry. Below a `basePath` or in a locale, both the route path (`/products/123`) and the public path (`/console/fr/products/123`) clear it. Use `tags` or `paths` when one mutation should refresh more than one route:
 
 ```tsx
 export const ProductRoute = createRoute("/products/[id]", {

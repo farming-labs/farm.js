@@ -10,8 +10,7 @@
     "build:hybrid": "FARM_REACTIVITY=hybrid vite build",
     "prepare:official": "node scripts/prepare-official.mjs",
     "summarize:official": "node scripts/summarize-official.mjs",
-    "compare:frameworks": "node scripts/compare-frameworks.mjs",
-    "test:harness": "node --test scripts/prepare-metadata.test.mjs scripts/summarize-official.test.mjs scripts/compare-frameworks.test.mjs",
+    "test:harness": "node --test scripts/prepare-metadata.test.mjs scripts/summarize-official.test.mjs",
     "type-check": "tsc --noEmit"
   },
   "dependencies": {
