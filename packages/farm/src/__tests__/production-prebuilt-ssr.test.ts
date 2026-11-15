@@ -4528,11 +4528,19 @@ await server.listen(Number(process.env.PORT));
             await expect
               .poll(() => page.locator("[data-stable-counter]").textContent())
               .toBe("stable:1");
+            await page.locator('[data-live-counter="first"]').evaluate((element) => {
+              (
+                window as typeof window & { __farmParityFirstCounter?: Element }
+              ).__farmParityFirstCounter = element;
+            });
 
             await fs.writeFile(
               path.join(developmentRoot, "src", "components", "live-counter.tsx"),
               isolatedParityCounterSource("after"),
             );
+            // React Fast Refresh, on by default in development, swaps the edited
+            // component inside every live boundary and keeps its state, as it does
+            // for route-wide client components.
             await expect
               .poll(
                 () =>
@@ -4541,7 +4549,17 @@ await server.listen(Number(process.env.PORT));
                     .evaluateAll((elements) => elements.map((element) => element.textContent)),
                 { timeout: 10_000 },
               )
-              .toEqual(["after:first:0", "after:second:0"]);
+              .toEqual(["after:first:1", "after:second:0"]);
+            expect(
+              await page
+                .locator('[data-live-counter="first"]')
+                .evaluate(
+                  (element) =>
+                    element ===
+                    (window as typeof window & { __farmParityFirstCounter?: Element })
+                      .__farmParityFirstCounter,
+                ),
+            ).toBe(true);
 
             expect(await page.locator("[data-stable-counter]").textContent()).toBe("stable:1");
             expect(
@@ -4583,7 +4601,7 @@ await server.listen(Number(process.env.PORT));
               await page
                 .locator("[data-live-counter]")
                 .evaluateAll((elements) => elements.map((element) => element.textContent)),
-            ).toEqual(["after:first:0", "after:second:0"]);
+            ).toEqual(["after:first:1", "after:second:0"]);
             expect(
               await page.evaluate(() =>
                 (
