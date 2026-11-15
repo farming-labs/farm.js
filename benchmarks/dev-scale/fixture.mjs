@@ -32,7 +32,14 @@ const HEAVY_PACKAGES = ["lucide-react", "motion", "cmdk", "sonner", "@radix-ui/r
  *   providers, plus TSX pages that render consumers, icons and package-built client components.
  */
 export function createDevScaleFixture(workspace, options) {
-  const { farmRepo, mdxPages, tsxPages, primitives, mode = "islands" } = options;
+  const {
+    farmRepo,
+    mdxPages,
+    tsxPages,
+    primitives,
+    mode = "islands",
+    staticPages = false,
+  } = options;
   const app = path.join(workspace, "apps/docs");
   const ui = path.join(workspace, "packages/ui");
   const appModules = path.join(app, "node_modules");
@@ -57,7 +64,7 @@ export function createDevScaleFixture(workspace, options) {
   link(ui, path.join(appModules, "@fixture/ui"));
 
   writeUiPackage(ui, primitives);
-  const pages = writeApp(app, { mdxPages, tsxPages, primitives, mode });
+  const pages = writeApp(app, { mdxPages, tsxPages, primitives, mode, staticPages });
   return { workspace, app, ui, ...pages };
 }
 
@@ -294,7 +301,9 @@ export function Callout({ children }: { children: ReactNode }) {
   );
 }
 
-function writeApp(app, { mdxPages, tsxPages, primitives, mode }) {
+function writeApp(app, { mdxPages, tsxPages, primitives, mode, staticPages }) {
+  // `staticPages` prerenders every page at build time, as a docs site does.
+  const staticExport = staticPages ? '\nexport const dynamic = "force-static";\n' : "";
   write(
     app,
     "package.json",
@@ -356,7 +365,7 @@ function writeApp(app, { mdxPages, tsxPages, primitives, mode }) {
 title: Doc ${index}
 description: Generated MDX page ${index}
 ---
-
+${staticExport}
 # Doc ${index}
 
 mdx body v0 for page ${index}. A paragraph with **bold** text, \`code\`, and a [link](/docs/section-${(index + 1) % sections}/page-${(index + 1) % mdxPages}).
@@ -414,7 +423,7 @@ ${index % 10 === 1 ? "      <MotionCard>animated</MotionCard>\n" : ""}${index % 
     </article>
   );
 }
-`,
+${staticExport}`,
     );
   }
 
