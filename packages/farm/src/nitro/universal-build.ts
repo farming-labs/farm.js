@@ -9382,6 +9382,9 @@ function createFarmErrorDocument(html, title) {
           '  ' + renderFarmClientEntryScript() + '\\n</body>';
       },
     );
+  // The charset and viewport a layout's own document leaves out, as on a page and the
+  // not-found page: without the viewport the error page lays out at desktop width on phones.
+  fullHtml = ensureFarmDocumentMeta(fullHtml, renderViewportHead(undefined));
   return fullHtml.trim().startsWith("<!DOCTYPE")
     ? fullHtml
     : "<!DOCTYPE html>\\n" + fullHtml;
