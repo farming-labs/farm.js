@@ -46,6 +46,31 @@ describe("API route query parameters", () => {
     expect(query).toEqual({ tag: "react" });
   });
 
+  it("gives an array field its single value as a one-element array", async () => {
+    const { status, query } = await queryGivenToHandler(
+      z.object({ tag: z.array(z.string()), page: z.string() }),
+      "?tag=react&page=2",
+    );
+
+    expect(status).toBe(200);
+    expect(query).toEqual({ tag: ["react"], page: "2" });
+  });
+
+  it("finds an array field behind optionality wrappers and transforms", async () => {
+    const { status, query } = await queryGivenToHandler(
+      z.object({
+        optional: z.array(z.string()).optional(),
+        defaulted: z.array(z.string()).default([]),
+        nullable: z.array(z.string()).nullable(),
+        piped: z.array(z.string()).transform((tags) => tags.join("+")),
+      }),
+      "?optional=a&defaulted=b&nullable=c&piped=d",
+    );
+
+    expect(status).toBe(200);
+    expect(query).toEqual({ optional: ["a"], defaulted: ["b"], nullable: ["c"], piped: "d" });
+  });
+
   it("preserves the order of a repeated parameter", async () => {
     const { query } = await queryGivenToHandler(
       z.object({ tag: z.array(z.string()) }),
