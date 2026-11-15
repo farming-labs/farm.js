@@ -552,7 +552,7 @@ export async function saveProduct(id: string, name: string) {
 
 `staleTime` accepts a number of milliseconds or a duration string such as `"500ms"`, `"30s"`, `"5m"`, or `"1h"`. Omit `staleTime` when data should stay cached until invalidated. A `staleTime` of `0` (or `"0ms"`) means "always revalidate": `data.main` runs for every request and its result is never cached or shared, as with `createServerQuery`. Any other value, such as a negative number or `"5 minutes"`, throws when the route is defined.
 
-Farm also tags route data by the rendered path, so `revalidatePath("/products/123")` invalidates the matching route data entry. Use `tags` or `paths` when one mutation should refresh more than one route:
+Farm also tags route data by the rendered path, so `revalidatePath("/products/123")` invalidates the matching route data entry. Below a `basePath` or in a locale, both the route path (`/products/123`) and the public path (`/console/fr/products/123`) clear it. Use `tags` or `paths` when one mutation should refresh more than one route:
 
 ```tsx
 export const ProductRoute = createRoute("/products/[id]", {
