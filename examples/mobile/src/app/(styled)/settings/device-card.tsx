@@ -7,7 +7,7 @@ import { useEffect, useState } from "react";
 type DeviceState =
   | { status: "checking" }
   | { status: "web" }
-  | { status: "app"; model: string; references: boolean }
+  | { status: "app"; model: string }
   | { status: "error"; message: string };
 
 /**
@@ -15,10 +15,9 @@ type DeviceState =
  * `mobile.modules.Device.web` in farm.config.ts registers it with the shell's bridge on Android
  * and iOS. In a browser, `available()` is false.
  *
- * On Android the photo comes back by reference: `pickPhoto()` resolves a `/__farm/files/<id>` URL
- * the shell answers from the file, so the photo never crosses the bridge as JSON. The iOS shell
- * cannot answer such URLs yet, so there, and in a browser, the same `PhotoPicker` opens the file
- * picker instead.
+ * In the app the photo comes back by reference: `pickPhoto()` resolves a URL the page shows in
+ * an `<img>` (Android serves `/__farm/files/<id>` from the file; iOS hands the page a `blob:` URL).
+ * In a browser, the same `PhotoPicker` opens the file picker instead.
  */
 export function DeviceCard() {
   // The server render and the first client render agree; the shell is checked after hydration.
@@ -33,10 +32,8 @@ export function DeviceCard() {
       return;
     }
     let current = true;
-    // The shell's OS, from the attribute its bridge script sets: only Android serves references.
-    const references = document.documentElement.getAttribute("data-farm-shell") === "android";
     native.Device.model().then(
-      (model) => current && setDevice({ status: "app", model, references }),
+      (model) => current && setDevice({ status: "app", model }),
       (error: NativeCallError) =>
         current && setDevice({ status: "error", message: `${error.code}: ${error.message}` }),
     );
@@ -77,7 +74,7 @@ export function DeviceCard() {
         <div className="actions">
           <PhotoPicker
             className="button"
-            pick={device.status === "app" && device.references ? native.Device.pickPhoto : undefined}
+            pick={device.status === "app" ? native.Device.pickPhoto : undefined}
             onPick={(uri) => {
               setPhotoError(undefined);
               setPhoto(uri);

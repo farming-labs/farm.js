@@ -34,4 +34,11 @@ describe("site footer", () => {
     expect(link).toBeDefined();
     expect(link).toContain("Design");
   });
+
+  it("links to the privacy notice and the terms", () => {
+    const html = renderToStaticMarkup(createElement(SiteFooter));
+
+    expect(html).toMatch(/<a\b[^>]*href="\/privacy"[^>]*>Privacy<\/a>/);
+    expect(html).toMatch(/<a\b[^>]*href="\/terms"[^>]*>Terms<\/a>/);
+  });
 });

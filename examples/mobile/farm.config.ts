@@ -31,7 +31,6 @@ export default defineConfig({
       // Pages the analyzer proves render natively become `server` screens: the server renders the
       // page and the shell draws it with native views. Pages with client-side logic stay web.
       auto: "on",
-      budgets: { appSizeMb: 12, screenOpenMs: 300, droppedFrames: 2 },
     },
     // The app's own Device module (src/native/: DeviceModule.kt on Android, DeviceModule.mm on
     // iOS) vibrates, so the Android manifest declares VIBRATE, an install-time permission with no

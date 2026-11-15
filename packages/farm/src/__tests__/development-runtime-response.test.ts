@@ -64,7 +64,7 @@ describe("development runtime response bridge", () => {
   redirects: async () => [{ source: "/redirect", destination: "/" }],
   headers: async () => [{
     source: "/redirect",
-    headers: [{ key: "x-late-config-header", value: "must-not-run" }],
+    headers: [{ key: "x-config-header", value: "applied" }],
   }],
   plugins: [{
     name: "binary-runtime-response",
@@ -117,8 +117,12 @@ export default function Page() { return <main>home</main>; }`,
     });
     expect(redirectResponse.status).toBe(307);
     expect(redirectResponse.headers.get("location")).toBe("/");
-    expect(redirectResponse.headers.get("x-late-config-header")).toBeNull();
-    expect(redirectResponse.headers.get("x-runtime-body")).toBe("");
+    // As in production: configured headers apply to the redirect, which passes through
+    // runtime.after with its "Redirecting to" body.
+    expect(redirectResponse.headers.get("x-config-header")).toBe("applied");
+    expect(redirectResponse.headers.get("x-runtime-body")).toBe(
+      Buffer.from("Redirecting to /").toString("hex"),
+    );
 
     const pageResponse = await fetch(`http://localhost:${address.port}/`);
     expect(pageResponse.headers.get("x-runtime-body")).toMatch(/^[a-f0-9]+$/);

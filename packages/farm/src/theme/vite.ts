@@ -14,20 +14,23 @@ export function createFarmThemeCssPlugin(
   return {
     name: "farm:theme-css",
     enforce: "pre",
-    transform(code, id) {
-      if (
-        !config.enabled ||
-        !/\.css(?:\?.*)?$/.test(id) ||
-        !/@import\s+["']tailwindcss["']/.test(code) ||
-        /@custom-variant\s+dark\b/.test(code)
-      ) {
-        return null;
-      }
+    transform: {
+      filter: { id: /\.css(?:\?.*)?$/, code: /@import\s+["']tailwindcss["']/ },
+      handler(code, id) {
+        if (
+          !config.enabled ||
+          !/\.css(?:\?.*)?$/.test(id) ||
+          !/@import\s+["']tailwindcss["']/.test(code) ||
+          /@custom-variant\s+dark\b/.test(code)
+        ) {
+          return null;
+        }
 
-      return {
-        code: `${code.trimEnd()}\n\n${FARM_DARK_VARIANT}\n`,
-        map: null,
-      };
+        return {
+          code: `${code.trimEnd()}\n\n${FARM_DARK_VARIANT}\n`,
+          map: null,
+        };
+      },
     },
   };
 }

@@ -139,7 +139,7 @@ function externalizePackagesPlugin(): Plugin {
 
 // Rolldown always colors its diagnostics; config load errors are printed and
 // asserted as plain text.
-function withPlainDiagnostics(error: unknown): unknown {
+export function withPlainDiagnostics(error: unknown): unknown {
   if (!(error instanceof Error)) return error;
   error.message = stripVTControlCharacters(error.message);
   if (typeof error.stack === "string") error.stack = stripVTControlCharacters(error.stack);

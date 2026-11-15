@@ -220,6 +220,7 @@ const sidebar = [
       { label: "Query and Params", slug: "query", icon: "search" },
       { label: "API Routes", slug: "api-routes", icon: "server" },
       { label: "API Client", slug: "api-client", icon: "terminal" },
+      { label: "Backend-Only Apps", slug: "backend", icon: "server" },
       { label: "Server Queries", slug: "server-queries", icon: "database" },
       { label: "Local-First Patterns", slug: "local-first", icon: "zap" },
       { label: "KV Storage", slug: "storage", icon: "database" },
@@ -279,6 +280,7 @@ const sidebar = [
           { label: "Overview", slug: "integrations/jobs", icon: "activity" },
           { label: "Trigger.dev", slug: "integrations/trigger", icon: "brand-trigger" },
           { label: "Inngest", slug: "integrations/inngest", icon: "brand-inngest" },
+          { label: "Durable workflows", slug: "integrations/durable-workflows", icon: "timer" },
         ],
       },
       {
@@ -376,6 +378,7 @@ const sidebar = [
         children: [
           { label: "Analyzer", slug: "plugins/analyzer", icon: "gauge" },
           { label: "API MCP", slug: "plugins/mcp", icon: "sparkles" },
+          { label: "Bot Protection", slug: "plugins/bot", icon: "shield" },
           { label: "Content", slug: "plugins/content", icon: "file" },
           { label: "DevTools", slug: "plugins/devtools", icon: "monitor" },
           { label: "Federation", slug: "plugins/federation", icon: "network" },
@@ -387,6 +390,7 @@ const sidebar = [
           { label: "Progress", slug: "plugins/progress", icon: "activity" },
           { label: "Search", slug: "plugins/search", icon: "search" },
           { label: "Scripts", slug: "plugins/scripts", icon: "code" },
+          { label: "Scroll Restoration", slug: "plugins/scroll-restoration", icon: "layout" },
           { label: "Sentry", slug: "plugins/sentry", icon: "brand-sentry" },
           { label: "Sync", slug: "plugins/sync", icon: "network" },
           { label: "StyleX", slug: "plugins/stylex", icon: "braces" },

@@ -12,7 +12,6 @@ export function getFarmPresetRuntime(preset: string): FarmPresetRuntime {
     preset === "cloudflare-pages" ||
     preset === "cloudflare-module" ||
     preset === "netlify-edge" ||
-    preset === "vercel-edge" ||
     preset === "deno"
   ) {
     return "edge";
@@ -198,6 +197,28 @@ export function createFarmDeploymentCookie(
     .join("; ");
 }
 
+/**
+ * A request's Cookie header without the deployment cookie, or undefined when no other cookie
+ * remains. The deployment cookie names a release, never a visitor, so a request carrying only it
+ * may still be answered from, and fill, a shared cache.
+ */
+export function withoutFarmDeploymentCookie(
+  cookieHeader: string | null | undefined,
+): string | undefined {
+  if (!cookieHeader) return undefined;
+  if (!cookieHeader.includes(FARM_DEPLOYMENT_COOKIE)) return cookieHeader;
+  const remaining = cookieHeader
+    .split(";")
+    .filter((part) => {
+      const separator = part.indexOf("=");
+      const name = (separator === -1 ? part : part.slice(0, separator)).trim();
+      return name !== FARM_DEPLOYMENT_COOKIE && part.trim() !== "";
+    })
+    .join(";")
+    .trim();
+  return remaining || undefined;
+}
+
 function readCookie(cookieHeader: string | null, name: string): string | undefined {
   if (!cookieHeader) return undefined;
 
@@ -218,4 +239,36 @@ function readCookie(cookieHeader: string | null, name: string): string | undefin
 
 function isSafeRequestMethod(method: string): boolean {
   return ["GET", "HEAD", "OPTIONS", "QUERY"].includes(method.toUpperCase());
+}
+
+const CLOUDFLARE_POPULATE_PROCESS_ENV_FLAG = "nodejs_compat_populate_process_env";
+const CLOUDFLARE_DO_NOT_POPULATE_PROCESS_ENV_FLAG = "nodejs_compat_do_not_populate_process_env";
+/** The compatibility date from which Workers populate `process.env` by default. */
+const CLOUDFLARE_POPULATE_PROCESS_ENV_DATE = "2025-04-01";
+
+/**
+ * The compatibility flags a generated Wrangler config needs so the worker's vars
+ * and secrets reach `process.env`, or undefined when it needs no change.
+ *
+ * Farm builds Workers at a compatibility date before `process.env` was populated
+ * by default, so server code reading it, such as an integration falling back to
+ * `process.env.STRIPE_SECRET_KEY`, saw none of them. A config whose date already
+ * populates `process.env`, or that opts out, is left as it is, since workerd
+ * refuses to start with both flags.
+ */
+export function resolveCloudflareProcessEnvFlags(wrangler: {
+  compatibility_date?: unknown;
+  compatibility_flags?: unknown;
+}): string[] | undefined {
+  const date = wrangler.compatibility_date;
+  const flags = wrangler.compatibility_flags;
+  if (typeof date !== "string" || date >= CLOUDFLARE_POPULATE_PROCESS_ENV_DATE) return undefined;
+  if (!Array.isArray(flags) || !flags.includes("nodejs_compat")) return undefined;
+  if (
+    flags.includes(CLOUDFLARE_POPULATE_PROCESS_ENV_FLAG) ||
+    flags.includes(CLOUDFLARE_DO_NOT_POPULATE_PROCESS_ENV_FLAG)
+  ) {
+    return undefined;
+  }
+  return [...flags, CLOUDFLARE_POPULATE_PROCESS_ENV_FLAG];
 }

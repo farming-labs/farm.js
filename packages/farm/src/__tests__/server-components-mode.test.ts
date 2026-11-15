@@ -3,10 +3,10 @@ import { resolveConfig } from "../config";
 import { resolveFarmServerComponentsMode } from "../server-components-mode";
 
 describe("experimental.serverComponents mode", () => {
-  it("maps true to rsc and reads the object form", () => {
+  it("maps true to islands and reads the object form", () => {
     expect(resolveFarmServerComponentsMode(undefined)).toBeUndefined();
     expect(resolveFarmServerComponentsMode(false)).toBeUndefined();
-    expect(resolveFarmServerComponentsMode(true)).toBe("rsc");
+    expect(resolveFarmServerComponentsMode(true)).toBe("islands");
     expect(resolveFarmServerComponentsMode({ mode: "rsc" })).toBe("rsc");
     expect(resolveFarmServerComponentsMode({ mode: "islands" })).toBe("islands");
   });

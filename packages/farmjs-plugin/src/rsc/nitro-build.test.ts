@@ -81,6 +81,47 @@ globalThis.__VITE_RSC_LOAD_SSR__ = () => import("/project/.nitro/vite/dist/ssr/i
     }
   });
 
+  it("rewrites entry imports that resolve when the server dir is reached through a link", () => {
+    // macOS reaches its temp dir through /var, a link to /private/var: one level deeper. A prerender
+    // server dir under the link path, pointed at bundles under the real path, must still resolve.
+    const outputRoot = realpathSync(mkdtempSync(path.join(tmpdir(), "farm-rsc-linked-")));
+
+    try {
+      const realRoot = path.join(outputRoot, "private", "project");
+      const linkedRoot = path.join(outputRoot, "project");
+      const serverDistDir = path.join(realRoot, "dist");
+      const entryDir = path.join(realRoot, "server", "_build");
+      mkdirSync(path.join(serverDistDir, "rsc"), { recursive: true });
+      mkdirSync(path.join(serverDistDir, "ssr"), { recursive: true });
+      mkdirSync(entryDir, { recursive: true });
+      writeFileSync(path.join(serverDistDir, "rsc", "farm-node-env.mjs"), "");
+      writeFileSync(path.join(serverDistDir, "rsc", "index.js"), "");
+      writeFileSync(path.join(serverDistDir, "ssr", "index.js"), "");
+      symlinkSync(realRoot, linkedRoot, "junction");
+
+      const entryPath = path.join(entryDir, "rsc-entry.mjs");
+      writeFileSync(
+        entryPath,
+        `import "/project/.nitro/vite/dist/rsc/farm-node-env.mjs";
+import rsc from "/project/.nitro/vite/dist/rsc/index.js";
+globalThis.__VITE_RSC_LOAD_SSR__ = () => import("/project/.nitro/vite/dist/ssr/index.js");`,
+      );
+
+      rewriteRscEntryImports(path.join(linkedRoot, "server"), serverDistDir);
+
+      const specifiers = [...readFileSync(entryPath, "utf-8").matchAll(/"(\.[^"]+)"/g)].map(
+        (match) => match[1]!,
+      );
+      expect(specifiers).toHaveLength(3);
+      // Node resolves a relative import from the importing file's real location.
+      for (const specifier of specifiers) {
+        expect(existsSync(path.resolve(entryDir, specifier)), specifier).toBe(true);
+      }
+    } finally {
+      rmSync(outputRoot, { recursive: true, force: true });
+    }
+  });
+
   it("boots node-server output after the project and workspace dependencies are removed", async () => {
     const fixtureRoot = mkdtempSync(path.join(tmpdir(), "farm-rsc-build-"));
     const isolatedRoot = mkdtempSync(path.join(tmpdir(), "farm-rsc-output-"));

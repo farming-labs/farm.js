@@ -1,4 +1,4 @@
-import { KitProvider, KitQuote, KitValue, kitGreeting } from "@farm-fixtures/rsc-kit";
+import { KitCard, KitProvider, KitQuote, KitValue, kitGreeting } from "@farm-fixtures/rsc-kit";
 import { KitLabel } from "../../../components/compat/kit-label";
 
 // A package with a react-server build, used from a server component as React Server Components
@@ -9,6 +9,7 @@ export default function RscKitPage() {
       <h1>rsc-kit</h1>
       <p data-testid="kit-greeting">{kitGreeting("islands")}</p>
       <KitQuote topic="engines" />
+      <KitCard title="kit card" />
       <KitProvider initial="from server">
         <article>
           <p>Server text inside the kit provider.</p>

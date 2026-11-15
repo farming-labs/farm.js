@@ -39,6 +39,7 @@ const buildEnv = {
   SUPABASE_URL: process.env.SUPABASE_URL || "https://ci.supabase.co",
   TRIGGER_PROJECT_REF: process.env.TRIGGER_PROJECT_REF || "proj_ci",
   TRIGGER_SECRET_KEY: process.env.TRIGGER_SECRET_KEY || "tr_ci",
+  TURNSTILE_SITE_KEY: process.env.TURNSTILE_SITE_KEY || "ci-turnstile-site-key",
   WORKOS_API_KEY: process.env.WORKOS_API_KEY || "sk_test_ci",
   WORKOS_CLIENT_ID: process.env.WORKOS_CLIENT_ID || "client_ci",
   WORKOS_COOKIE_PASSWORD:

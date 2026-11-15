@@ -87,7 +87,7 @@ farm build
 farm deploy --vercel
 ```
 
-For the `vercel` and `vercel-edge` presets, the integration builds the Eve service and adds its
+For the `vercel` preset, the integration builds the Eve service and adds its
 functions, routes, and assets to Farm's Vercel output, so the app and the agent ship from one
 project with the same public `/eve` routes.
 

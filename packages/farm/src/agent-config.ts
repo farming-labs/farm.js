@@ -73,8 +73,9 @@ export interface FarmAgentUserConfig {
    * Serve `/llms.txt` (https://llmstxt.org): a Markdown index of the app's static
    * pages, linking to their Markdown mirrors. `true` builds it from page metadata
    * and also serves `/llms-full.txt`; an object sets the title, summary, details,
-   * and which routes to list. A `src/app/llms.ts` metadata route or a
-   * `public/llms.txt` replaces the generated file. Left unset, `/llms.txt` is served
+   * and which routes to list. Links use the root layout's `metadataBase`, or the
+   * request's origin without one, as for the sitemap. A `src/app/llms.ts` metadata
+   * route or a `public/llms.txt` replaces the generated file. Left unset, `/llms.txt` is served
    * (without `/llms-full.txt`) unless the docs engine is enabled, which serves its own.
    *
    * @default { full: false } without docs, false with docs
@@ -83,7 +84,8 @@ export interface FarmAgentUserConfig {
   /**
    * Serve `/sitemap.xml` listing the app's static pages, the same pages the generated
    * llms.txt lists, each with the time its page file last changed. Dynamic routes,
-   * pages whose metadata says noindex, pages behind a route `guard`, and pages a
+   * pages whose metadata says noindex (their own, or a layout's when the page sets no
+   * `robots`), pages behind a route `guard`, and pages a
    * path-specific guard covers (non-root middleware.ts, a config or integration
    * middleware matcher naming the path) are left out.
    * URLs use the root layout's `metadataBase`, or the request's origin without one. An
@@ -167,13 +169,22 @@ const DEFAULT_JSON_LD: FarmAgentJsonLd = { type: "WebSite" };
 
 export function resolveFarmAgentConfig(
   input: FarmAgentUserConfig | undefined,
-  context: { docs?: boolean } = {},
+  /**
+   * `docs`: the docs engine serves its own llms.txt, sitemap, and MCP server.
+   * `pages: false`: the app has no pages (`renderer: false`), so the page-derived defaults
+   * (JSON-LD, llms.txt, sitemap, and the page-reading MCP server) would describe nothing.
+   */
+  context: { docs?: boolean; pages?: boolean } = {},
 ): ResolvedFarmAgentConfig {
+  const servesPages = context.pages !== false;
+  const pageDefaults = servesPages && !context.docs;
   const jsonLd = input?.jsonLd;
   return {
     jsonLd:
       jsonLd === undefined
-        ? { ...DEFAULT_JSON_LD }
+        ? servesPages
+          ? { ...DEFAULT_JSON_LD }
+          : false
         : !jsonLd
           ? false
           : jsonLd === true
@@ -182,15 +193,15 @@ export function resolveFarmAgentConfig(
     noindexPreviews: resolveFarmNoindexPreviews(input?.noindexPreviews),
     // The docs engine answers /llms.txt with its own pages; a default here would replace it.
     // llms-full.txt renders every listed page, so it stays opt-in.
-    llmsTxt: resolveFarmLlmsTxtConfig(input?.llmsTxt ?? (context.docs ? false : { full: false })),
+    llmsTxt: resolveFarmLlmsTxtConfig(input?.llmsTxt ?? (pageDefaults ? { full: false } : false)),
     // Same rule as llms.txt: the docs engine answers /sitemap.xml with its own pages.
-    sitemap: resolveFarmAgentSitemap(input?.sitemap ?? !context.docs),
+    sitemap: resolveFarmAgentSitemap(input?.sitemap ?? pageDefaults),
     crawlers: resolveFarmAgentCrawlers(input?.crawlers),
     apiCatalog: resolveFarmAgentBoolean(input?.apiCatalog, "apiCatalog", false),
     aiCatalog: resolveFarmAgentBoolean(input?.aiCatalog, "aiCatalog", true),
     manifest: resolveFarmAppManifestConfig(input?.manifest),
     // Same rule as llms.txt: the docs engine serves its own MCP server at /mcp.
-    mcp: resolveFarmAgentBoolean(input?.mcp, "mcp", !context.docs),
+    mcp: resolveFarmAgentBoolean(input?.mcp, "mcp", pageDefaults),
   };
 }
 

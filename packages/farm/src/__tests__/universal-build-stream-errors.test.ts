@@ -21,6 +21,11 @@ type StreamRenderer = {
     routeKey?: string,
     flushToken?: string,
   ) => Promise<RenderedElement>;
+  renderFarmCompleteDocument: (
+    ReactDOMServer: unknown,
+    element: unknown,
+    documentKey: string,
+  ) => Promise<string>;
 };
 
 // The production stream renderer only exists inside the generated-entry
@@ -30,6 +35,7 @@ type StreamRenderer = {
 function instantiateStreamRenderer(
   streamingCapabilities = { node: true, web: true },
   primitives = { TextEncoder, TextDecoder, ReadableStream },
+  reactSyncRender = true,
 ): StreamRenderer {
   const source = fs.readFileSync(
     path.join(process.cwd(), "src", "nitro", "universal-build.ts"),
@@ -51,16 +57,18 @@ function instantiateStreamRenderer(
     "ReadableStream",
     "_resolveCurrentCspNonce",
     "getFarmRendererRenderOptions",
-    `${source.slice(start, end)}\nreturn { renderFarmElement, renderFarmElementToString };`,
+    "farmFormState",
+    `${source.slice(start, end)}\nreturn { renderFarmElement, renderFarmCompleteDocument };`,
   );
   return factory(
     isFarmRedirectError,
     isFarmNotFoundError,
     streamingCapabilities,
-    true,
+    reactSyncRender,
     primitives.TextEncoder,
     primitives.TextDecoder,
     primitives.ReadableStream,
+    () => undefined,
     () => undefined,
     () => undefined,
   ) as StreamRenderer;
@@ -494,6 +502,175 @@ function latePipeableServer(lateError: unknown) {
   };
 }
 
+// The not-found and error documents go out whole, with their status. renderToString threw "A
+// component suspended while responding to synchronous input" for a layout holding a lazy
+// component, and Farm sent its bare fallback 404 instead of the app's not-found page.
+describe("generated complete document renderer", () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  function countedServer() {
+    const calls = { sync: 0, node: 0, web: 0 };
+    return {
+      calls,
+      server: {
+        ...ReactDOMServer,
+        renderToString(element: React.ReactNode) {
+          calls.sync++;
+          return ReactDOMServer.renderToString(element);
+        },
+        renderToPipeableStream(element: React.ReactNode, options: any) {
+          calls.node++;
+          return ReactDOMServer.renderToPipeableStream(element, options);
+        },
+        renderToReadableStream(element: React.ReactNode, options: any) {
+          calls.web++;
+          return ReactDOMServer.renderToReadableStream(element, options);
+        },
+      },
+    };
+  }
+
+  function suspendingDocument() {
+    const settle = <T>(value: T) =>
+      new Promise<T>((resolve) => setTimeout(() => resolve(value), 5));
+    const Nav = React.lazy(() =>
+      settle({ default: () => React.createElement("nav", null, "lazy nav") }),
+    );
+    const release = settle("release 7");
+    function Release() {
+      return React.createElement("footer", null, React.use(release));
+    }
+    return React.createElement(
+      "html",
+      null,
+      React.createElement(
+        "body",
+        null,
+        // Outside any boundary: renderToString throws.
+        React.createElement(Nav),
+        React.createElement("main", null, "not found"),
+        // Inside one: renderToString leaves it to the client.
+        React.createElement(
+          React.Suspense,
+          { fallback: React.createElement("p", null, "release fallback") },
+          React.createElement(Release),
+        ),
+      ),
+    );
+  }
+
+  it.each(["node", "web"] as const)(
+    "waits on the %s stream for every boundary, then keeps that renderer for the document",
+    async (runtime) => {
+      const renderer = instantiateStreamRenderer({
+        node: runtime === "node",
+        web: runtime === "web",
+      });
+      const { calls, server } = countedServer();
+      for (let request = 1; request <= 2; request++) {
+        const html = await renderer.renderFarmCompleteDocument(
+          server,
+          suspendingDocument(),
+          "not-found",
+        );
+        expect(html).toContain("<nav>lazy nav</nav>");
+        expect(html).toContain("<main>not found</main>");
+        expect(html).toContain("<footer>release 7</footer>");
+        expect(html).not.toContain("release fallback");
+        expect(html).not.toContain("$RC");
+        // One synchronous attempt finds the suspension; later requests stream straight away.
+        expect(calls).toEqual({
+          sync: 1,
+          node: runtime === "node" ? request : 0,
+          web: runtime === "web" ? request : 0,
+        });
+      }
+    },
+  );
+
+  it("renders a document that does not suspend with renderToString alone", async () => {
+    const renderer = instantiateStreamRenderer({ node: true, web: false });
+    const { calls, server } = countedServer();
+    const document = () =>
+      React.createElement(
+        "html",
+        null,
+        React.createElement(
+          "body",
+          null,
+          React.createElement(
+            React.Suspense,
+            { fallback: "loading" },
+            React.createElement("main", null, "not found"),
+          ),
+        ),
+      );
+    for (let request = 0; request < 3; request++) {
+      expect(await renderer.renderFarmCompleteDocument(server, document(), "plain")).toBe(
+        ReactDOMServer.renderToString(document()),
+      );
+    }
+    expect(calls).toEqual({ sync: 3, node: 0, web: 0 });
+  });
+
+  it("leaves a boundary that fails to the client and still sends the document", async () => {
+    const errors = vi.spyOn(console, "error").mockImplementation(() => {});
+    const renderer = instantiateStreamRenderer({ node: true, web: false });
+    function ClientOnly(): React.ReactNode {
+      throw new Error("window is not defined");
+    }
+    const html = await renderer.renderFarmCompleteDocument(
+      ReactDOMServer,
+      React.createElement(
+        "main",
+        null,
+        "not found",
+        React.createElement(
+          React.Suspense,
+          { fallback: React.createElement("p", null, "client fallback") },
+          React.createElement(ClientOnly),
+        ),
+      ),
+      "client-boundary",
+    );
+    expect(html).toContain("not found");
+    expect(html).toContain("<!--$!-->");
+    expect(html).toContain("client fallback");
+    expect(errors).toHaveBeenCalledWith("[Farm SSR stream]", expect.any(Error));
+  });
+
+  it("still fails a document whose shell throws", async () => {
+    vi.spyOn(console, "error").mockImplementation(() => {});
+    const renderer = instantiateStreamRenderer({ node: true, web: false });
+    function Broken(): React.ReactNode {
+      throw new Error("layout failed");
+    }
+    await expect(
+      renderer.renderFarmCompleteDocument(ReactDOMServer, React.createElement(Broken), "broken"),
+    ).rejects.toThrow("layout failed");
+  });
+
+  it("lets other renderers wait for async content in their own renderToString", async () => {
+    const renderer = instantiateStreamRenderer(
+      { node: true, web: true },
+      { TextEncoder, TextDecoder, ReadableStream },
+      false,
+    );
+    const server = {
+      renderToString: vi.fn(async () => "<main>vue not found</main>"),
+      renderToPipeableStream: vi.fn(),
+      renderToReadableStream: vi.fn(),
+    };
+    expect(await renderer.renderFarmCompleteDocument(server, null, "not-found")).toBe(
+      "<main>vue not found</main>",
+    );
+    expect(server.renderToPipeableStream).not.toHaveBeenCalled();
+    expect(server.renderToReadableStream).not.toHaveBeenCalled();
+  });
+});
+
 describe("generated production stream renderer control-flow errors", () => {
   afterEach(() => {
     vi.restoreAllMocks();
@@ -737,8 +914,9 @@ describe("streamed navigation flush markers", () => {
     // The browser accepts exactly this shape (readFarmNavigationStream).
     expect(first).toMatch(/^[0-9a-f]{32}$/);
     expect(createFarmFlushToken()).not.toBe(first);
+    // A page with defer() data arrives whole, with the snapshot its props are revived from.
     expect(source).toContain(
-      'request.headers.get("f-stream") === "flush"\n          ? createFarmFlushToken()',
+      'request.headers.get("f-stream") === "flush" && farmDeferredData.records.length === 0\n            ? createFarmFlushToken()',
     );
     expect(source).toContain('...(farmFlushToken ? { "F-Flush": farmFlushToken } : {})');
     expect(source).not.toContain('"<!--farm-flush-->"');

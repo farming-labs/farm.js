@@ -19,7 +19,7 @@ export function generateSsrEntry(ctx: EntryContext): string {
 import React from 'react';
 import { createFromReadableStream } from '@vitejs/plugin-rsc/ssr';
 import { injectRSCPayload } from 'rsc-html-stream/server';
-import { renderToPipeableStream } from 'react-dom/server';
+import { ${ctx.workers ? "renderToReadableStream" : "renderToPipeableStream"} } from 'react-dom/server';
 
 function debug(...args) {
   ${debugLog}
@@ -151,7 +151,18 @@ export async function renderHTML(firstArg, options = {}) {
   }
   if (!bootstrap && PROD_BOOTSTRAP !== "__FARM_BOOTSTRAP_SCRIPT__") bootstrap = PROD_BOOTSTRAP;
   
-  // Use renderToPipeableStream so Suspense streams: fallback (loading.tsx) first, then resolved content.
+${
+  ctx.workers
+    ? `  // Workers have no Node streams, so render to a web stream. Suspense still streams: fallback
+  // (loading.tsx) first, then resolved content. The promise rejects when the shell can't render,
+  // so the request handler can render error.tsx through RSC and SSR.
+  const htmlStream = await renderToReadableStream(React.createElement(Root), {
+    ...(bootstrap && { bootstrapScriptContent: bootstrap }),
+    formState: options.formState,
+    onError(error) { console.error('[RSC] SSR render error:', error); },
+  });
+`
+    : `  // Use renderToPipeableStream so Suspense streams: fallback (loading.tsx) first, then resolved content.
   const { PassThrough, Readable } = await import('stream');
   const passThrough = new PassThrough();
   // Do not commit an empty response when the shell cannot render. Reject back
@@ -165,7 +176,8 @@ export async function renderHTML(firstArg, options = {}) {
       onError(error) { console.error('[RSC] SSR render error:', error); },
     });
   });
-
+`
+}
   const CLIENT_ENTRY_HREF = "__FARM_CLIENT_ENTRY_HREF__";
   const PLACEHOLDER_STR = "__FARM_CLIENT_ENTRY_HREF__";
   const injectClientScriptInStream = typeof CLIENT_ENTRY_HREF === "string" && CLIENT_ENTRY_HREF.length > 0 && CLIENT_ENTRY_HREF.indexOf(PLACEHOLDER_STR) < 0;
@@ -175,7 +187,10 @@ export async function renderHTML(firstArg, options = {}) {
     // Stream HTML to the client while preserving the RSC payload for hydration.
     debug('Streaming HTML (loading fallback then content)');
     const streamingClientScriptInjector = injectBeforeStream('</body></html>', clientScriptTag);
-    const webStream = typeof Readable.toWeb === 'function'
+${
+  ctx.workers
+    ? "    const webStream = htmlStream;"
+    : `    const webStream = typeof Readable.toWeb === 'function'
       ? Readable.toWeb(passThrough)
       : new ReadableStream({
           start(controller) {
@@ -183,7 +198,8 @@ export async function renderHTML(firstArg, options = {}) {
             passThrough.on('end', () => controller.close());
             passThrough.on('error', (e) => controller.error(e));
           }
-        });
+        });`
+}
     // In development, the stylesheets the shell's client components import (CSS modules come from
     // JavaScript in the browser, so without links their HTML is unstyled until scripts run).
     const devStyles = globalThis.__FARM_RSC_DEV_CLIENT_STYLES__;
@@ -197,7 +213,7 @@ export async function renderHTML(firstArg, options = {}) {
 
   // Legacy path: buffer full HTML then send (no loading streaming)
   debug('Rendering to HTML stream (then buffering)');
-  const fullHtmlRaw = await pipeableStreamToString(passThrough);
+  const fullHtmlRaw = ${ctx.workers ? "await new Response(htmlStream).text()" : "await pipeableStreamToString(passThrough)"};
   let fullHtml = fullHtmlRaw;
   const bufferedDevStyles = globalThis.__FARM_RSC_DEV_CLIENT_STYLES__;
   const bufferedHeadTags = headTags + (typeof bufferedDevStyles === 'function' ? bufferedDevStyles() : '');

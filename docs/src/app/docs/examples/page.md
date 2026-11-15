@@ -23,6 +23,7 @@ Use the examples folder as executable docs for routing, RSC, agents, docs, markd
 | examples/i18n                   | Typed ICU messages, locale routing, detection, client switching, API context, and RTL.          |
 | examples/docs-integration       | Docs runtime and /api/docs machine routes.                                                      |
 | examples/api-mcp                | Authenticated MCP tools declared directly on opted-in typed API routes.                         |
+| examples/api-server             | A backend-only todo API with `renderer: false`: endpoints, typed errors, middleware, OpenAPI.   |
 | examples/federation-demo        | Separate producer and host builds with a federated browser component.                           |
 | examples/search-demo            | Static Pagefind indexing, route selection, and a headless React search interface.               |
 | examples/stripe-integration     | Stripe checkout, portal, session, webhooks.                                                     |

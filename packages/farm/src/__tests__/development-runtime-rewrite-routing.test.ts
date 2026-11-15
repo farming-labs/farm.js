@@ -13,9 +13,13 @@ import { createServer } from "../server/create-server";
 const packageRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
 
 // The production entry routes whatever `runtime.before` yields, so the dev page
-// path has to resolve its route from the same request. This is the generated
-// production matcher, used here to pin the pattern and params dev reports for a
-// rewritten pathname to what a built app resolves for the same path.
+// path has to resolve its route from the same request. The router and render hooks
+// are another matter: production's `handleFarmPluginRequest` takes their route from
+// the runtime options it computed from the incoming request, before runtime.before
+// ran, and the plugin docs say render.before describes "the page route the requested
+// URL matches". So they report the requested route, not the replacement. This is the
+// generated production matcher, used here to pin the pattern and params dev reports
+// to what a built app resolves for the same path.
 const prodMatch = new Function(
   `${generateRuntimePathMatcherSource()}\nreturn matchRuntimePathPattern;`,
 )() as (pattern: string, pathname: string) => Record<string, string> | null;
@@ -171,29 +175,32 @@ describe("development runtime.before rewrite routing", () => {
     expect(html).toContain('data-items-layout="1"');
   });
 
-  it("reports the routed route to plugins, matching the production matcher", async () => {
+  it("reports the requested route to the router and render hooks, as production does", async () => {
     const response = await fetch(`${origin}/from`);
     const html = await response.text();
     const reported = readReportedRoute(html);
 
+    // The page renders the replacement route (see above), but the hooks describe the
+    // URL as requested: production runs them with the route it matched for the
+    // incoming request, before runtime.before replaced it. Dev used to report the
+    // replacement here, which no production build did.
+    expect(html).toContain("items-route:42");
     expect(reported).toEqual({
-      pathname: "/items/42",
+      pathname: "/from",
       method: "GET",
-      routePattern: "/items/[id]",
-      params: { id: "42" },
+      routePattern: "/from",
+      params: {},
     });
-    // The selected route, including the layout chain the page actually rendered
-    // with, is the rewritten one rather than the requested one.
     expect(readRouteMatch(html)).toEqual({
-      pathname: "/items/42",
+      pathname: "/from",
       matched: true,
-      routePattern: "/items/[id]",
-      params: { id: "42" },
-      layoutPatterns: ["/", "/items"],
+      routePattern: "/from",
+      params: {},
+      layoutPatterns: ["/"],
     });
     // Pin the reported pattern and params to what a built app resolves for the
-    // same rewritten pathname, so the two matchers cannot drift apart.
-    expect(prodMatch(String(reported?.routePattern), "/items/42")).toEqual(reported?.params);
+    // same requested pathname, so the two matchers cannot drift apart.
+    expect(prodMatch(String(reported?.routePattern), "/from")).toEqual(reported?.params);
   });
 
   it("does not re-route a request the session left alone", async () => {

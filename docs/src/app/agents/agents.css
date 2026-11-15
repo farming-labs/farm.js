@@ -48,6 +48,7 @@
   mask-image:
     linear-gradient(180deg, transparent, rgb(0 0 0 / 0.25) 40%, #000),
     linear-gradient(90deg, transparent, #000 18%, #000 82%, transparent);
+  -webkit-mask-composite: source-in, xor;
   mask-composite: intersect;
 }
 .agents-hero-copy {
@@ -213,10 +214,15 @@
   line-height: 10px;
   user-select: none;
   pointer-events: none;
+  -webkit-mask-image:
+    linear-gradient(90deg, transparent, #000 8%, #000 92%, transparent),
+    linear-gradient(0deg, transparent, #000 18%, #000 82%, transparent),
+    radial-gradient(ellipse clamp(140px, 26vw, 300px) 220px at 50% 50%, transparent 15%, #000);
   mask-image:
     linear-gradient(90deg, transparent, #000 8%, #000 92%, transparent),
     linear-gradient(0deg, transparent, #000 18%, #000 82%, transparent),
     radial-gradient(ellipse clamp(140px, 26vw, 300px) 220px at 50% 50%, transparent 15%, #000);
+  -webkit-mask-composite: source-in, xor;
   mask-composite: intersect;
 }
 .agent-ascii-row {

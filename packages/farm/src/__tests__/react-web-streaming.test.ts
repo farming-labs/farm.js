@@ -19,7 +19,6 @@ describe("React Web streaming on edge presets", () => {
       "cloudflare",
       "cloudflare-pages",
       "cloudflare-module",
-      "vercel-edge",
       "netlify-edge",
       "deno",
     ]) {
@@ -39,7 +38,7 @@ describe("React Web streaming on edge presets", () => {
     // Other renderers externalize react-dom entirely, so aliasing it would be
     // both pointless and a way to pull React into a build that has none.
     expect(shouldAliasReactServerToWebBuild(svelte, "cloudflare")).toBe(false);
-    expect(shouldAliasReactServerToWebBuild(svelte, "vercel-edge")).toBe(false);
+    expect(shouldAliasReactServerToWebBuild(svelte, "netlify-edge")).toBe(false);
   });
 
   it("treats an unresolved renderer as React, matching isReactRenderer", () => {

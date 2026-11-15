@@ -8,7 +8,7 @@ section: "Integrations"
 
 The Inngest runtime turns each Farm task into an event name, sends single or batched events, and reads function runs by the returned event ID.
 
-The current adapter is intentionally narrower than the Trigger.dev runtime. It supports triggering, batching, status, and idempotent event IDs. It does not currently expose delay, scheduling, cancellation, tags, queues, retries, TTL, or concurrency options.
+The current adapter is intentionally narrower than the Trigger.dev runtime. It supports triggering, batching, status, idempotent event IDs, and delayed or one-off scheduled sends through the event `ts`. It does not expose cancellation, tags, queues, retries, TTL, or concurrency options.
 
 ## Add Inngest
 
@@ -152,20 +152,18 @@ If Inngest has accepted the event but no function run is visible yet, Farm retur
 
 ## Current limitations
 
-The shared Jobs API still contains `schedule` and `cancel`, but the Inngest adapter reports unsupported behavior instead of silently ignoring it:
+`$options.delay` and `api.jobs.<task>.schedule(...)` are supported and set the event `ts`; see [Schedule and cancel](/docs/integrations/jobs#schedule-and-cancel) for the accepted formats. The shared Jobs API also contains options the Inngest adapter cannot honor, and it reports them instead of silently ignoring them:
 
-| Operation or option             | Current result                                  |
-| ------------------------------- | ----------------------------------------------- |
-| `$options.delay`                | `400`                                           |
-| `$options.debounce`             | `400`                                           |
-| `$options.tags`                 | `400`                                           |
-| `api.jobs.<task>.schedule(...)` | `400` because delayed launch is not implemented |
-| `api.jobs.<task>.cancel(...)`   | `501`                                           |
-| `defaults.queue`                | Integration setup error                         |
-| `defaults.retry`                | Integration setup error                         |
-| `defaults.ttl`                  | Integration setup error                         |
-| `defaults.concurrencyKey`       | Integration setup error                         |
-| `defaults.tags`                 | Integration setup error                         |
+| Operation or option           | Current result          |
+| ----------------------------- | ----------------------- |
+| `$options.debounce`           | `400`                   |
+| `$options.tags`               | `400`                   |
+| `api.jobs.<task>.cancel(...)` | `501`                   |
+| `defaults.queue`              | Integration setup error |
+| `defaults.retry`              | Integration setup error |
+| `defaults.ttl`                | Integration setup error |
+| `defaults.concurrencyKey`     | Integration setup error |
+| `defaults.tags`               | Integration setup error |
 
 `defaults.idempotencyKey` and batch triggering are supported.
 

@@ -106,11 +106,22 @@ export interface FarmDocsRouteLabelInput {
   apiPath?: string;
   /** The entries of `docs.roots`, served alongside `path`. */
   roots?: readonly string[];
+  /**
+   * The paths of the pages the docs renderer publishes (`/docs/routing`), listed from its
+   * content. Only these are reported by their own path.
+   */
+  pages?: ReadonlySet<string>;
 }
 
+// A published page's path, as Farm Infra accepts a route: no brackets, so it never reads as a
+// pattern, and no percent escapes or other characters a page path rarely needs.
+const PUBLISHED_PAGE_PATH = /^\/[a-zA-Z0-9_./-]{0,250}$/;
+
 /**
- * A docs page by the route the docs engine registers (`/docs` and `/docs/[...slug]`, with
- * `.md` for its Markdown), or the docs API by its base. Null outside both.
+ * A docs page by its own path when the docs renderer publishes it (`/docs/routing`, with `.md`
+ * for its Markdown), else by the route the docs engine registers (`/docs/[...slug]`), or the docs
+ * API by its base. Null outside both. A path no page has keeps the catch-all, so a label never
+ * carries a path someone only requested.
  */
 export function resolveFarmDocsRouteLabel(
   routePathname: string,
@@ -130,7 +141,11 @@ export function resolveFarmDocsRouteLabel(
     if (page === entry || (entry === "/" && page === "/index")) {
       return markdown ? getFarmMarkdownMirrorPath(entry) : entry;
     }
-    if (page.startsWith(`${base}/`)) return `${base}/[...slug]${markdown ? ".md" : ""}`;
+    if (page.startsWith(`${base}/`)) {
+      const label =
+        docs.pages?.has(page) && PUBLISHED_PAGE_PATH.test(page) ? page : `${base}/[...slug]`;
+      return `${label}${markdown ? ".md" : ""}`;
+    }
   }
   return null;
 }

@@ -18,6 +18,7 @@ import {
 import { _runWithFarmI18nRequest, type FarmI18nRuntime } from "../i18n/server";
 import {
   API_ROUTE_METHODS,
+  createFarmInternalServerErrorResponse,
   getAllowedAPIRouteMethods,
   invokeAPIRouteEndpoint,
   registerAPIRouteShape,
@@ -78,6 +79,7 @@ export class APIRouteManager {
   private bodySizeLimit?: number;
   private basePath?: string;
   private dispatch?: PluginAPIDispatch;
+  private discovery: Promise<void> = Promise.resolve();
 
   constructor(
     appDir: string | readonly string[],
@@ -104,44 +106,57 @@ export class APIRouteManager {
   }
 
   /**
-   * Discover route.ts files in /app/api and explicit endpoints in root routes.ts
+   * Discover route.ts files in /app/api and explicit endpoints in root routes.ts.
+   *
+   * Requests keep matching the current routes until discovery finishes, and a failed discovery
+   * keeps them: discovery awaits each route module, and a dev server runs it again for each route
+   * file a watcher reports. Discoveries run one at a time, so an older scan never replaces a newer
+   * one.
    */
-  async discoverRoutes(): Promise<void> {
-    const previousRoutes = this.routes;
-    const previousEndpointSources = this.endpointSources;
-    const previousRouteShapes = this.routeShapes;
-    this.routes = new Map();
-    this.endpointSources = new Map();
-    this.routeShapes = new Map();
-
-    try {
-      for (const appDir of this.appDirs) {
-        const apiDir = path.join(appDir, "api");
-        let routeFiles: string[] = [];
-
-        if (fs.existsSync(apiDir)) {
-          routeFiles = this.findRouteFiles(apiDir);
-        }
-
-        for (const filePath of routeFiles) {
-          await this.loadRoute(filePath, appDir);
-        }
-
-        await this.loadRootRoutes(appDir);
-        await this.loadProgrammaticApiRoutes(appDir);
-      }
-      this.routes = new Map(
-        mergePluginAPIRoutes([...this.routes.values()], this.plugins, undefined, {
+  discoverRoutes(): Promise<void> {
+    const discovery = this.discovery
+      .catch(() => {})
+      .then(async () => {
+        const next = new APIRouteManager(this.appDirs, this.viteServer, {
+          plugins: this.plugins,
+          throwOnLoadError: this.throwOnLoadError,
+          i18n: this.i18n,
           bodySizeLimit: this.bodySizeLimit,
+          basePath: this.basePath,
           dispatch: this.dispatch,
-        }).map((route) => [route.path, route]),
-      );
-    } catch (error) {
-      this.routes = previousRoutes;
-      this.endpointSources = previousEndpointSources;
-      this.routeShapes = previousRouteShapes;
-      throw error;
+        });
+        await next.discoverInto();
+        this.routes = next.routes;
+        this.endpointSources = next.endpointSources;
+        this.routeShapes = next.routeShapes;
+      });
+    this.discovery = discovery;
+    return discovery;
+  }
+
+  /** Fill this manager's empty route tables. Only a fresh manager made by discoverRoutes runs it. */
+  private async discoverInto(): Promise<void> {
+    for (const appDir of this.appDirs) {
+      const apiDir = path.join(appDir, "api");
+      let routeFiles: string[] = [];
+
+      if (fs.existsSync(apiDir)) {
+        routeFiles = this.findRouteFiles(apiDir);
+      }
+
+      for (const filePath of routeFiles) {
+        await this.loadRoute(filePath, appDir);
+      }
+
+      await this.loadRootRoutes(appDir);
+      await this.loadProgrammaticApiRoutes(appDir);
     }
+    this.routes = new Map(
+      mergePluginAPIRoutes([...this.routes.values()], this.plugins, undefined, {
+        bodySizeLimit: this.bodySizeLimit,
+        dispatch: this.dispatch,
+      }).map((route) => [route.path, route]),
+    );
 
     if (process.env.FARM_VERBOSE) {
       logger.success(`Discovered ${this.routes.size} API routes`);
@@ -326,7 +341,8 @@ export class APIRouteManager {
     return null;
   }
 
-  private async loadModule(filePath: string): Promise<Record<string, unknown>> {
+  /** Load an app module through the server that loads the routes, as their handlers were. */
+  async loadModule(filePath: string): Promise<Record<string, unknown>> {
     if (this.viteServer) {
       return await loadFarmDevModule(this.viteServer, filePath);
     }
@@ -440,10 +456,7 @@ export class APIRouteManager {
         } catch (error: any) {
           if (options.throwOnError) throw error;
           console.error(`[API Error] ${pathname}:`, error);
-          return new Response(JSON.stringify({ error: "Internal Server Error" }), {
-            status: 500,
-            headers: { "Content-Type": "application/json" },
-          });
+          return createFarmInternalServerErrorResponse();
         }
       };
 

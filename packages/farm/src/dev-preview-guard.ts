@@ -166,9 +166,9 @@ async function isAllowedPreviewRequest(
     return true;
   }
 
-  const isModuleOrAsset =
-    MODULE_EXTENSION.test(file) || ASSET_EXTENSION.test(file) || query.has("import");
-  if (!isModuleOrAsset) return false;
+  // Decided by the file, not the query: Vite transforms any file requested with `?import`, so a
+  // data file the client does not import would otherwise be served as a module.
+  if (!MODULE_EXTENSION.test(file) && !ASSET_EXTENSION.test(file)) return false;
   for (const source of options.getSourceRoots()) {
     const sourceRoot = await realpathOr(source.root);
     const sourceDir = await realpathOr(path.resolve(source.root, source.srcDir));

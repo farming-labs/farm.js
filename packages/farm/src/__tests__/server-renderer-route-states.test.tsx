@@ -222,6 +222,37 @@ describe("file route loading.tsx and error.tsx", () => {
     expect(response.body).toContain("/src/app/dashboard/loading.tsx");
   });
 
+  it("answers an islands navigation without its loading.tsx fallback, as production does", async () => {
+    const renderer = createRenderer({
+      [routeModulePath]: {
+        default: async function DashboardPage() {
+          await new Promise((resolve) => setTimeout(resolve, 5));
+          return React.createElement("main", null, "Dashboard ready");
+        },
+      },
+      [loadingModulePath]: {
+        default: function DashboardLoading() {
+          return React.createElement("p", null, "Loading dashboard");
+        },
+      },
+    });
+    (renderer as any).config.experimental.serverComponents = { mode: "islands" };
+    const render = async (headers: Record<string, string>) => {
+      const response = createMockResponse();
+      const request = createMockRequest("/dashboard");
+      Object.assign(request.headers, headers);
+      await renderer.renderPage(request, response);
+      return response.body;
+    };
+
+    // The browser swaps a navigation into a page on screen, so a fallback in it would paint.
+    const navigation = await render({ "f-stream": "flush" });
+    expect(navigation).toContain("Dashboard ready");
+    expect(navigation).not.toContain("Loading dashboard");
+    // A document load still streams loading.tsx while the page suspends.
+    expect(await render({})).toContain("Loading dashboard");
+  });
+
   it("renders the nearest error.tsx for file route render failures", async () => {
     vi.spyOn(logger, "error").mockImplementation(() => {});
     const response = createMockResponse();
@@ -681,6 +712,37 @@ describe("file route loading.tsx and error.tsx", () => {
           "127.0.0.1:4317",
         );
       }
+    });
+
+    it("links to the root layout's metadataBase and still reads pages from this server", async () => {
+      const fetchSpy = stubMarkdownFetch();
+      const response = createMockResponse();
+      const renderer = createRenderer(
+        {
+          ...pages,
+          [layoutModulePath]: {
+            ...pages[layoutModulePath],
+            metadata: {
+              ...pages[layoutModulePath].metadata,
+              metadataBase: "https://acme.test/app",
+            },
+          },
+        },
+        { routes, layouts: { "/": layoutModulePath }, agent: { llmsTxt: true } },
+      );
+      const request = createDevRequest("/llms-full.txt");
+      request.headers = { host: "evil.test" };
+
+      await renderer.renderPage(request, response);
+
+      expect(response.body).toContain("URL: https://acme.test/dashboard.md");
+      expect(response.body).toContain("dashboard-markdown-body");
+      expect(response.body).not.toContain("evil.test");
+      expect(fetchSpy).toHaveBeenCalledTimes(2);
+
+      const index = createMockResponse();
+      await renderer.renderPage(createDevRequest("/llms.txt"), index);
+      expect(index.body).toContain("- [Dashboard](https://acme.test/dashboard.md)");
     });
 
     it("reads pages from an HTTPS dev server, verifying the requested hostname", async () => {
@@ -1286,6 +1348,83 @@ describe("file route loading.tsx and error.tsx", () => {
     expect(html).toContain("Settings fragment");
   });
 
+  it("keeps a large route inline instead of behind its loading.tsx fallback", async () => {
+    // React outlines a completed boundary bigger than its 12.8 KB progressive chunk
+    // size: the fallback, then the content in a hidden segment revealed by $RC.
+    const rows = Array.from({ length: 400 }, (_, index) => index);
+    const renderer = createRenderer({});
+    const html = await renderer.renderNavigationFragment({
+      PageComponent: function LargePage() {
+        return React.createElement(
+          "ul",
+          null,
+          rows.map((row) =>
+            React.createElement("li", { key: row }, `Large navigation row ${row} with padding`),
+          ),
+        );
+      },
+      LoadingComponent: function RouteLoading() {
+        return React.createElement("p", null, "Route loading fallback");
+      },
+      pageProps: {},
+      params: {},
+      layouts: [],
+      pageShouldHydrate: true,
+      layoutShouldHydrate: false,
+      islandStrategy: null,
+    });
+
+    expect(html.length).toBeGreaterThan(12_800);
+    expectInlineNavigationFragment(html, "Large navigation row 399 with padding");
+  });
+
+  it("waits for a route that suspends briefly instead of serializing its fallback", async () => {
+    const renderer = createRenderer({});
+    const html = await renderer.renderNavigationFragment({
+      PageComponent: async function BrieflyAsyncPage() {
+        await new Promise((resolve) => setTimeout(resolve, 5));
+        return React.createElement("main", null, "Briefly async page ready");
+      },
+      LoadingComponent: function RouteLoading() {
+        return React.createElement("p", null, "Route loading fallback");
+      },
+      pageProps: {},
+      params: {},
+      layouts: [],
+      pageShouldHydrate: false,
+      layoutShouldHydrate: false,
+      islandStrategy: null,
+    });
+
+    expectInlineNavigationFragment(html, "Briefly async page ready");
+  });
+
+  it("still returns a fragment when content under loading.tsx fails after the shell", async () => {
+    vi.spyOn(console, "error").mockImplementation(() => {});
+    const renderer = createRenderer({});
+    const html = await renderer.renderNavigationFragment({
+      PageComponent: async function FailingPage() {
+        await new Promise((resolve) => setTimeout(resolve, 5));
+        throw new Error("late route failure");
+      },
+      LoadingComponent: function RouteLoading() {
+        return React.createElement("p", null, "Route loading fallback");
+      },
+      pageProps: {},
+      params: {},
+      layouts: [],
+      pageShouldHydrate: true,
+      layoutShouldHydrate: false,
+      islandStrategy: null,
+    });
+
+    // A late failure does not reject the fragment: React marks the boundary for
+    // client rendering inline rather than through a deferred $RX script.
+    expect(html).toContain("<!--$!-->");
+    expect(html).not.toContain("$RX(");
+    expect(html).toContain("Route loading fallback");
+  });
+
   it("applies the app base path while rendering navigation fragments", async () => {
     const renderer = createRenderer({}, { basePath: "/console" });
     const html = await renderer.renderNavigationFragment({
@@ -1310,6 +1449,7 @@ describe("custom not-found rendering", () => {
     const renderer = new ServerRenderer(
       { ...createConfig(), basePath: "/console" } as Required<FarmConfig>,
       {
+        toRoutePathname: (pathname: string) => pathname,
         matchMetadataRoute: () => null,
         matchMetadataImage: () => null,
         matchRoute: () => ({ route: null, params: {}, layouts: [], slots: [] }),
@@ -1351,6 +1491,7 @@ describe("custom not-found rendering", () => {
     });
     const response = createMockResponse();
     const routeManager = {
+      toRoutePathname: (pathname: string) => pathname,
       matchMetadataRoute: () => null,
       matchMetadataImage: () => null,
       matchRoute: () => ({ route: null, params: {}, layouts: [], slots: [] }),
@@ -1399,6 +1540,7 @@ describe("custom not-found rendering", () => {
     const errorSpy = vi.spyOn(logger, "error").mockImplementation(() => {});
     const response = createMockResponse();
     const routeManager = {
+      toRoutePathname: (pathname: string) => pathname,
       matchMetadataRoute: () => null,
       matchMetadataImage: () => null,
       matchRoute: () => ({ route: null, params: {}, layouts: [], slots: [] }),
@@ -1528,7 +1670,15 @@ function createRenderer(
   const routeManager = {
     getRoutes: () => toRouteEntries(options.routes),
     getLayouts: () => toRouteEntries(options.layouts),
+    getRouteLayouts: (pattern: string) =>
+      [...toRouteEntries(options.layouts).values()].filter(
+        (layout) =>
+          layout.pattern === "/" ||
+          pattern === layout.pattern ||
+          pattern.startsWith(`${layout.pattern}/`),
+      ),
     getIsolatedClientBoundaryModules: () => new Set(options.isolatedClientBoundaryModules ?? []),
+    toRoutePathname: (pathname: string) => pathname,
     matchMetadataRoute(pathname: string) {
       const segmentPath = applicationMetadataPattern === "/" ? "" : applicationMetadataPattern;
       if (
@@ -1858,6 +2008,18 @@ function createBinaryResponse(): BinaryMockResponse {
   };
 
   return response as unknown as BinaryMockResponse;
+}
+
+function expectInlineNavigationFragment(html: string, content: string) {
+  // A fragment is inserted into a page already on screen, so React's streamed
+  // fallback and its deferred reveal script would both reach the screen.
+  expect(html).not.toContain("<!--$?-->");
+  expect(html).not.toContain("$RC(");
+  expect(html).not.toContain("Route loading fallback");
+  const page = new JSDOM(`<div id="root">${html}</div>`).window.document.getElementById(
+    "__farm_page__",
+  );
+  expect(page?.textContent).toContain(content);
 }
 
 function createDeferred<T>() {

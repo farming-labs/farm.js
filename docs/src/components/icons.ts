@@ -38,6 +38,7 @@ import {
   Rocket as LucideRocket,
   Route as LucideRoute,
   Server as LucideServer,
+  Smartphone as LucideSmartphone,
   Terminal as LucideTerminal,
   TimerReset as LucideTimerReset,
   Weight as LucideWeight,
@@ -105,6 +106,7 @@ export const RefreshCw = lean(LucideRefreshCw);
 export const Rocket = lean(LucideRocket);
 export const Route = lean(LucideRoute);
 export const Server = lean(LucideServer);
+export const Smartphone = lean(LucideSmartphone);
 export const Terminal = lean(LucideTerminal);
 export const TimerReset = lean(LucideTimerReset);
 export const Weight = lean(LucideWeight);

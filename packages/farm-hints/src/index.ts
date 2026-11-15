@@ -1,4 +1,5 @@
 import { definePlugin, type FarmPlugin } from "@farm.js/core/plugin";
+import { isFarmRendererDisabled } from "@farm.js/core/renderer";
 import { resolveHintsOptions, type HintsOptions } from "./config.js";
 import type { FarmHintsRuntime } from "./types.js";
 
@@ -36,6 +37,8 @@ export function hints(options: HintsOptions = {}) {
     enforce: "post",
     configure(config, context) {
       if (context.isProd) return withoutPlugin(config, plugin);
+      // A backend-only app (`renderer: false`) loads no page, so there is no runtime to pre-bundle.
+      if (isFarmRendererDisabled(config.renderer)) return withoutPlugin(config, plugin);
       // The runtime is imported lazily by the client plugin, so Vite's dependency scan
       // never sees it or its web-vitals and axe-core imports. Discovered on first load,
       // they re-optimize Vite's dependencies while the page runs and load a second copy

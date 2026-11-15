@@ -169,6 +169,8 @@ describe("farmMiddleware() with farmApi() on one dev server", () => {
     expect(result.reachedEnd).toBe(false);
     expect(result.error).toBeInstanceOf(Error);
     expect((result.error as Error).message).toBe("auth backend down");
+    // Vite's error page is kept out of shared caches, as core's is.
+    expect(result.res.setHeader).toHaveBeenCalledWith("Cache-Control", "private, no-store");
   });
 
   // Vite's default appType "spa" runs its HTML fallback before plugin post

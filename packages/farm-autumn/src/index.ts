@@ -12,17 +12,19 @@ import {
   Webhook as StandardWebhook,
   WebhookVerificationError as StandardWebhookVerificationError,
 } from "standardwebhooks";
+import type {
+  FarmIntegration,
+  FarmIntegrationAPI,
+  FarmIntegrationHandlerContext,
+  FarmIntegrationLogger,
+} from "@farm.js/core";
 import {
   describeIntegrationOriginRejection,
   resolveIntegrationAllowedOrigins,
   validateIntegrationRequestOrigin,
   defineIntegration,
   integrationRoute,
-  type FarmIntegration,
-  type FarmIntegrationAPI,
-  type FarmIntegrationHandlerContext,
-  type FarmIntegrationLogger,
-} from "@farm.js/core";
+} from "@farm.js/core/integrations";
 import {
   integrationConfig,
   normalizeWebhookConfig,

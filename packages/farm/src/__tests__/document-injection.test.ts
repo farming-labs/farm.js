@@ -94,6 +94,9 @@ function createInjector(viewportTags = renderViewportHead(undefined), bootsClien
     "hasFavicon",
     // Set before the composer runs, as the handler does once the whole page has rendered.
     `let fullHtml;\nlet farmBootsClient = ${bootsClient};\n` +
+      // Props without defer() values: prepared as they are, with no snapshot to write.
+      "const farmDeferredData = { data: { page: clientPageProps, slots: routeSlotPayload }, records: [] };\n" +
+      'const renderFarmDeferredDataScript = () => "";\n' +
       "const farmEntryScript = farmBootsClient ? " +
       JSON.stringify(BOOT_SCRIPT) +
       " : renderFarmClientEntryScript();\n" +

@@ -123,6 +123,11 @@ farm generate --check
 interface and prints the LAN URLs; `--host <address>` binds one address. `vite.server.host` sets
 the same option in `farm.config.ts`, and the flag wins over it.
 
+`farm dev` opens its port as soon as Vite is ready, then finishes setting up the app: route
+discovery, the hydration plan, API routes, and middleware. A request that arrives first waits for
+that setup and then gets its normal response. If setup fails, the server reports the error once,
+closes, and exits, as before.
+
 `farm dev` refreshes generated route/API types automatically when page and API route files change. Use `farm generate` when you want to refresh the same files outside the dev server, such as in CI, before publishing a package, or after moving files while the dev server was stopped.
 
 When integration database schemas are configured, `farm generate` also writes schema artifacts if Farm can detect the data layer. Pass `--orm` and `--output` when you want explicit schema output for a migration step.

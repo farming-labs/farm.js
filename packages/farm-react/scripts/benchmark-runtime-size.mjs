@@ -12,7 +12,7 @@ const resultFile = join(packageRoot, "RUNTIME_SIZE_RESULTS.json");
 const checkOnly = process.argv.includes("--check");
 const chunkAccounting = [];
 
-async function bundle(entry, compiler) {
+async function bundle(entry, compiler, compiledRoot = false) {
   const result = await build({
     configFile: false,
     root: fixtureRoot,
@@ -23,7 +23,9 @@ async function bundle(entry, compiler) {
     plugins: createFarmRendererPlugin({
       rendererOptions: {
         experimental: {
-          compiler: compiler ? { onUnsupported: "error" } : false,
+          // These fixtures measure the compiler runtime itself; the compiled root, which moves
+          // React DOM out of the initial download, is measured separately below.
+          compiler: compiler ? { onUnsupported: "error", compiledRoot } : false,
         },
       },
     }),
@@ -733,6 +735,18 @@ if (chunkAccounting.length > 0) {
 if (checkOnly) {
   const reference = JSON.parse(await readFile(resultFile, "utf8"));
   assertRuntimeSizeBudgets(results, reference);
+  // With the compiled root (the default when the compiler is on), React DOM leaves the initial
+  // download: it is a deferred chunk, loaded only for trees the compiled root cannot mount.
+  const directCompiledRoot = await bundle("direct.tsx", true, true);
+  const initialGzip = directCompiledRoot.chunkAccounting.initial.gzip;
+  if (!(initialGzip > 0 && initialGzip <= directOff.gzip - 30_000)) {
+    throw new Error(
+      `The compiled root's initial JavaScript is ${initialGzip} B gzip; it must be at least 30,000 B below the React DOM build's ${directOff.gzip} B.`,
+    );
+  }
+  if (directCompiledRoot.chunkAccounting.deferred.gzip === 0) {
+    throw new Error("The compiled root did not move React DOM into a deferred chunk.");
+  }
 } else {
   await writeFile(resultFile, `${JSON.stringify(results, null, 2)}\n`, "utf8");
 }

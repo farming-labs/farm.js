@@ -57,7 +57,11 @@ export type FarmMobileNativeEngine = "react-native" | "platform";
  */
 export type FarmMobileNativeAuto = "off" | "report" | "on";
 
-/** `"intent"` starts a route's data request when a link to it is pressed. */
+/**
+ * Reserved: `"intent"` is meant to start a route's data request when a link to it is pressed. It is
+ * recorded in the route manifest, but no shell prefetches yet, and a page that sets it gets a
+ * build warning.
+ */
 export type FarmMobilePrefetch = "intent" | "off";
 
 export interface FarmMobileNativeRouteConfig {
@@ -75,6 +79,7 @@ export interface FarmMobileNativeRouteConfig {
   presentation?: FarmMobilePresentation;
 }
 
+/** Reserved: nothing measures these yet, and the build warns when they are set. */
 export interface FarmMobileBudgets {
   /** Installed app size, in MB. */
   appSizeMb?: number;
@@ -93,7 +98,7 @@ export interface FarmMobileNativeConfig {
   routes?: Record<string, FarmMobileNativeRouteConfig>;
   /**
    * Components that may render as native views inside web screens, such as `"Map"`. Reserved:
-   * no islands render yet.
+   * no islands render yet, and the build warns when this is set.
    */
   islands?: string[];
   /** Default for every route; a page's `export const mobile` wins. Defaults to `"intent"`. */

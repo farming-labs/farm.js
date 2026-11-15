@@ -33,7 +33,16 @@ import {
   type APIRouteParams,
   type APIRouteMatch,
 } from "./route-pattern";
-import { validateIntegrationRequestOrigin } from "../integration-request-security";
+import {
+  rejectCrossSiteNonJSONBody,
+  validateIntegrationRequestOrigin,
+} from "../integration-request-security";
+import { isMultipartSchema } from "./transport";
+
+const CROSS_SITE_JSON_BODY_MESSAGE =
+  "This endpoint reads a JSON body, so a request from another origin must send Content-Type: " +
+  "application/json. To accept form posts from other origins, wrap the body schema in multipart().";
+
 /**
  * Every method an API route module can export. Route discovery in core and in
  * the plain-Vite plugin reads this list, so a handler exported under any of
@@ -169,15 +178,22 @@ async function invokeAPIRouteEndpointInContext(
     ...searchParamsToObject(url.searchParams),
   };
 
+  const types = endpoint.__types || {};
   let body: any = undefined;
   if (request.method.toUpperCase() !== "GET" && request.method.toUpperCase() !== "HEAD") {
+    // A JSON body schema is the contract the generated client sends. Form bodies stay readable
+    // from the app's own pages (a native `<fetcher.Form>` submission before hydration), but
+    // another site posting one is refused; `multipart()` declares form input instead.
+    if (types.body && !isMultipartSchema(types.body)) {
+      const rejection = rejectCrossSiteNonJSONBody(request, CROSS_SITE_JSON_BODY_MESSAGE);
+      if (rejection) return rejection;
+    }
     const parsedBody = await readRequestBody(request);
     if (parsedBody.error) return parsedBody.error;
     body = parsedBody.body;
   }
 
   const headers = Object.fromEntries(request.headers.entries());
-  const types = endpoint.__types || {};
 
   const queryValidation = await validateInput(types.query, query, "Invalid query parameters");
   if (queryValidation instanceof Response) {
@@ -310,6 +326,21 @@ function attachEndpointInvalidations(response: Response, keys: readonly string[]
     status: response.status,
     statusText: response.statusText,
     headers,
+  });
+}
+
+/**
+ * @internal The JSON body of the generic `500` Farm answers when an API route, a docs API
+ * route, or app middleware throws. It is the production entry's body, so `farm dev` sends the
+ * same one. Typed endpoint failures answer {@link createEndpointFailureResponse} instead.
+ */
+export const FARM_INTERNAL_SERVER_ERROR_BODY = JSON.stringify({ error: "Internal Server Error" });
+
+/** @internal The generic `500` response, with {@link FARM_INTERNAL_SERVER_ERROR_BODY}. */
+export function createFarmInternalServerErrorResponse(): Response {
+  return new Response(FARM_INTERNAL_SERVER_ERROR_BODY, {
+    status: 500,
+    headers: { "Content-Type": "application/json" },
   });
 }
 

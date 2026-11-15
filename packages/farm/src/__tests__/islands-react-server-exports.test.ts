@@ -2,11 +2,14 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
+import { ensureFarmInternalClientReference } from "../islands-package-references";
 import {
   findFarmClientOnlyImport,
   findFarmPackageManifest,
+  findFarmReactServerClientModules,
   isFarmClientExport,
   resolveFarmReactServerExport,
+  rewriteFarmReactServerClientModuleImports,
   rewriteFarmReactServerImports,
 } from "../islands-react-server-exports";
 
@@ -93,6 +96,86 @@ describe("react-server builds in islands mode", () => {
     expect(isFarmClientExport(server, "KitProvider")).toBe(true);
     expect(isFarmClientExport(server, "Quote")).toBe(false);
     expect(isFarmClientExport(server, "greeting")).toBe(false);
+  });
+
+  it("trace a name past a star export of a use client module that does not export it", () => {
+    const root = project({
+      "node_modules/star-kit/index.js":
+        'export * from "./client.js";\nexport * from "./server.js";\n',
+      "node_modules/star-kit/client.js": '"use client";\nexport function Widget() {}\n',
+      "node_modules/star-kit/server.js": "export function Card() {}\n",
+      "node_modules/star-kit/cjs.js": '"use client";\nexports.Old = 1;\n',
+    });
+    const entry = path.join(root, "node_modules/star-kit/index.js");
+    expect(isFarmClientExport(entry, "Widget")).toBe(true);
+    expect(isFarmClientExport(entry, "Card")).toBe(false);
+    expect(isFarmClientExport(entry, "Missing")).toBe(false);
+    expect(isFarmClientExport(path.join(root, "node_modules/star-kit/cjs.js"), "Old")).toBe(true);
+  });
+
+  it("find the use client modules a react-server build renders for the names imported", () => {
+    const root = project({
+      "node_modules/card-kit/package.json": JSON.stringify({
+        name: "card-kit",
+        exports: { ".": { "react-server": "./server.js", default: "./client.js" } },
+      }),
+      "node_modules/card-kit/server.js":
+        'export * from "./hooks.js";\nexport * from "./card.js";\nexport * from "./other.js";\n',
+      "node_modules/card-kit/client.js": '"use client";\nexport function Card() {}\n',
+      "node_modules/card-kit/hooks.js": '"use client";\nexport function useTheme() {}\n',
+      "node_modules/card-kit/card.js":
+        'import { Copy } from "./copy.js";\nimport { Media } from "./parts.js";\nexport function Card() { return [Copy, Media]; }\n',
+      "node_modules/card-kit/parts.js": 'export { Media } from "./media.js";\n',
+      "node_modules/card-kit/copy.js": '"use client";\nexport function Copy() {}\n',
+      "node_modules/card-kit/media.js": '"use client";\nexport function Media() {}\n',
+      "node_modules/card-kit/other.js":
+        'import { Extra } from "./extra.js";\nexport function Other() { return Extra; }\n',
+      "node_modules/card-kit/extra.js": '"use client";\nexport function Extra() {}\n',
+      "src/page.tsx": 'import { Card } from "card-kit";\nexport default () => <Card />;\n',
+    });
+    const page = path.join(root, "src/page.tsx");
+    const kitDir = path.join(root, "node_modules/card-kit");
+    expect(isFarmClientExport(path.join(kitDir, "server.js"), "Card")).toBe(false);
+    expect(
+      findFarmReactServerClientModules(fs.readFileSync(page, "utf8"), page, "card-kit"),
+    ).toEqual([path.join(kitDir, "copy.js"), path.join(kitDir, "media.js")]);
+    expect(findFarmReactServerClientModules("", page, "react")).toBeNull();
+
+    const reference = ensureFarmInternalClientReference(root, path.join(kitDir, "copy.js"))!;
+    expect(reference.startsWith(path.join(root, ".farm", "client-references", "card-kit"))).toBe(
+      true,
+    );
+    const source = fs.readFileSync(reference, "utf8");
+    expect(source).toContain('"use client";');
+    expect(source).toContain(
+      `import { Copy as __farm_reference_0__ } from ${JSON.stringify(path.join(kitDir, "copy.js"))};`,
+    );
+    expect(source).toContain("export { __farm_reference_0__ as Copy };");
+
+    const card = path.join(kitDir, "card.js");
+    const rewritten = rewriteFarmReactServerClientModuleImports({
+      code: fs.readFileSync(card, "utf8"),
+      file: card,
+      reference: (file) => (file.endsWith("copy.js") ? "/refs/copy.tsx" : null),
+    });
+    expect(rewritten).toContain('import { Copy } from "/refs/copy.tsx";');
+    expect(rewritten).toContain('import { Media } from "./parts.js";');
+    const barrel = path.join(kitDir, "parts.js");
+    expect(
+      rewriteFarmReactServerClientModuleImports({
+        code: fs.readFileSync(barrel, "utf8"),
+        file: barrel,
+        reference: () => "/refs/media.tsx",
+      }),
+    ).toContain('export { Media } from "/refs/media.tsx";');
+    const server = path.join(kitDir, "server.js");
+    expect(
+      rewriteFarmReactServerClientModuleImports({
+        code: fs.readFileSync(server, "utf8"),
+        file: server,
+        reference: () => "/refs/hooks.tsx",
+      }),
+    ).toBeNull();
   });
 
   it("point server names at the react-server build and client names at their references", () => {

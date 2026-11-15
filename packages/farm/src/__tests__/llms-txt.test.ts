@@ -6,7 +6,10 @@ import {
   createFarmDefaultLlmsTxt,
   createFarmLlmsFullRenderer,
   createFarmLlmsMarkdownReader,
+  isFarmPageNoIndex,
+  readFarmLlmsMarkdownFrom,
   renderFarmLlmsFullTxt,
+  resolveFarmAgentOrigin,
   resolveFarmLlmsTxtConfig,
   serializeFarmLlmsTxt,
 } from "../llms-txt";
@@ -214,11 +217,25 @@ describe("collectFarmLlmsTxtPages", () => {
       markdown: resolveMarkdownConfig({ expose: ["/docs/[...slug]"] }),
     });
     expect(pages.map((page) => page.url)).toEqual([
-      // applyFarmBasePath maps the home page to "/app/", like every other Farm link.
-      "https://acme.test/app/",
+      // The URL each page answers at: "/app/" redirects to "/app" without trailingSlash.
+      "https://acme.test/app",
       "https://acme.test/app/admin/users",
       "https://acme.test/app/docs/getting-started.md",
       "https://acme.test/app/pricing",
+    ]);
+    // With trailingSlash a page answers at "/app/pricing/"; a mirror keeps its .md URL.
+    expect(
+      collectFarmLlmsTxtPages(sources, {
+        origin,
+        basePath: "/app",
+        markdown: resolveMarkdownConfig({ expose: ["/docs/[...slug]"] }),
+        trailingSlash: true,
+      }).map((page) => page.url),
+    ).toEqual([
+      "https://acme.test/app/",
+      "https://acme.test/app/admin/users/",
+      "https://acme.test/app/docs/getting-started.md",
+      "https://acme.test/app/pricing/",
     ]);
     expect(
       collectFarmLlmsTxtPages(sources, {
@@ -227,6 +244,53 @@ describe("collectFarmLlmsTxtPages", () => {
         markdown: resolveMarkdownConfig(false),
       })[0].url,
     ).toBe("https://acme.test/");
+  });
+
+  it("links pages in the default locale's URL, which answers without a redirect", () => {
+    const pages = [{ pattern: "/" }, { pattern: "/about" }, { pattern: "/team" }];
+    const i18n = (routing: "prefix-always" | "prefix-except-default" | "none", enabled = true) => ({
+      enabled,
+      basePath: "/app",
+      locales: ["en", "fr"],
+      defaultLocale: "en",
+      routing,
+    });
+    const urls = (options: Partial<Parameters<typeof collectFarmLlmsTxtPages>[1]>) =>
+      collectFarmLlmsTxtPages(pages, {
+        origin,
+        basePath: "/app",
+        markdown: resolveMarkdownConfig({ expose: ["/", "/about"] }),
+        ...options,
+      }).map((page) => page.url);
+
+    // Every locale is prefixed: '/app/about.md' answers with a 307 to '/app/en/about.md'.
+    expect(urls({ i18n: i18n("prefix-always") })).toEqual([
+      "https://acme.test/app/en/index.md",
+      "https://acme.test/app/en/about.md",
+      "https://acme.test/app/en/team",
+    ]);
+    expect(urls({ i18n: i18n("prefix-always"), trailingSlash: true })).toEqual([
+      "https://acme.test/app/en/index.md",
+      "https://acme.test/app/en/about.md",
+      "https://acme.test/app/en/team/",
+    ]);
+    // The production server passes no basePath here; the i18n config carries it.
+    expect(urls({ basePath: undefined, i18n: i18n("prefix-always") })).toEqual(
+      urls({ i18n: i18n("prefix-always") }),
+    );
+    // The default locale is unprefixed, routing "none" adds no prefix, and i18n may be off.
+    for (const config of [
+      i18n("prefix-except-default"),
+      i18n("none"),
+      i18n("prefix-always", false),
+    ]) {
+      expect(urls({ i18n: config })).toEqual(urls({}));
+    }
+    expect(urls({})).toEqual([
+      "https://acme.test/app/index.md",
+      "https://acme.test/app/about.md",
+      "https://acme.test/app/team",
+    ]);
   });
 
   it("matches optional catch-all patterns at their base and below", () => {
@@ -253,6 +317,61 @@ describe("collectFarmLlmsTxtPages", () => {
       "/docs/getting-started",
       "/pricing",
     ]);
+  });
+});
+
+describe("isFarmPageNoIndex", () => {
+  const noindex = { robots: { index: false } };
+
+  it("follows the nearest layout's robots when the page sets none", () => {
+    expect(isFarmPageNoIndex({ title: "Roster" }, [{}, noindex])).toBe(true);
+    expect(isFarmPageNoIndex(undefined, [noindex, { title: "Staff" }])).toBe(true);
+    expect(isFarmPageNoIndex({}, [noindex, { robots: "index, follow" }])).toBe(false);
+  });
+
+  it("lets the page's own robots replace its layouts'", () => {
+    expect(isFarmPageNoIndex({ robots: { index: true } }, [noindex])).toBe(false);
+    expect(isFarmPageNoIndex({ robots: "noindex" }, [{ robots: { index: true } }])).toBe(true);
+    // A page that sets robots to nothing renders none, as mergeMetadata spreads it over.
+    expect(isFarmPageNoIndex({ robots: undefined }, [noindex])).toBe(false);
+  });
+
+  it("is false without robots anywhere", () => {
+    expect(isFarmPageNoIndex(undefined)).toBe(false);
+    expect(isFarmPageNoIndex({ title: "About" }, [{ title: "Acme" }])).toBe(false);
+  });
+});
+
+describe("resolveFarmAgentOrigin", () => {
+  it("prefers an absolute http(s) metadataBase over the request's origin", () => {
+    expect(resolveFarmAgentOrigin("https://acme.test/app/", "http://evil.test")).toBe(
+      "https://acme.test",
+    );
+    expect(resolveFarmAgentOrigin(new URL("http://acme.test:8080"), "http://evil.test")).toBe(
+      "http://acme.test:8080",
+    );
+  });
+
+  it("falls back to the request's origin without a usable metadataBase", () => {
+    for (const metadataBase of [undefined, "/relative", "ftp://acme.test", "not a url", 42]) {
+      expect(resolveFarmAgentOrigin(metadataBase, "http://localhost:3000")).toBe(
+        "http://localhost:3000",
+      );
+    }
+  });
+});
+
+describe("readFarmLlmsMarkdownFrom", () => {
+  it("reads links on the configured origin from the origin the request reached", async () => {
+    const read = vi.fn(async (url: string) => url);
+    const rebased = readFarmLlmsMarkdownFrom("http://localhost:3000", "https://acme.test", read);
+
+    expect(await rebased("https://acme.test/docs/a.md?x=1")).toBe(
+      "http://localhost:3000/docs/a.md?x=1",
+    );
+    // Other origins pass through; renderFarmLlmsFullTxt never inlines them anyway.
+    expect(await rebased("https://other.test/b.md")).toBe("https://other.test/b.md");
+    expect(readFarmLlmsMarkdownFrom("https://acme.test", "https://acme.test", read)).toBe(read);
   });
 });
 

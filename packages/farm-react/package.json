@@ -1,6 +1,6 @@
 {
   "name": "@farm.js/react",
-  "version": "0.1.0-beta.39",
+  "version": "0.1.0-beta.42",
   "description": "React renderer and opt-in AOT compiler for FARMJS applications",
   "keywords": [
     "aot",
@@ -41,6 +41,11 @@
       "types": "./dist/compiler-runtime.d.ts",
       "import": "./dist/compiler-runtime.mjs",
       "require": "./dist/compiler-runtime.cjs"
+    },
+    "./compiled-root": {
+      "types": "./dist/compiled-root.d.ts",
+      "import": "./dist/compiled-root.mjs",
+      "require": "./dist/compiled-root.cjs"
     },
     "./list": {
       "types": "./dist/list.d.ts",

@@ -513,8 +513,8 @@ modules and assets inside the source directory (and layer source directories). I
   and scripts, and any workspace file reached through `/@fs/`, unless browser code already imports
   that exact URL.
 - `?raw`, `?inline`, and `?url` requests unless app code imports that exact URL.
-- Non-asset files inside the source directory, such as `.json`, `.sqlite`, or `.yaml` files
-  requested directly.
+- Non-asset files inside the source directory, such as `.json`, `.sqlite`, or `.yaml` files,
+  whatever the query, unless browser code imports them.
 - DevTools (`/__farm/devtools*`) and Vite's open-in-editor endpoint.
 
 Independently of preview, the dev server never serves `.farm/` (the auth database, build caches,

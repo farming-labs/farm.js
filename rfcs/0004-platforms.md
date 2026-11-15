@@ -10,6 +10,16 @@
 
 ## Status
 
+Update 2026-11-09, after 0.1.67. The list below is from 0.1.61. Since then:
+
+- **Shipped in 0.1.65** (`@farm.js/mobile` 0.1.0-beta.10): the iOS shell, iOS React Native screens
+  and modules, native-tier pages on iOS, and the rest of the docs status table.
+- **0.1.66:** native HTML tables, and islands-mode shell screens.
+- **0.1.67:** iOS web screens receive module files as `blob:` URLs, which closes "file references".
+- **Platform screens** moved to [RFC 0007](./0007-platform-screens.md).
+- **Reserved options** (`native.islands`, `native.budgets`, a page's `prefetch`, `layout.native.tsx`)
+  now warn at build time, since nothing acts on them yet.
+
 Updated 2026-11-07, after 0.1.61.
 
 - Desktop: merged and released. #2353 (core runtime primitives), #2354
@@ -55,7 +65,7 @@ Updated 2026-11-07, after 0.1.61.
   [The iOS React Native host links prebuilt XCFrameworks](#the-ios-react-native-host-links-prebuilt-xcframeworks)),
   with native screens, autolinked and app modules, and ports on iOS.
 - Not built: platform screens (`page.kt`, `page.swift`; moved to
-  [RFC 0006](./0006-platform-screens.md) for discussion), native islands, file references and subscriptions
+  [RFC 0007](./0007-platform-screens.md) for discussion), native islands, file references and subscriptions
   for module calls, `layout.native.tsx` providers, intent prefetch, budgets in CI, the contract
   manifest and the remote rule override.
 - Revised 2026-11-01: mobile screens come in tiers chosen per route (web by default, React Native
@@ -587,7 +597,7 @@ export default function Feed() {
 
 #### Native screens: platform
 
-> Moved to [RFC 0006](./0006-platform-screens.md), which is open for discussion. The sketch below
+> Moved to [RFC 0007](./0007-platform-screens.md), which is open for discussion. The sketch below
 > is its starting point, not a decision.
 
 Optional, for screens that should run no JS at all: Kotlin with Jetpack Compose on Android, Swift
@@ -1670,7 +1680,7 @@ Mobile (0.2.x):
     generated React Native ports with `auto: "on"`. In review: native-tier pages on iOS (#2495).
     Not started: visual diffs and budgets that demote a route.
 11. **Platform screens** (`page.kt`, `page.swift`, `@FarmScreen`) and analyzer stage 4. Not
-    started and not scheduled; the design moved to [RFC 0006](./0006-platform-screens.md) for
+    started and not scheduled; the design moved to [RFC 0007](./0007-platform-screens.md) for
     discussion. Platform routes show a placeholder.
 
 Both:

@@ -147,7 +147,7 @@ describe("the RSC mobile client", () => {
     expect(entry).toContain(`JSON.parse("${FARM_RSC_NATIVE_STYLESHEETS_PLACEHOLDER}")`);
     expect(entry).toContain("headers.delete('x-farm-native-tree')");
     expect(entry).toContain(
-      "return _applyFarmMobileShellClient(request, response, farmMobileShellClient);",
+      "const finalResponse = _applyFarmMobileShellClient(request, response, farmMobileShellClient);",
     );
     expect(entry).toContain(`JSON.parse("${FARM_RSC_MOBILE_SHELL_CLIENT_PLACEHOLDER}")`);
   });

@@ -5,6 +5,7 @@ import path from "node:path";
 import { describe, expect, it, vi } from "vitest";
 import { createMarkdownMirrorResponse, resolveMarkdownConfig } from "../markdown";
 import { createFarmNodeRequestAbortSignal } from "../server-http";
+import { toFarmTrailingSlashPageRequest } from "../trailing-slash";
 
 // Execute the actual development caller, including its lazy renderPage callback.
 function runtime({
@@ -33,6 +34,7 @@ function runtime({
   const createDispatch = vi.fn((_server: unknown) => fetchPage);
   const run = new Function(
     "createMarkdownMirrorResponse",
+    "toFarmTrailingSlashPageRequest",
     "createFarmNodeRequestAbortSignal",
     "createFarmDevServerDispatch",
     "server",
@@ -45,11 +47,14 @@ function runtime({
     `return async function () {
       const docsHeaders = new Headers({ "accept-encoding": "gzip, br" });
       const apiServerBasePath = "/api";
+      // A local of the development caller: the request path as routes see it.
+      const toRoutePathname = (pathname) => pathname;
       ${source.slice(start, end)}
       return markdownResponse;
     };`,
   )(
     createMarkdownMirrorResponse,
+    toFarmTrailingSlashPageRequest,
     createSignal,
     createDispatch,
     server,

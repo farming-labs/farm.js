@@ -279,7 +279,7 @@ describe("farm dev --desktop", () => {
       "farm.config.ts": `export default {
   telemetry: false,
   desktop: { name: "Notes", id: "com.example.notes" },
-  experimental: { serverComponents: true },
+  experimental: { serverComponents: { mode: "rsc" } },
 };`,
     });
     // Stand-ins for the RSC packages: the guard must not depend on what the pipeline serves.

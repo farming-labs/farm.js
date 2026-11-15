@@ -1,797 +1,829 @@
+/* Tailwind v3 cascade, kept on v4: the Pixel Border theme ships compiled Tailwind in cascade
+ * layers, which v3 lifted above its preflight. Preflight now takes the lowest layer, and the rest
+ * of the site's Tailwind stays unlayered, in v3's order, so it overrides the theme as before. */
+@layer preflight, properties, theme, base, components, utilities;
+
 /* Preserve farmjs.dev's established Pixel Border presentation while the
  * current theme runtime owns browser navigation and hydration behavior. */
 @import "@farming-labs/theme-production/pixel-border/css";
 @import "./docs-overrides.css";
+@import "tailwindcss/theme.css";
+@import "tailwindcss/preflight.css" layer(preflight);
+@import "./tailwind-v3-preflight.css" layer(preflight);
 
-@tailwind base;
-@tailwind components;
-@tailwind utilities;
+@source "../**/*.{js,ts,jsx,tsx}";
 
-@layer base {
-  :root {
-    --farm-bg: #000;
-    --farm-line: rgb(255 255 255 / 0.12);
-    --farm-line-soft: rgb(255 255 255 / 0.055);
-    --farm-rule: rgb(255 255 255 / 0.09);
-    /* Keep theme utilities on the compiled layout font instead of ui-monospace. */
-    --font-geist-mono: "Geist Mono", ui-monospace, monospace !important;
-  }
-
-  html {
-    scroll-behavior: smooth;
-  }
-
-  body {
-    font-family:
-      "Geist Mono", ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono",
-      "Courier New", monospace;
-    margin: 0;
-    background: var(--farm-bg);
-    font-synthesis: none;
-    text-rendering: optimizeLegibility;
-  }
+@theme {
+  --font-sans: var(--font-geist-sans), ui-sans-serif, system-ui, -apple-system, sans-serif;
 }
 
-@layer components {
-  .farm-announcement {
-    background: #000;
-  }
+/* Reads the Geist Pixel variable the font package sets, so it can't be a theme variable. */
+@utility font-geist-pixel {
+  font-family: var(--font-geist-pixel), var(--font-geist-mono), monospace;
+}
 
-  .farm-home .font-mono {
-    font-family: var(--font-geist-mono), ui-monospace, SFMono-Regular, Menlo, monospace !important;
-    letter-spacing: 0;
-  }
+/* On Tailwind v3 the theme's layered base rules came after its unlayered ones, so code text kept
+ * the base monospace stack. Unlayered rules now win over layers, so restate it here. */
+code,
+kbd,
+pre,
+samp {
+  font-family: var(
+    --default-mono-font-family,
+    ui-monospace,
+    SFMono-Regular,
+    Menlo,
+    Monaco,
+    Consolas,
+    "Liberation Mono",
+    "Courier New",
+    monospace
+  );
+}
 
-  /* A default only: zero specificity, so a component's own border color wins
-     whichever stylesheet the bundler happens to load first. */
-  :where(.farm-home, .farm-home *) {
-    border-color: rgb(229 231 235);
-  }
+:root {
+  --farm-bg: #000;
+  --farm-line: rgb(255 255 255 / 0.12);
+  --farm-line-soft: rgb(255 255 255 / 0.055);
+  --farm-rule: rgb(255 255 255 / 0.09);
+  /* Keep theme utilities on the compiled layout font instead of ui-monospace. */
+  --font-geist-mono: "Geist Mono", ui-monospace, monospace !important;
+}
 
-  /* lucide's default attributes for the icons in components/icons.ts, which leave them out of
-     the HTML. The size has no specificity, so size utilities still win. */
-  svg.lucide:not([fill]) {
-    fill: none;
-  }
-  svg.lucide:not([stroke]) {
-    stroke: currentColor;
-    stroke-linecap: round;
-    stroke-linejoin: round;
-  }
-  :where(svg.lucide:not([width])) {
-    width: 24px;
-    height: 24px;
-  }
+html {
+  scroll-behavior: smooth;
+}
 
-  .farm-home footer > .grid > :first-child {
-    border-bottom-width: 0 !important;
-  }
+body {
+  font-family:
+    "Geist Mono", ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono",
+    "Courier New", monospace;
+  margin: 0;
+  background: var(--farm-bg);
+  font-synthesis: none;
+  text-rendering: optimizeLegibility;
+}
 
-  .farm-home .font-geist-pixel {
-    -webkit-font-smoothing: none;
-    -moz-osx-font-smoothing: auto;
-    text-rendering: optimizeSpeed;
-  }
+.farm-announcement {
+  background: #000;
+}
 
+.farm-home .font-mono {
+  font-family: var(--font-geist-mono), ui-monospace, SFMono-Regular, Menlo, monospace !important;
+  letter-spacing: 0;
+}
+
+/* A default only: zero specificity, so a component's own border color wins
+   whichever stylesheet the bundler happens to load first. */
+:where(.farm-home, .farm-home *) {
+  border-color: rgb(229 231 235);
+}
+
+/* lucide's default attributes for the icons in components/icons.ts, which leave them out of
+   the HTML. The size has no specificity, so size utilities still win. */
+svg.lucide:not([fill]) {
+  fill: none;
+}
+svg.lucide:not([stroke]) {
+  stroke: currentColor;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+:where(svg.lucide:not([width])) {
+  width: 24px;
+  height: 24px;
+}
+
+.farm-home footer > .grid > :first-child {
+  border-bottom-width: 0 !important;
+}
+
+.farm-home .font-geist-pixel {
+  -webkit-font-smoothing: none;
+  -moz-osx-font-smoothing: auto;
+  text-rendering: optimizeSpeed;
+}
+
+.farm-page-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  width: 100%;
+  max-width: 1320px;
+  margin-inline: auto;
+}
+
+.farm-page-rail {
+  display: none;
+  min-width: 0;
+  border-inline: 1px solid var(--farm-line);
+  background-color: #000;
+  background-image: repeating-linear-gradient(
+    135deg,
+    transparent 0,
+    transparent 6px,
+    rgb(255 255 255 / 0.07) 6px,
+    rgb(255 255 255 / 0.07) 7px
+  );
+  background-attachment: fixed;
+}
+
+.farm-page-content {
+  border-inline: 1px solid var(--farm-line);
+}
+
+.farm-full-rule,
+.farm-wide-rule,
+.farm-top-rule {
+  position: relative;
+}
+
+.farm-full-rule::after,
+.farm-wide-rule::after,
+.farm-top-rule::before {
+  position: absolute;
+  right: calc(50% - 50vw);
+  left: calc(50% - 50vw);
+  z-index: 20;
+  height: 1px;
+  background: var(--farm-rule);
+  content: "";
+  pointer-events: none;
+}
+
+.farm-top-rule::before {
+  top: -1px;
+}
+
+.farm-full-rule::after,
+.farm-wide-rule::after {
+  bottom: -1px;
+}
+
+.farm-hero-rule::after {
+  bottom: 0;
+  background: rgb(255 255 255 / 0.16);
+}
+
+/* SelectionWire (the home and agents heroes): a cursor drags a selection over
+   a word, drags a wire into a target and clicks it. The component positions
+   everything per frame in a layer over its parent; these rules only style it.
+   The wire matches the blog figures' connectors. */
+.farm-sw-layer {
+  position: absolute;
+  inset: 0;
+  z-index: 2;
+  pointer-events: none;
+}
+
+.farm-hero-swap {
+  position: relative;
+  display: inline-block;
+  text-align: left;
+  white-space: nowrap;
+  /* Scrambled signs run wider than letters; keep them inside the word's box
+     without changing its baseline the way overflow would. */
+  clip-path: inset(-0.3em 0 -0.3em 0);
+}
+
+.farm-sw-select {
+  position: absolute;
+  top: 0;
+  left: 0;
+  border: 1px dashed rgb(255 255 255 / 0.34);
+  opacity: 0;
+  pointer-events: none;
+}
+
+.farm-sw-corner {
+  position: absolute;
+  display: none;
+  width: 7px;
+  height: 7px;
+  border: 1px solid rgb(255 255 255 / 0.42);
+  background: #000;
+}
+
+.farm-sw-select[data-corners] .farm-sw-corner {
+  display: block;
+}
+
+.farm-sw-corner-tl {
+  top: -4px;
+  left: -4px;
+}
+
+.farm-sw-corner-tr {
+  top: -4px;
+  right: -4px;
+}
+
+.farm-sw-corner-bl {
+  bottom: -4px;
+  left: -4px;
+}
+
+.farm-sw-corner-br {
+  right: -4px;
+  bottom: -4px;
+}
+
+.farm-sw-wires {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  overflow: visible;
+  pointer-events: none;
+}
+
+.farm-sw-wire {
+  fill: none;
+  stroke: rgb(255 255 255 / 0.28);
+  stroke-width: 1.2;
+  opacity: 0;
+}
+
+.farm-sw-end {
+  fill: #6a6a6a;
+  opacity: 0;
+}
+
+/* The link the wire connects to: a dashed target while the wire is dragged,
+   outlined once it lands, hovered and clicked by the cursor, then lit. */
+.farm-hero-tag {
+  position: absolute;
+  right: 1rem;
+  bottom: -8px;
+  padding: 4px 6px;
+  border: 1px solid rgb(255 255 255 / 0.34);
+  color: rgb(255 255 255 / 0.5);
+  font:
+    400 10px/1 var(--font-geist-mono),
+    ui-monospace,
+    monospace;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  white-space: nowrap;
+  opacity: 1;
+  pointer-events: auto;
+  transform-origin: center;
+  transition:
+    background-color 200ms linear,
+    border-color 200ms linear,
+    color 200ms linear;
+}
+
+/* The server-rendered tag is a usable no-JavaScript fallback. Once the
+   animation initializes, its data state moves it into the animated layer. */
+.farm-hero-tag[data-sw-state] {
+  top: 0;
+  right: auto;
+  bottom: auto;
+  left: 0;
+  border-color: transparent;
+  opacity: 0;
+  pointer-events: none;
+}
+
+.farm-hero-tag[data-sw-state]:not([data-sw-state="off"]) {
+  opacity: var(--sw-fade, 1);
+}
+
+.farm-hero-tag[data-sw-state="target"] {
+  border-color: rgb(255 255 255 / 0.34);
+  border-style: dashed;
+}
+
+.farm-hero-tag[data-sw-state="linked"] {
+  border: 1px solid rgb(255 255 255 / 0.6);
+  color: #fff;
+}
+
+.farm-hero-tag:is([data-sw-state="hover"], [data-sw-state="press"]) {
+  border: 1px solid #fff;
+  background: rgb(255 255 255 / 0.14);
+  color: #fff;
+}
+
+.farm-hero-tag[data-sw-state="on"] {
+  border: 1px solid #fff;
+  background: #fff;
+  color: #000;
+  pointer-events: auto;
+}
+
+.farm-hero-tag[data-sw-state="on"]:hover {
+  border-color: rgb(255 255 255 / 0.84);
+  background: rgb(255 255 255 / 0.84);
+}
+
+.farm-hero-tag:focus-visible {
+  outline: 2px solid #fff;
+  outline-offset: 2px;
+}
+
+/* The click's rings, centred on the point the component positions. */
+.farm-sw-ripple {
+  position: absolute;
+  top: -14px;
+  left: -14px;
+  width: 28px;
+  height: 28px;
+  border: 1.5px solid rgb(255 255 255 / 0.7);
+  border-radius: 50%;
+  opacity: 0;
+  pointer-events: none;
+}
+
+/* The launch video's cursor; its tip is the point the component positions. */
+.farm-sw-cursor {
+  position: absolute;
+  top: 0;
+  left: 0;
+  z-index: 2;
+  width: 18px;
+  height: 18px;
+  opacity: 0;
+  pointer-events: none;
+  transform-origin: 3px 2px;
+}
+
+.farm-hero-flicker {
+  -webkit-mask-image: radial-gradient(
+    ellipse 220% 78% at 50% -20%,
+    transparent 55%,
+    rgb(0 0 0 / 0.04) 62%,
+    rgb(0 0 0 / 0.16) 70%,
+    rgb(0 0 0 / 0.42) 80%,
+    rgb(0 0 0 / 0.76) 90%,
+    #000 100%
+  );
+  mask-image: radial-gradient(
+    ellipse 220% 78% at 50% -20%,
+    transparent 55%,
+    rgb(0 0 0 / 0.04) 62%,
+    rgb(0 0 0 / 0.16) 70%,
+    rgb(0 0 0 / 0.42) 80%,
+    rgb(0 0 0 / 0.76) 90%,
+    #000 100%
+  );
+}
+
+.farm-feature-spotlight {
+  position: relative;
+  isolation: isolate;
+  background-color: #000;
+  background-image: radial-gradient(
+    ellipse 84% 42% at 50% 18%,
+    rgb(255 255 255 / 0.05),
+    rgb(255 255 255 / 0.015) 42%,
+    transparent 76%
+  );
+}
+
+.farm-feature-spotlight::before,
+.farm-feature-spotlight::after {
+  position: absolute;
+  z-index: 0;
+  border-radius: 50%;
+  content: "";
+  pointer-events: none;
+}
+
+.farm-feature-spotlight::before {
+  inset: 2% -5% 54% 0;
+  background: radial-gradient(
+    ellipse at center,
+    rgb(255 255 255 / 0.22) 0%,
+    rgb(255 255 255 / 0.09) 36%,
+    rgb(255 255 255 / 0.025) 62%,
+    transparent 86%
+  );
+  filter: blur(34px);
+  opacity: 0.76;
+  transform: translate3d(-6px, 8px, 0);
+}
+
+.farm-feature-spotlight::after {
+  inset: 8% 76% 18% 0;
+  background: radial-gradient(
+    ellipse at 100% 28%,
+    rgb(255 255 255 / 0.18) 0%,
+    rgb(255 255 255 / 0.065) 42%,
+    transparent 82%
+  );
+  filter: blur(22px);
+  opacity: 0.68;
+  transform: translate3d(6px, -2px, 0);
+}
+
+.farm-agent-spotlight {
+  background-image: radial-gradient(
+    ellipse 92% 72% at 52% 48%,
+    rgb(255 255 255 / 0.055),
+    rgb(255 255 255 / 0.018) 48%,
+    transparent 80%
+  );
+}
+
+.farm-agent-spotlight::before {
+  inset: 12% 2% 22%;
+  filter: blur(64px);
+  opacity: 0.7;
+  transform: none;
+}
+
+.farm-agent-spotlight::after {
+  inset: 20% 10% 18% 34%;
+  filter: blur(48px);
+  opacity: 0.52;
+  transform: none;
+}
+
+.farm-integration-visual {
+  isolation: isolate;
+}
+
+.farm-integration-visual::before {
+  position: absolute;
+  inset: -10% -18%;
+  z-index: -1;
+  background: radial-gradient(
+    ellipse at center,
+    rgb(255 255 255 / 0.105) 0%,
+    rgb(255 255 255 / 0.055) 42%,
+    rgb(255 255 255 / 0.018) 62%,
+    transparent 80%
+  );
+  content: "";
+  filter: blur(28px);
+  pointer-events: none;
+}
+
+.farm-integration-visual::after {
+  position: absolute;
+  inset: -4% -7%;
+  z-index: 2;
+  background: radial-gradient(
+    ellipse 78% 80% at center,
+    transparent 48%,
+    rgb(0 0 0 / 0.08) 65%,
+    rgb(0 0 0 / 0.48) 84%,
+    rgb(0 0 0 / 0.9) 100%
+  );
+  backdrop-filter: blur(5px);
+  content: "";
+  -webkit-mask-image: radial-gradient(
+    ellipse 78% 80% at center,
+    transparent 0%,
+    transparent 52%,
+    rgb(0 0 0 / 0.35) 70%,
+    black 100%
+  );
+  mask-image: radial-gradient(
+    ellipse 78% 80% at center,
+    transparent 0%,
+    transparent 52%,
+    rgb(0 0 0 / 0.35) 70%,
+    black 100%
+  );
+  pointer-events: none;
+}
+
+.farm-integration-directory {
+  -webkit-mask-image: radial-gradient(
+    ellipse 88% 86% at center,
+    black 0%,
+    black 54%,
+    rgb(0 0 0 / 0.82) 68%,
+    rgb(0 0 0 / 0.3) 84%,
+    transparent 100%
+  );
+  mask-image: radial-gradient(
+    ellipse 88% 86% at center,
+    black 0%,
+    black 54%,
+    rgb(0 0 0 / 0.82) 68%,
+    rgb(0 0 0 / 0.3) 84%,
+    transparent 100%
+  );
+}
+
+.farm-illustration-surface {
+  background-color: #000;
+  background-image: linear-gradient(180deg, rgb(255 255 255 / 0.025), transparent 36%);
+  box-shadow:
+    0 18px 48px rgb(0 0 0 / 0.38),
+    inset 0 1px 0 rgb(255 255 255 / 0.025);
+}
+
+.farm-terminal-command-text {
+  width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  animation: farm-terminal-command-type 9.6s infinite;
+  will-change: width, opacity;
+}
+
+.farm-terminal-command-cursor {
+  margin-left: 0.2em;
+  vertical-align: -0.12em;
+  animation: farm-terminal-cursor-window 9.6s linear infinite;
+}
+
+.farm-terminal-command-cursor::before {
+  display: block;
+  width: 0.45em;
+  height: 1.05em;
+  background: rgb(255 255 255 / 0.74);
+  animation: farm-terminal-cursor-blink 0.8s steps(1, end) infinite;
+  content: "";
+}
+
+.farm-terminal-output {
+  clip-path: inset(0 0 100% 0);
+  animation: farm-terminal-output 9.6s infinite;
+  will-change: clip-path, opacity;
+}
+
+.farm-build-command-text {
+  width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  animation: farm-build-command-type 10.8s infinite;
+  will-change: width, opacity;
+}
+
+.farm-build-command-cursor {
+  margin-left: 0.2em;
+  vertical-align: -0.12em;
+  animation: farm-build-cursor-window 10.8s linear infinite;
+}
+
+.farm-build-command-cursor::before {
+  display: block;
+  width: 0.45em;
+  height: 1.05em;
+  background: rgb(255 255 255 / 0.74);
+  animation: farm-terminal-cursor-blink 0.8s steps(1, end) infinite;
+  content: "";
+}
+
+.farm-build-output {
+  clip-path: inset(0 0 100% 0);
+  animation: farm-build-output 10.8s infinite;
+  will-change: clip-path, opacity;
+}
+
+.farm-renderer-value {
+  display: inline-block;
+  width: 10ch;
+  height: 1.5rem;
+  overflow: hidden;
+  white-space: nowrap;
+  vertical-align: bottom;
+}
+
+/* The launch film's code palette, matching the docs code panels: keywords and punctuation dim,
+   plain code soft grey, names a step brighter, strings brightest, nothing bold. */
+.farm-highlighted-code {
+  --sh-class: #d4d4d4;
+  --sh-entity: #d4d4d4;
+  --sh-identifier: #a1a1a1;
+  --sh-string: #e8e8e8;
+  --sh-keyword: #6b6b6b;
+  --sh-comment: rgb(255 255 255 / 0.3);
+  --sh-property: #a1a1a1;
+  --sh-sign: #6b6b6b;
+  --sh-space: inherit;
+  counter-reset: farm-code-line;
+}
+
+/* Punctuation carries no token span (see renderHighlightedCode), so it takes the line's color. */
+.farm-highlighted-code .sh__line {
+  color: var(--sh-sign);
+  display: block;
+  min-width: max-content;
+  min-height: 1.5rem;
+  padding-right: 1.5rem;
+  padding-left: 0.75rem;
+  white-space: pre;
+  counter-increment: farm-code-line;
+}
+
+.farm-highlighted-code .sh__line::before {
+  display: inline-block;
+  width: 2rem;
+  margin-right: 1rem;
+  color: rgb(255 255 255 / 0.18);
+  text-align: right;
+  content: counter(farm-code-line);
+  user-select: none;
+}
+
+.farm-highlighted-code .sh__line--highlighted {
+  background: rgb(255 255 255 / 0.055);
+  box-shadow: inset 2px 0 0 rgb(255 255 255 / 0.68);
+}
+
+.farm-highlighted-code .sh__line--highlighted::before {
+  color: rgb(255 255 255 / 0.48);
+}
+
+.farm-highlighted-code--compact .sh__line {
+  min-height: 1.25rem;
+}
+
+.farm-highlighted-code--value-cycle .sh__line {
+  min-height: 1rem;
+}
+
+.farm-highlighted-code--value-cycle-compact .sh__line {
+  min-height: 1.125rem;
+}
+
+.farm-highlighted-code .sh__token--keyword {
+  font-weight: 400;
+}
+
+/* Token colors, which sugar-high would otherwise inline on every token (see
+   renderHighlightedCode). */
+.farm-highlighted-code .sh__token--identifier {
+  color: var(--sh-identifier);
+}
+.farm-highlighted-code .sh__token--keyword {
+  color: var(--sh-keyword);
+}
+.farm-highlighted-code .sh__token--string {
+  color: var(--sh-string);
+}
+.farm-highlighted-code .sh__token--class {
+  color: var(--sh-class);
+}
+.farm-highlighted-code .sh__token--property {
+  color: var(--sh-property);
+}
+.farm-highlighted-code .sh__token--entity {
+  color: var(--sh-entity);
+}
+.farm-highlighted-code .sh__token--jsxliterals {
+  color: var(--sh-jsxliterals);
+}
+.farm-highlighted-code .sh__token--sign {
+  color: var(--sh-sign);
+}
+.farm-highlighted-code .sh__token--comment {
+  color: var(--sh-comment);
+}
+.farm-highlighted-code .sh__token--break {
+  color: var(--sh-break);
+}
+
+/* Hand-coloured panels (the renderer switcher) mark tokens with text-white opacities; give them the
+   same palette as the highlighter's tokens. */
+.farm-highlighted-code .text-white {
+  color: var(--sh-keyword);
+}
+.farm-highlighted-code .text-white\/64 {
+  color: var(--sh-identifier);
+}
+.farm-highlighted-code .text-white\/78 {
+  color: var(--sh-property);
+}
+.farm-highlighted-code .text-white\/94 {
+  color: var(--sh-string);
+}
+.farm-highlighted-code .text-white\/42 {
+  color: var(--sh-sign);
+}
+
+.farm-highlighted-code .sh__token--comment {
+  font-style: italic;
+}
+
+.farm-code-cycle-panel {
+  animation: farm-code-cycle-panel-in 260ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+.farm-code-typewriter .sh__line:last-child::after,
+.farm-inline-typewriter::after {
+  display: inline-block;
+  width: 0.45em;
+  height: 1.05em;
+  margin-left: 0.18em;
+  background: rgb(255 255 255 / 0.72);
+  vertical-align: -0.12em;
+  animation: farm-terminal-cursor-blink 0.8s steps(1, end) infinite;
+  content: "";
+}
+
+/* Utility lists for elements the homepage repeats dozens of times, named once here so the
+   HTML does not carry them on every copy. Each class holds every utility for the properties it
+   sets (base, responsive, and state variants together); utilities that compete with another
+   class on the same element stay in the markup. */
+.farm-indexed-label {
+  @apply flex min-w-0 items-center gap-1.5 text-[10px] font-normal uppercase tracking-normal text-current;
+}
+
+.farm-stack-tile {
+  @apply flex h-16 w-40 shrink-0 items-center justify-center gap-3 border-r border-white/12 bg-black px-4 text-[10px] font-normal uppercase tracking-normal text-white/48 transition-colors duration-150 hover:text-white/82 focus-visible:z-10 focus-visible:text-white focus-visible:outline focus-visible:outline-1 focus-visible:-outline-offset-1 focus-visible:outline-white/36 hover:bg-white/[0.07] focus-visible:bg-white/[0.07] sm:w-44 sm:text-[11px];
+}
+
+.farm-stack-tile > :is(img, svg) {
+  @apply shrink-0 opacity-72;
+}
+
+.farm-stack-tile > span {
+  @apply whitespace-nowrap;
+}
+
+.farm-integration-tile {
+  @apply absolute grid place-items-center bg-white/[0.055] transition-[background-color,color] duration-150 hover:z-10 hover:bg-white focus-visible:z-10 focus-visible:bg-white focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-[-2px] focus-visible:outline-white;
+}
+
+.farm-integration-tile-icon {
+  @apply size-7 opacity-60 transition-[filter,opacity,transform] duration-150 group-hover:-translate-y-1 group-hover:invert-0 group-hover:opacity-100 group-focus-visible:-translate-y-1 group-focus-visible:invert-0 group-focus-visible:opacity-100;
+}
+
+.farm-integration-tile-glyph {
+  @apply size-7 text-white/60 transition-[color,transform] duration-150 group-hover:-translate-y-1 group-hover:text-black group-focus-visible:-translate-y-1 group-focus-visible:text-black;
+}
+
+.farm-integration-tile-label {
+  @apply pointer-events-none absolute inset-x-1 bottom-1 translate-y-1 truncate text-center text-[7px] font-normal uppercase tracking-normal text-black/55 opacity-0 transition-[opacity,transform] duration-150 group-hover:translate-y-0 group-hover:opacity-100 group-focus-visible:translate-y-0 group-focus-visible:opacity-100;
+}
+
+.farm-deploy-tile {
+  @apply absolute flex size-[20%] items-center justify-center overflow-hidden rounded-none border border-white/[0.08] transition-[background-color,border-color] duration-150;
+}
+
+.farm-deploy-tile-brand {
+  @apply bg-white/[0.055] group-hover/deployment:border-white/[0.14] group-hover/deployment:bg-white/[0.075];
+}
+
+.farm-deploy-tile-icon {
+  @apply size-7 opacity-72 transition-[opacity,transform] duration-150 group-hover/tile:-translate-y-1 group-hover/tile:opacity-90;
+}
+
+.farm-deploy-tile-label {
+  @apply pointer-events-none absolute inset-x-1 bottom-1 translate-y-1 truncate text-center text-[7px] font-normal uppercase tracking-normal text-white/68 opacity-0 transition-[opacity,transform] duration-150 group-hover/tile:translate-y-0 group-hover/tile:opacity-100;
+}
+
+.farm-code-tab {
+  @apply relative flex h-full min-w-0 flex-1 items-center justify-center border-r border-white/8 px-2 text-white/34 transition-[background-color,color,box-shadow] duration-150 hover:bg-white/[0.035] hover:text-white/68 focus-visible:z-10 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-[-2px] focus-visible:outline-white aria-selected:bg-white/[0.045] aria-selected:text-white/82 aria-selected:shadow-[inset_0_-1px_0_rgba(255,255,255,0.85)];
+}
+
+.farm-footer-link {
+  @apply flex min-h-7 items-center justify-between gap-2 text-[9px] font-normal uppercase !tracking-[0.04em] text-white/48 transition-colors duration-150 hover:text-white focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-white;
+}
+
+.farm-nav-link {
+  @apply aria-[current=page]:bg-white/[0.04] aria-[current=page]:text-white flex h-full min-w-0 flex-auto items-center border-r border-white/12 px-3 last:border-r-0 uppercase tracking-normal text-white/48 transition-colors duration-150 hover:bg-white/[0.035] hover:text-white focus-visible:z-10 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-[-2px] focus-visible:outline-white xl:px-4;
+}
+
+.farm-footer-row {
+  @apply flex h-12 items-center justify-between border-b border-white/12 px-4 text-[9px] font-normal uppercase !tracking-[0.04em] text-white/58 transition-[background-color,color] duration-150 hover:bg-white/[0.035] hover:text-white focus-visible:outline focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-white;
+}
+
+.farm-menu-link {
+  @apply flex h-12 items-center border-b border-white/10 px-4 uppercase tracking-normal text-white/58 last:border-b-0 hover:bg-white/[0.04] hover:text-white;
+}
+
+.farm-file-tree-item {
+  @apply relative flex h-7 w-full min-w-0 items-center gap-1.5 rounded-[3px] px-2 text-left text-[9px] font-normal tracking-normal transition-[background-color,color] duration-150 focus-visible:z-10 focus-visible:outline focus-visible:outline-1 focus-visible:outline-offset-[-1px] focus-visible:outline-white/60 sm:text-[10px];
+}
+
+.farm-install-tab {
+  @apply relative flex h-7 min-w-0 items-center justify-center gap-1 border-r border-white/10 px-1 text-[8px] font-normal uppercase tracking-normal text-white/42 transition-[background-color,color] duration-150 last:border-r-0 hover:bg-white/[0.055] hover:text-white focus-visible:z-10 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-[-2px] focus-visible:outline-white aria-selected:bg-white aria-selected:text-black sm:h-8 sm:text-[9px];
+}
+
+.farm-feature-title {
+  @apply mt-6 max-w-[31rem] text-balance text-xl font-medium leading-[1.2] tracking-normal sm:text-2xl sm:leading-8;
+}
+
+.farm-feature-body {
+  @apply mt-3 max-w-[31rem] text-white/48;
+}
+
+.farm-action-link {
+  @apply inline-flex min-w-0 items-center justify-center border font-normal uppercase tracking-normal transition-[background-color,border-color,color,transform] duration-150 active:translate-y-px focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-white;
+}
+
+@media (min-width: 768px) {
   .farm-page-grid {
-    display: grid;
-    grid-template-columns: minmax(0, 1fr);
-    width: 100%;
-    max-width: 1320px;
-    margin-inline: auto;
+    grid-template-columns: 40px minmax(0, 1240px) 40px;
   }
 
   .farm-page-rail {
-    display: none;
-    min-width: 0;
-    border-inline: 1px solid var(--farm-line);
-    background-color: #000;
-    background-image: repeating-linear-gradient(
-      135deg,
-      transparent 0,
-      transparent 6px,
-      rgb(255 255 255 / 0.07) 6px,
-      rgb(255 255 255 / 0.07) 7px
-    );
-    background-attachment: fixed;
+    display: block;
   }
 
   .farm-page-content {
-    border-inline: 1px solid var(--farm-line);
-  }
-
-  .farm-full-rule,
-  .farm-wide-rule,
-  .farm-top-rule {
-    position: relative;
-  }
-
-  .farm-full-rule::after,
-  .farm-wide-rule::after,
-  .farm-top-rule::before {
-    position: absolute;
-    right: calc(50% - 50vw);
-    left: calc(50% - 50vw);
-    z-index: 20;
-    height: 1px;
-    background: var(--farm-rule);
-    content: "";
-    pointer-events: none;
-  }
-
-  .farm-top-rule::before {
-    top: -1px;
-  }
-
-  .farm-full-rule::after,
-  .farm-wide-rule::after {
-    bottom: -1px;
-  }
-
-  .farm-hero-rule::after {
-    bottom: 0;
-    background: rgb(255 255 255 / 0.16);
-  }
-
-  /* SelectionWire (the home and agents heroes): a cursor drags a selection over
-     a word, drags a wire into a target and clicks it. The component positions
-     everything per frame in a layer over its parent; these rules only style it.
-     The wire matches the blog figures' connectors. */
-  .farm-sw-layer {
-    position: absolute;
-    inset: 0;
-    z-index: 2;
-    pointer-events: none;
-  }
-
-  .farm-hero-swap {
-    position: relative;
-    display: inline-block;
-    text-align: left;
-    white-space: nowrap;
-    /* Scrambled signs run wider than letters; keep them inside the word's box
-       without changing its baseline the way overflow would. */
-    clip-path: inset(-0.3em 0 -0.3em 0);
-  }
-
-  .farm-sw-select {
-    position: absolute;
-    top: 0;
-    left: 0;
-    border: 1px dashed rgb(255 255 255 / 0.34);
-    opacity: 0;
-    pointer-events: none;
-  }
-
-  .farm-sw-corner {
-    position: absolute;
-    display: none;
-    width: 7px;
-    height: 7px;
-    border: 1px solid rgb(255 255 255 / 0.42);
-    background: #000;
-  }
-
-  .farm-sw-select[data-corners] .farm-sw-corner {
-    display: block;
-  }
-
-  .farm-sw-corner-tl {
-    top: -4px;
-    left: -4px;
-  }
-
-  .farm-sw-corner-tr {
-    top: -4px;
-    right: -4px;
-  }
-
-  .farm-sw-corner-bl {
-    bottom: -4px;
-    left: -4px;
-  }
-
-  .farm-sw-corner-br {
-    right: -4px;
-    bottom: -4px;
-  }
-
-  .farm-sw-wires {
-    position: absolute;
-    inset: 0;
-    width: 100%;
-    height: 100%;
-    overflow: visible;
-    pointer-events: none;
-  }
-
-  .farm-sw-wire {
-    fill: none;
-    stroke: rgb(255 255 255 / 0.28);
-    stroke-width: 1.2;
-    opacity: 0;
-  }
-
-  .farm-sw-end {
-    fill: #6a6a6a;
-    opacity: 0;
-  }
-
-  /* The link the wire connects to: a dashed target while the wire is dragged,
-     outlined once it lands, hovered and clicked by the cursor, then lit. */
-  .farm-hero-tag {
-    position: absolute;
-    right: 1rem;
-    bottom: -8px;
-    padding: 4px 6px;
-    border: 1px solid rgb(255 255 255 / 0.34);
-    color: rgb(255 255 255 / 0.5);
-    font:
-      400 10px/1 var(--font-geist-mono),
-      ui-monospace,
-      monospace;
-    letter-spacing: 0.04em;
-    text-transform: uppercase;
-    white-space: nowrap;
-    opacity: 1;
-    pointer-events: auto;
-    transform-origin: center;
-    transition:
-      background-color 200ms linear,
-      border-color 200ms linear,
-      color 200ms linear;
-  }
-
-  /* The server-rendered tag is a usable no-JavaScript fallback. Once the
-     animation initializes, its data state moves it into the animated layer. */
-  .farm-hero-tag[data-sw-state] {
-    top: 0;
-    right: auto;
-    bottom: auto;
-    left: 0;
-    border-color: transparent;
-    opacity: 0;
-    pointer-events: none;
-  }
-
-  .farm-hero-tag[data-sw-state]:not([data-sw-state="off"]) {
-    opacity: var(--sw-fade, 1);
-  }
-
-  .farm-hero-tag[data-sw-state="target"] {
-    border-color: rgb(255 255 255 / 0.34);
-    border-style: dashed;
-  }
-
-  .farm-hero-tag[data-sw-state="linked"] {
-    border: 1px solid rgb(255 255 255 / 0.6);
-    color: #fff;
-  }
-
-  .farm-hero-tag:is([data-sw-state="hover"], [data-sw-state="press"]) {
-    border: 1px solid #fff;
-    background: rgb(255 255 255 / 0.14);
-    color: #fff;
-  }
-
-  .farm-hero-tag[data-sw-state="on"] {
-    border: 1px solid #fff;
-    background: #fff;
-    color: #000;
-    pointer-events: auto;
-  }
-
-  .farm-hero-tag[data-sw-state="on"]:hover {
-    border-color: rgb(255 255 255 / 0.84);
-    background: rgb(255 255 255 / 0.84);
-  }
-
-  .farm-hero-tag:focus-visible {
-    outline: 2px solid #fff;
-    outline-offset: 2px;
-  }
-
-  /* The click's rings, centred on the point the component positions. */
-  .farm-sw-ripple {
-    position: absolute;
-    top: -14px;
-    left: -14px;
-    width: 28px;
-    height: 28px;
-    border: 1.5px solid rgb(255 255 255 / 0.7);
-    border-radius: 50%;
-    opacity: 0;
-    pointer-events: none;
-  }
-
-  /* The launch video's cursor; its tip is the point the component positions. */
-  .farm-sw-cursor {
-    position: absolute;
-    top: 0;
-    left: 0;
-    z-index: 2;
-    width: 18px;
-    height: 18px;
-    opacity: 0;
-    pointer-events: none;
-    transform-origin: 3px 2px;
-  }
-
-  .farm-hero-flicker {
-    -webkit-mask-image: radial-gradient(
-      ellipse 220% 78% at 50% -20%,
-      transparent 55%,
-      rgb(0 0 0 / 0.04) 62%,
-      rgb(0 0 0 / 0.16) 70%,
-      rgb(0 0 0 / 0.42) 80%,
-      rgb(0 0 0 / 0.76) 90%,
-      #000 100%
-    );
-    mask-image: radial-gradient(
-      ellipse 220% 78% at 50% -20%,
-      transparent 55%,
-      rgb(0 0 0 / 0.04) 62%,
-      rgb(0 0 0 / 0.16) 70%,
-      rgb(0 0 0 / 0.42) 80%,
-      rgb(0 0 0 / 0.76) 90%,
-      #000 100%
-    );
-  }
-
-  .farm-feature-spotlight {
-    position: relative;
-    isolation: isolate;
-    background-color: #000;
-    background-image: radial-gradient(
-      ellipse 84% 42% at 50% 18%,
-      rgb(255 255 255 / 0.05),
-      rgb(255 255 255 / 0.015) 42%,
-      transparent 76%
-    );
-  }
-
-  .farm-feature-spotlight::before,
-  .farm-feature-spotlight::after {
-    position: absolute;
-    z-index: 0;
-    border-radius: 50%;
-    content: "";
-    pointer-events: none;
-  }
-
-  .farm-feature-spotlight::before {
-    inset: 2% -5% 54% 0;
-    background: radial-gradient(
-      ellipse at center,
-      rgb(255 255 255 / 0.22) 0%,
-      rgb(255 255 255 / 0.09) 36%,
-      rgb(255 255 255 / 0.025) 62%,
-      transparent 86%
-    );
-    filter: blur(34px);
-    opacity: 0.76;
-    transform: translate3d(-6px, 8px, 0);
-  }
-
-  .farm-feature-spotlight::after {
-    inset: 8% 76% 18% 0;
-    background: radial-gradient(
-      ellipse at 100% 28%,
-      rgb(255 255 255 / 0.18) 0%,
-      rgb(255 255 255 / 0.065) 42%,
-      transparent 82%
-    );
-    filter: blur(22px);
-    opacity: 0.68;
-    transform: translate3d(6px, -2px, 0);
-  }
-
-  .farm-agent-spotlight {
-    background-image: radial-gradient(
-      ellipse 92% 72% at 52% 48%,
-      rgb(255 255 255 / 0.055),
-      rgb(255 255 255 / 0.018) 48%,
-      transparent 80%
-    );
-  }
-
-  .farm-agent-spotlight::before {
-    inset: 12% 2% 22%;
-    filter: blur(64px);
-    opacity: 0.7;
-    transform: none;
-  }
-
-  .farm-agent-spotlight::after {
-    inset: 20% 10% 18% 34%;
-    filter: blur(48px);
-    opacity: 0.52;
-    transform: none;
-  }
-
-  .farm-integration-visual {
-    isolation: isolate;
-  }
-
-  .farm-integration-visual::before {
-    position: absolute;
-    inset: -10% -18%;
-    z-index: -1;
-    background: radial-gradient(
-      ellipse at center,
-      rgb(255 255 255 / 0.105) 0%,
-      rgb(255 255 255 / 0.055) 42%,
-      rgb(255 255 255 / 0.018) 62%,
-      transparent 80%
-    );
-    content: "";
-    filter: blur(28px);
-    pointer-events: none;
-  }
-
-  .farm-integration-visual::after {
-    position: absolute;
-    inset: -4% -7%;
-    z-index: 2;
-    background: radial-gradient(
-      ellipse 78% 80% at center,
-      transparent 48%,
-      rgb(0 0 0 / 0.08) 65%,
-      rgb(0 0 0 / 0.48) 84%,
-      rgb(0 0 0 / 0.9) 100%
-    );
-    backdrop-filter: blur(5px);
-    content: "";
-    -webkit-mask-image: radial-gradient(
-      ellipse 78% 80% at center,
-      transparent 0%,
-      transparent 52%,
-      rgb(0 0 0 / 0.35) 70%,
-      black 100%
-    );
-    mask-image: radial-gradient(
-      ellipse 78% 80% at center,
-      transparent 0%,
-      transparent 52%,
-      rgb(0 0 0 / 0.35) 70%,
-      black 100%
-    );
-    pointer-events: none;
-  }
-
-  .farm-integration-directory {
-    -webkit-mask-image: radial-gradient(
-      ellipse 88% 86% at center,
-      black 0%,
-      black 54%,
-      rgb(0 0 0 / 0.82) 68%,
-      rgb(0 0 0 / 0.3) 84%,
-      transparent 100%
-    );
-    mask-image: radial-gradient(
-      ellipse 88% 86% at center,
-      black 0%,
-      black 54%,
-      rgb(0 0 0 / 0.82) 68%,
-      rgb(0 0 0 / 0.3) 84%,
-      transparent 100%
-    );
-  }
-
-  .farm-illustration-surface {
-    background-color: #000;
-    background-image: linear-gradient(180deg, rgb(255 255 255 / 0.025), transparent 36%);
-    box-shadow:
-      0 18px 48px rgb(0 0 0 / 0.38),
-      inset 0 1px 0 rgb(255 255 255 / 0.025);
-  }
-
-  .farm-terminal-command-text {
-    width: 0;
-    overflow: hidden;
-    white-space: nowrap;
-    animation: farm-terminal-command-type 9.6s infinite;
-    will-change: width, opacity;
-  }
-
-  .farm-terminal-command-cursor {
-    margin-left: 0.2em;
-    vertical-align: -0.12em;
-    animation: farm-terminal-cursor-window 9.6s linear infinite;
-  }
-
-  .farm-terminal-command-cursor::before {
-    display: block;
-    width: 0.45em;
-    height: 1.05em;
-    background: rgb(255 255 255 / 0.74);
-    animation: farm-terminal-cursor-blink 0.8s steps(1, end) infinite;
-    content: "";
-  }
-
-  .farm-terminal-output {
-    clip-path: inset(0 0 100% 0);
-    animation: farm-terminal-output 9.6s infinite;
-    will-change: clip-path, opacity;
-  }
-
-  .farm-build-command-text {
-    width: 0;
-    overflow: hidden;
-    white-space: nowrap;
-    animation: farm-build-command-type 10.8s infinite;
-    will-change: width, opacity;
-  }
-
-  .farm-build-command-cursor {
-    margin-left: 0.2em;
-    vertical-align: -0.12em;
-    animation: farm-build-cursor-window 10.8s linear infinite;
-  }
-
-  .farm-build-command-cursor::before {
-    display: block;
-    width: 0.45em;
-    height: 1.05em;
-    background: rgb(255 255 255 / 0.74);
-    animation: farm-terminal-cursor-blink 0.8s steps(1, end) infinite;
-    content: "";
-  }
-
-  .farm-build-output {
-    clip-path: inset(0 0 100% 0);
-    animation: farm-build-output 10.8s infinite;
-    will-change: clip-path, opacity;
-  }
-
-  .farm-renderer-value {
-    display: inline-block;
-    width: 10ch;
-    height: 1.5rem;
-    overflow: hidden;
-    white-space: nowrap;
-    vertical-align: bottom;
-  }
-
-  /* The launch film's code palette, matching the docs code panels: keywords and punctuation dim,
-     plain code soft grey, names a step brighter, strings brightest, nothing bold. */
-  .farm-highlighted-code {
-    --sh-class: #d4d4d4;
-    --sh-entity: #d4d4d4;
-    --sh-identifier: #a1a1a1;
-    --sh-string: #e8e8e8;
-    --sh-keyword: #6b6b6b;
-    --sh-comment: rgb(255 255 255 / 0.3);
-    --sh-property: #a1a1a1;
-    --sh-sign: #6b6b6b;
-    --sh-space: inherit;
-    counter-reset: farm-code-line;
-  }
-
-  /* Punctuation carries no token span (see renderHighlightedCode), so it takes the line's color. */
-  .farm-highlighted-code .sh__line {
-    color: var(--sh-sign);
-    display: block;
-    min-width: max-content;
-    min-height: 1.5rem;
-    padding-right: 1.5rem;
-    padding-left: 0.75rem;
-    white-space: pre;
-    counter-increment: farm-code-line;
-  }
-
-  .farm-highlighted-code .sh__line::before {
-    display: inline-block;
-    width: 2rem;
-    margin-right: 1rem;
-    color: rgb(255 255 255 / 0.18);
-    text-align: right;
-    content: counter(farm-code-line);
-    user-select: none;
-  }
-
-  .farm-highlighted-code .sh__line--highlighted {
-    background: rgb(255 255 255 / 0.055);
-    box-shadow: inset 2px 0 0 rgb(255 255 255 / 0.68);
-  }
-
-  .farm-highlighted-code .sh__line--highlighted::before {
-    color: rgb(255 255 255 / 0.48);
-  }
-
-  .farm-highlighted-code--compact .sh__line {
-    min-height: 1.25rem;
-  }
-
-  .farm-highlighted-code--value-cycle .sh__line {
-    min-height: 1rem;
-  }
-
-  .farm-highlighted-code--value-cycle-compact .sh__line {
-    min-height: 1.125rem;
-  }
-
-  .farm-highlighted-code .sh__token--keyword {
-    font-weight: 400;
-  }
-
-  /* Token colors, which sugar-high would otherwise inline on every token (see
-     renderHighlightedCode). */
-  .farm-highlighted-code .sh__token--identifier {
-    color: var(--sh-identifier);
-  }
-  .farm-highlighted-code .sh__token--keyword {
-    color: var(--sh-keyword);
-  }
-  .farm-highlighted-code .sh__token--string {
-    color: var(--sh-string);
-  }
-  .farm-highlighted-code .sh__token--class {
-    color: var(--sh-class);
-  }
-  .farm-highlighted-code .sh__token--property {
-    color: var(--sh-property);
-  }
-  .farm-highlighted-code .sh__token--entity {
-    color: var(--sh-entity);
-  }
-  .farm-highlighted-code .sh__token--jsxliterals {
-    color: var(--sh-jsxliterals);
-  }
-  .farm-highlighted-code .sh__token--sign {
-    color: var(--sh-sign);
-  }
-  .farm-highlighted-code .sh__token--comment {
-    color: var(--sh-comment);
-  }
-  .farm-highlighted-code .sh__token--break {
-    color: var(--sh-break);
-  }
-
-  /* Hand-coloured panels (the renderer switcher) mark tokens with text-white opacities; give them the
-     same palette as the highlighter's tokens. */
-  .farm-highlighted-code .text-white {
-    color: var(--sh-keyword);
-  }
-  .farm-highlighted-code .text-white\/64 {
-    color: var(--sh-identifier);
-  }
-  .farm-highlighted-code .text-white\/78 {
-    color: var(--sh-property);
-  }
-  .farm-highlighted-code .text-white\/94 {
-    color: var(--sh-string);
-  }
-  .farm-highlighted-code .text-white\/42 {
-    color: var(--sh-sign);
-  }
-
-  .farm-highlighted-code .sh__token--comment {
-    font-style: italic;
-  }
-
-  .farm-code-cycle-panel {
-    animation: farm-code-cycle-panel-in 260ms cubic-bezier(0.22, 1, 0.36, 1);
-  }
-
-  .farm-code-typewriter .sh__line:last-child::after,
-  .farm-inline-typewriter::after {
-    display: inline-block;
-    width: 0.45em;
-    height: 1.05em;
-    margin-left: 0.18em;
-    background: rgb(255 255 255 / 0.72);
-    vertical-align: -0.12em;
-    animation: farm-terminal-cursor-blink 0.8s steps(1, end) infinite;
-    content: "";
-  }
-
-  /* Utility lists for elements the homepage repeats dozens of times, named once here so the
-     HTML does not carry them on every copy. Each class holds every utility for the properties it
-     sets (base, responsive, and state variants together); utilities that compete with another
-     class on the same element stay in the markup. */
-  .farm-indexed-label {
-    @apply flex min-w-0 items-center gap-1.5 text-[10px] font-normal uppercase tracking-normal text-current;
-  }
-
-  .farm-stack-tile {
-    @apply flex h-16 w-40 shrink-0 items-center justify-center gap-3 border-r border-white/12 bg-black px-4 text-[10px] font-normal uppercase tracking-normal text-white/48 transition-colors duration-150 hover:text-white/82 focus-visible:z-10 focus-visible:text-white focus-visible:outline focus-visible:outline-1 focus-visible:-outline-offset-1 focus-visible:outline-white/36 hover:bg-white/[0.07] focus-visible:bg-white/[0.07] sm:w-44 sm:text-[11px];
-  }
-
-  .farm-stack-tile > :is(img, svg) {
-    @apply shrink-0 opacity-72;
-  }
-
-  .farm-stack-tile > span {
-    @apply whitespace-nowrap;
-  }
-
-  .farm-integration-tile {
-    @apply absolute grid place-items-center bg-white/[0.055] transition-[background-color,color] duration-150 hover:z-10 hover:bg-white focus-visible:z-10 focus-visible:bg-white focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-[-2px] focus-visible:outline-white;
-  }
-
-  .farm-integration-tile-icon {
-    @apply size-7 opacity-60 transition-[filter,opacity,transform] duration-150 group-hover:-translate-y-1 group-hover:invert-0 group-hover:opacity-100 group-focus-visible:-translate-y-1 group-focus-visible:invert-0 group-focus-visible:opacity-100;
-  }
-
-  .farm-integration-tile-glyph {
-    @apply size-7 text-white/60 transition-[color,transform] duration-150 group-hover:-translate-y-1 group-hover:text-black group-focus-visible:-translate-y-1 group-focus-visible:text-black;
-  }
-
-  .farm-integration-tile-label {
-    @apply pointer-events-none absolute inset-x-1 bottom-1 translate-y-1 truncate text-center text-[7px] font-normal uppercase tracking-normal text-black/55 opacity-0 transition-[opacity,transform] duration-150 group-hover:translate-y-0 group-hover:opacity-100 group-focus-visible:translate-y-0 group-focus-visible:opacity-100;
-  }
-
-  .farm-deploy-tile {
-    @apply absolute flex size-[20%] items-center justify-center overflow-hidden rounded-none border border-white/[0.08] transition-[background-color,border-color] duration-150;
-  }
-
-  .farm-deploy-tile-brand {
-    @apply bg-white/[0.055] group-hover/deployment:border-white/[0.14] group-hover/deployment:bg-white/[0.075];
-  }
-
-  .farm-deploy-tile-icon {
-    @apply size-7 opacity-72 transition-[opacity,transform] duration-150 group-hover/tile:-translate-y-1 group-hover/tile:opacity-90;
-  }
-
-  .farm-deploy-tile-label {
-    @apply pointer-events-none absolute inset-x-1 bottom-1 translate-y-1 truncate text-center text-[7px] font-normal uppercase tracking-normal text-white/68 opacity-0 transition-[opacity,transform] duration-150 group-hover/tile:translate-y-0 group-hover/tile:opacity-100;
-  }
-
-  .farm-code-tab {
-    @apply relative flex h-full min-w-0 flex-1 items-center justify-center border-r border-white/8 px-2 text-white/34 transition-[background-color,color,box-shadow] duration-150 hover:bg-white/[0.035] hover:text-white/68 focus-visible:z-10 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-[-2px] focus-visible:outline-white aria-selected:bg-white/[0.045] aria-selected:text-white/82 aria-selected:shadow-[inset_0_-1px_0_rgba(255,255,255,0.85)];
-  }
-
-  .farm-footer-link {
-    @apply flex min-h-7 items-center justify-between gap-2 text-[9px] font-normal uppercase !tracking-[0.04em] text-white/48 transition-colors duration-150 hover:text-white focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-white;
-  }
-
-  .farm-nav-link {
-    @apply aria-[current=page]:bg-white/[0.04] aria-[current=page]:text-white flex h-full min-w-0 flex-auto items-center border-r border-white/12 px-3 last:border-r-0 uppercase tracking-normal text-white/48 transition-colors duration-150 hover:bg-white/[0.035] hover:text-white focus-visible:z-10 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-[-2px] focus-visible:outline-white xl:px-4;
-  }
-
-  .farm-footer-row {
-    @apply flex h-12 items-center justify-between border-b border-white/12 px-4 text-[9px] font-normal uppercase !tracking-[0.04em] text-white/58 transition-[background-color,color] duration-150 hover:bg-white/[0.035] hover:text-white focus-visible:outline focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-white;
-  }
-
-  .farm-menu-link {
-    @apply flex h-12 items-center border-b border-white/10 px-4 uppercase tracking-normal text-white/58 last:border-b-0 hover:bg-white/[0.04] hover:text-white;
-  }
-
-  .farm-file-tree-item {
-    @apply relative flex h-7 w-full min-w-0 items-center gap-1.5 rounded-[3px] px-2 text-left text-[9px] font-normal tracking-normal transition-[background-color,color] duration-150 focus-visible:z-10 focus-visible:outline focus-visible:outline-1 focus-visible:outline-offset-[-1px] focus-visible:outline-white/60 sm:text-[10px];
-  }
-
-  .farm-install-tab {
-    @apply relative flex h-7 min-w-0 items-center justify-center gap-1 border-r border-white/10 px-1 text-[8px] font-normal uppercase tracking-normal text-white/42 transition-[background-color,color] duration-150 last:border-r-0 hover:bg-white/[0.055] hover:text-white focus-visible:z-10 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-[-2px] focus-visible:outline-white aria-selected:bg-white aria-selected:text-black sm:h-8 sm:text-[9px];
-  }
-
-  .farm-feature-title {
-    @apply mt-6 max-w-[31rem] text-balance text-xl font-medium leading-[1.2] tracking-normal sm:text-2xl;
-  }
-
-  .farm-feature-body {
-    @apply mt-3 max-w-[31rem] text-white/48;
-  }
-
-  .farm-action-link {
-    @apply inline-flex min-w-0 items-center justify-center border font-normal uppercase tracking-normal transition-[background-color,border-color,color,transform] duration-150 active:translate-y-px focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-white;
-  }
-
-  @media (min-width: 768px) {
-    .farm-page-grid {
-      grid-template-columns: 40px minmax(0, 1240px) 40px;
-    }
-
-    .farm-page-rail {
-      display: block;
-    }
-
-    .farm-page-content {
-      border-inline: 0;
-    }
+    border-inline: 0;
   }
 }
+
+@tailwind utilities source(none);
 
 @keyframes farm-logo-rail {
   from {

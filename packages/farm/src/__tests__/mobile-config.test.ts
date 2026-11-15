@@ -4,6 +4,7 @@ import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { pluginHook } from "./plugin-hook";
 import { parseAst } from "rolldown/parseAst";
 import { resolveConfig, type FarmUserConfig, type ResolvedFarmConfig } from "../config";
 import { loadFarmMobileRuntime } from "../config-runtime";
@@ -893,6 +894,26 @@ describe("mobile screens", () => {
     });
   });
 
+  it("warns about reserved options nothing acts on yet", async () => {
+    const root = await createApp({
+      "src/app/feed/page.tsx": `export const mobile = { prefetch: "intent" } as const;\n${PAGE}`,
+      "src/app/(tabs)/layout.native.tsx": PAGE,
+    });
+    const quiet = await appFor(root, userConfig());
+    // The default prefetch and an explicit "off" ask for nothing, so they stay quiet.
+    expect(quiet.warnings.filter((warning) => /islands|budgets/.test(warning))).toEqual([]);
+    const app = await appFor(
+      root,
+      userConfig({ islands: ["Map"], budgets: { screenOpenMs: 300 }, prefetch: "off" }),
+    );
+    expect(app.warnings).toEqual([
+      "mobile.native.islands is reserved: no native islands render yet, so these stay web components: Map.",
+      "mobile.native.budgets is reserved: nothing measures app size, screen open time, or dropped frames yet.",
+      'src/app/feed/page.tsx: mobile.prefetch "intent" has no effect yet: the shell does not prefetch a route\'s data.',
+      "src/app/(tabs)/layout.native.tsx: layout.native files are reserved: nothing renders them yet, though the analyzer reads one in place of that folder's layout.",
+    ]);
+  });
+
   it("checks platform screens and the engine", async () => {
     const root = await createApp({
       "src/app/feed/page.native.tsx": PAGE,
@@ -1141,9 +1162,13 @@ describe("mobile on the web", () => {
     expect(platform()).toBe("web");
     setPlatform("mobile");
     expect(platform()).toBe("mobile");
-    const plugin = farmServerOnlyEntriesPlugin() as any;
-    const id = plugin.resolveId("@farm.js/core/platform", "/app/page.tsx", { ssr: false });
-    expect(plugin.load(id)).toContain('return "mobile";');
+    const plugin = farmServerOnlyEntriesPlugin();
+    const id = pluginHook<[string, string, { ssr: boolean }], string>(plugin, "resolveId")(
+      "@farm.js/core/platform",
+      "/app/page.tsx",
+      { ssr: false },
+    )!;
+    expect(pluginHook<[string], string>(plugin, "load")(id)).toContain('return "mobile";');
     setPlatform("other");
     expect(platform()).toBe("web");
   });

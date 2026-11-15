@@ -41,8 +41,7 @@ RCT_EXPORT_MODULE(Device)
 
 /// The system photo library picker, from UIKit; it runs out of process and needs no permission.
 /// The photo is copied into tmp/farm-files and resolved as its file:// URL, which a native
-/// screen's Image loads. iOS web screens cannot load it (file references are Android only), so the
-/// example's web screen uses a file input on iOS.
+/// screen's Image loads; on its way to a web screen the shell turns it into a blob: URL.
 - (void)pickPhoto:(RCTPromiseResolveBlock)resolve reject:(RCTPromiseRejectBlock)reject
 {
   dispatch_async(dispatch_get_main_queue(), ^{

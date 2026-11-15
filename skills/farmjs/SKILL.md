@@ -219,6 +219,9 @@ Read `docs/src/app/docs/configuration/page.md` before adding an unfamiliar optio
 - Metadata route files `sitemap.ts`, `robots.ts`, `manifest.ts`, `llms.ts`, and `llms-full.ts`
   serve `/sitemap.xml`, `/robots.txt`, `/manifest.webmanifest`, `/llms.txt`, and `/llms-full.txt`
 - Route exports or route rules select dynamic, static, ISR, PPR, runtime, and cache behavior
+- Client navigations announce the new page's title (else its first `h1`, else the pathname) to
+  screen readers in a live region created on the first navigation (`#farm-route-announcer`); give
+  each page a distinct `metadata.title`; focus is not moved
 
 Page shape:
 
@@ -529,8 +532,11 @@ Built-in server plugins are imported from `@farm.js/core/plugin/server`, includi
 - Use `docs` for human docs, shared search, markdown, `llms.txt`, sitemap, robots, and agent APIs.
   A root `sitemap.ts`, `robots.ts`, `llms.ts`, or `llms-full.ts` (or the same file in `public/`)
   takes its path from the docs engine.
-- Docs pages render on request. `docs.prerender: true` writes the pages a docs adapter lists as
-  static files on Node and serverless targets; a docs `page.mdx` takes no `force-static` export.
+- Docs pages render on request. `docs.prerender: true` writes them as static files on Node and
+  serverless targets: every built-in renderer page (pages with social images need
+  `socialImage.baseUrl`) or the pages a docs adapter lists. A docs `page.mdx` takes no
+  `force-static` export; an app `page.md`/`page.mdx` outside the docs engine prerenders with a
+  literal top-level `export const dynamic = "force-static";` (or `revalidate`).
 - Use `agent.llmsTxt` for an app's own `/llms.txt` and `/llms-full.txt` (`full: false` skips the
   second). A static `public/llms.txt` or `public/llms-full.txt` overrides each, and so do
   `src/app/llms.ts` and `src/app/llms-full.ts`, which return the whole file as a string or the
@@ -555,12 +561,22 @@ false }` trims it (a hidden section is `null`); `agent.manifest: false` turns it
   deployments (`FARM_PREVIEW=1`, `VERCEL_ENV=preview`, Netlify deploy-preview/branch-deploy at
   build time, Render PR previews). Test locally with `FARM_PREVIEW=1 farm dev`.
 - Use `after()` only for short post-response work and a jobs integration for durable work.
+  `runtime: local()` runs tasks in the app (give the `jobs` storage namespace a persistent mount;
+  schedule `/api/jobs/_runtime/local/tick` with cron on serverless). `trigger(...)` and
+  `inngest(...)` call code deployed to the provider. `defineJobsRuntime()` adds a runtime; check it
+  with `createJobsRuntimeConformance` from `@farm.js/jobs/testing`.
 - Configure OpenTelemetry and Farm runtime events for correlated traces.
 
 `farm preview` exposes an already-running local app; it does not build or deploy. Bind remote
 sandbox development servers with `farm dev --host 0.0.0.0 --port <port>`. For deployment,
 prefer `deploy.target` for first-class targets and `deploy.preset` only for Nitro pass-through. A
-preset overrides a target. Use `farm deploy --plan` before shipping and run the exact target build.
+preset overrides a target. `deploy.target` must be `vercel`, `cloudflare`, `netlify`, or `node`;
+config resolution rejects any other name. Use `farm deploy --plan` before shipping and run the
+exact target build.
+A static page any middleware guards renders on request. On Vercel, a middleware file with
+`export const config = { runtime: "edge" }` runs in front of the pages it guards, so they prerender;
+it may import only web APIs and the Edge runtime's Node modules (`async_hooks`, `events`, `buffer`,
+`assert`, `util`), and the build stops on any other Node import.
 
 Current diagnostic and migration commands include:
 

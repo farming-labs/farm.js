@@ -9,7 +9,10 @@ export {
 export { farmSecretsMatch } from "../secret-compare";
 export { createFarmLayoutSelector } from "../routing/layout-selector";
 export { isInRouteGroupScope as isInFarmRouteGroupScope } from "../routing/route-groups";
-export { mergeRouteRenderingDirectiveConfig } from "../route-rendering";
+export {
+  mergeRouteRenderingDirectiveConfig,
+  resolveRouteSharedCacheControl,
+} from "../route-rendering";
 export { materializeSSGRoutePath } from "../ssg-paths";
 export type { FarmServerConfig } from "../server-http";
 export {
@@ -45,6 +48,7 @@ export {
   _getRequestReadCount,
   _runWithCurrentRequest,
   _runWithFarmCspNonce,
+  _withFarmTrustedProxyOrigin,
   getCurrentRequest,
   resolveFarmWebRequestOrigin,
 } from "../server/request";
@@ -86,18 +90,36 @@ export {
   _markFarmOwnedResponse,
   _withFarmResponseHeaders,
 } from "../owned-response";
-export { createFarmAgentRobots } from "../agent-crawlers";
-export { createFarmDefaultSitemap } from "../agent-sitemap";
+export {
+  createFarmAgentRobots,
+  resolveFarmAgentCrawlers,
+  type FarmAgentCrawlers,
+  type ResolvedFarmAgentCrawlers,
+} from "../agent-crawlers";
+export {
+  createFarmDefaultSitemap,
+  resolveFarmAgentSitemap,
+  type FarmAgentSitemapUserConfig,
+  type ResolvedFarmAgentSitemap,
+} from "../agent-sitemap";
 export { collectFarmDefaultMCPPages, resolveFarmDefaultMCPServer } from "../agent-mcp";
 export { handleFarmDefaultMCPRequest } from "../agent-mcp-handler";
 export { createFarmAiCatalogResponse, listFarmMCPLlmsTxtLinks } from "../ai-catalog";
 export { registerFarmMCPServer } from "../mcp-catalog";
+export {
+  _listFarmRegisteredMCPServerTools,
+  _observeFarmRegisteredMCPResponse,
+  _readFarmRegisteredMCPCalls,
+} from "../registered-mcp";
 export { createFarmApiCatalogResponse } from "../api-catalog";
 export {
   collectFarmLlmsTxtPages,
   createFarmDefaultLlmsTxt,
   createFarmLlmsMarkdownReader,
+  isFarmPageNoIndex,
+  readFarmLlmsMarkdownFrom,
   renderFarmLlmsFullTxt,
+  resolveFarmAgentOrigin,
   createFarmLlmsFullRenderer,
   resolveFarmLlmsTxtConfig,
   type FarmLlmsTxtUserConfig,
@@ -106,8 +128,16 @@ export {
 export {
   applyProductionMiddlewareHeaders,
   createProductionMiddlewareRunner,
+  _hasPrivateFarmRequestHeaders,
+  _withFarmDeploymentCookie,
   _withFarmGuardedResponseCache,
 } from "../middleware/production-runtime";
+export {
+  createFarmDeploymentMismatchResponse,
+  FARM_DEPLOYMENT_ID_HEADER,
+  getFarmDeploymentMismatch,
+  withoutFarmDeploymentCookie,
+} from "../deployment";
 export { _farmPluginsKeepResponsesPrivate } from "../plugin-runtime-endpoint";
 export { _runWithMiddlewareContext, _runWithMiddlewareData } from "../middleware/server";
 export {
@@ -148,11 +178,20 @@ export {
   serializeFarmInlineValue,
 } from "./legacy-runtime";
 export {
+  normalizeFarmTrailingSlashPathname,
   resolveFarmTrailingSlashRedirect,
   setFarmTrailingSlashPreference,
+  toFarmTrailingSlashPageRequest,
 } from "../trailing-slash";
 export { applyFarmBasePath, setFarmBasePath, stripFarmBasePath } from "../base-path";
 export { appendFarmRedirectQuery } from "../redirect-query";
+export {
+  applyConfigResponseHeaders,
+  createConfigHeadersMatcher,
+  createConfigRedirectMatcher,
+  createConfigRewriteMatcher,
+} from "../plugins/config-routes";
+export { isDeferred, prepareDeferredData, snapshotDeferredData } from "../deferred";
 export {
   applyFarmCspNonceToResponse,
   createFarmCspNonce,
@@ -175,7 +214,11 @@ export function appendFarmLinkHeader(headers: Headers, value: string): void {
     headers.set("Link", `${current}, ${value}`);
   }
 }
-export { handleFarmFormActionRequest } from "../form-actions";
+export {
+  getFarmFormState,
+  handleFarmFormActionRequest,
+  renderFarmFormStateScript,
+} from "../form-actions";
 export { ignoreFarmHeldValues, installFarmIslandValues } from "../client/island-values";
 export { getSharedLayoutPrefixLength, parseFarmLayoutChainHeader } from "../navigation/render-plan";
 export { createFarmMobileSessionPlugin } from "../mobile/session";

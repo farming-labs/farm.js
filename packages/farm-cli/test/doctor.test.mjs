@@ -472,20 +472,23 @@ test("reports whether experimental.serverComponents runs React Server Components
   const writeConfig = (lines) =>
     writeFile(
       path.join(root, "farm.config.mjs"),
-      ["export default {", "  experimental: { serverComponents: true },", ...lines, "};", ""].join(
-        "\n",
-      ),
+      [
+        "export default {",
+        '  experimental: { serverComponents: { mode: "rsc" } },',
+        ...lines,
+        "};",
+        "",
+      ].join("\n"),
     );
 
   try {
-    // Without the packages the app keeps running without RSC, and doctor says the fallback ends.
+    // `{ mode: "rsc" }` without the packages fails with the install command.
     await writeConfig([]);
-    const fallback = await runFarmDoctor({ root, offline: true });
-    const fallbackCheck = fallback.checks.find(
-      (entry) => entry.code === "SERVER_COMPONENTS_FALLBACK",
+    const missing = await runFarmDoctor({ root, offline: true });
+    const missingCheck = missing.checks.find(
+      (entry) => entry.code === "SERVER_COMPONENTS_PACKAGES_MISSING",
     );
-    assert.equal(fallbackCheck?.status, "warn");
-    assert.match(fallbackCheck?.message || "", /`farm dev` and `farm build` install them/);
+    assert.equal(missingCheck?.status, "fail");
 
     for (const name of ["@farm.js/plugin", "@vitejs/plugin-rsc", "react-server-dom-webpack"]) {
       const dir = path.join(root, "node_modules", ...name.split("/"));
@@ -498,22 +501,41 @@ test("reports whether experimental.serverComponents runs React Server Components
       "pass",
     );
 
-    await writeFile(
-      path.join(root, "farm.config.mjs"),
-      'export default { experimental: { serverComponents: { mode: "islands" } } };\n',
-    );
-    const islands = await runFarmDoctor({ root, offline: true });
+    // RSC runs the configure and client hooks of plugins, and the check says so.
+    await writeConfig(['  plugins: [{ name: "app:recorder", client: { setup() {} } }],']);
+    const withPlugins = await runFarmDoctor({ root, offline: true });
     assert.equal(
-      islands.checks.find((entry) => entry.code === "SERVER_COMPONENTS_ISLANDS")?.status,
-      "pass",
+      withPlugins.checks.find((entry) => entry.code === "SERVER_COMPONENTS_READY")?.message,
+      "farm dev and farm build run the RSC pipeline; it ignores plugins (except their configure and client hooks).",
     );
 
+    // `true` and `{ mode: "islands" }` both run islands mode.
+    for (const value of ["true", '{ mode: "islands" }']) {
+      await writeFile(
+        path.join(root, "farm.config.mjs"),
+        `export default { experimental: { serverComponents: ${value} } };\n`,
+      );
+      const islands = await runFarmDoctor({ root, offline: true });
+      assert.equal(
+        islands.checks.find((entry) => entry.code === "SERVER_COMPONENTS_ISLANDS")?.status,
+        "pass",
+      );
+    }
+
     // Config RSC cannot run that decides what a request may receive stops it, as farm dev does.
-    await writeConfig(["  headers() { return []; },"]);
+    await writeConfig(['  routeRules: { "/admin/**": { headers: { "x-admin": "1" } } },']);
     const blocked = await runFarmDoctor({ root, offline: true });
     const blockedCheck = blocked.checks.find((entry) => entry.code === "SERVER_COMPONENTS_BLOCKED");
     assert.equal(blockedCheck?.status, "fail");
-    assert.match(blockedCheck?.message || "", /does not run `headers` yet/);
+    assert.match(blockedCheck?.message || "", /does not run `routeRules` yet/);
+
+    // Config headers(), redirects() and rewrites() run in RSC and no longer block it.
+    await writeConfig(["  headers() { return []; },"]);
+    const withHeaders = await runFarmDoctor({ root, offline: true });
+    assert.equal(
+      withHeaders.checks.find((entry) => entry.code === "SERVER_COMPONENTS_BLOCKED"),
+      undefined,
+    );
   } finally {
     await rm(root, { recursive: true, force: true });
   }
@@ -832,6 +854,38 @@ test("recognizes routes using the configured renderer extension", async () => {
     assert.ok(report.checks.some((check) => check.code === "ROOT_LAYOUT_READY"));
     assert.ok(!report.checks.some((check) => check.code === "NO_PAGE_ROUTES"));
     assert.ok(!report.checks.some((check) => check.code === "ROOT_LAYOUT_MISSING"));
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("treats a renderer: false app as API-only", async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "farm-cli-doctor-backend-"));
+
+  try {
+    await mkdir(path.join(root, "src/app/api/users"), { recursive: true });
+    await writeFile(
+      path.join(root, "package.json"),
+      JSON.stringify({ name: "backend-doctor", dependencies: { "@farm.js/core": "workspace:*" } }),
+    );
+    await writeFile(path.join(root, "farm.config.mjs"), "export default { renderer: false };\n");
+    await writeFile(
+      path.join(root, "src/app/api/users/route.ts"),
+      "export function GET() { return Response.json([]); }\n",
+    );
+
+    const report = await runFarmDoctor({ root, offline: true, fix: true });
+
+    assert.ok(report.checks.some((check) => check.code === "API_ROUTES_READY"));
+    for (const code of ["NO_PAGE_ROUTES", "ROOT_LAYOUT_MISSING", "ROOT_LAYOUT_READY"]) {
+      assert.ok(!report.checks.some((check) => check.code === code), code);
+    }
+    // The safe fixes must not add a React layout to an app without pages.
+    await assert.rejects(stat(path.join(root, "src/app/layout.tsx")));
+
+    await rm(path.join(root, "src/app/api"), { recursive: true });
+    const empty = await runFarmDoctor({ root, offline: true });
+    assert.equal(empty.checks.find((check) => check.code === "NO_API_ROUTES")?.status, "fail");
   } finally {
     await rm(root, { recursive: true, force: true });
   }

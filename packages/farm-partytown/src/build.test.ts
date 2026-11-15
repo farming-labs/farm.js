@@ -66,7 +66,7 @@ describe("Partytown assets", () => {
     temporaryDirectories.push(outputDir);
     const result = await writePartytownBuildArtifacts({
       outputDir,
-      preset: "vercel-edge",
+      preset: "vercel",
       basePath: "/",
       options: resolvePartytownOptions({ debug: true }),
     });

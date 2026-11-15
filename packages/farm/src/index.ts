@@ -178,7 +178,12 @@ export * from "./docs";
 export * from "./markdown";
 export * from "./app-markdown";
 export * from "./observability";
-export { classifyFarmAgent, type FarmAgentIdentity } from "./agent-identity";
+export {
+  classifyFarmAgent,
+  classifyFarmClient,
+  type FarmAgentIdentity,
+  type FarmClientIdentity,
+} from "./agent-identity";
 export {
   registerFarmMCPServer,
   type FarmMCPEndpointTool,
@@ -298,6 +303,7 @@ export type {
   FarmPluginRuntimeHooks,
   FarmPluginRuntimeRequestOptions,
   FarmPluginRuntimeRequestHandler,
+  FarmPluginRuntimeRequestScope,
   FarmPluginRuntimeSession,
   FarmPluginDiscoveredRoute,
   FarmPluginRouterHooks,

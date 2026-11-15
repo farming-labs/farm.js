@@ -91,6 +91,27 @@ pnpm summarize:official /absolute/path/to/js-framework-benchmark
 
 See [BENCHMARK_RESULTS.md](./BENCHMARK_RESULTS.md) for the checked-in interpretation and
 `BENCHMARK_RESULTS.json` for raw sample arrays and medians from the recorded run.
+[BENCHMARK_RESULTS_LINUX_CHROMIUM.md](./BENCHMARK_RESULTS_LINUX_CHROMIUM.md) and
+`BENCHMARK_RESULTS_LINUX_CHROMIUM.json` are a separate run on a Linux VM with Chromium; compare
+ratios between builds, not absolute times across the two machines.
+
+## Compare with other frameworks
+
+To rank Farm against the harness's own entries, build those entries in the checkout (for example
+`frameworks/keyed/vanillajs`, `solid`, `svelte`, `vue`, `preact-hooks` and `react-compiler-hooks`,
+each with `npm ci && npm run build-prod` where it has a build), add them to the `--framework`
+lists of the `isKeyed` and `bench` commands above, and run the CPU, memory and size suites into an
+otherwise empty `webdriver-ts/results`. Then score every framework in that directory:
+
+```bash
+pnpm compare:frameworks /absolute/path/to/js-framework-benchmark
+```
+
+It recomputes each median from the raw samples, rejects duplicate results, and scores CPU with the
+official weights and memory and size with equal weights, relative to the best framework in the
+run, as the harness's results table does. Set `FARM_COMPARISON_OUTPUT` to choose the JSON path.
+[FRAMEWORK_COMPARISON_LINUX_CHROMIUM.md](./FRAMEWORK_COMPARISON_LINUX_CHROMIUM.md) is the recorded
+ten-framework run.
 
 These are local results produced by the official harness, not an official leaderboard submission.
 Browser, operating-system, runner, framework versions, harness revision, and sample counts must be

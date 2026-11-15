@@ -6,3 +6,5 @@ export declare function kitGreeting(name: string): string;
 export declare function useKitLabel(): { label: string; click(): void };
 export declare function KitProvider(props: { initial: string; children?: ReactNode }): ReactNode;
 export declare function KitValue(): ReactNode;
+export declare function KitCard(props: { title: string }): ReactNode | Promise<ReactNode>;
+export declare function useKitTheme(): string;

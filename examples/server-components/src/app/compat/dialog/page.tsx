@@ -19,6 +19,21 @@ export default function DialogPage() {
           </Dialog.Content>
         </Dialog.Portal>
       </Dialog.Root>
+      {/* asChild: the trigger gives its props and handlers to the server-rendered button. */}
+      <Dialog.Root>
+        <Dialog.Trigger asChild>
+          <button type="button" className="as-child-trigger">
+            Open as child
+          </button>
+        </Dialog.Trigger>
+        <Dialog.Portal>
+          <Dialog.Content>
+            <Dialog.Title>As child title</Dialog.Title>
+            <Dialog.Description>Opened from a server button.</Dialog.Description>
+            <Close>Close as child</Close>
+          </Dialog.Content>
+        </Dialog.Portal>
+      </Dialog.Root>
     </section>
   );
 }

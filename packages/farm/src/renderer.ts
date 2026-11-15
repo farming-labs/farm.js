@@ -355,8 +355,23 @@ export interface FarmServerRendererRuntime {
       onShellReady(): void;
       onShellError(error: unknown): void;
       onError(error: unknown): void;
+      /**
+       * React DOM option, passed only for React: called once every Suspense
+       * boundary has finished. Buffered renders start piping here.
+       */
+      onAllReady?(): void;
+      /**
+       * React DOM option, passed only for React: completed boundaries larger than
+       * this stream behind their fallback. Buffered renders raise it to stay inline.
+       */
+      progressiveChunkSize?: number;
       /** CSP nonce forwarded to renderer-owned inline streaming scripts. */
       nonce?: string;
+      /**
+       * React DOM option: the form state of a `useActionState` form posted without JavaScript,
+       * which the page renders with.
+       */
+      formState?: unknown;
     },
   ) => {
     pipe(destination: NodeJS.WritableStream): void;
@@ -395,13 +410,39 @@ export const REACT_RENDERER: Readonly<FarmRenderer> = Object.freeze({
   },
 });
 
+/**
+ * The renderer an app gets with `renderer: false`: it has no pages, so it builds no browser
+ * client and no React (or other UI) runtime. Its server module only answers the renderer
+ * contract and throws if anything tries to render a component.
+ */
+export const NO_RENDERER: Readonly<FarmRenderer> = Object.freeze({
+  name: "none",
+  vite: "@farm.js/core/renderer/none/server",
+  server: "@farm.js/core/renderer/none/server",
+  client: "@farm.js/core/renderer/none/server",
+  capabilities: {
+    streaming: { node: false, web: false },
+    reconcilesRerenders: false,
+    functionComponents: false,
+  },
+});
+
+/** True when the app opted out of pages and their renderer with `renderer: false`. */
+export function isFarmRendererDisabled(
+  renderer: Pick<FarmRenderer, "name"> | false | undefined,
+): boolean {
+  return renderer === false || renderer?.name === NO_RENDERER.name;
+}
+
 export function defineRenderer<const TRenderer extends FarmRenderer>(
   renderer: TRenderer,
 ): TRenderer {
   return renderer;
 }
 
-export function resolveFarmRenderer(renderer?: FarmRenderer): FarmRenderer {
+export function resolveFarmRenderer(renderer?: FarmRenderer | false): FarmRenderer {
+  // `renderer: false`, or a config that already resolved it, which config resolution runs again.
+  if (renderer === false || isFarmRendererDisabled(renderer)) renderer = NO_RENDERER;
   const resolved = renderer || REACT_RENDERER;
   const fields = ["name", "vite", "server", "client"] as const;
 
@@ -498,6 +539,8 @@ export async function loadFarmRendererVitePlugins(
   // React needs no renderer package. Keep this path dependency-free and avoid
   // resolving Farm's own built package while running from source in the monorepo.
   if (renderer.vite === REACT_RENDERER.vite) return [createFarmReactJsxPlugin()];
+  // An app without pages compiles no components.
+  if (isFarmRendererDisabled(renderer)) return [];
 
   const modulePath = resolveFarmRendererModule(root, renderer.vite);
   const rendererModule = (await import(pathToFileURL(modulePath).href)) as FarmRendererViteModule;

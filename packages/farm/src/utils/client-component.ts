@@ -2,18 +2,27 @@ import fs from "fs";
 import path from "path";
 import { fileURLToPath } from "url";
 import {
+  ensureFarmInternalClientReference,
   ensureFarmPackageClientReference,
   farmPackageClientImportExports,
+  FARM_CLIENT_REFERENCE_DIRECTORY,
   FARM_CLIENT_REFERENCE_PRAGMA,
   findFarmPackageClientImports,
+  parseFarmResolveFrom,
 } from "../islands-package-references";
 import {
   farmReactServerBuildReachesClientModules,
   findFarmPackageManifest,
+  findFarmReactServerClientModules,
   findFarmReactServerClientNames,
   findFarmServerBundledPackage,
+  type FarmServerBundledPackage,
 } from "../islands-react-server-exports";
 import { isFarmIslandStrategy, type FarmIslandStrategy } from "../island";
+import {
+  ensureFarmIslandContainerReference,
+  findFarmIslandContainers,
+} from "../islands-containers";
 import { isReactRenderer, type FarmRenderer } from "../renderer";
 import type { FarmIsolatedClientHydrationMode } from "../types";
 import { logger } from "../utils";
@@ -22,8 +31,30 @@ import {
   PackageInspectionTrace,
 } from "./package-client-boundary-cache";
 import { getFarmProjectSourceDir } from "./source-dir";
+import { memoizeInFarmSourceSnapshot, noteFarmSourceRead } from "./source-snapshot";
+
+export { traceFarmSourceReads, withFarmSourceSnapshot } from "./source-snapshot";
 
 function readIfExists(filePath: string): string | null {
+  // Client references are written while a plan runs, so they are read from disk every time.
+  if (filePath.replace(/\\/g, "/").includes(FARM_CLIENT_REFERENCE_DIRECTORY)) {
+    return readSourceFile(filePath);
+  }
+  return memoizeInFarmSourceSnapshot(
+    "source",
+    filePath,
+    () => readSourceFile(filePath),
+    (content) => content !== null,
+  );
+}
+
+function readSourceFile(filePath: string): string | null {
+  const content = readSourceFileContents(filePath);
+  if (content !== null) noteFarmSourceRead(filePath);
+  return content;
+}
+
+function readSourceFileContents(filePath: string): string | null {
   try {
     if (!filePath || !fs.existsSync(filePath)) {
       return null;
@@ -251,7 +282,7 @@ export function hasUseClientDirective(content: string | null): boolean {
   // Directive-prologue semantics allow comments and other directives (e.g.
   // "use strict") before "use client". Scan the leading string-literal
   // statements with the comment-aware tokenizer.
-  for (const token of tokenizeModuleSource(content)) {
+  for (const token of scanModuleSourceTokens(content, true)) {
     if (token.kind === "string") {
       if (token.value === "use client") {
         return true;
@@ -369,14 +400,50 @@ function skipRegularExpression(content: string, startIndex: number): number | nu
   return null;
 }
 
-function tokenizeModuleSource(content: string): ModuleSourceToken[] {
+const tokenizedModules = new Map<string, readonly ModuleSourceToken[]>();
+const TOKENIZED_MODULE_CACHE_SIZE = 32;
+
+/** The module's tokens. Several helpers inspect the same file in a row, so recent results are kept. */
+function tokenizeModuleSource(content: string): readonly ModuleSourceToken[] {
+  return memoizeInFarmSourceSnapshot("tokens", content, () => tokenizeRecentModuleSource(content));
+}
+
+function tokenizeRecentModuleSource(content: string): readonly ModuleSourceToken[] {
+  const cached = tokenizedModules.get(content);
+  if (cached) return cached;
+  const tokens = scanModuleSourceTokens(content);
+  if (tokenizedModules.size >= TOKENIZED_MODULE_CACHE_SIZE) {
+    tokenizedModules.delete(tokenizedModules.keys().next().value!);
+  }
+  tokenizedModules.set(content, tokens);
+  return tokens;
+}
+
+/** `/\s/`, without a regular expression per ASCII character. */
+function isWhitespaceCode(code: number): boolean {
+  if (code < 128) return code === 32 || (code >= 9 && code <= 13);
+  return /\s/.test(String.fromCharCode(code));
+}
+
+/** `[A-Za-z_$]`. */
+function isIdentifierStartCode(code: number): boolean {
+  return (code >= 97 && code <= 122) || (code >= 65 && code <= 90) || code === 95 || code === 36;
+}
+
+/** `[\w$]`. */
+function isIdentifierPartCode(code: number): boolean {
+  return isIdentifierStartCode(code) || (code >= 48 && code <= 57);
+}
+
+/** With `prologueOnly`, stops at the first token that cannot belong to a directive prologue. */
+function scanModuleSourceTokens(content: string, prologueOnly = false): ModuleSourceToken[] {
   const tokens: ModuleSourceToken[] = [];
   let index = 0;
   let line = 1;
 
   while (index < content.length) {
     const character = content[index];
-    if (/\s/.test(character)) {
+    if (isWhitespaceCode(content.charCodeAt(index))) {
       if (character === "\n") line++;
       index++;
       continue;
@@ -451,21 +518,23 @@ function tokenizeModuleSource(content: string): ModuleSourceToken[] {
       continue;
     }
 
-    if (/[A-Za-z_$]/.test(character)) {
+    if (isIdentifierStartCode(content.charCodeAt(index))) {
       const start = index++;
-      while (index < content.length && /[\w$]/.test(content[index])) index++;
+      while (index < content.length && isIdentifierPartCode(content.charCodeAt(index))) index++;
       tokens.push({ kind: "identifier", value: content.slice(start, index), line });
+      if (prologueOnly) return tokens;
       continue;
     }
 
     tokens.push({ kind: "punctuation", value: character, line });
+    if (prologueOnly && character !== ";") return tokens;
     index++;
   }
 
   return tokens;
 }
 
-function isIslandExportStart(tokens: ModuleSourceToken[], index: number): boolean {
+function isIslandExportStart(tokens: readonly ModuleSourceToken[], index: number): boolean {
   const token = tokens[index];
   const previous = tokens[index - 1];
   const startsStatement =
@@ -561,7 +630,7 @@ export function hasAsyncDefaultExport(content: string | null): boolean {
   return false;
 }
 
-function isAsyncLocalDeclaration(tokens: ModuleSourceToken[], name: string): boolean {
+function isAsyncLocalDeclaration(tokens: readonly ModuleSourceToken[], name: string): boolean {
   for (let index = 0; index < tokens.length - 2; index++) {
     if (
       tokens[index].value === "async" &&
@@ -633,6 +702,24 @@ function resolveOwnerSourcePath(resolvedPath: string | null, root?: string): str
     current = target;
   }
   return current;
+}
+
+/**
+ * Islands mode: the local names in a server module `code` (at `file`) that render client
+ * components, directly or through the server components they import. Their uses inside a container
+ * element grow the island to it (RFC 0006).
+ */
+export function getFarmClientRenderingBindings(code: string, file: string, root: string): string[] {
+  const bindings: string[] = [];
+  for (const [specifier, locals] of getStaticImportBindings(code)) {
+    const imported = resolveImportedModule(file, specifier, root);
+    if (!imported.path) continue;
+    const metadata = imported.local
+      ? inspectClientModuleMetadata(imported.path, root, new Set([path.resolve(file)]), false)
+      : inspectPackageClientBoundary(imported.path, root, new Set());
+    if (metadata.isClientComponent || metadata.shouldHydrate) bindings.push(...locals);
+  }
+  return bindings;
 }
 
 /**
@@ -870,17 +957,16 @@ function planClientModuleHydration(
 
 /**
  * An async page's client components hydrate inside its hydrating layout's React tree from a
- * serialized server tree, so they read the layout's context. Islands that declare a deferred
- * strategy keep hydrating as roots of their own on that schedule.
+ * serialized server tree, so they read the layout's context: a provider the layout renders, such
+ * as a theme or a sidebar's state. That holds for islands that declare a deferred strategy too:
+ * as roots of their own they hydrated outside every provider, so one deferred island made each
+ * client component on the page throw where it read a layout's context, and islx restored their
+ * server HTML. Inside the tree they hydrate with the layout's root.
  */
 export function usesFarmServerTree(
   plan: Pick<ClientModuleHydrationPlan, "asyncOwnerIslands" | "isolatedBoundaries"> | undefined,
 ): boolean {
-  return (
-    plan?.asyncOwnerIslands === true &&
-    plan.isolatedBoundaries.length > 0 &&
-    plan.isolatedBoundaries.every((boundary) => boundary.islandStrategy === "load")
-  );
+  return plan?.asyncOwnerIslands === true && plan.isolatedBoundaries.length > 0;
 }
 
 /**
@@ -961,6 +1047,7 @@ interface FarmIsolatedHydrationRoutePlan {
   isolatedBoundaries: IsolatedClientBoundaryReference[];
   costGuardExceeded?: true;
   fallbackReason?: string;
+  serverTreeLayout?: true;
 }
 
 interface FarmIsolatedHydrationRouteOwner {
@@ -1071,6 +1158,16 @@ export function enforceFarmIsolatedHydrationRouteBudget(
         layoutAppliesToRoute(ancestor.pattern, layout.pattern),
     );
     if (hasRouteWideAncestor && layout.metadata.hasIsolatedClientBoundaries) {
+      if (options.serverOwners && !layout.metadata.asyncOwnerIslands) {
+        // Islands mode: the ancestor's root rebuilds this server layout from its tree, as
+        // getClientModuleHydrationPlan plans a layout that hydrates as one root. Its module stays
+        // on the server instead of joining the client entry of every page.
+        layout.metadata.shouldHydrate = layout.metadata.legacyShouldHydrate;
+        layout.metadata.islandStrategy = layout.metadata.legacyIslandStrategy;
+        layout.metadata.hasIsolatedClientBoundaries = false;
+        layout.metadata.serverTreeLayout = true;
+        continue;
+      }
       restoreRouteWideHydration(layout.metadata);
     }
   }
@@ -1094,6 +1191,40 @@ export function isIsolatableClientBoundarySource(content: string | null): boolea
     /\bexport\s+(?:async\s+)?function\s+[A-Z][$\w]*/.test(content) ||
     /\bexport\s+(?:const|let|var|class)\s+[A-Z][$\w]*/.test(content) ||
     exportListNames(content).some((name) => name === "default" || /^[A-Z]/.test(name))
+  );
+}
+
+/**
+ * What a hydration plan reads from a client module: its directive, declared strategy, `hydrate`
+ * export, export shape and imports. A plan stops at a client module, so nothing else in it (its
+ * markup, state or handlers) can change a plan. Null for any other module, whose JSX plans read.
+ */
+function clientModulePlanSignature(content: string | null | undefined): string | null {
+  if (!content || !hasUseClientDirective(content)) return null;
+  try {
+    return JSON.stringify([
+      getIslandStrategyExport(content),
+      hasHydrateExport(content),
+      isIsolatableClientBoundarySource(content),
+      getImportSpecifiers(content).sort(),
+    ]);
+  } catch {
+    // An island export a plan rejects: replan, so the plan reports it.
+    return null;
+  }
+}
+
+/**
+ * @internal Whether `file`, a client module whose source was `previous`, still reads the same to
+ * every hydration plan, so route modules that render it can keep their plans after the edit.
+ */
+export function isFarmClientModulePlanUnchanged(
+  file: string,
+  previous: string | undefined,
+): boolean {
+  const signature = clientModulePlanSignature(previous);
+  return (
+    signature !== null && signature === clientModulePlanSignature(readSourceFileContents(file))
   );
 }
 
@@ -1273,7 +1404,7 @@ function countStaticJsxUses(content: string | null, localBindings: string[]): nu
 }
 
 function findMatchingToken(
-  tokens: ModuleSourceToken[],
+  tokens: readonly ModuleSourceToken[],
   openingIndex: number,
   opening: string,
   closing: string,
@@ -1289,7 +1420,7 @@ function findMatchingToken(
 }
 
 function containsClientJsx(
-  tokens: ModuleSourceToken[],
+  tokens: readonly ModuleSourceToken[],
   start: number,
   end: number,
   clientBindings: Set<string>,
@@ -1300,7 +1431,7 @@ function containsClientJsx(
   return false;
 }
 
-function findStatementEnd(tokens: ModuleSourceToken[], start: number): number {
+function findStatementEnd(tokens: readonly ModuleSourceToken[], start: number): number {
   let parentheses = 0;
   let brackets = 0;
   let braces = 0;
@@ -1337,7 +1468,7 @@ function findStatementEnd(tokens: ModuleSourceToken[], start: number): number {
 }
 
 function getClientRenderingHelpers(
-  tokens: ModuleSourceToken[],
+  tokens: readonly ModuleSourceToken[],
   clientBindings: Set<string>,
 ): Set<string> {
   const helperBodies = new Map<string, [start: number, end: number]>();
@@ -1585,12 +1716,6 @@ function collectIsolatedClientBoundaries(
     const parsed = parseClientModuleMetadata(content, false);
 
     if (parsed.isClientComponent) {
-      if (projectRoot && !path.resolve(moduleSourcePath).startsWith(`${projectRoot}${path.sep}`)) {
-        fallbackReason = `client boundary ${moduleSourcePath} is outside the application root`;
-        fallbackHint =
-          "Move the component into the application, or publish it as a package (package client components render as static HTML)";
-        return 0;
-      }
       if (!isIsolatableClientBoundarySource(content)) {
         fallbackReason = `client boundary ${moduleSourcePath} uses an unsupported export shape`;
         fallbackHint =
@@ -1619,8 +1744,16 @@ function collectIsolatedClientBoundaries(
       const importedPath = imported.path;
       if (!importedPath) continue;
       let importedBoundaryCount: number;
+      const workspaceEntry =
+        !imported.local && options.packageReferences
+          ? farmWorkspaceServerEntry(importedPath)
+          : null;
       if (imported.local) {
         importedBoundaryCount = visit(importedPath);
+      } else if (workspaceEntry) {
+        // A workspace package's server code is app code, as the bundler compiles it: its
+        // client components, and those of its own dependencies, render as islands.
+        importedBoundaryCount = visit(workspaceEntry);
       } else {
         // A package with a `react-server` build: only the names that build takes from a
         // "use client" module are client components (islands-react-server-exports.ts).
@@ -1632,8 +1765,22 @@ function collectIsolatedClientBoundaries(
           importedBoundaryCount = 0;
           for (const exportName of reactServerClientNames) {
             importedBoundaryCount += visit(
-              ensureFarmPackageClientReference(projectRoot!, specifier, exportName),
+              ensureFarmPackageClientReference(
+                projectRoot!,
+                specifier,
+                exportName,
+                moduleSourcePath,
+              ),
             );
+          }
+          // The `"use client"` modules that build renders itself (react-tweet's video player).
+          for (const clientFile of findFarmReactServerClientModules(
+            content ?? "",
+            moduleSourcePath,
+            specifier,
+          ) ?? []) {
+            const reference = ensureFarmInternalClientReference(projectRoot!, clientFile);
+            if (reference) importedBoundaryCount += visit(reference);
           }
         } else {
           const packageMetadata = inspectPackageClientBoundary(importedPath, root, new Set());
@@ -1653,7 +1800,12 @@ function collectIsolatedClientBoundaries(
             for (const reference of references) {
               for (const exportName of farmPackageClientImportExports(reference)) {
                 importedBoundaryCount += visit(
-                  ensureFarmPackageClientReference(projectRoot!, specifier, exportName),
+                  ensureFarmPackageClientReference(
+                    projectRoot!,
+                    specifier,
+                    exportName,
+                    moduleSourcePath,
+                  ),
                 );
               }
             }
@@ -1675,7 +1827,16 @@ function collectIsolatedClientBoundaries(
       const localBindings = importedBindings.get(specifier) ?? [];
       const staticUses = countStaticJsxUses(content, localBindings);
       if (staticUses > 0) {
-        const container = findParserSensitiveJsxContainer(content, localBindings);
+        // Islands mode: the element around the component becomes the island (RFC 0006).
+        const grows =
+          options.packageReferences === true &&
+          projectRoot !== undefined &&
+          (findFarmIslandContainers(content ?? "", moduleSourcePath, localBindings)?.length ?? 0) >
+            0;
+        if (grows) visit(ensureFarmIslandContainerReference(projectRoot!));
+        const container = grows
+          ? undefined
+          : findParserSensitiveJsxContainer(content, localBindings);
         if (container) {
           fallbackReason = `the client boundary imported from ${specifier} renders inside <${container}>, where the HTML parser relocates its hydration marker`;
           fallbackHint = `Move "use client" up to a component that renders the whole <${container}>${PARSER_SENSITIVE_FLOW_HINTS[container] ?? ""}`;
@@ -1793,10 +1954,21 @@ function inspectClientModuleMetadata(
 }
 
 /**
- * Within a production build, reuse an earlier inspection of the same package entry graph when it
- * would read exactly what it read before: none of its files are visited yet, and every file where
+ * Within a production build or a dev-server plan, reuse an earlier inspection of the same package
+ * entry graph when it would read exactly what it read before: none of its files are visited yet, and every file where
  * it stopped because an earlier inspection had visited it is visited again.
  */
+/**
+ * The real path of a package entry that is a workspace package's server code (linked from outside
+ * `node_modules`, as pnpm links one, without a `"use client"` directive), or null.
+ */
+function farmWorkspaceServerEntry(entry: string): string | null {
+  const real = realpathOrSelf(entry);
+  if (real.split(path.sep).includes("node_modules")) return null;
+  if (parseClientModuleMetadata(readIfExists(real), false).isClientComponent) return null;
+  return real;
+}
+
 function realpathOrSelf(file: string): string {
   try {
     return fs.realpathSync(file);
@@ -1824,7 +1996,11 @@ function inspectPackageClientBoundary(
   const key = `${root ?? ""}\0${resolvedPath}`;
   const cached = cache.find(key, visited);
   if (cached) {
-    for (const file of cached.files) visited.add(file);
+    for (const file of cached.files) {
+      visited.add(file);
+      // The inspection read them, so a traced result depends on them as on its own reads.
+      noteFarmSourceRead(file);
+    }
     return { ...cached.result };
   }
   const trace = new PackageInspectionTrace();
@@ -1899,10 +2075,22 @@ function traversePackageClientBoundary(
 
 function getImportSpecifiers(
   content: string | null,
-  { reexportsOnly = false, dynamic = false }: { reexportsOnly?: boolean; dynamic?: boolean } = {},
+  options: { reexportsOnly?: boolean; dynamic?: boolean } = {},
 ): string[] {
   if (!content) return [];
+  const specifiers = memoizeInFarmSourceSnapshot(
+    `specifiers:${options.reexportsOnly === true}:${options.dynamic === true}`,
+    content,
+    () => scanImportSpecifiers(content, options),
+  );
+  // Callers may change the list they get.
+  return [...specifiers];
+}
 
+function scanImportSpecifiers(
+  content: string,
+  { reexportsOnly = false, dynamic = false }: { reexportsOnly?: boolean; dynamic?: boolean },
+): string[] {
   const tokens = tokenizeModuleSource(content);
   const matches = new Set<string>();
   let braceDepth = 0;
@@ -1975,7 +2163,7 @@ function getImportSpecifiers(
 }
 
 function isTypeOnlyNamedClause(
-  tokens: ModuleSourceToken[],
+  tokens: readonly ModuleSourceToken[],
   startIndex: number,
   endIndex: number,
 ): boolean {
@@ -2008,8 +2196,32 @@ export function resolveImportedModule(
   specifier: string,
   root?: string,
 ): { path: string | null; local: boolean } {
+  const resolved = memoizeInFarmSourceSnapshot(
+    "resolution",
+    `${root ?? ""}\0${importerPath}\0${specifier}`,
+    () => resolveImportedModuleUncached(importerPath, specifier, root),
+    // A file added later may resolve an import that does not resolve now.
+    (result) => result.path !== null,
+  );
+  // Callers may change the result they get.
+  return { ...resolved };
+}
+
+function resolveImportedModuleUncached(
+  importerPath: string,
+  specifier: string,
+  root?: string,
+): { path: string | null; local: boolean } {
   if (specifier.startsWith(".") || specifier.startsWith("/")) {
     return { path: resolveImportedModuleSourcePath(importerPath, specifier, root), local: true };
+  }
+  // A client reference for a package the app root does not resolve to the importer's copy.
+  const resolveFrom = parseFarmResolveFrom(specifier, importerPath);
+  if (resolveFrom) {
+    return {
+      path: resolvePackageModuleSourcePath(resolveFrom.importer, resolveFrom.specifier),
+      local: false,
+    };
   }
   const aliased = resolveProjectAliasSourcePath(specifier, root);
   if (aliased) return { path: aliased, local: true };
@@ -2418,7 +2630,22 @@ export function isFarmPackageClientBoundary(
 }
 
 const CLIENT_PACKAGE_SCAN_EXTENSIONS = /\.(?:[cm]?[jt]sx?)$/;
-const CLIENT_PACKAGE_SCAN_SKIP = new Set(["node_modules", ".farm", ".git", "dist", ".output"]);
+const CLIENT_PACKAGE_SCAN_SKIP = new Set([
+  "node_modules",
+  ".farm",
+  ".git",
+  "dist",
+  ".output",
+  "__tests__",
+]);
+const TEST_FILE = /\.(?:test|spec)\.[cm]?[jt]sx?$/;
+
+/** An app source module: test files run under a test runner, never in the app's module graphs. */
+function isScannedSourceFile(name: string): boolean {
+  return (
+    CLIENT_PACKAGE_SCAN_EXTENSIONS.test(name) && !name.endsWith(".d.ts") && !TEST_FILE.test(name)
+  );
+}
 
 /** The package a bare specifier names: `@scope/name` or `name`, without a subpath. */
 function bareSpecifierPackage(specifier: string): string | null {
@@ -2474,8 +2701,7 @@ function scanFarmPackageImports(
         if (!CLIENT_PACKAGE_SCAN_SKIP.has(entry.name)) walk(file);
         continue;
       }
-      if (!CLIENT_PACKAGE_SCAN_EXTENSIONS.test(entry.name) || entry.name.endsWith(".d.ts"))
-        continue;
+      if (!isScannedSourceFile(entry.name)) continue;
       const content = readIfExists(file);
       if (!content) continue;
       const client = hasUseClientDirective(content);
@@ -2499,7 +2725,12 @@ function scanFarmPackageImports(
  * development renders them as the production bundle does.
  */
 export function collectFarmServerBundledPackages(directory: string): string[] {
-  const found = new Set<string>();
+  return collectFarmServerBundledPackageInfo(directory).map(({ name }) => name);
+}
+
+/** As `collectFarmServerBundledPackages`, with why each package is bundled. */
+export function collectFarmServerBundledPackageInfo(directory: string): FarmServerBundledPackage[] {
+  const found = new Map<string, FarmServerBundledPackage>();
   const checked = new Set<string>();
   const walk = (current: string) => {
     let entries: fs.Dirent[];
@@ -2515,8 +2746,7 @@ export function collectFarmServerBundledPackages(directory: string): string[] {
         if (!CLIENT_PACKAGE_SCAN_SKIP.has(entry.name)) walk(file);
         continue;
       }
-      if (!CLIENT_PACKAGE_SCAN_EXTENSIONS.test(entry.name) || entry.name.endsWith(".d.ts"))
-        continue;
+      if (!isScannedSourceFile(entry.name)) continue;
       const content = readIfExists(file);
       if (!content) continue;
       for (const specifier of new Set(getImportSpecifiers(content))) {
@@ -2524,12 +2754,12 @@ export function collectFarmServerBundledPackages(directory: string): string[] {
         if (!name || checked.has(name)) continue;
         checked.add(name);
         const bundled = findFarmServerBundledPackage(file, name);
-        if (bundled) found.add(bundled);
+        if (bundled) found.set(bundled.name, bundled);
       }
     }
   };
   walk(directory);
-  return [...found].sort();
+  return [...found.values()].sort((a, b) => (a.name < b.name ? -1 : a.name > b.name ? 1 : 0));
 }
 
 const clientReachableModules = new Map<string, Set<string>>();
@@ -2562,7 +2792,7 @@ export function getFarmClientReachableModules(directory: string, root: string): 
       const file = path.join(current, entry.name);
       if (entry.isDirectory()) {
         if (!entry.name.startsWith(".") && !CLIENT_PACKAGE_SCAN_SKIP.has(entry.name)) walk(file);
-      } else if (CLIENT_PACKAGE_SCAN_EXTENSIONS.test(entry.name) && !entry.name.endsWith(".d.ts")) {
+      } else if (isScannedSourceFile(entry.name)) {
         const content = readIfExists(file);
         if (hasUseClientDirective(content) || hasHydrateExport(content)) queue.push(file);
       }

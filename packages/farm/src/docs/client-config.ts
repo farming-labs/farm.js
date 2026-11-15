@@ -1,3 +1,4 @@
+import { fileNamePattern } from "../utils/hook-filters";
 import { realpathSync } from "node:fs";
 import { createRequire } from "node:module";
 import path from "node:path";
@@ -103,10 +104,14 @@ export function farmDocsClientConfigPlugin(configModule: string | undefined): Pl
   return {
     name: "farm:docs-client-config",
     enforce: "pre",
-    transform(code, id, options) {
-      if (options?.ssr || !isFarmDocsClientConfigModule(id, configModule)) return null;
-      const redacted = redactFarmDocsClientConfig(code, id.split("?")[0]);
-      return redacted === null ? null : { code: redacted, map: null };
+    transform: {
+      // Never matches without a docs config module, so the bundler never calls the handler.
+      filter: { id: configModule ? fileNamePattern([configModule]) : /(?!)/ },
+      handler(code, id, options) {
+        if (options?.ssr || !isFarmDocsClientConfigModule(id, configModule)) return null;
+        const redacted = redactFarmDocsClientConfig(code, id.split("?")[0]);
+        return redacted === null ? null : { code: redacted, map: null };
+      },
     },
   };
 }

@@ -415,7 +415,19 @@ export class MiddlewareManager {
           durationMs: Date.now() - middlewareStartTime,
         });
       } catch (error) {
-        // redirect() and notFound() are control flow: the caller answers them.
+        // redirect() and notFound() are control flow: the caller answers them, with the headers
+        // this middleware set, as production does.
+        if (
+          (isFarmRedirectError(error) || isFarmNotFoundError(error)) &&
+          !res.headersSent &&
+          !res.writableEnded
+        ) {
+          for (const [key, value] of ctx.headers) {
+            try {
+              res.setHeader(key, value);
+            } catch {}
+          }
+        }
         emitFarmEvent(
           isFarmRedirectError(error) || isFarmNotFoundError(error)
             ? {

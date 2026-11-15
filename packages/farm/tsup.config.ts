@@ -22,12 +22,14 @@ const entry = {
   "api/client": "src/api-client.ts",
   "api/client.native": "src/api-client.native.ts",
   "api/runtime": "src/api/runtime.ts",
+  "api/node": "src/api/node.ts",
   "api/route-manager": "src/api/route-manager.ts",
   router: "src/router.ts",
   routes: "src/routes.ts",
   request: "src/request.ts",
   plugin: "src/plugin-entry.ts",
   integrations: "src/integrations.ts",
+  "integrations/orm": "src/integration-orm.ts",
   schema: "src/schema.ts",
   storage: "src/storage/index.ts",
   cache: "src/cache.ts",
@@ -96,6 +98,7 @@ const entry = {
   "internal/app-markdown-runtime": "src/app-markdown-runtime.ts",
   "internal/docs-precompiled-runtime": "src/docs/precompiled-runtime.ts",
   "internal/compression-runtime": "src/plugins/compression.ts",
+  "internal/vercel-edge-middleware": "src/middleware/vercel-edge.ts",
   "internal/build-runtime": "src/nitro/build-runtime.ts",
   "internal/config-runtime": "src/config-runtime.ts",
   "internal/production-node-env": "src/build/production-node-env.ts",
@@ -106,6 +109,7 @@ const entry = {
   "renderer/react/server": "src/renderer/react/server.ts",
   "renderer/react/client": "src/renderer/react/client.ts",
   "renderer/react/vite": "src/renderer/react/vite.ts",
+  "renderer/none/server": "src/renderer/none/server.ts",
 };
 
 export const farmPackageBuildOptions = {

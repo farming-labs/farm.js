@@ -42,10 +42,19 @@ const CREDENTIAL_VARY = /(?:^|,)\\s*(?:\\*|cookie|authorization)\\s*(?:,|$)/i;
 // What Nitro's entry sets when the response has no Cache-Control of its own.
 const NITRO_DEFAULT_CACHE_CONTROL = "public, max-age=0, must-revalidate";
 
+// The deployment cookie names a release, not a visitor (see @farm.js/core/deployment).
+function hasVisitorCookies(cookieHeader) {
+  if (!cookieHeader) return false;
+  return cookieHeader.split(";").some((part) => {
+    const name = part.split("=")[0].trim();
+    return name !== "" && name !== "__farm_deployment";
+  });
+}
+
 function isSharedCacheable(request, response) {
   return (
     response.status === 200 &&
-    !request.headers.has("cookie") &&
+    !hasVisitorCookies(request.headers.get("cookie")) &&
     !request.headers.has("authorization") &&
     !response.headers.has("set-cookie") &&
     !PRIVATE_CACHE_DIRECTIVE.test(response.headers.get("cache-control") || "") &&

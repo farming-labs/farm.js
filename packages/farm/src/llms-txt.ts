@@ -11,12 +11,14 @@
  */
 import { FARM_INTERNAL_READ_HEADER } from "./agent-identity";
 import { applyFarmBasePath } from "./base-path";
+import { localizeFarmPathname, type FarmLocalePathConfig } from "./i18n/routing";
 import {
   getFarmMarkdownMirrorPath,
   isFarmMarkdownMirrorExposed,
   matchesFarmMarkdownRoutePattern,
   type FarmMarkdownResolvedConfig,
 } from "./markdown";
+import { normalizeFarmTrailingSlashPathname } from "./trailing-slash";
 
 export interface FarmLlmsTxtLink {
   title: string;
@@ -155,6 +157,10 @@ export function collectFarmLlmsTxtPages(
     markdown?: FarmMarkdownResolvedConfig;
     include?: string[];
     exclude?: string[];
+    /** The app's `trailingSlash`: a page without a mirror is linked at `/about/`. */
+    trailingSlash?: boolean;
+    /** The app's resolved i18n config: pages are linked in the default locale's URL. */
+    i18n?: FarmAgentPageI18n;
   },
 ): FarmLlmsTxtPage[] {
   const include = options.include ?? [];
@@ -175,20 +181,81 @@ export function collectFarmLlmsTxtPages(
     // A page its author keeps out of search stays out of the agent index too.
     if (isFarmMetadataNoIndex(source.metadata)) continue;
 
-    // llmstxt.org prefers links to Markdown; use the page's mirror when it has one.
+    // llmstxt.org prefers links to Markdown; use the page's mirror when it has one, and
+    // otherwise the URL the page answers at, so the link does not redirect.
     const target = isFarmMarkdownMirrorExposed(options.markdown, path)
-      ? getFarmMarkdownMirrorPath(path)
-      : path;
+      ? getFarmAgentPagePublicPath(getFarmMarkdownMirrorPath(path), options)
+      : normalizeFarmTrailingSlashPathname(
+          getFarmAgentPagePublicPath(path, options),
+          options.trailingSlash === true,
+        );
     const description = readMetadataString(source.metadata, "description");
     pages.set(path, {
       path,
       title: readMetadataTitle(source.metadata) ?? fallbackPageTitle(path),
-      url: `${options.origin}${applyFarmBasePath(target, options.basePath)}`,
+      url: `${options.origin}${target}`,
       ...(description ? { description } : {}),
     });
   }
 
   return [...pages.values()].sort((left, right) => left.path.localeCompare(right.path));
+}
+
+/** The app's resolved i18n config (`config.i18n`); ignored when `enabled` is false. */
+export type FarmAgentPageI18n = FarmLocalePathConfig & { enabled?: boolean };
+
+/**
+ * The public path of a static page or its mirror in generated agent files: below the base
+ * path and, with i18n, in the default locale. Under `routing: "prefix-always"` a path without
+ * a locale answers with a redirect to one; the default `"prefix-except-default"` leaves the
+ * default locale unprefixed, and routing `"none"` adds no prefix, so those paths are unchanged.
+ */
+export function getFarmAgentPagePublicPath(
+  pathname: string,
+  options: { basePath?: string; i18n?: FarmAgentPageI18n },
+): string {
+  const { i18n } = options;
+  if (!i18n || i18n.enabled === false) return applyFarmBasePath(pathname, options.basePath);
+  return localizeFarmPathname(pathname, i18n.defaultLocale, {
+    ...i18n,
+    basePath: options.basePath ?? i18n.basePath,
+  });
+}
+
+/**
+ * The origin generated agent files (llms.txt, llms-full.txt, sitemap.xml) link to: the root
+ * layout's `metadataBase` when it is an absolute http(s) URL, else the request's origin. The
+ * request's host is client input, so a configured base keeps it out of files CDNs may cache.
+ */
+export function resolveFarmAgentOrigin(metadataBase: unknown, requestOrigin: string): string {
+  if (typeof metadataBase !== "string" && !(metadataBase instanceof URL)) return requestOrigin;
+  try {
+    const url = new URL(String(metadataBase));
+    return url.protocol === "https:" || url.protocol === "http:" ? url.origin : requestOrigin;
+  } catch {
+    return requestOrigin;
+  }
+}
+
+/**
+ * Reads pages linked on `origin` (a configured `metadataBase`) from `readOrigin`, the origin
+ * this server was reached at, so llms-full.txt reads stay on this server whatever the links name.
+ */
+export function readFarmLlmsMarkdownFrom(
+  readOrigin: string,
+  origin: string,
+  read: (url: string) => Promise<string | null>,
+): (url: string) => Promise<string | null> {
+  if (readOrigin === origin) return read;
+  return (url) => {
+    let target: URL;
+    try {
+      target = new URL(url);
+    } catch {
+      return read(url);
+    }
+    return read(target.origin === origin ? `${readOrigin}${target.pathname}${target.search}` : url);
+  };
 }
 
 /** True when page metadata asks search engines not to index the page. */
@@ -204,6 +271,21 @@ export function isFarmMetadataNoIndex(metadata: unknown): boolean {
   return Boolean(
     robots && typeof robots === "object" && (robots as { index?: unknown }).index === false,
   );
+}
+
+/**
+ * True when a page renders with noindex. Page metadata merges over its layouts' (root first)
+ * and `robots` is replaced whole, so the page's own `robots` decides, else the nearest
+ * layout's. `layoutMetadata` is the wrapping layouts' metadata, root first.
+ */
+export function isFarmPageNoIndex(
+  pageMetadata: unknown,
+  layoutMetadata: readonly unknown[] = [],
+): boolean {
+  for (const metadata of [pageMetadata, ...[...layoutMetadata].reverse()]) {
+    if (isRecord(metadata) && "robots" in metadata) return isFarmMetadataNoIndex(metadata);
+  }
+  return false;
 }
 
 export function createFarmDefaultLlmsTxt(options: {

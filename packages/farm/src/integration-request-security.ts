@@ -98,6 +98,28 @@ export function validateIntegrationRequestOrigin(
   return { ok: true };
 }
 
+/**
+ * Refuse a cross-site request whose declared body type is not JSON, for a route whose body schema
+ * reads JSON.
+ *
+ * `application/json` is not a CORS-safelisted type, so a page on another site can send a JSON body
+ * only after a CORS preflight the app allows. `text/plain`,
+ * `application/x-www-form-urlencoded`, and `multipart/form-data` skip that preflight and still
+ * carry the visitor's cookies, so a body declared as one of them, or as any other non-JSON type,
+ * is refused before the route reads it. Same-origin requests and callers that send no origin
+ * metadata at all (servers, webhooks) keep every content type they had.
+ */
+export function rejectCrossSiteNonJSONBody(request: Request, message: string): Response | null {
+  const contentType = request.headers.get("content-type")?.split(";", 1)[0]?.trim().toLowerCase();
+  if (!contentType || contentType === "application/json" || contentType.endsWith("+json")) {
+    return null;
+  }
+  if (validateIntegrationRequestOrigin(request, { requireOriginMetadata: false }).ok) {
+    return null;
+  }
+  return Response.json({ error: "Unsupported Media Type", message }, { status: 415 });
+}
+
 export function describeIntegrationOriginRejection(reason: IntegrationOriginRejection): string {
   switch (reason) {
     case "missing-origin":

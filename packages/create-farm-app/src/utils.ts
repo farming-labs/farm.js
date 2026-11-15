@@ -7,6 +7,13 @@ export const logger = {
   error: (message: string) => console.error(`${pc.red("✗")} ${message}`),
 };
 
+export function showStarInvitation(isInteractive = Boolean(process.stdout.isTTY)) {
+  if (!isInteractive) return;
+
+  logger.info("");
+  logger.info("Enjoying Farm? Star it: https://github.com/farming-labs/farm.js");
+}
+
 export function showBanner() {
   const art = [
     "░██████████   ░███    ░█████████  ░███     ░███         ░█████   ░██████",

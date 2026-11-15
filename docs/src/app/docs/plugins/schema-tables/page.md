@@ -319,7 +319,8 @@ mount have no tables and are listed as skipped.
 Give `definePlugin` the schema:
 
 ```ts title="src/index.ts"
-import { definePlugin, defineSchema } from "@farm.js/core";
+import { definePlugin } from "@farm.js/core/plugin";
+import { defineSchema } from "@farm.js/core/schema";
 
 export const teamsSchema = defineSchema({
   models: {

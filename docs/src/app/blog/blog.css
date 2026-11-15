@@ -265,9 +265,13 @@
   text-align: center;
   user-select: none;
   pointer-events: none;
+  -webkit-mask-image:
+    linear-gradient(to right, #000 65%, transparent),
+    linear-gradient(to bottom, transparent, #000 14%, #000 86%, transparent);
   mask-image:
     linear-gradient(to right, #000 65%, transparent),
     linear-gradient(to bottom, transparent, #000 14%, #000 86%, transparent);
+  -webkit-mask-composite: source-in, xor;
   mask-composite: intersect;
   transition: color 180ms ease-out;
 }
@@ -356,6 +360,7 @@
 }
 @media (prefers-reduced-motion: no-preference) {
   .blog-release-art[data-motion] .blog-art-digit {
+    -webkit-mask-image: linear-gradient(transparent, #000 12%, #000 88%, transparent);
     mask-image: linear-gradient(transparent, #000 12%, #000 88%, transparent);
   }
   .blog-release-art[data-motion] .blog-art-value {
@@ -598,6 +603,10 @@
 .blog-post-artwork .blog-figure {
   width: 100%;
   margin: 0;
+}
+/* Header art scales as a whole, like an image: a type floor would outgrow its boxes on a phone. */
+.blog-post-artwork .blog-figure--fit .bf-stage {
+  font-size: min(calc(1.62cqw * var(--bf-scale, 1)), 13px);
 }
 .blog-release-art--full-bleed .blog-art-label,
 .blog-release-art--full-bleed .blog-art-caption {
