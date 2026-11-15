@@ -16,6 +16,7 @@ import type { StaticMiddlewareConfig } from "../middleware/static-config";
 import { createFarmSourceAlias } from "../server/vite-config";
 import { withPlainDiagnostics } from "../build/node-module-bundle";
 import { logger } from "../utils";
+import { groupFarmVercelRouteAlternatives } from "./vercel-assets";
 
 /** The Vercel function that runs the edge middleware; its name is also its `middlewarePath`. */
 export const FARM_VERCEL_EDGE_MIDDLEWARE_FUNCTION = "_farm_middleware";
@@ -55,26 +56,26 @@ function toFarmVercelEdgeGuardedUrls(pathnames: readonly string[], basePath: str
 }
 
 /**
- * The Vercel route that runs the edge middleware for exactly these prerendered pages. No URL may
- * reach a guarded file without its guard, so it matches every URL that could answer for a page:
+ * The Vercel routes that run the edge middleware for exactly these prerendered pages. No URL may
+ * reach a guarded file without its guard, so they match every URL that could answer for a page:
  * its public path below the basePath (where the file is written), the same path at the origin
- * root (where Farm also answers pages), and each with `/`, `/index.html`, or `.html`.
+ * root (where Farm also answers pages), and each with `/`, `/index.html`, or `.html`. Many pages
+ * take several routes: Vercel limits the length of each.
  */
-export function createFarmVercelEdgeMiddlewareRoute(
+export function createFarmVercelEdgeMiddlewareRoutes(
   pathnames: readonly string[],
   basePath = "/",
-): { src: string; middlewarePath: string; middlewareRawSrc: string[]; continue: true } {
+): Array<{ src: string; middlewarePath: string; middlewareRawSrc: string[]; continue: true }> {
   const publicPaths = toFarmVercelEdgeGuardedUrls(pathnames, basePath);
-  const alternatives = publicPaths.map((pathname) => {
+  return groupFarmVercelRouteAlternatives(publicPaths, (pathname) => {
     const trimmed = pathname.replace(/\/+$/, "");
     return trimmed ? `${escapeRegExp(trimmed)}(?:/|/index\\.html|\\.html)?` : "/(?:index\\.html)?";
-  });
-  return {
-    src: `^(?:${alternatives.join("|")})$`,
+  }).map((group) => ({
+    src: group.src,
     middlewarePath: FARM_VERCEL_EDGE_MIDDLEWARE_FUNCTION,
-    middlewareRawSrc: publicPaths,
+    middlewareRawSrc: group.items,
     continue: true,
-  };
+  }));
 }
 
 /** The edge function's entry: the edge middleware files and the runtime that answers for them. */

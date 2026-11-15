@@ -272,7 +272,7 @@ import {
 import { readMiddlewareFileConfig, type StaticMiddlewareConfig } from "../middleware/static-config";
 import { CDN_CACHE_CONTROL_HEADERS } from "../middleware/production-runtime";
 import {
-  createFarmVercelEdgeMiddlewareRoute,
+  createFarmVercelEdgeMiddlewareRoutes,
   farmTargetRunsEdgeMiddleware,
   isFarmEdgeMiddlewareRoute,
   writeFarmVercelEdgeMiddlewareFunction,
@@ -14532,7 +14532,7 @@ async function postProcessVercelOutput(
     runtimeRoutes,
     middlewareRoutes:
       edgeMiddlewareRoutes.length > 0
-        ? [createFarmVercelEdgeMiddlewareRoute(edgeMiddleware.guardedPages, config.basePath)]
+        ? createFarmVercelEdgeMiddlewareRoutes(edgeMiddleware.guardedPages, config.basePath)
         : [],
     canonicalSlashRoutes: createFarmVercelCanonicalSlashRoutes(prerenderedPages),
   });
