@@ -9,7 +9,10 @@ export {
 export { farmSecretsMatch } from "../secret-compare";
 export { createFarmLayoutSelector } from "../routing/layout-selector";
 export { isInRouteGroupScope as isInFarmRouteGroupScope } from "../routing/route-groups";
-export { mergeRouteRenderingDirectiveConfig } from "../route-rendering";
+export {
+  mergeRouteRenderingDirectiveConfig,
+  resolveRouteSharedCacheControl,
+} from "../route-rendering";
 export { materializeSSGRoutePath } from "../ssg-paths";
 export type { FarmServerConfig } from "../server-http";
 export {
@@ -119,6 +122,7 @@ export {
 export {
   applyProductionMiddlewareHeaders,
   createProductionMiddlewareRunner,
+  _hasPrivateFarmRequestHeaders,
   _withFarmDeploymentCookie,
   _withFarmGuardedResponseCache,
 } from "../middleware/production-runtime";

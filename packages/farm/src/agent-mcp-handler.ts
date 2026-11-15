@@ -10,9 +10,13 @@ import {
   FARM_DEFAULT_MCP_DESCRIPTION,
   FARM_DEFAULT_MCP_PROTOCOL_VERSIONS,
   FARM_DEFAULT_MCP_TOOLS,
+  resolveFarmDefaultMCPI18n,
+  type FarmDefaultMCPI18n,
   type FarmDefaultMCPPage,
 } from "./agent-mcp";
 import { stripFarmBasePath } from "./base-path";
+import { resolveFarmLocalePath, type FarmLocalePathConfig } from "./i18n/routing";
+import { resolveFarmAgentOrigin } from "./llms-txt";
 
 const INSTRUCTIONS =
   "This server reads the site's public pages. Call list_pages or search_pages to find a page, " +
@@ -29,6 +33,13 @@ export interface FarmDefaultMCPContext {
   /** Reads a Markdown URL anonymously; null when the page does not answer with Markdown. */
   readMarkdown: (url: string) => Promise<string | null>;
   basePath?: string;
+  /** The app's i18n routing, so a listed page's localized URL reads that page. */
+  i18n?: FarmDefaultMCPI18n;
+  /**
+   * The root layout's `metadataBase`, which `listPages` links to, so `read_page` also takes a
+   * URL on its origin. Only the path is read from it; pages are always read from this server.
+   */
+  metadataBase?: unknown;
 }
 
 type JSONRPCId = string | number | null;
@@ -219,7 +230,13 @@ async function callTool(
   if (typeof path !== "string" || !path.trim() || path.length > 2048) {
     return toolError('path must be a page path such as "/about".');
   }
-  const pagePath = toPagePath(path, request.url, context.basePath);
+  const pagePath = toPagePath(
+    path,
+    request.url,
+    context.metadataBase,
+    context.basePath,
+    resolveFarmDefaultMCPI18n(context.i18n, context.basePath),
+  );
   const pages = await context.listPages();
   const page = pagePath ? pages.find((candidate) => candidate.path === pagePath) : undefined;
   if (!page) {
@@ -279,22 +296,46 @@ function searchPages(
     .map(({ page }) => page);
 }
 
-/** A page path from what an agent passes: a path, a `.md` mirror path, or a same-origin URL. */
-function toPagePath(input: string, requestUrl: string, basePath?: string): string | null {
+/**
+ * A page path from what an agent passes: a path, a `.md` mirror path, or a URL on this
+ * request's origin or on the `metadataBase` origin list_pages links to. Any other origin names
+ * no page. Only the path is kept: a listed page is read from this server, never from the URL's
+ * origin. Pages are listed in the default locale, so another locale's URL names no listed page.
+ */
+function toPagePath(
+  input: string,
+  requestUrl: string,
+  metadataBase: unknown,
+  basePath?: string,
+  i18n?: FarmLocalePathConfig,
+): string | null {
   let url: URL;
   try {
     url = new URL(input.trim(), requestUrl);
   } catch {
     return null;
   }
-  if (url.origin !== new URL(requestUrl).origin) return null;
+  const requestOrigin = new URL(requestUrl).origin;
+  if (
+    url.origin !== requestOrigin &&
+    url.origin !== resolveFarmAgentOrigin(metadataBase, requestOrigin)
+  ) {
+    return null;
+  }
   let path = url.pathname;
   try {
     path = decodeURI(path);
   } catch {
     return null;
   }
-  path = stripFarmBasePath(path, basePath);
+  if (i18n) {
+    // Strips the base path, then the locale.
+    const match = resolveFarmLocalePath(path, i18n);
+    if (match.explicit && match.locale !== i18n.defaultLocale) return null;
+    path = match.pathname;
+  } else {
+    path = stripFarmBasePath(path, basePath);
+  }
   if (path === "/index.md") return "/";
   if (path.toLowerCase().endsWith(".md")) path = path.slice(0, -3) || "/";
   return path.length > 1 ? path.replace(/\/+$/, "") || "/" : path;

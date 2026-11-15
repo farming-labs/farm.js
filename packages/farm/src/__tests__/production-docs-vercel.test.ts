@@ -161,6 +161,68 @@ describe("Vercel docs content", () => {
     }
   }, 180_000);
 
+  it("copies a symlinked docs directory into the function instead of linking to the build machine", async () => {
+    const root = await fs.mkdtemp(path.join(os.tmpdir(), "farm-vercel-docs-symlink-"));
+    try {
+      await fs.mkdir(path.join(root, "node_modules", "@farm.js"), { recursive: true });
+      await fs.symlink(
+        packageRoot,
+        path.join(root, "node_modules", "@farm.js", "core"),
+        "junction",
+      );
+      for (const name of ["react", "react-dom"]) {
+        await fs.symlink(
+          await fs.realpath(path.join(packageRoot, "node_modules", name)),
+          path.join(root, "node_modules", name),
+          "junction",
+        );
+      }
+      await fs.writeFile(path.join(root, "package.json"), '{"type":"module","private":true}');
+      // The app keeps its docs outside src and links them in, as a monorepo website does.
+      const sharedDocs = path.join(root, "shared-docs");
+      await fs.mkdir(path.join(sharedDocs, "guide"), { recursive: true });
+      await fs.writeFile(path.join(sharedDocs, "page.md"), "---\ntitle: Docs\n---\n# Docs\n");
+      await fs.writeFile(
+        path.join(sharedDocs, "guide", "page.md"),
+        "---\ntitle: Guide\n---\n# Guide from the linked folder\n",
+      );
+      await fs.mkdir(path.join(root, "src", "app"), { recursive: true });
+      await fs.writeFile(
+        path.join(root, "src", "app", "layout.tsx"),
+        "export default function Layout({ children }) { return <main>{children}</main>; }",
+      );
+      await fs.symlink(sharedDocs, path.join(root, "src", "app", "docs"), "junction");
+      const config = await resolveConfig(
+        {
+          root,
+          srcDir: "src",
+          images: { provider: "none" },
+          telemetry: false,
+          deploy: { target: "vercel" },
+          docs: { adapter: false, entry: "/docs", contentDir: "src/app/docs" },
+        },
+        "production",
+      );
+      await build(config, { root, preset: "vercel" });
+
+      const functionRoot = path.resolve(root, config.deploy.outputDir, "functions", "__nitro.func");
+      const bundled = await fs.lstat(path.join(functionRoot, "farm-docs-content"));
+      expect(bundled.isSymbolicLink()).toBe(false);
+      expect(bundled.isDirectory()).toBe(true);
+
+      // The deployed function has no access to the build machine's checkout.
+      await fs.rename(sharedDocs, path.join(root, "shared-docs-not-deployed"));
+      const { default: handler } = await import(
+        /* @vite-ignore */ pathToFileURL(path.join(functionRoot, "index.mjs")).href
+      );
+      const markdown = await handler.fetch(new Request("https://farm.test/docs/guide.md"));
+      expect(markdown.status).toBe(200);
+      expect(await markdown.text()).toContain("Guide from the linked folder");
+    } finally {
+      await fs.rm(root, { recursive: true, force: true });
+    }
+  }, 180_000);
+
   it("serves the docs engine under basePath and links every page below it", async () => {
     const root = await fs.mkdtemp(path.join(os.tmpdir(), "farm-vercel-docs-base-path-"));
     try {

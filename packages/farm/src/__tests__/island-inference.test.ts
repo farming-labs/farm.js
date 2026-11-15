@@ -3,8 +3,12 @@
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { afterAll, describe, expect, it } from "vitest";
-import { inferFarmIslandStrategy, resolveFarmRouteRootStrategy } from "../island-inference";
+import { afterAll, describe, expect, it, vi } from "vitest";
+import {
+  inferFarmIslandStrategy,
+  invalidateFarmRouteRootInferences,
+  resolveFarmRouteRootStrategy,
+} from "../island-inference";
 
 const root = fs.mkdtempSync(path.join(os.tmpdir(), "farm-island-inference-"));
 let count = 0;
@@ -247,6 +251,51 @@ export default function Page() { return <AddButton />; }`;
       ),
     });
     expect(strategy()).toBe("load");
+  });
+
+  it("reads a route's graph once, until a file it read changes", () => {
+    const strategy = route(provider, page, {
+      "components/add.tsx": client(
+        `export function AddButton() { const [n, setN] = useState(0); return <button onClick={() => setN(n + 1)}>{n}</button>; }`,
+      ),
+    });
+    expect(strategy()).toBe("interaction");
+    const reads = vi.spyOn(fs, "readFileSync");
+    try {
+      // Every request to the route asks again; none of them reads the page's graph.
+      expect(strategy()).toBe("interaction");
+      expect(strategy()).toBe("interaction");
+      expect(reads).not.toHaveBeenCalled();
+    } finally {
+      reads.mockRestore();
+    }
+
+    // An edit to a component the root renders decides the next request.
+    const add = path.join(root, `app-${count - 1}`, "src", "components", "add.tsx");
+    fs.writeFileSync(
+      add,
+      client(`export function AddButton() { useEffect(() => {}); return null; }`),
+    );
+    const future = new Date(Date.now() + 5_000);
+    fs.utimesSync(add, future, future);
+    expect(strategy()).toBe("load");
+  });
+
+  it("lists a route's client components again after invalidation", () => {
+    const strategy = route(provider, page, {
+      "components/add.tsx": client(
+        `export function AddButton() { const [n, setN] = useState(0); return <button onClick={() => setN(n + 1)}>{n}</button>; }`,
+      ),
+    });
+    expect(strategy()).toBe("interaction");
+    invalidateFarmRouteRootInferences();
+    const reads = vi.spyOn(fs, "readFileSync");
+    try {
+      expect(strategy()).toBe("interaction");
+      expect(reads).toHaveBeenCalled();
+    } finally {
+      reads.mockRestore();
+    }
   });
 
   it("keeps what a module declares", () => {

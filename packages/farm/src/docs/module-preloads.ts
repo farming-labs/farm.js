@@ -106,6 +106,8 @@ export function createFarmDocsModulePreloadPlugin(options: {
   let runtimeModuleIds: string[] = [];
   return {
     name: "farm-docs-module-preloads",
+    // After Vite's CSS plugin deletes stylesheet-only chunks (see client-module-preloads.ts).
+    enforce: "post" as const,
     async buildStart(this: {
       resolve: (source: string, importer?: string) => Promise<{ id: string } | null>;
     }) {

@@ -14,9 +14,12 @@ import { generateRscEntry } from "./rsc.js";
  * The generated locale wrapper of an app with i18n under basePath "/console", run with core's
  * runtime, where `/console/about` is a page and `/console/llms.txt` is not.
  */
-function localizedRequestRunner(trailingSlash: boolean) {
+function localizedRequestRunner(
+  trailingSlash: boolean,
+  routing: "prefix-always" | "prefix-except-default" = "prefix-except-default",
+) {
   const i18n = resolveFarmI18nConfig(
-    { locales: ["en", "fr"], defaultLocale: "en" },
+    { locales: ["en", "fr"], defaultLocale: "en", routing },
     { basePath: "/console" },
   );
   const entry = generateRscEntry({
@@ -77,12 +80,32 @@ describe("RSC locale redirects", () => {
       ["/console/about/", false, "/console/fr/about/"],
       ["/console/about?tab=1", false, "/console/fr/about/?tab=1"],
       ["/console/about/", true, "/console/fr/about/index.rsc"],
-      // Not a page: the trailing-slash rule is not this path's, as in core.
-      ["/console/llms.txt", false, "/console/fr/llms.txt"],
     ] as const) {
       const response = await run(french(pathname), payload, render);
       expect(response.status, pathname).toBe(307);
       expect(response.headers.get("location"), pathname).toBe(location);
+    }
+  });
+
+  it("answer site-level agent files where they are asked for, as core does", async () => {
+    for (const routing of ["prefix-always", "prefix-except-default"] as const) {
+      const run = localizedRequestRunner(true, routing);
+      for (const pathname of [
+        "/console/llms.txt",
+        "/console/llms-full.txt",
+        "/console/sitemap.xml",
+        "/console/robots.txt",
+        "/robots.txt",
+      ]) {
+        const response = await run(french(pathname), false, async () => new Response("file"));
+        expect({ routing, pathname, status: response.status }).toEqual({
+          routing,
+          pathname,
+          status: 200,
+        });
+        expect(response.headers.get("set-cookie"), pathname).toBeNull();
+        expect(response.headers.get("vary"), pathname).toBeNull();
+      }
     }
   });
 

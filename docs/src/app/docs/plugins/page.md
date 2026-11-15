@@ -257,6 +257,9 @@ inside the current request; they do not create another plugin request lifecycle.
 | `waitUntil()` | Runtime request hooks                   | Registers non-blocking work with hosts that support background tasks.   |
 | `durationMs`  | After, error                            | Elapsed request time at that lifecycle phase.                           |
 
+An app metadata route (`sitemap.ts`, `robots.ts`, `manifest.ts`, `llms.ts`, or a metadata image)
+is an `asset` request whose `route.pattern` is the metadata route's, in development and production.
+
 ### Router hooks
 
 | Hook                | Purpose                                                                   |
@@ -276,6 +279,21 @@ Router hooks are useful for diagnostics, conventions, manifests, and instrumenta
 | `render.html`   | Inspect or transform the completed HTML document. | Replacement HTML or nothing. |
 
 Adding `render.html` requires Farm to buffer the final document. Prefer `render.before` when observation is enough and preserving streaming matters.
+
+Render hooks run for every page request, in development and production: a request a page route
+matches, or a `GET` or `HEAD` request that no API route, integration route, docs page, or app
+metadata route (`sitemap.ts`, `robots.ts`, `manifest.ts`, a metadata image) answers. That includes a
+config redirect, a route-file `redirect()` from `defineRoutes`, a config rewrite (once, for the URL
+as requested, not again for its destination), the generated `llms.txt`, `sitemap.xml`, and
+`robots.txt`, the app manifest, a Markdown mirror (and the page it reads), and the not-found page.
+`render.before` runs before Farm resolves the request, so the response may be a redirect or a text
+file rather than a rendered page. Its `routePattern` and `params` describe the page route the
+requested URL matches; `routePattern` is `null` when none does, so check it before doing page-only
+work. The router and render hooks describe the requested URL even when a `runtime.before` hook
+returns a replacement `Request`; Farm routes and renders the replacement, and `runtime.after` sees
+it. Render hooks do not run when a `runtime.before` hook answers the request, and `render.html` sees
+only HTML responses. The React Server Components pipeline does not run render hooks yet; see
+[Server rendering](/docs/server-rendering#react-server-components).
 
 ### Build hooks
 
@@ -355,7 +373,7 @@ through is sent with `Cache-Control: private, no-store` instead of a shared poli
 as logging or analytics, declares `runtime: { cache: "public", before() {} }` to keep the app's
 shared caching.
 
-When a configured rewrite sends the request to an internal destination, every `runtime.before` runs again with the destination `Request` and the same `ctx`, so a guard on `/admin/*` also covers a rewrite that lands there. `runtime.context` and `runtime.after` run once per request.
+When a configured rewrite sends the request to an internal destination, every `runtime.before` runs again with the destination `Request` and the same `ctx`, so a guard on `/admin/*` also covers a rewrite that lands there. `runtime.context` and `runtime.after` run once per request. Only that second `runtime.before` gets the destination's `route`; every other runtime hook gets the `route` of the URL as requested.
 
 Runtime hooks don't run for files in `public/`, which are served as static assets first; serve a protected file from a route instead. Runtime hooks use Web APIs, so the same plugin works in development and universal production builds. The event includes `kind`, route metadata, the request `AbortSignal`, and `waitUntil()` for background work supported by the host.
 

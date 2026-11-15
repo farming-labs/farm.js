@@ -252,7 +252,7 @@ describe("the agent API runs through Farm's request pipeline", () => {
     await expectRunsThroughGuards(origin);
   }, 120_000);
 
-  it("in a production node server", async () => {
+  it("in a production node server", async ({ onTestFailed }) => {
     const root = await createApp("farm-agent-prod-");
     const resolved = await resolveConfig(
       {
@@ -272,6 +272,8 @@ describe("the agent API runs through Farm's request pipeline", () => {
       { cwd: root, env: { ...process.env, PORT: String(port) }, stdio: "pipe" },
     );
     let output = "";
+    // The engine reports a run it could not execute on the server's stderr.
+    onTestFailed(() => console.error(`The production server's output:\n${output}`));
     const listening = new Promise<void>((resolve, reject) => {
       const onData = (chunk: Buffer) => {
         output += chunk;

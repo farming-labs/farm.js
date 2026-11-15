@@ -184,7 +184,9 @@
   display: flex;
   flex-direction: column;
   gap: 0.75em;
-  padding: 0 0.4em;
+  /* A bubble's tail pokes 11px past it (.bf-tail). On small type, this padding and the body's
+     1.2em must still hold it, or the body's overflow clips its tip. */
+  padding: 0 max(0.4em, calc(11px - 1.2em));
 }
 /* Message bubbles: dark, hairline border, a small curved tail on the sender's side. */
 .bf-bubble {

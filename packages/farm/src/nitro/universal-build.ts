@@ -200,6 +200,7 @@ import {
 import type { FarmRouteRuntimeManifest, FarmRouteRuntimeManifestEntry } from "../route-runtime";
 import { createFarmVercelRouteRuntimeFunctions } from "./vercel-route-runtime";
 import { buildFarmVercelRoutes, createFarmVercelCanonicalSlashRoutes } from "./vercel-assets";
+import { listFarmClientOutputFiles, planFarmImmutableAssets } from "./immutable-assets";
 import {
   assertServerReadSSRAssetsSupported,
   collectServerOnlySSRAssets,
@@ -271,7 +272,7 @@ import {
 import { readMiddlewareFileConfig, type StaticMiddlewareConfig } from "../middleware/static-config";
 import { CDN_CACHE_CONTROL_HEADERS } from "../middleware/production-runtime";
 import {
-  createFarmVercelEdgeMiddlewareRoute,
+  createFarmVercelEdgeMiddlewareRoutes,
   farmTargetRunsEdgeMiddleware,
   isFarmEdgeMiddlewareRoute,
   writeFarmVercelEdgeMiddlewareFunction,
@@ -1440,7 +1441,6 @@ export async function buildUniversal(
   assertFarmDocsRuntimeSupported(config, preset);
   const srcDir = config.srcDir || "src";
   const distDir = config.distDir || ".farm";
-  const deployOutputDir = resolveDeployOutputPath(root, config.deploy.outputDir);
   const lifecyclePluginManager = options.pluginManager;
   // Attach all-settled handlers immediately so an earlier discovery failure
   // cannot leave a rejected preload unobserved.
@@ -1746,9 +1746,11 @@ function shouldBuildFarmMobileClient(config: ResolvedFarmConfig): boolean {
 /**
  * Nitro's cache route rules (`swr`, `cache`) store a response by URL, and refuse to store one
  * whose `Vary` names a request header the rule does not key on. Farm's own responses vary on:
- * `Accept` where a page negotiates its Markdown alternate, and `X-Farm-Shell` where a mobile
- * shell's document loads a different client. The cache keys on those headers too, so it can store
- * those responses and serve each request the variant it asked for.
+ * `Accept` where a page negotiates its Markdown alternate, `X-Farm-Shell` where a mobile
+ * shell's document loads a different client, and `F-Layouts` where an islands-mode navigation
+ * names the layouts it keeps (that render is private, the whole page is shared). The cache keys
+ * on those headers too, so it can store those responses and serve each request the variant it
+ * asked for.
  */
 function varyFarmNitroCacheRules(
   rules: Record<string, any>,
@@ -2589,8 +2591,11 @@ async function buildClient(
           ],
         },
       };
-      // The app's `vite` block applies to production as it does in development.
-      await viteBuild(mergeFarmProductionViteConfig(clientViteConfig, config.vite));
+      // The app's `vite` block applies to production as it does in development, including
+      // its client output options (chunking) under the file names Farm owns.
+      await viteBuild(
+        mergeFarmProductionViteConfig(clientViteConfig, config.vite, { clientOutput: true }),
+      );
       if (platform === "mobile") {
         // Documents keep the web stylesheet: CSS does not depend on platform().
         await fs.rm(path.join(outputDir, `${entryName}.css`), { force: true });
@@ -4011,7 +4016,8 @@ ${generateUniversalRouterStateProperties()}
       this.currentHistoryState = options.popState;
     }
 
-    this.saveScrollPosition(window.location.pathname + window.location.search);
+    // Save under the page still on screen: on Back/Forward the URL already names the destination.
+    this.saveScrollPosition(from);
     const navigation = this.startNavigation(from, url, action);
     let clientNavigation;
     try {
@@ -4291,7 +4297,8 @@ async function createFarmServerTreePageElement(source, pathname) {
     return await createFarmServerTreeElement(React, source, {
       load: loadFarmIsolatedBoundary,
       ServerHtml: FarmServerPage,
-      key: pathname,
+      // No key: the next page of the same layout updates this one in place, as React Server
+      // Components do, instead of unmounting it and building every node again.
     });
   } catch (error) {
     console.warn("[Farm.js] Could not rebuild the server tree of " + pathname + "; its server HTML was kept.", error);
@@ -5303,7 +5310,8 @@ ${
     // A route transition invalidates any trigger waiting on the previous DOM boundary.
     cancelPendingPageHydration();
     this.stopNavigationStream();
-    this.saveScrollPosition(window.location.pathname + window.location.search);
+    // Save under the page still on screen: on Back/Forward the URL already names the destination.
+    this.saveScrollPosition(from);
     const navigation = this.startNavigation(from, url, action);
     // A refresh keeps the islands still on the page (islands mode).
     navigation.refresh = options.refresh === true;
@@ -5937,17 +5945,16 @@ async function buildSSRInMemory(
       specRoute: config.openapi.specRoute || null,
     };
   }
-  const discoveredMiddlewareRoutes = await discoverMiddlewareRoutes(appDirs);
-  // On a target that runs `runtime: "edge"` middleware in front of static files, the server
-  // learns which files those are, so the build's own prerender requests skip them.
-  const middlewareRoutes = farmTargetRunsEdgeMiddleware(preset)
-    ? await Promise.all(
-        discoveredMiddlewareRoutes.map(async (route) => ({
-          ...route,
-          config: await readMiddlewareFileConfig(route.filePath),
-        })),
-      )
-    : discoveredMiddlewareRoutes;
+  // Each file's literal `config`: on a target that runs `runtime: "edge"` middleware in front of
+  // static files the server learns which files those are, so the build's own prerender
+  // requests skip them; and a root file's `matcher` names the pages it guards, which public
+  // listings (sitemap.xml, llms.txt, MCP) then leave out.
+  const middlewareRoutes = await Promise.all(
+    (await discoverMiddlewareRoutes(appDirs)).map(async (route) => ({
+      ...route,
+      config: await readMiddlewareFileConfig(route.filePath),
+    })),
+  );
   const instrumentationPath = resolveFarmInstrumentationFile(root, config.srcDir || "src");
 
   // Check for custom not-found page
@@ -7172,10 +7179,22 @@ function renderFarmServerTreeLayout(Layout, props, outlets) {
   orderedPageRoutes.forEach((route, index) => {
     const varName = `pageRoute${index}`;
     if (isFarmMarkdownPageFile(route.modulePath)) {
+      // The module reads its literal route config exports; whether its source reads the request
+      // is decided here, as for any page.
+      const renderingDirective = readRouteRenderingDirectiveFromFile(route.modulePath);
+      // Islands mode: below a hydrating layout, the MDX components' islands join its islx tree,
+      // as dev renders them and the client route table expects; as roots of their own they lost
+      // its context. Without server components they stay isolated islands, each torn down to its
+      // server HTML when a navigation leaves the page, which the docs blog relies on.
+      const markdownServerTree =
+        pageHydrationPlanOptions.serverOwners &&
+        usesFarmServerTree(pageHydrationPlans.get(route.modulePath));
       pageRegistrations.push(`
   {
     pattern: ${JSON.stringify(route.pattern)},${
       route.directory ? `\n    directory: ${JSON.stringify(route.directory)},` : ""
+    }${renderingDirective ? `\n    rendering: ${JSON.stringify(renderingDirective)},` : ""}${
+      markdownServerTree ? "\n    serverTree: true," : ""
     }
     module: createFarmMarkdownRouteModule({
       source: ${JSON.stringify(route.source ?? "")},
@@ -7467,6 +7486,7 @@ function renderFarmServerTreeLayout(Layout, props, outlets) {
   createFarmProductionLifecycle,
   createFarmNodeRequestAbortSignal,
   createProductionMiddlewareRunner,
+  _hasPrivateFarmRequestHeaders,
   _withFarmGuardedResponseCache,
   _farmPluginsKeepResponsesPrivate,
   getTheme as getFarmTheme,
@@ -7480,6 +7500,7 @@ function renderFarmServerTreeLayout(Layout, props, outlets) {
   localizeFarmHref,
   manageFarmDocumentPreloads,
   mergeRouteRenderingDirectiveConfig,
+  resolveRouteSharedCacheControl,
   manageFarmLinkHeaderPreloads,
   mergeMetadata,
   mergeModuleViewport,
@@ -8872,12 +8893,98 @@ async function renderFarmElement(ReactDOMServer, element, routeKey, flushToken =
   return { html, head: "", shellHtml: html, streamErrors };
 }
 
-async function renderFarmElementToString(ReactDOMServer, element) {
-  const rendered = await renderFarmElement(ReactDOMServer, element);
-  if (rendered.html !== undefined) return rendered.html;
-  const html = await new Response(rendered.stream).text();
-  if (rendered.streamErrors.length > 0) throw rendered.streamErrors[0];
-  return html;
+// The not-found and error documents go out whole, with their status, so they never stream.
+// renderToString renders a tree that does not suspend in one synchronous pass, but throws "A
+// component suspended while responding to synchronous input" when a lazy component or a use()
+// read suspends outside a Suspense boundary, and leaves a boundary that suspends inside one to
+// the client (<!--$!-->). Such a document renders with the streaming renderer instead, which
+// sends nothing until every boundary is done, so the output is the resolved markup without
+// fallbacks or reveal scripts. A document that suspended once keeps that renderer for the rest
+// of this server process, as a page route that suspends keeps streaming. As for pages, a
+// response with a CSP nonce or a posted form state renders with the stream, which takes them.
+// Renderers other than React wait for their own async content in renderToString.
+const farmSuspendingDocuments = new Set();
+
+async function renderFarmCompleteDocument(ReactDOMServer, element, documentKey) {
+  if (!farmReactSyncRender || !canRenderFarmElementWhenAllReady(ReactDOMServer)) {
+    return await ReactDOMServer.renderToString(element, getFarmRendererRenderOptions());
+  }
+  if (!farmSuspendingDocuments.has(documentKey) &&
+      !_resolveCurrentCspNonce() &&
+      farmFormState() === undefined) {
+    let html;
+    try {
+      html = ReactDOMServer.renderToString(element, getFarmRendererRenderOptions());
+    } catch {
+      // A real render error fails the streaming render the same way.
+    }
+    if (typeof html === "string" && !html.includes("<!--$!-->")) return html;
+    farmSuspendingDocuments.add(documentKey);
+  }
+  return await renderFarmElementWhenAllReady(ReactDOMServer, element);
+}
+
+function canRenderFarmElementWhenAllReady(ReactDOMServer) {
+  return (farmRendererStreamingCapabilities.web &&
+      typeof ReactDOMServer.renderToReadableStream === "function") ||
+    (farmRendererStreamingCapabilities.node &&
+      typeof ReactDOMServer.renderToPipeableStream === "function");
+}
+
+async function renderFarmElementWhenAllReady(ReactDOMServer, element) {
+  const onError = function(error) {
+    // After the shell, a failed boundary is rendered by the client, as on a page.
+    if (isFarmRedirectError(error) || isFarmNotFoundError(error)) return;
+    console.error("[Farm SSR stream]", error);
+  };
+  // Completed boundaries larger than this would stream behind their fallback: keep them inline.
+  const progressiveChunkSize = Number.MAX_SAFE_INTEGER;
+  if (farmRendererStreamingCapabilities.web &&
+      typeof ReactDOMServer.renderToReadableStream === "function") {
+    const stream = await ReactDOMServer.renderToReadableStream(element, {
+      nonce: _resolveCurrentCspNonce(),
+      formState: farmFormState(),
+      progressiveChunkSize,
+      onError,
+    });
+    await stream.allReady;
+    return await new Response(stream).text();
+  }
+  return await new Promise(function(resolve, reject) {
+    const chunks = [];
+    const decoder = new TextDecoder();
+    const destination = {
+      write(chunk) {
+        chunks.push(typeof chunk === "string" ? chunk : decoder.decode(chunk, { stream: true }));
+        return true;
+      },
+      flush() {},
+      end() {
+        chunks.push(decoder.decode());
+        resolve(chunks.join(""));
+      },
+      on() {
+        return destination;
+      },
+      destroy(error) {
+        reject(error || new Error("React server render stream was destroyed"));
+      },
+    };
+    const pipeableStream = ReactDOMServer.renderToPipeableStream(element, {
+      nonce: _resolveCurrentCspNonce(),
+      formState: farmFormState(),
+      progressiveChunkSize,
+      onAllReady() {
+        try {
+          pipeableStream.pipe(destination);
+        } catch (error) {
+          reject(error);
+        }
+      },
+      onShellError: reject,
+      onError,
+    });
+  });
 }
 
 // Most pages render without suspending. React's renderToString renders them in
@@ -9059,6 +9166,50 @@ function opensFarmFullDocument(markup) {
   return /^<!doctype/i.test(inner) || /^<html[\\s>]/i.test(inner);
 }
 
+// The head elements a component renders (<meta>, <title>, preloads), which React writes ahead of
+// a render whose root is not <html>, split off for the document's head. A full document keeps
+// them: its own head takes them. Matches the dev renderer's takeFarmHoistedHead.
+function takeFarmHoistedHead(markup) {
+  if (opensFarmFullDocument(markup)) return { head: "", body: markup };
+  const hoistable = /${HOISTED_HEAD_ELEMENT.source}/i;
+  let head = "";
+  let body = markup;
+  let match;
+  while ((match = hoistable.exec(body.replace(/^\\s+/, "")))) {
+    head += match[0];
+    body = body.replace(/^\\s+/, "").slice(match[0].length);
+  }
+  return { head: head, body: body };
+}
+
+// A rendered page with the head elements React wrote first moved to its head field, for Farm's shell to
+// put in the document's head. A streamed page's first chunk is its shellHtml: those bytes are
+// dropped from the stream.
+function takeFarmRenderedHead(rendered) {
+  if (rendered.head) return rendered;
+  if (rendered.html !== undefined) {
+    const split = takeFarmHoistedHead(rendered.html);
+    if (!split.head) return rendered;
+    return Object.assign({}, rendered, { html: split.body, shellHtml: split.body, head: split.head });
+  }
+  const shell = rendered.shellHtml || "";
+  const split = takeFarmHoistedHead(shell);
+  if (!split.head) return rendered;
+  let left = new TextEncoder().encode(shell.slice(0, shell.length - split.body.length)).byteLength;
+  const stream = rendered.stream.pipeThrough(new TransformStream({
+    transform(chunk, controller) {
+      if (left > 0) {
+        const dropped = Math.min(left, chunk.byteLength);
+        left -= dropped;
+        chunk = chunk.subarray(dropped);
+        if (chunk.byteLength === 0) return;
+      }
+      controller.enqueue(chunk);
+    },
+  }));
+  return Object.assign({}, rendered, { stream: stream, shellHtml: split.body, head: split.head });
+}
+
 function extractFarmFullDocument(markup) {
   if (!opensFarmFullDocument(markup)) return null;
   const hoisted = peelFarmDocumentPrefix(markup).hoisted;
@@ -9174,8 +9325,9 @@ const farmClientEntryPreloadTags = farmClientModulePreloads
   ? farmClientModulePreloads.entry.map(renderFarmClientModulePreload).join("")
   : "";
 // The client modules a document's markup loads: its islands' boundaries and the
-// client references of its server tree.
-const FARM_CLIENT_MODULE_REFERENCE_PATTERN = /<f-island src="([^"]+)"|"r":"(\\/[^"]+)"/g;
+// client references of its server tree. An island with a deferred strategy loads its
+// module on its own trigger, so it is not preloaded.
+const FARM_CLIENT_MODULE_REFERENCE_PATTERN = /<f-island src="([^"]+)"([^>]*)>|"r":"(\\/[^"]+)"/g;
 
 function renderFarmClientModulePreload(index) {
   return '\\n  <link rel="modulepreload" href="/' +
@@ -9203,7 +9355,10 @@ function renderFarmClientModulePreloads(markup, pageModule) {
   };
   add(pageModule);
   if (typeof markup === "string") {
-    for (const match of markup.matchAll(FARM_CLIENT_MODULE_REFERENCE_PATTERN)) add(match[1] || match[2]);
+    for (const match of markup.matchAll(FARM_CLIENT_MODULE_REFERENCE_PATTERN)) {
+      if (match[1] && FARM_DEFERRED_ISLAND_STRATEGY.test(match[2])) continue;
+      add(match[1] || match[3]);
+    }
   }
   return tags;
 }
@@ -9275,39 +9430,14 @@ function applyFarmI18nResponse(response, resolution) {
   });
 }
 
-function hasOnlyValidFarmLocaleCookie(cookieHeader) {
-  if (!farmI18nRuntime || !cookieHeader) return false;
-  const parts = cookieHeader.split(";");
-  if (parts.length !== 1) return false;
-
-  const cookie = parts[0].trim();
-  const separator = cookie.indexOf("=");
-  if (separator <= 0) return false;
-
-  let name;
-  let value;
-  try {
-    name = decodeURIComponent(cookie.slice(0, separator).trim());
-    value = decodeURIComponent(cookie.slice(separator + 1).trim());
-  } catch {
-    return false;
-  }
-
-  return (
-    name === farmI18nConfig.cookie.name &&
-    farmI18nConfig.locales.includes(value)
-  );
-}
-
+// Credentials or a visitor's cookie; the deployment cookie, and a lone valid locale cookie when
+// the URL names the locale, keep shared caching. The RSC server decides with the same helper.
 function hasPrivateFarmRequestHeaders(request, farmLocaleResolution) {
-  if (request.headers.get("authorization")) return true;
-  // The deployment cookie names a release, not a visitor, so it alone keeps shared caching.
-  const cookieHeader = withoutFarmDeploymentCookie(request.headers.get("cookie"));
-  if (!cookieHeader) return false;
-
-  return !(
-    farmLocaleResolution?.source === "url" &&
-    hasOnlyValidFarmLocaleCookie(cookieHeader)
+  return _hasPrivateFarmRequestHeaders(
+    request,
+    farmI18nRuntime && farmLocaleResolution?.source === "url"
+      ? { name: farmI18nConfig.cookie.name, locales: farmI18nConfig.locales }
+      : undefined,
   );
 }
 
@@ -9629,7 +9759,7 @@ function createFarmAgentSitemapResponse(request) {
         metadataBase: rootLayout && rootLayout.module && rootLayout.module.metadata
           ? rootLayout.module.metadata.metadataBase
           : undefined,
-        basePath: ${JSON.stringify(config.basePath)},${config.trailingSlash ? "\n        trailingSlash: true," : ""}
+        basePath: ${JSON.stringify(config.basePath)},${config.trailingSlash ? "\n        trailingSlash: true," : ""}${config.i18n.enabled ? "\n        i18n: farmI18nConfig," : ""}
       },
     ),
     {},
@@ -9656,21 +9786,29 @@ function getFarmDefaultMCPServer() {
 }
 async function handleFarmDefaultMCP(request) {
   const origin = new URL(request.url).origin;
+  // Pages are linked on metadataBase, as sitemap.xml and llms.txt link them.
+  const metadataBase = getFarmRootMetadataBase();
   return handleFarmDefaultMCPRequest(request, {
     server: getFarmDefaultMCPServer(),
     basePath: ${JSON.stringify(config.basePath)},
+    i18n: farmI18nConfig,
+    metadataBase,
+    // Each page at the URL it answers at, as in development and as the sitemap lists it.
     listPages: () =>
       collectFarmDefaultMCPPages(
         getFarmAgentListedPageRoutes().map((route) => ({ pattern: route.pattern, module: route.module })),
-        { origin, basePath: ${JSON.stringify(config.basePath)}, markdown: farmMarkdownConfig },
+        {
+          origin,
+          metadataBase,
+          basePath: ${JSON.stringify(config.basePath)},
+          markdown: farmMarkdownConfig,${config.trailingSlash ? "\n          trailingSlash: true," : ""}
+          i18n: farmI18nConfig,
+        },
       ),
-    // A fresh request through this handler, so the caller's cookies never shape a page.
-    // The handler sees paths below the base path, as the server passes them in.
-    readMarkdown: (url) => {
-      const page = new URL(url);
-      page.pathname = stripFarmBasePath(page.pathname);
-      return farmDefaultMCPReadMarkdown(page.href);
-    },
+    // A fresh request through this handler, so the caller's cookies never shape a page. It
+    // reads the public URL, base path included, as llms-full.txt does: this handler sees
+    // public paths, and with i18n a mirror path without the base path answers with a redirect.
+    readMarkdown: farmDefaultMCPReadMarkdown,
   });
 }
 // \`fetch\` is this module's outer request entry: plugin runtime hooks run and the page
@@ -9679,16 +9817,16 @@ const farmDefaultMCPReadMarkdown = createFarmLlmsMarkdownReader((page) => fetch(
 `
     : ""
 }
-// The origin llms.txt and llms-full.txt link to: the root layout's metadataBase, else the
-// request's origin, as for the sitemap and in development.
+// The origin llms.txt, llms-full.txt and list_pages link to: the root layout's metadataBase,
+// else the request's origin, as for the sitemap and in development.
 function getFarmAgentOrigin(request) {
+  return resolveFarmAgentOrigin(getFarmRootMetadataBase(), new URL(request.url).origin);
+}
+function getFarmRootMetadataBase() {
   const rootLayout = layoutRoutes.find((layout) => layout.pattern === "/");
-  return resolveFarmAgentOrigin(
-    rootLayout && rootLayout.module && rootLayout.module.metadata
-      ? rootLayout.module.metadata.metadataBase
-      : undefined,
-    new URL(request.url).origin,
-  );
+  return rootLayout && rootLayout.module && rootLayout.module.metadata
+    ? rootLayout.module.metadata.metadataBase
+    : undefined;
 }
 
 // Static pages and root metadata for llms.txt, built the same way as in development.
@@ -9700,7 +9838,7 @@ function createFarmLlmsTxtContext(request, full) {
       origin,
       markdown: farmMarkdownConfig,
       include: farmLlmsTxtConfig.include,
-      exclude: farmLlmsTxtConfig.exclude,${config.trailingSlash ? "\n      trailingSlash: true," : ""}
+      exclude: farmLlmsTxtConfig.exclude,${config.trailingSlash ? "\n      trailingSlash: true," : ""}${config.i18n.enabled ? "\n      i18n: farmI18nConfig," : ""}
     },
   );
   const rootLayout = layoutRoutes.find((layout) => layout.pattern === "/");
@@ -10353,12 +10491,15 @@ function getPPRShellBypassReason(request, middlewareData, middlewareContext) {
 
 // origin is set when the shell carries hreflang alternates (i18n prefix
 // routing), so one host never serves a shell holding another host's URLs.
+// A shell embeds its deployment's ID and client assets, and a shared cache
+// adapter outlives a deployment, so each deployment keys its own shells.
 function getPPRShellCacheKey(url, locale, origin) {
   const key = [
     "ppr",
     locale || "",
     normalizeRevalidatePath(url.pathname),
     url.search,
+    farmDeploymentId,
   ];
   return createFarmCacheKey(origin ? key.concat(origin) : key);
 }
@@ -10388,22 +10529,13 @@ function hasFarmUnserializableRouteData(data) {
   return Boolean(data) && typeof data === "object" && Object.values(data).some(isPromise);
 }
 
+// Core's policy for the route, shared with the RSC server so both send the same Cache-Control.
 function getRouteSharedCacheControl(route, pprCanCache) {
   if (!route || !route.module) {
     return null;
   }
 
-  const view = resolveRouteRenderingView(route);
-  if (view.dynamic === "force-dynamic") {
-    return null;
-  }
-  if (!view.ssg && !pprCanCache) {
-    return null;
-  }
-
-  const revalidate =
-    typeof view.revalidate === "number" && view.revalidate > 0 ? view.revalidate : 60;
-  return "public, s-maxage=" + revalidate + ", stale-while-revalidate=300";
+  return resolveRouteSharedCacheControl(resolveRouteRenderingView(route), pprCanCache);
 }
 
 async function getCachedPPRShell(cacheKey) {
@@ -10789,6 +10921,14 @@ ${
           middlewareHeaders,
         );
       }
+      // A docs page is a page document: it names this deployment, and a navigation from
+      // another deployment's page is refused, as for an app page.
+      const farmDocsDeploymentMismatch = getFarmDeploymentMismatch(request, farmDeploymentId);
+      if (farmDocsDeploymentMismatch) {
+        await docsResponse.body?.cancel();
+        return createFarmDeploymentMismatchResponse(farmDocsDeploymentMismatch);
+      }
+      farmCacheGuard.deploymentPage = true;
       const wrappedDocsResponse = withFarmDocsRequestCache(
         await wrapFarmDocsResponseWithLayouts(request, docsResponse),
         request,
@@ -11248,6 +11388,12 @@ ${
 
       // Reads from here on belong to the page render, not to middleware.
       const requestReadsBeforeRender = _getRequestReadCount();
+      // A swr or cache route rule stores this page by URL for every visitor. Nitro hands Farm the
+      // request without its cookies, Authorization, or any header the rule does not key on, so a
+      // render that reads nothing of the request is that shared page, whatever its route config.
+      const farmRouteRuleCached =
+        Boolean(adapterContext?.routeRuleCache) &&
+        (request.method === "GET" || request.method === "HEAD");
 
       // Get the page component and metadata
       let PageComponent = route.module.default;
@@ -11483,7 +11629,8 @@ ${
             ? `// Islands mode: a route a shared cache may store (a PPR shell, a static page) renders
         // whole for every request, so a cache hit stays a hit. Other routes leave out what the
         // navigating browser keeps: the layouts it shows and the values it holds.
-        const farmSharedCacheableRoute = Boolean(getRouteSharedCacheControl(route, pprCanCache));
+        const farmSharedCacheableRoute =
+          farmRouteRuleCached || Boolean(getRouteSharedCacheControl(route, pprCanCache));
         if (farmSharedCacheableRoute) ignoreFarmHeldValues();
         const farmLayoutKeyOf = getFarmLayoutKey;
         // A navigation the browser renders in its layout's React root rebuilds a server-tree page
@@ -11646,13 +11793,14 @@ ${
           wrappedElement = wrapWithFarmIntegrationProviders(wrappedElement);
           return renderFarmElement(ReactDOMServer, wrappedElement, route.pattern, farmFlushToken);
         };
-        const renderedPage = ${
+        // The head elements a component rendered go to the document's head (takeFarmRenderedHead).
+        const renderedPage = takeFarmRenderedHead(${
           hasMiddlewareRuntime
             ? `await _runWithMiddlewareData(middlewareData, () =>
           _runWithMiddlewareContext(middlewareContext, renderPageElement)
         )`
             : "await renderPageElement()"
-        };
+        });
 
         // A completed document is not a reusable PPR shell: it already contains
         // the request's resolved Suspense content. Until the production runtime
@@ -11758,6 +11906,24 @@ ${
           middlewareData?.size ||
           middlewareContext?.size
         );
+        if (farmRouteRuleCached && (renderedPage.stream || hasRequestScopedRender)) {
+          // The route rule's cache refuses a private page: say why it renders on every request.
+          emitFarmEvent({
+            type: "cache.bypass",
+            route: pathname,
+            reason: pageStatus >= 400
+              ? "error-status"
+              : renderReadRequest
+                ? "request-read"
+                : middlewareData?.size || middlewareContext?.size
+                  ? "middleware-data"
+                  : hasConfiguredRouteContext
+                    ? "route-context"
+                    : renderedPage.stream
+                      ? "suspense-stream"
+                      : "request-scoped",
+          });
+        }
         const sharedCacheControl = getRouteSharedCacheControl(route, pprCanCache);
         const responseHeaders = {
           "Content-Type": "text/html; charset=utf-8",
@@ -11767,8 +11933,16 @@ ${
         };
         // An error status or a request-scoped render is never shareable, even when
         // the PPR shell headers would otherwise grant a shared max-age.
-        if (renderedPage.stream || hasRequestScopedRender || !sharedCacheControl) {
+        if (
+          renderedPage.stream ||
+          hasRequestScopedRender ||
+          (!sharedCacheControl && !farmRouteRuleCached)
+        ) {
           responseHeaders["Cache-Control"] = "private, no-store";
+        } else if (responseHeaders["Cache-Control"] == null) {
+          // A page with no policy of its own under a swr or cache route rule: the rule's cache
+          // stores it and sends the rule's Cache-Control.
+          delete responseHeaders["Cache-Control"];
         }
         const farmI18nSnapshot = getFarmI18nSnapshot();${
           farmIslandsMode
@@ -11874,7 +12048,8 @@ ${
             '  <meta charset="utf-8">\\n' +
             '  ' + viewportTags + '\\n' +
             (hasFavicon ? '' : '  <link rel="icon" href="data:,">\\n') +
-            '  <title>' + title + '</title>' + metaTags + '\\n' +
+            (suppressDefaultTitle ? '' : '  <title>' + title + '</title>') + metaTags +
+            (rendererHead ? '\\n  ' + rendererHead : '') + '\\n' +
             '  <link rel="stylesheet" href="/__farm_client_css_href__">\\n' +
             '  <link rel="modulepreload" href="/__farm_client_js_src__">' + renderFarmClientModulePreloads(null, route.clientModule) + '\\n' +
             renderFarmRendererHydrationScript() + '\\n' +
@@ -11901,9 +12076,10 @@ ${
               }
               try {
                 return createLateNotFoundRecovery(
-                  await ReactDOMServer.renderToString(
+                  await renderFarmCompleteDocument(
+                    ReactDOMServer,
                     wrapWithFarmIntegrationProviders(createFarmNotFoundElement(pathname)),
-                    getFarmRendererRenderOptions()
+                    "not-found-recovery"
                   )
                 );
               } catch (error) {
@@ -12061,7 +12237,9 @@ ${
             pprCacheKey,
             { html: fullHtml },
             {
-              paths: [pathname],
+              // revalidatePath() takes the route path ("/pricing"), as the docs show, while the
+              // shell answers the public one ("/console/fr/pricing"): either clears it.
+              paths: [...new Set([pathname, getFarmRoutePathname(pathname)])],
               tags: ["ppr"],
               revalidate: pprConfig.revalidate ?? false,
             }
@@ -12196,7 +12374,12 @@ ${
         errorElement = wrapWithFarmIntegrationProviders(errorElement);
 
         const renderErrorElement = () =>
-          renderFarmElementToString(ReactDOMServer, errorElement);
+          renderFarmCompleteDocument(
+            ReactDOMServer,
+            // Islands mode: the error document writes its islands' values, as a page does.
+            typeof farmIslandsRender === "function" ? farmIslandsRender(errorElement) : errorElement,
+            "error:" + errorBoundaryMatch.route.pattern
+          );
         const errorHtml = ${
           hasMiddlewareRuntime
             ? `await _runWithMiddlewareData(middlewareData, () =>
@@ -12303,6 +12486,13 @@ ${
 `
     : ""
 }
+  // The not-found page is a page document: it names this deployment, and a navigation from
+  // another deployment's page is refused, as for an app page.
+  const farmNotFoundDeploymentMismatch = getFarmDeploymentMismatch(request, farmDeploymentId);
+  if (farmNotFoundDeploymentMismatch) {
+    return createFarmDeploymentMismatchResponse(farmNotFoundDeploymentMismatch);
+  }
+  farmCacheGuard.deploymentPage = true;
   // Agents that navigate in Markdown (a \`.md\` URL or \`Accept: text/markdown\`)
   // get a Markdown error body instead of the HTML not-found shell.
   if (farmRequestWantsMarkdown(pathname, request.headers.get("accept"))) {
@@ -12342,7 +12532,7 @@ ${
     }
     notFoundElement = wrapWithFarmIntegrationProviders(notFoundElement);
     
-    const html = await ReactDOMServer.renderToString(notFoundElement, getFarmRendererRenderOptions());
+    const html = await renderFarmCompleteDocument(ReactDOMServer, notFoundElement, "not-found");
     // The layouts' and the not-found page's metadata, as the development renderer uses it.
     const notFoundMetadata = renderMetadataHead(
       await resolveFarmNotFoundMetadata(
@@ -13439,7 +13629,9 @@ ${hasNitroCacheRouteRules ? "  let farmGuardedResponse = false\n" : ""}  const r
       ? `
   const farmCacheControl = response.headers.get('cache-control')
   if (
-    farmGuardedResponse &&
+    // A guarded response, or any response Farm kept private under a swr or cache rule: the
+    // rule's cache does not store it, and the rule's public Cache-Control must not reach a CDN.
+    (farmGuardedResponse || event.context?.routeRules?.cache) &&
     farmCacheControl &&
     FARM_PRIVATE_CACHE_DIRECTIVE.test(farmCacheControl)
   ) {
@@ -13559,6 +13751,9 @@ function toFarmNodeResponse(request, response) {
     varyFarmNitroCacheRules(routeRulesToNitroRouteRules(config.routeRules), [
       ...(config.md.enabled ? ["accept"] : []),
       ...(shouldBuildFarmMobileClient(config) ? ["x-farm-shell"] : []),
+      ...(resolveFarmServerComponentsMode(config.experimental?.serverComponents) === "islands"
+        ? ["f-layouts"]
+        : []),
     ]),
     config.basePath,
     resolveFarmAPIServerBasePath(config.api),
@@ -13593,6 +13788,23 @@ function toFarmNodeResponse(request, response) {
     }),
   );
 
+  // Content-hashed client files never change, so they are cached for a year. Vercel gets the same
+  // policy from the immutable route postProcessVercelOutput writes, which replaces Nitro's routes.
+  const immutableAssets = isVercel
+    ? { publicAssets: [], routeRules: {} }
+    : planFarmImmutableAssets({
+        clientOutputDir,
+        files: await listFarmClientOutputFiles(clientOutputDir),
+        routeRules: configuredNitroRouteRules,
+        routePaths: [
+          ...[...routeManager.getRoutes().keys()].map((pattern) =>
+            applyFarmBasePath(pattern, config.basePath),
+          ),
+          ...apiRouteManager.getRoutes().keys(),
+          resolveFarmAPIServerBasePath(config.api),
+        ],
+      });
+
   let nitroConfig: NitroConfig = {
     preset,
     ...(farmNodeServerEntryPath ? { entry: farmNodeServerEntryPath } : {}),
@@ -13611,13 +13823,9 @@ function toFarmNodeResponse(request, response) {
     alias: resolveNitroInternalRuntimeAliases(root),
     compatibilityDate: "2024-12-01",
     output: resolveFarmNitroOutputConfig(preset, outputDir),
-    publicAssets: [
-      {
-        dir: clientOutputDir,
-        maxAge: 31536000,
-        baseURL: "/",
-      },
-    ],
+    // Nitro gives the root directory no Cache-Control on any preset (it falls through to the
+    // app), so public files keep revalidating; the hashed directories carry their own maxAge.
+    publicAssets: [{ dir: clientOutputDir, baseURL: "/" }, ...immutableAssets.publicAssets],
     // A self-hosted Node server sends static files itself, so precompress them
     // with gzip and let Nitro serve that by Accept-Encoding. Brotli at Nitro's
     // fixed top quality cost a docs app ~20 s of build CPU for a small further
@@ -13681,6 +13889,7 @@ function toFarmNodeResponse(request, response) {
       "/**": {
         prerender: false,
       },
+      ...immutableAssets.routeRules,
       ...configuredNitroRouteRules,
       // Exact user rules must retain their runtime settings without replacing
       // the headers and prerender marker generated for a safe physical page.
@@ -14372,7 +14581,7 @@ async function postProcessVercelOutput(
     runtimeRoutes,
     middlewareRoutes:
       edgeMiddlewareRoutes.length > 0
-        ? [createFarmVercelEdgeMiddlewareRoute(edgeMiddleware.guardedPages, config.basePath)]
+        ? createFarmVercelEdgeMiddlewareRoutes(edgeMiddleware.guardedPages, config.basePath)
         : [],
     canonicalSlashRoutes: createFarmVercelCanonicalSlashRoutes(prerenderedPages),
   });
@@ -14437,9 +14646,11 @@ async function copyFarmDocsRootContent(
   }
   await fs.rm(bundledContentDir, { recursive: true, force: true });
   await fs.mkdir(path.dirname(bundledContentDir), { recursive: true });
+  // A linked docs folder must ship as files: a symlink would point at the build machine.
   await fs.cp(docsContentDir, bundledContentDir, {
     recursive: true,
     force: true,
+    dereference: true,
   });
   await fs.writeFile(
     path.join(bundledContentDir, FARM_DOCS_LAST_MODIFIED_MANIFEST),

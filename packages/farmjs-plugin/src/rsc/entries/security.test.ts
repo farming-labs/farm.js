@@ -381,7 +381,7 @@ describe("generated server action security", () => {
     const clientEntry = generateClientEntry(context);
 
     expect(serverEntry).toContain('const farmDeploymentId = "release-2"');
-    expect(serverEntry).toContain("createFarmDeploymentCookie(");
+    expect(serverEntry).toContain("_withFarmDeploymentCookie(request, response, farmDeploymentId");
     expect(serverEntry.indexOf("getFarmDeploymentMismatch(request")).toBeLessThan(
       serverEntry.indexOf("validateServerActionRequest(request"),
     );

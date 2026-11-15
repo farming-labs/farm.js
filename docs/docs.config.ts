@@ -280,6 +280,7 @@ const sidebar = [
           { label: "Overview", slug: "integrations/jobs", icon: "activity" },
           { label: "Trigger.dev", slug: "integrations/trigger", icon: "brand-trigger" },
           { label: "Inngest", slug: "integrations/inngest", icon: "brand-inngest" },
+          { label: "Durable workflows", slug: "integrations/durable-workflows", icon: "timer" },
         ],
       },
       {
@@ -390,6 +391,7 @@ const sidebar = [
           { label: "Progress", slug: "plugins/progress", icon: "activity" },
           { label: "Search", slug: "plugins/search", icon: "search" },
           { label: "Scripts", slug: "plugins/scripts", icon: "code" },
+          { label: "Scroll Restoration", slug: "plugins/scroll-restoration", icon: "layout" },
           { label: "Sentry", slug: "plugins/sentry", icon: "brand-sentry" },
           { label: "Sync", slug: "plugins/sync", icon: "network" },
           { label: "StyleX", slug: "plugins/stylex", icon: "braces" },

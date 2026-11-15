@@ -14,6 +14,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import { parseAst } from "rolldown/parseAst";
+import { memoizeInFarmSourceSnapshot, noteFarmSourceRead } from "./utils/source-snapshot";
 
 type AstNode = Record<string, any>;
 
@@ -151,6 +152,7 @@ function readModule(file: string): AstNode | null {
   } catch {
     return null;
   }
+  noteFarmSourceRead(file);
   const cached = parsedModules.get(file);
   if (cached && cached.size === stat.size && cached.mtimeMs === stat.mtimeMs) return cached.program;
   let program: AstNode | null = null;
@@ -326,8 +328,16 @@ export function isFarmPackageClientExport(
   specifier: string,
   name: string,
 ): boolean {
-  const entry = resolveFarmPackageDefaultEntry(importer, specifier);
-  return !entry || traceFarmExport(entry, name) !== "server";
+  // A hydration plan asks this for each name each route imports from a package; the answer
+  // depends on the importer only through the directory it resolves the package from.
+  return memoizeInFarmSourceSnapshot(
+    "package-client-export",
+    `${path.dirname(importer)}\0${specifier}\0${name}`,
+    () => {
+      const entry = resolveFarmPackageDefaultEntry(importer, specifier);
+      return !entry || traceFarmExport(entry, name) !== "server";
+    },
+  );
 }
 
 /** A module's imports of packages, with the names each reads. */

@@ -749,17 +749,62 @@ export default function Page() {
 }
 `.trim(),
       );
+      // An island that hydrates when visible loads its module then, not with the page.
+      await fs.writeFile(
+        path.join(root, "src", "app", "later.tsx"),
+        `
+"use client";
+import { useState } from "react";
+
+export const island = "visible";
+
+export default function Later() {
+  const [count, setCount] = useState(0);
+  return <button onClick={() => setCount(count + 1)}>later {count}</button>;
+}
+`.trim(),
+      );
       await fs.mkdir(path.join(root, "src", "app", "islands"), { recursive: true });
       await fs.writeFile(
         path.join(root, "src", "app", "islands", "page.tsx"),
         `
 import { Counter } from "../counter";
+import Later from "../later";
 
 export default async function IslandsPage() {
-  return <main><h1>islands</h1><Counter /></main>;
+  return <main><h1>islands</h1><Counter /><Later /></main>;
 }
 `.trim(),
       );
+      // Two pages whose only shared module is a stylesheet: Rolldown gives it a chunk of its
+      // own, which Vite deletes once the CSS is in farm-client.css.
+      await fs.writeFile(path.join(root, "src", "app", "styles.css"), ".styled { color: red; }\n");
+      for (const name of ["a", "b"]) {
+        await fs.mkdir(path.join(root, "src", "app", `styled-${name}`), { recursive: true });
+        await fs.writeFile(
+          path.join(root, "src", "app", `styled-${name}`, "widget.tsx"),
+          `
+"use client";
+import "../styles.css";
+import { useState } from "react";
+
+export function Widget() {
+  const [count, setCount] = useState(0);
+  return <button className="styled" onClick={() => setCount(count + 1)}>${name} {count}</button>;
+}
+`.trim(),
+        );
+        await fs.writeFile(
+          path.join(root, "src", "app", `styled-${name}`, "page.tsx"),
+          `
+import { Widget } from "./widget";
+
+export default function Page() {
+  return <main><Widget /></main>;
+}
+`.trim(),
+        );
+      }
       const userConfig = {
         root,
         srcDir: "src",
@@ -802,6 +847,10 @@ export default async function IslandsPage() {
       const entryImports = manifest.entry.map((index) => manifest.files[index]!);
       const moduleChunk = (moduleId: string) => manifest.files[manifest.modules[moduleId]![0]!]!;
       expect(entryImports.length).toBeGreaterThan(0);
+      // Every file the manifest can list was written, including after Vite removed the
+      // stylesheet-only chunk the styled pages shared.
+      await Promise.all(manifest.files.map((file) => fs.access(path.join(publicDir, file))));
+      expect(manifest.modules["/src/app/styled-a/page.tsx"]).toBeDefined();
       // The entry imports the first one statically.
       expect(entryCode).toMatch(
         new RegExp(
@@ -837,12 +886,25 @@ export default async function IslandsPage() {
           expect(response.status).toBe(200);
           const html = await response.text();
           expect(html).toContain('<f-island src="/src/app/counter.tsx"');
+          expect(html).toMatch(/<f-island src="\/src\/app\/later.tsx"[^>]* strategy="visible"/);
           const files = await preloadsIn(html);
           expect(files).toContain(moduleChunk("/src/app/counter.tsx"));
           expect(files).not.toContain(moduleChunk("/src/app/page.tsx"));
+          expect(files).not.toContain(moduleChunk("/src/app/later.tsx"));
         },
         "/islands",
       );
+      for (const name of ["a", "b"]) {
+        await runProductionRequest(
+          serverDir,
+          async (response) => {
+            expect(response.status).toBe(200);
+            const files = await preloadsIn(await response.text());
+            expect(files).toContain(moduleChunk(`/src/app/styled-${name}/page.tsx`));
+          },
+          `/styled-${name}`,
+        );
+      }
       await runProductionRequest(
         serverDir,
         async (response) => {
@@ -2706,7 +2768,9 @@ export function CopyButton({ text }) {
           { FARMJS_API_KEY: key, FARMJS_API_URL: `http://127.0.0.1:${receiverPort}` },
         );
         expect(received[0]!.headers.authorization).toBe(`Bearer ${key}`);
-        expect(received[0]!.body).not.toContain("private");
+        // The path, never its query string or the request's cookies.
+        expect(received[0]!.body).not.toContain("private-query");
+        expect(received[0]!.body).not.toContain("private-cookie");
         expect(JSON.parse(received[0]!.body)).toEqual({
           schemaVersion: 1,
           events: [
@@ -2716,6 +2780,7 @@ export function CopyButton({ text }) {
               timestamp: expect.any(String),
               kind: "request",
               route: "/users/[id]",
+              path: "/users/private-customer",
               method: "GET",
               status: 200,
               durationMs: expect.any(Number),
@@ -2977,7 +3042,19 @@ export default {
       expect(requests().filter((line) => line.includes("/[unmatched]"))).toEqual([
         "GET /[unmatched] 404",
       ]);
-      expect(received.join("")).not.toContain("private");
+      // Templates never carry the request's own segments; each path is what was asked for.
+      const events = received.flatMap((body) => JSON.parse(body).events);
+      expect(events.map(({ route }) => route).join(" ")).not.toContain("private");
+      expect(events.filter(({ kind }) => kind === "request").map(({ path }) => path)).toEqual(
+        expect.arrayContaining([
+          "/blog/private-post.md",
+          "/docs/private-missing",
+          "/blog/private-post",
+          "/private-missing",
+          "/mcp",
+        ]),
+      );
+      expect(received.join("")).not.toContain("private-query");
     } finally {
       await new Promise((resolve) => receiver.close(resolve));
       await fs.rm(root, { recursive: true, force: true });

@@ -1,5 +1,4 @@
 // @vitest-environment node
-import { spawn } from "node:child_process";
 import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
@@ -11,6 +10,7 @@ import { loadConfig, resolveConfig } from "../config";
 import { isFarmDeploymentMismatchResponse } from "../deployment";
 import { createServer } from "../server/create-server";
 import { getAvailablePort } from "./dev-server-port";
+import { startProductionServer } from "./production-server";
 
 // Deployment skew protection (docs: Deployment, rolling deployment safety). A document names its
 // deployment in an inline script, the x-farm-deployment-id header, and an HttpOnly deployment
@@ -44,11 +44,13 @@ export default defineConfig({
   deploymentId: "release-2",
   basePath: "/console",
   routeRules: { "/swr/**": { swr: 60 } },
+  docs: { enabled: true, entry: "/docs", contentDir: "docs", adapter: false },
   headers: () => [
     { source: "/shared", headers: [{ key: "cache-control", value: "public, s-maxage=600" }] },
   ],
 });
 `,
+  "docs/guide.md": "---\ntitle: Guide\n---\n# Guide\n",
   "src/app/layout.tsx":
     "export default function Layout({ children }) { return <html><body>{children}</body></html>; }",
   "src/app/page.tsx": `export const dynamic = "force-dynamic";
@@ -248,6 +250,61 @@ async function expectSharedCachePagesKeepCaching(origin: string): Promise<void> 
   expect(prerendered.headers.getSetCookie()).toEqual([]);
 }
 
+/**
+ * A docs engine page and the not-found page are page documents too: each names its deployment
+ * and follows the cookie and refusal rules of any other page, so a navigation from another
+ * deployment's page to either is detected and a stale page's forms stay refused.
+ */
+async function expectDocsAndNotFoundPagesNameDeployment(
+  origin: string,
+  mode: "development" | "production",
+): Promise<void> {
+  for (const [pathname, status, marker] of [
+    ["/console/docs/guide", 200, "Guide"],
+    ["/console/missing", 404, "404"],
+  ] as const) {
+    // As for other pages, the development server sets the deployment cookie on every GET page,
+    // and production only on one that stays out of shared caches: a visitor's cookie makes the
+    // docs page private, while an anonymous docs page and the not-found page are not.
+    for (const cookie of ["session=abc", undefined]) {
+      const page = await fetch(`${origin}${pathname}`, {
+        headers: { accept: "text/html", ...(cookie ? { cookie } : {}) },
+      });
+      const keptPrivate = /private|no-store/.test(page.headers.get("cache-control") ?? "");
+      expect(
+        {
+          status: page.status,
+          deployment: page.headers.get("x-farm-deployment-id"),
+          cookies: page.headers.getSetCookie().filter((value) => value.startsWith("__farm")),
+        },
+        `${pathname} ${cookie ?? "anonymous"}`,
+      ).toEqual({
+        status,
+        deployment: CURRENT,
+        cookies: mode === "development" || keptPrivate ? [COOKIE] : [],
+      });
+      if (mode === "production" && pathname === "/console/docs/guide" && cookie) {
+        expect(keptPrivate).toBe(true);
+      }
+      expect(await page.text(), pathname).toContain(marker);
+    }
+
+    // A navigation fetch from another deployment's page is refused, and its cookie stays.
+    const staleNavigation = await fetch(`${origin}${pathname}`, {
+      headers: { accept: "text/html", "x-farm-deployment-id": STALE },
+    });
+    expect(
+      {
+        status: staleNavigation.status,
+        mismatch: staleNavigation.headers.get("x-farm-deployment-mismatch"),
+        cookies: staleNavigation.headers.getSetCookie(),
+      },
+      pathname,
+    ).toEqual({ status: 409, mismatch: "1", cookies: [] });
+    await staleNavigation.body?.cancel();
+  }
+}
+
 async function startDevelopment(root: string): Promise<string> {
   const server = await createServer({ root });
   devServers.add(server);
@@ -264,42 +321,22 @@ async function withProduction(root: string, check: (origin: string) => Promise<v
   );
   await build(config, { root, preset: "node-server" });
 
-  const output = path.join(root, ".farm", ".output");
-  const port = await getAvailablePort();
-  const processOutput: string[] = [];
-  const productionServer = spawn(process.execPath, [path.join(output, "server", "index.mjs")], {
-    cwd: path.join(output, "server"),
-    env: { ...process.env, HOST: "127.0.0.1", PORT: String(port) },
-    stdio: ["ignore", "pipe", "pipe"],
-  });
-  productionServer.stdout.on("data", (chunk) => processOutput.push(String(chunk)));
-  productionServer.stderr.on("data", (chunk) => processOutput.push(String(chunk)));
-  const exited = new Promise<void>((resolve) => productionServer.once("exit", () => resolve()));
-
+  const productionServer = await startProductionServer(
+    path.join(root, ".farm", ".output", "server"),
+  );
   try {
-    const origin = `http://127.0.0.1:${port}`;
-    let ready = false;
-    for (let attempt = 0; attempt < 200 && !ready; attempt++) {
-      if (productionServer.exitCode !== null) break;
-      ready = await fetch(`${origin}/_farm/health/ready`).then(
-        (response) => response.ok,
-        () => false,
-      );
-      if (!ready) await new Promise((resolve) => setTimeout(resolve, 50));
-    }
-    expect(ready, processOutput.join("")).toBe(true);
-
-    await check(origin);
+    await check(productionServer.origin);
   } finally {
-    if (productionServer.exitCode === null) productionServer.kill();
-    await exited;
+    await productionServer.stop();
   }
 }
 
 describe("deployment skew protection", () => {
   it("in development", async () => {
     const root = await createApp("farm-dev-deployment-skew-");
-    await expectDeploymentSkewContract(await startDevelopment(root));
+    const origin = await startDevelopment(root);
+    await expectDeploymentSkewContract(origin);
+    await expectDocsAndNotFoundPagesNameDeployment(origin, "development");
   }, 120_000);
 
   it("in a node-server production build", async () => {
@@ -307,6 +344,7 @@ describe("deployment skew protection", () => {
     await withProduction(root, async (origin) => {
       await expectDeploymentSkewContract(origin);
       await expectSharedCachePagesKeepCaching(origin);
+      await expectDocsAndNotFoundPagesNameDeployment(origin, "production");
     });
   }, 240_000);
 });

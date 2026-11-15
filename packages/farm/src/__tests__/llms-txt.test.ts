@@ -246,6 +246,53 @@ describe("collectFarmLlmsTxtPages", () => {
     ).toBe("https://acme.test/");
   });
 
+  it("links pages in the default locale's URL, which answers without a redirect", () => {
+    const pages = [{ pattern: "/" }, { pattern: "/about" }, { pattern: "/team" }];
+    const i18n = (routing: "prefix-always" | "prefix-except-default" | "none", enabled = true) => ({
+      enabled,
+      basePath: "/app",
+      locales: ["en", "fr"],
+      defaultLocale: "en",
+      routing,
+    });
+    const urls = (options: Partial<Parameters<typeof collectFarmLlmsTxtPages>[1]>) =>
+      collectFarmLlmsTxtPages(pages, {
+        origin,
+        basePath: "/app",
+        markdown: resolveMarkdownConfig({ expose: ["/", "/about"] }),
+        ...options,
+      }).map((page) => page.url);
+
+    // Every locale is prefixed: '/app/about.md' answers with a 307 to '/app/en/about.md'.
+    expect(urls({ i18n: i18n("prefix-always") })).toEqual([
+      "https://acme.test/app/en/index.md",
+      "https://acme.test/app/en/about.md",
+      "https://acme.test/app/en/team",
+    ]);
+    expect(urls({ i18n: i18n("prefix-always"), trailingSlash: true })).toEqual([
+      "https://acme.test/app/en/index.md",
+      "https://acme.test/app/en/about.md",
+      "https://acme.test/app/en/team/",
+    ]);
+    // The production server passes no basePath here; the i18n config carries it.
+    expect(urls({ basePath: undefined, i18n: i18n("prefix-always") })).toEqual(
+      urls({ i18n: i18n("prefix-always") }),
+    );
+    // The default locale is unprefixed, routing "none" adds no prefix, and i18n may be off.
+    for (const config of [
+      i18n("prefix-except-default"),
+      i18n("none"),
+      i18n("prefix-always", false),
+    ]) {
+      expect(urls({ i18n: config })).toEqual(urls({}));
+    }
+    expect(urls({})).toEqual([
+      "https://acme.test/app/index.md",
+      "https://acme.test/app/about.md",
+      "https://acme.test/app/team",
+    ]);
+  });
+
   it("matches optional catch-all patterns at their base and below", () => {
     const pages = [{ pattern: "/docs" }, { pattern: "/docs/install" }, { pattern: "/pricing" }];
     const paths = (options: { include?: string[]; exclude?: string[] }) =>

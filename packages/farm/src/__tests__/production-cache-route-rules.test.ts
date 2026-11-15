@@ -1,6 +1,5 @@
 // @vitest-environment node
 
-import { spawn, type ChildProcess } from "node:child_process";
 import fs from "node:fs/promises";
 import http from "node:http";
 import path from "node:path";
@@ -8,15 +7,13 @@ import { fileURLToPath } from "node:url";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { build } from "../build";
 import { resolveConfig } from "../config";
-import { getAvailablePort } from "./dev-server-port";
+import { startProductionServer, type ProductionServer } from "./production-server";
 
 const packageRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
 
 let root: string | undefined;
-let server: ChildProcess | undefined;
-let serverExited: Promise<unknown> | undefined;
+let server: ProductionServer | undefined;
 let port = 0;
-const output: string[] = [];
 
 interface RawResponse {
   status: number;
@@ -67,6 +64,19 @@ beforeAll(async () => {
     `export const revalidate = 60;
 export default function News() { return <main data-at={String(Date.now() + Math.random())}>news</main>; }`,
   );
+  // A page with no route config of its own, and one that reads a cookie.
+  await write(
+    "src/app/docs/page.tsx",
+    "export default function Docs() { return <main data-at={String(Date.now() + Math.random())}>docs</main>; }",
+  );
+  await write(
+    "src/app/account/page.tsx",
+    `import { cookies } from "@farm.js/core/headers";
+export default function Account() {
+  const user = cookies().get("user")?.value ?? "anonymous";
+  return <main data-at={String(Date.now() + Math.random())}>account-{user}</main>;
+}`,
+  );
   const api = `export function GET() {
   return Response.json({ at: Date.now() + Math.random(), pad: "x".repeat(4000) });
 }`;
@@ -79,39 +89,24 @@ export default function News() { return <main data-at={String(Date.now() + Math.
       telemetry: false,
       images: { provider: "none" },
       deploy: { target: "node-server" },
-      routeRules: { "/news": { swr: 60 }, "/api/feed": { swr: 60 } },
+      routeRules: {
+        "/news": { swr: 60 },
+        "/docs": { swr: 60 },
+        "/account": { swr: 60 },
+        "/api/feed": { swr: 60 },
+      },
     },
     "production",
   );
   await build(config, { root, preset: "node-server" });
 
-  const serverDirectory = path.join(root, ".farm", ".output", "server");
-  port = await getAvailablePort();
-  server = spawn(process.execPath, [path.join(serverDirectory, "index.mjs")], {
-    cwd: serverDirectory,
-    env: { ...process.env, HOST: "127.0.0.1", PORT: String(port) },
-    stdio: ["ignore", "pipe", "pipe"],
-  });
-  serverExited = new Promise((resolve) => server!.once("exit", resolve));
-  server.stdout?.on("data", (chunk) => output.push(String(chunk)));
-  server.stderr?.on("data", (chunk) => output.push(String(chunk)));
-  for (let attempt = 0; attempt < 120; attempt++) {
-    try {
-      await request("/api/live");
-      return;
-    } catch {
-      await new Promise((resolve) => setTimeout(resolve, 50));
-    }
-  }
-  throw new Error(`Production server did not start\n${output.join("")}`);
+  server = await startProductionServer(path.join(root, ".farm", ".output", "server"));
+  port = server.port;
 }, 180_000);
 
 afterAll(async () => {
   // Windows refuses to remove the output while the server still holds it as its cwd.
-  if (server && server.exitCode === null && server.signalCode === null) {
-    server.kill();
-    await serverExited;
-  }
+  await server?.stop();
   if (root) await fs.rm(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
 });
 
@@ -120,12 +115,37 @@ describe("swr route rules on a Node server", () => {
     const browser = { accept: "text/html", "accept-encoding": "gzip, br" };
     const first = await request("/news", browser);
     const second = await request("/news", browser);
-    expect(first.status, output.join("")).toBe(200);
+    expect(first.status, server?.output()).toBe(200);
     expect(second.headers["x-cache"]).toBe("HIT");
     expect(renderedAt(second.body)).toBe(renderedAt(first.body));
     // The stored body is sent as it is: never compressed bytes without a Content-Encoding.
     expect(second.headers["content-encoding"]).toBeUndefined();
     expect(second.body).toContain("news");
+  });
+
+  it("stores a page that has no route config and reads nothing of the request", async () => {
+    const first = await request("/docs", { accept: "text/html" });
+    const second = await request("/docs", { accept: "text/html" });
+    expect(first.status, server?.output()).toBe(200);
+    expect(first.headers["set-cookie"]).toBeUndefined();
+    expect(second.headers["x-cache"]).toBe("HIT");
+    expect(renderedAt(second.body)).toBe(renderedAt(first.body));
+    expect(second.headers["cache-control"]).toContain("s-maxage=60");
+    expect(second.headers["cache-control"]).not.toMatch(/private|no-store/);
+  });
+
+  it("keeps a page that reads cookies private and out of the rule's cache", async () => {
+    const browser = { accept: "text/html", cookie: "user=alice" };
+    const first = await request("/account", browser);
+    const second = await request("/account", browser);
+    const anonymous = await request("/account", { accept: "text/html" });
+    for (const response of [first, second, anonymous]) {
+      expect(response.status, server?.output()).toBe(200);
+      expect(response.headers["x-cache"]).not.toBe("HIT");
+      // Farm's private policy reaches the client, not the rule's public one.
+      expect(response.headers["cache-control"]).toBe("private, no-store");
+    }
+    expect(renderedAt(second.body)).not.toBe(renderedAt(first.body));
   });
 
   it("keys the stored page on Accept, so a Markdown request gets Markdown", async () => {

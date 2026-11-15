@@ -35,9 +35,12 @@ const READY_TIMEOUT_MS = 30_000;
  * other server and the test reads its responses as the app's.
  *
  * Readiness is therefore the server's own line for the exact port, which it prints only
- * after its own listen succeeded: the production entry's `Listening on`, or the `Local:`
- * banner of a script that starts `@farm.js/core/server` itself. If the child instead exits
- * because the port is in use, it lost the port, and the helper starts it again on a new one.
+ * after its own listen succeeded: the production entry's `Listening on`, the `Listening on:`
+ * banner of srvx (which serves Nitro's own presets, such as an RSC build), or the `Local:`
+ * banner of a script that starts `@farm.js/core/server` itself. srvx prints its banner only
+ * while `TEST` is unset, and vitest sets it, so a test of such a server passes `TEST: ""`.
+ * If the child instead exits because the port is in use, it lost the port, and the helper
+ * starts it again on a new one.
  */
 export async function startProductionServer(
   serverDirectory: string,
@@ -74,7 +77,7 @@ function spawnOnPort(
   // Only this child's own line counts: `:30001` must not match a wait for `:3000`. The
   // `Local:` banner is colored, so escape codes can sit between the label and the URL.
   const ready = new RegExp(
-    `(?:Listening on https?://127\\.0\\.0\\.1|Local:.*https?://localhost):${port}(?!\\d)`,
+    `(?:Listening on:? https?://127\\.0\\.0\\.1|Local:.*https?://localhost):${port}(?!\\d)`,
   );
 
   return new Promise((resolve) => {

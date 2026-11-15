@@ -101,6 +101,11 @@ export function collectFarmClientModulePreloads(
  * Client build plugin that writes the manifest next to the build output (not into
  * the public client directory). It always writes, so a rebuild replaces an earlier
  * manifest.
+ *
+ * It runs after Vite's CSS plugin, whose `generateBundle` deletes the chunks that hold
+ * only stylesheets (their CSS goes into `farm-client.css`) and drops them from every
+ * chunk's `imports`. Read before that, the manifest listed those chunks, and documents
+ * preloaded files the build never wrote.
  */
 export function createFarmClientModulePreloadPlugin(options: {
   root: string;
@@ -109,6 +114,7 @@ export function createFarmClientModulePreloadPlugin(options: {
 }) {
   return {
     name: "farm-client-module-preloads",
+    enforce: "post" as const,
     async generateBundle(_output: unknown, bundle: Record<string, { type: string }>) {
       await fs.mkdir(options.buildDir, { recursive: true });
       await fs.writeFile(

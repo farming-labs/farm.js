@@ -1026,6 +1026,35 @@ export default function Layout() { return <><Counter />{labels.join(",")}</>; }
     ]);
   });
 
+  it("renders an async page through the server tree when an island defers its hydration", () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), "farm-client-async-deferred-"));
+    tempDirs.push(root);
+    const appDir = path.join(root, "src", "app");
+    fs.mkdirSync(appDir, { recursive: true });
+    // Both read the layout's provider; one waits until it is visible.
+    fs.writeFileSync(
+      path.join(appDir, "badge.tsx"),
+      '"use client";\nimport { usePlatform } from "./platform";\nexport function Badge() { return <span>{usePlatform()}</span>; }\n',
+    );
+    fs.writeFileSync(
+      path.join(appDir, "chart.tsx"),
+      '"use client";\nimport { usePlatform } from "./platform";\nexport const island = "visible";\nexport function Chart() { return <figure>{usePlatform()}</figure>; }\n',
+    );
+    const page = path.join(appDir, "page.tsx");
+    fs.writeFileSync(
+      page,
+      'import { Badge } from "./badge";\nimport { Chart } from "./chart";\nexport default async function Page() { return <><Badge /><Chart /></>; }\n',
+    );
+
+    const plan = getClientModuleHydrationPlan(page, root, "off", { asyncOwnerIslands: true });
+    expect(plan.isolatedBoundaries.map((boundary) => boundary.islandStrategy)).toEqual([
+      "load",
+      "visible",
+    ]);
+    // As roots of their own, both hydrated outside the layout's provider and threw.
+    expect(usesFarmServerTree(plan)).toBe(true);
+  });
+
   it("keeps an async page's client boundaries that receive React elements", () => {
     const root = fs.mkdtempSync(path.join(os.tmpdir(), "farm-client-async-elements-"));
     tempDirs.push(root);

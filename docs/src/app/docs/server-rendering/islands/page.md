@@ -67,7 +67,9 @@ lets the browser give `useId` the ids in the HTML. The full contract is islx's
   islands all wait loads a 1.7 KB boot script instead of the runtime.
 - **Layouts.** A layout that needs one React root (a client provider around the pages) renders as
   an islx server tree: the browser rebuilds it from the HTML, so its module stays on the server,
-  and a navigation keeps the provider's state.
+  and a navigation keeps the provider's state. The pages below it, Markdown pages included, join
+  that tree, so every client component on them reads the provider, one that declares a deferred
+  `island` strategy too: it hydrates with the layout instead of waiting.
 - **Actions.** `"use server"` functions compile to islx action references. A form posts its action
   without a page load, or without JavaScript, and the page refreshes with its islands' state kept,
   including islands in Suspense content that streams in after the page.
@@ -76,8 +78,9 @@ lets the browser give `useId` the ids in the HTML. The full contract is islx's
   call returns. Its arguments and result can refer to themselves, through a promise or stream in
   the result too. A value the server cannot carry (an element, a plain function, a class instance)
   can still be an argument: the action can only return it, and the browser gets the same object
-  back. An action bound with `.bind` in the browser can be passed to another action, and an
-  action can return one that captured values.
+  back. An action bound with `.bind` in the browser can be passed to another action, which RSC
+  cannot do (React's browser client sends it as a temporary reference), and an action can return
+  one that captured values.
 - **Navigation.** A navigation fetches the page's HTML, streamed, with only the layouts the
   browser does not keep, and hydrates the islands it brings.
 
@@ -135,7 +138,7 @@ parts:
 | A package client component in a server component (`next-themes`, `sonner`'s `Toaster`, Radix parts, jotai's `Provider`, `SWRConfig`)            | yes   | Farm writes a client reference module for each export (`.farm/client-references/`) and server code imports that, so the export renders as an island, as RSC renders a client reference.                                |
 | A workspace package's server component in a monorepo, rendering client components of its own dependencies                                       | yes   | Its server code is app code, as the bundler compiles it. A client reference resolves a package as the importer does, so a dependency the app does not have, or has at another version, still loads.                    |
 | A server module that re-exports package client components (`export { Toaster } from "sonner"`)                                                  | yes   | The re-export points at the same client references, so modules that import it render those components as islands.                                                                                                      |
-| Client components in workspace sources outside the app (a monorepo's `packages/ui/src`, through tsconfig `paths` or a relative import)          | yes   | They render as islands, like the app's own client components.                                                                                                                                                          |
+| Client components in workspace sources outside the app (a monorepo's `packages/ui/src`, through tsconfig `paths` or a relative import)          | yes   | They render as islands in `farm dev` and builds, like the app's own client components. The package needs no dependency on Farm.                                                                                        |
 | A package provider around server content                                                                                                        | yes   | Client components inside it are its descendants and read its context.                                                                                                                                                  |
 | A package provider in a layout                                                                                                                  | yes   | The layout renders as a server tree; the provider keeps its state across navigations.                                                                                                                                  |
 | `useFormStatus` in a client component inside a server `<form>`                                                                                  | yes   | Farm points the import at islx's `useFormStatus`, which reports the server form's submit.                                                                                                                              |

@@ -43,16 +43,47 @@ and `CF_PAGES`. Detection is enabled only by the values `1` or `true` (case-inse
 empty, `0`, `false`, and other values do not select a platform. An explicit target, preset, or CLI
 override remains authoritative.
 
-### Immutable fingerprinted assets on Vercel
+### Client asset caching
 
-Farm's Vercel Build Output automatically serves content-hashed files under `assets/` and `chunks/`
-with `Cache-Control: public, max-age=31536000, immutable`. This covers fingerprinted JavaScript, CSS,
-fonts, and images, including nested asset directories and applications with a `basePath`.
+A production build serves Farm's content-hashed client files with
+`Cache-Control: public, max-age=31536000, immutable` on every first-class target (`node`,
+`vercel`, `netlify`, and `cloudflare`), on Bun, and on other `deploy.preset` presets wherever Nitro
+maps public assets and route rules into the preset's output. A hashed file's name
+changes whenever its bytes do, so a browser keeps it for a year and never asks for it again, on a
+repeat visit or on a client navigation that loads a new chunk. The files are:
 
-The rule intentionally excludes HTML, unhashed public files, and stable entry URLs such as
-`/farm-client.js` and `/farm-client.css`. Those URLs can change between deployments and must remain
-revalidatable. The immutable header route runs before Vercel's filesystem handler, so matching files
-are still served directly from the CDN and never enter the Farm server function.
+- every chunk under `/chunks/` and every asset under `/assets/` whose name carries Farm's `-h<hash>`
+  fingerprint, such as `/chunks/page-h1a2b3c4d.js`, `/assets/farm-client-h1a2b3c4d.css`, and the
+  self-hosted fonts in `/assets/fonts/`
+- the hashed client entries at the root: `/farm-client-h<hash>.js`, islands mode's
+  `/farm-client-boot-h<hash>.js`, and the mobile client's `/farm-mobile-client-h<hash>.js`
+
+Everything else keeps revalidating with the platform's default: files from `public/` such as
+`/favicon.ico` and `/robots.txt` (including any under `public/assets/`), the stable
+`/farm-client.js` and `/farm-client.css` URLs, HTML, and every page and API response. Hashed client
+files are served at the origin root, so an app with a `basePath` such as `/console` still loads
+them from `/chunks/...`; the policy applies there too.
+
+Farm sets the policy through Nitro. A directory that holds only hashed files, usually `chunks/` and
+`assets/`, becomes a Nitro `publicAssets` directory with a one-year `maxAge`: Nitro sends the header
+from Node and Bun servers, writes it to `_headers` on Netlify and Cloudflare, and serves the
+directory from the CDN without the server function, so a chunk an old deployment referenced is a
+`404` that no cache keeps. A directory shared with a file from `public/` or with an app route, such
+as a page at `/assets/[id]`, gets a header rule for each hashed file instead and stays shared with
+the app. On Vercel, a header route matching the same filenames runs before the filesystem handler.
+
+A `routeRules` entry of the app that sets `Cache-Control` for a hashed file wins over this policy,
+whether it names the file's directory (`"/assets/**"`) or every path (`"/**"`):
+
+```ts
+export default defineConfig({
+  routeRules: {
+    "/assets/**": { headers: { "cache-control": "public, max-age=600" } },
+  },
+});
+```
+
+`farm dev` is unchanged: Vite serves modules with its own caching.
 
 ### Guarded static pages on Vercel
 
@@ -136,7 +167,7 @@ During a rolling deployment, an open page can belong to release A while its next
 
 Mutation requests are rejected before their action body is decoded or the handler runs. This prevents a stale action from being replayed against a new release and accidentally creating duplicate writes. The user can refresh and deliberately submit again.
 
-Page responses carry the server's ID in the `x-farm-deployment-id` header, and the cookie's path is the app's `basePath`. A page request whose header, or for a form post whose cookie, names another deployment gets the `409` after app middleware and before the page renders or an action runs. Outside `@farm.js/plugin/rsc`, only page requests are checked; API routes answer as usual. A document load reads only the header, so a stale cookie never refuses opening the app in a new tab. Farm sets the cookie on `GET` page responses, never on a refused request, so the stale page's forms stay refused. In a production build, only a page response that stays out of shared caches (`private` or `no-store`, with no CDN cache header) sets it: a prerendered, ISR, PPR, or other publicly cached page is sent without the cookie, because CDNs do not cache a response that sets one. Such a page still embeds its deployment ID, so navigations from it are checked.
+Page responses carry the server's ID in the `x-farm-deployment-id` header, and the cookie's path is the app's `basePath`. Docs engine pages and the not-found page count as page responses here, so a navigation from an old page to either is detected too. A page request whose header, or for a form post whose cookie, names another deployment gets the `409` after app middleware and before the page renders or an action runs. Outside `@farm.js/plugin/rsc`, only page requests are checked; API routes answer as usual. A document load reads only the header, so a stale cookie never refuses opening the app in a new tab. Farm sets the cookie on `GET` page responses, never on a refused request, so the stale page's forms stay refused. In a production build, only a page response that stays out of shared caches (`private` or `no-store`, with no CDN cache header) sets it: a prerendered, ISR, PPR, or other publicly cached page is sent without the cookie, because CDNs do not cache a response that sets one. Such a page still embeds its deployment ID, so navigations from it are checked.
 
 Farm resolves the ID from explicit config, `FARM_DEPLOYMENT_ID`, `VERCEL_GIT_COMMIT_SHA`, or `CF_PAGES_COMMIT_SHA`. Otherwise, production uses `generateBuildId` and development uses `"development"`.
 

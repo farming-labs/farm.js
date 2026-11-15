@@ -1,10 +1,9 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
-  createFarmDeploymentCookie,
   createFarmDeploymentMismatchResponse,
   getFarmDeploymentMismatch,
 } from "@farm.js/core/deployment";
-import { _withFarmResponseHeaders } from "@farm.js/core/internal/production-runtime";
+import { _withFarmDeploymentCookie } from "@farm.js/core/internal/production-runtime";
 import type { EntryContext } from "../types.js";
 import { generateRscEntry } from "./rsc.js";
 
@@ -35,15 +34,14 @@ function createHandler(respond: (request: Request) => Response) {
   const entry = generateRscEntry(context);
   return new Function(
     "farmDeploymentId",
-    "createFarmDeploymentCookie",
     "getFarmDeploymentMismatch",
     "createFarmDeploymentMismatchResponse",
-    "_withFarmResponseHeaders",
+    "_withFarmDeploymentCookie",
     "isFarmAPIPathname",
     "farmApiBasePath",
     "collectFarmStaticPages",
     "respond",
-    `${slice(entry, "// Directives a CDN reads in place of Cache-Control", "// Auto-discover all route modules")}
+    `${slice(entry, "function withFarmDeploymentCookie(", "// Auto-discover all route modules")}
     ${slice(entry, "// Client navigation addresses a page's RSC payload", "async function handleFarmRequestWithRuntime(")}
     async function handleFarmRequestWithRuntime(request) {
       // The page pipeline refuses a request naming another deployment before anything renders.
@@ -58,10 +56,9 @@ function createHandler(respond: (request: Request) => Response) {
     return handler;`,
   )(
     "release-2",
-    createFarmDeploymentCookie,
     getFarmDeploymentMismatch,
     createFarmDeploymentMismatchResponse,
-    _withFarmResponseHeaders,
+    _withFarmDeploymentCookie,
     () => false,
     "/api",
     async () => [],

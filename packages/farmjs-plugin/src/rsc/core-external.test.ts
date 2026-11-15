@@ -23,7 +23,7 @@ import { resolveFarmAPIRequestURL } from "@farm.js/core/api";
 import { resolveRscBuildOutputPath } from "./build-paths.js";
 import farmRsc, { defineConfig } from "./index.js";
 import { buildRscNitro } from "./nitro-build.js";
-import { linkRscFixtureDependencies } from "./test-fixture-dependencies.js";
+import { linkRscFixtureDependencies, METADATA_TEST_PNG } from "./test-fixture-dependencies.js";
 
 const delay = (milliseconds: number) =>
   new Promise<void>((resolve) => setTimeout(resolve, milliseconds));
@@ -646,6 +646,32 @@ export default function sitemap({ path }) {
             "llms-full.ts",
             `export default function llmsFull({ defaults }) { return { ...defaults, title: "Custom full" }; }`,
           );
+          // manifest.ts, a static opengraph-image with its alt text, and a generated image in a
+          // dynamic segment, which renders with the app's @vercel/og.
+          writeRoute(
+            "manifest.ts",
+            `export const revalidate = 120;
+export default function manifest() { return { name: "Route File Shop", display: "standalone" }; }`,
+          );
+          writeFileSync(path.join(srcDir, "opengraph-image.png"), METADATA_TEST_PNG);
+          writeRoute("opengraph-image.alt.txt", "Route File Shop preview");
+          writeRoute(
+            "products/[id]/page.tsx",
+            `export default async function Page({ params }) { return <main>Product {params.id}</main>; }`,
+          );
+          writeRoute(
+            "products/[id]/opengraph-image.tsx",
+            `export const alt = "Product card";
+export default async function Image({ params }) {
+  return <div style={{ display: "flex", fontSize: 64 }}>Product {params.id}</div>;
+}`,
+          );
+          // A prerendered page carries the same head tags.
+          writeRoute(
+            "prerendered/page.tsx",
+            `export const dynamic = "force-static";
+export default function Page() { return <main>Prerendered route file page</main>; }`,
+          );
         }
         if (name === "base-path") {
           // basePath "/console": a page at its route path, one nested under app/console/ as RSC
@@ -667,6 +693,40 @@ export default function sitemap({ path }) {
             "links/page.tsx",
             `import { Link } from "@farm.js/core/client";
 export default function Page() { return <Link href="/about">About link</Link>; }`,
+          );
+          // Revalidating pages: one a shared cache may store, one behind a guard, one behind
+          // middleware that opts back into shared caching and sets its own Cache-Control, and one
+          // whose layout reads the request.
+          writeRoute(
+            "isr/page.tsx",
+            `export const revalidate = 300;
+export default async function Page() { return <main>Revalidating page</main>; }`,
+          );
+          writeRoute(
+            "isr/guarded/page.tsx",
+            `export const revalidate = 300;
+export default function Page() { return <main>Guarded revalidating page</main>; }`,
+          );
+          writeRoute("isr/guarded/middleware.ts", `export function middleware() {}`);
+          writeRoute(
+            "isr/public/page.tsx",
+            `export const revalidate = 300;
+export default function Page() { return <main>Public revalidating page</main>; }`,
+          );
+          writeRoute(
+            "isr/public/middleware.ts",
+            `export const config = { cache: "public" };
+export function middleware(request, context) { context.headers.set("cache-control", "public, max-age=5"); }`,
+          );
+          writeRoute(
+            "isr/layout-reads/layout.tsx",
+            `import { headers } from "@farm.js/core";
+export default async function Layout({ children }) { return <section data-agent={headers().get("user-agent") ? "1" : "0"}>{children}</section>; }`,
+          );
+          writeRoute(
+            "isr/layout-reads/page.tsx",
+            `export const revalidate = 300;
+export default function Page() { return <main>Layout reads the request</main>; }`,
           );
         }
         if (name === "i18n") {
@@ -738,10 +798,13 @@ export function GET() { return Response.json({ locale: getLocale(), source: getL
           "react-server-dom-webpack",
           "rsc-html-stream",
           "vite",
+          // Generated metadata images render with @vercel/og, which the app installs.
+          ...(name === "metadata-routes" ? ["@vercel/og"] : []),
         ]) {
           const linkPath = path.join(fixtureModules, packageName);
           const packagePath = [
             path.join(packageRoot, "node_modules", packageName),
+            path.resolve(packageRoot, "../farm/node_modules", packageName),
             path.resolve(packageRoot, "../../examples/rsc-demo/node_modules", packageName),
           ].find((candidate) => existsSync(candidate));
           if (!packagePath) throw new Error(`Missing fixture dependency: ${packageName}`);
@@ -967,6 +1030,21 @@ export const echo = createEndpoint("/api/echo", { method: "POST" }, async ({ bod
             "Static fr",
           );
           expect(existsSync(path.join(publicDir, "static", "index.html"))).toBe(false);
+        }
+
+        if (name === "metadata-routes") {
+          // A prerendered page names the manifest and the nearest image in its head too.
+          const prerenderedHtml = readFileSync(
+            path.join(outputDir, "public", "console", "prerendered", "index.html"),
+            "utf8",
+          );
+          expect(prerenderedHtml).toContain("Prerendered route file page");
+          expect(prerenderedHtml).toContain(
+            '<link rel="manifest" href="/console/manifest.webmanifest">',
+          );
+          expect(prerenderedHtml).toMatch(
+            /<meta property="og:image" content="\/console\/opengraph-image\?v=[0-9a-f]{16}">/,
+          );
         }
 
         if (name === "config-routes") {
@@ -1327,6 +1405,52 @@ export const echo = createEndpoint("/api/echo", { method: "POST" }, async ({ bod
               `<link rel="alternate" href="${mirror}" type="text/markdown">`,
             );
           }
+
+          // A revalidating page gets core's shared Cache-Control on its HTML, its Flight payload
+          // and its '.rsc' payload, which vary by Accept and never set the deployment cookie. A
+          // browser holding only that cookie still gets the shared response.
+          const SHARED = "public, s-maxage=300, stale-while-revalidate=300";
+          const isrRequest = (pathname: string, headers: Record<string, string> = {}) =>
+            fetch(origin + pathname, { headers, signal: AbortSignal.timeout(10_000) });
+          const home = await isrRequest("/console");
+          const deploymentId = home.headers.get("x-farm-deployment-id");
+          expect(deploymentId).toBeTruthy();
+          for (const [pathname, headers] of [
+            ["/console/isr", { accept: "text/html" }],
+            ["/console/isr", { accept: "text/x-component" }],
+            ["/console/isr.rsc", { accept: "*/*" }],
+            ["/console/isr", { accept: "text/html", cookie: `__farm_deployment=${deploymentId}` }],
+            // A cache: "public" middleware's own Cache-Control yields to the page's, as in core.
+            ["/console/isr/public", { accept: "text/html" }],
+            ["/console/isr/public.rsc", { accept: "*/*" }],
+          ] as const) {
+            const response = await isrRequest(pathname, headers);
+            const label = `${pathname} ${JSON.stringify(headers)}`;
+            expect(response.status, `${label} ${logs}`).toBe(200);
+            expect(await response.text(), label).toContain("evalidating page");
+            expect(response.headers.get("cache-control"), label).toBe(SHARED);
+            expect(response.headers.get("vary")?.toLowerCase(), label).toContain("accept");
+            expect(response.headers.get("x-farm-deployment-id"), label).toBe(deploymentId);
+            expect(response.headers.getSetCookie(), label).toEqual([]);
+          }
+          // One visitor's render stays private, as core keeps it: a session cookie, credentials,
+          // middleware that let the request through, and a layout that read the request.
+          for (const [pathname, headers] of [
+            ["/console/isr", { accept: "text/html", cookie: "session=abc" }],
+            ["/console/isr", { accept: "text/x-component", authorization: "Bearer token" }],
+            ["/console/isr/guarded", { accept: "text/html" }],
+            ["/console/isr/guarded.rsc", { accept: "*/*" }],
+            ["/console/isr/layout-reads", { accept: "text/html" }],
+            ["/console/isr/layout-reads.rsc", { accept: "*/*" }],
+          ] as const) {
+            const response = await isrRequest(pathname, headers);
+            const label = `${pathname} ${JSON.stringify(headers)}`;
+            expect(response.status, `${label} ${logs}`).toBe(200);
+            await response.text();
+            expect(response.headers.get("cache-control"), label).toBe("private, no-store");
+          }
+          // Revalidating pages render on each request: none is prerendered.
+          expect(existsSync(path.join(isolatedOutput, "public", "console", "isr.rsc"))).toBe(false);
         }
         if (name === "trailing-slash") {
           for (const [pathname, accept, marker] of [
@@ -1503,6 +1627,46 @@ export const echo = createEndpoint("/api/echo", { method: "POST" }, async ({ bod
           const full = await (await get("/console/llms-full.txt")).text();
           expect(full).toMatch(/^# Custom full\n/);
           expect(full).toContain("About from a route file app");
+          // manifest.ts answers at manifest.webmanifest, with its revalidate.
+          const manifest = await get("/console/manifest.webmanifest");
+          expect(manifest.status, logs).toBe(200);
+          expect(manifest.headers.get("content-type")).toBe(
+            "application/manifest+json; charset=utf-8",
+          );
+          expect(manifest.headers.get("cache-control")).toContain("s-maxage=120");
+          expect(await manifest.json()).toEqual({ name: "Route File Shop", display: "standalone" });
+          // The head names the manifest and the nearest image, below the basePath.
+          const aboutHtml = await (await get("/console/about")).text();
+          expect(aboutHtml).toContain('<link rel="manifest" href="/console/manifest.webmanifest">');
+          const ogImage = aboutHtml.match(/<meta property="og:image" content="([^"]+)">/)?.[1];
+          expect(ogImage, aboutHtml).toMatch(/^\/console\/opengraph-image\?v=[0-9a-f]{16}$/);
+          expect(aboutHtml).toContain(
+            '<meta property="og:image:alt" content="Route File Shop preview">',
+          );
+          // The static image, inlined by the build, with core's caching.
+          const staticImage = await get(ogImage!);
+          expect(staticImage.status, logs).toBe(200);
+          expect(staticImage.headers.get("content-type")).toBe("image/png");
+          expect(staticImage.headers.get("cache-control")).toBe(
+            "public, max-age=31536000, immutable",
+          );
+          expect(Buffer.from(await staticImage.arrayBuffer())).toEqual(METADATA_TEST_PNG);
+          const unversioned = await get("/console/opengraph-image");
+          expect(unversioned.headers.get("cache-control")).toBe(
+            "public, max-age=0, must-revalidate",
+          );
+          // A dynamic segment's generated image, in the head and rendered as a 1200x630 PNG.
+          const productHtml = await (await get("/console/products/42")).text();
+          expect(productHtml).toContain(
+            '<meta property="og:image" content="/console/products/42/opengraph-image">',
+          );
+          expect(productHtml).toContain('<meta property="og:image:alt" content="Product card">');
+          const generated = await get("/console/products/42/opengraph-image");
+          expect(generated.status, logs).toBe(200);
+          expect(generated.headers.get("content-type")).toBe("image/png");
+          const png = Buffer.from(await generated.arrayBuffer());
+          expect(png.subarray(1, 4).toString()).toBe("PNG");
+          expect([png.readUInt32BE(16), png.readUInt32BE(20)]).toEqual([1200, 630]);
           // Route files are not page documents, so only the page sets the deployment cookie.
           for (const pathname of [
             "/console/sitemap.xml",
@@ -1511,6 +1675,9 @@ export const echo = createEndpoint("/api/echo", { method: "POST" }, async ({ bod
             "/console/robots.txt",
             "/console/llms.txt",
             "/console/llms-full.txt",
+            "/console/manifest.webmanifest",
+            "/console/opengraph-image",
+            "/console/products/42/opengraph-image",
             "/console/about",
           ]) {
             const response = await get(pathname);

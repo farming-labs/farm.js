@@ -9,7 +9,7 @@ import { loadConfig, resolveConfig } from "../config";
 import { resolveFarmI18nConfig } from "../i18n/config";
 import { createFarmVercelEdgeMiddleware } from "../middleware/vercel-edge";
 import { buildFarmVercelRoutes } from "../nitro/vercel-assets";
-import { createFarmVercelEdgeMiddlewareRoute } from "../nitro/vercel-edge-middleware";
+import { createFarmVercelEdgeMiddlewareRoutes } from "../nitro/vercel-edge-middleware";
 
 const packageRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
 
@@ -151,8 +151,8 @@ describe("Vercel edge middleware runtime", () => {
 
 describe("Vercel edge middleware route", () => {
   it("covers each guarded page and the file names its static output answers for", () => {
-    const route = createFarmVercelEdgeMiddlewareRoute(["/docs/guide", "/"], "/");
-    const matches = (pathname: string) => new RegExp(route.src).test(pathname);
+    const [route] = createFarmVercelEdgeMiddlewareRoutes(["/docs/guide", "/"], "/");
+    const matches = (pathname: string) => new RegExp(route!.src).test(pathname);
 
     for (const pathname of [
       "/docs/guide",
@@ -167,30 +167,44 @@ describe("Vercel edge middleware route", () => {
     for (const pathname of ["/docs/guides", "/docs/guide/x", "/docs", "/other"]) {
       expect(matches(pathname), pathname).toBe(false);
     }
-    expect(route).toMatchObject({ middlewarePath: "_farm_middleware", continue: true });
+    expect(route!).toMatchObject({ middlewarePath: "_farm_middleware", continue: true });
   });
 
   it("covers a page under the basePath and at the path its static file is written to", () => {
-    const route = createFarmVercelEdgeMiddlewareRoute(["/docs/guide"], "/console");
-    const matches = (pathname: string) => new RegExp(route.src).test(pathname);
+    const [route] = createFarmVercelEdgeMiddlewareRoutes(["/docs/guide"], "/console");
+    const matches = (pathname: string) => new RegExp(route!.src).test(pathname);
     expect(matches("/console/docs/guide")).toBe(true);
     // Vercel serves the prerendered file at the app path too.
     expect(matches("/docs/guide/index.html")).toBe(true);
     expect(matches("/console/docs/guides")).toBe(false);
-    expect(route.middlewareRawSrc).toEqual(["/docs/guide", "/console/docs/guide"]);
+    expect(route!.middlewareRawSrc).toEqual(["/docs/guide", "/console/docs/guide"]);
+  });
+
+  it("splits many guarded pages into routes Vercel accepts, each page in one", () => {
+    const pages = Array.from({ length: 300 }, (_, i) => `/idea/a-long-guarded-page-name-${i}`);
+    const routes = createFarmVercelEdgeMiddlewareRoutes(pages, "/");
+    expect(routes.length).toBeGreaterThan(1);
+    for (const route of routes) expect(route.src.length).toBeLessThanOrEqual(4096);
+    expect(routes.flatMap((route) => route.middlewareRawSrc)).toEqual(pages);
+    for (const page of pages) {
+      expect(
+        routes.filter((route) => new RegExp(route.src).test(`${page}/`)),
+        page,
+      ).toHaveLength(1);
+    }
   });
 
   it("runs before Vercel serves static files", () => {
-    const middleware = createFarmVercelEdgeMiddlewareRoute(["/docs/guide"]);
+    const [middleware] = createFarmVercelEdgeMiddlewareRoutes(["/docs/guide"]);
     const routes = buildFarmVercelRoutes({
       presetRoutes: [
         { src: "/redirected", status: 307, headers: { Location: "/" } },
         { handle: "filesystem" },
       ],
       runtimeRoutes: [],
-      middlewareRoutes: [middleware],
+      middlewareRoutes: [middleware!],
     });
-    const middlewareIndex = routes.indexOf(middleware);
+    const middlewareIndex = routes.indexOf(middleware!);
     expect(middlewareIndex).toBe(1);
     expect(middlewareIndex).toBeLessThan(
       routes.findIndex((route) => route.handle === "filesystem"),
@@ -300,7 +314,7 @@ describe('runtime: "edge" middleware in a Vercel build', () => {
       // No shared cache keeps the guarded page for the next visitor.
       const guideHeaders = routes.find(
         (route: { src?: string; headers?: Record<string, string> }) =>
-          route.headers && route.src && new RegExp(route.src).test("/docs/guide"),
+          route.headers && route.src && new RegExp(route!.src).test("/docs/guide"),
       )?.headers;
       expect(guideHeaders?.["cache-control"]).toBe("private, no-store");
 

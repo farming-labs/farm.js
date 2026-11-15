@@ -49,6 +49,10 @@ describe("RSC deployment cookie under farm dev", () => {
       "export default function Page() { return <main>Public page</main>; }",
     );
     write(
+      "src/isr/page.tsx",
+      "export const revalidate = 300;\nexport default function Page() { return <main>Revalidating page</main>; }",
+    );
+    write(
       "src/public/middleware.ts",
       `export const config = { cache: "public" };
 export function middleware(request, context) {
@@ -156,6 +160,15 @@ export function middleware(request, context) {
     expect(home.status).toBe(200);
     expect(home.headers.get("cache-control")).toBe("private, no-store");
     expect(home.headers.getSetCookie()).toEqual([]);
+  }, 30_000);
+
+  it("keeps a revalidating page out of shared caches, as core's dev server does", async () => {
+    for (const accept of ["text/html", "text/x-component"]) {
+      const response = await get("/isr", { accept });
+      expect(response.status, accept).toBe(200);
+      expect(await response.text(), accept).toContain("Revalidating page");
+      expect(response.headers.get("cache-control"), accept).toBe("private, no-store");
+    }
   }, 30_000);
 
   it("refuses a request naming another deployment without the cookie", async () => {

@@ -2,6 +2,7 @@ import {
   createFarmDeploymentCookie,
   FARM_DEPLOYMENT_ID_HEADER,
   getFarmDeploymentMismatch,
+  withoutFarmDeploymentCookie,
 } from "../deployment";
 import { _withFarmResponseHeaders } from "../owned-response";
 import type {
@@ -924,6 +925,42 @@ export const CDN_CACHE_CONTROL_HEADERS = [
   "netlify-cdn-cache-control",
   "cloudflare-cdn-cache-control",
 ];
+
+/**
+ * Whether a page request carries what makes its render one visitor's: an `Authorization` header
+ * or a cookie. The deployment cookie names a release, not a visitor, so alone it keeps shared
+ * caching, and so does a lone valid locale cookie (`localeCookie`) when the URL names the locale.
+ *
+ * @internal
+ */
+export function _hasPrivateFarmRequestHeaders(
+  request: Request,
+  localeCookie?: { name: string; locales: readonly string[] },
+): boolean {
+  if (request.headers.get("authorization")) return true;
+  const cookieHeader = withoutFarmDeploymentCookie(request.headers.get("cookie"));
+  if (!cookieHeader) return false;
+  return !(localeCookie && isOnlyFarmLocaleCookie(cookieHeader, localeCookie));
+}
+
+function isOnlyFarmLocaleCookie(
+  cookieHeader: string,
+  localeCookie: { name: string; locales: readonly string[] },
+): boolean {
+  const parts = cookieHeader.split(";");
+  if (parts.length !== 1) return false;
+  const cookie = parts[0].trim();
+  const separator = cookie.indexOf("=");
+  if (separator <= 0) return false;
+  try {
+    return (
+      decodeURIComponent(cookie.slice(0, separator).trim()) === localeCookie.name &&
+      localeCookie.locales.includes(decodeURIComponent(cookie.slice(separator + 1).trim()))
+    );
+  } catch {
+    return false;
+  }
+}
 
 /**
  * Keep a response that middleware let through out of shared caches. A CDN keys its copy by URL

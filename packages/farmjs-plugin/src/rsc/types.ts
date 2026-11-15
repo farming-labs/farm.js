@@ -245,10 +245,18 @@ export interface EntryContext {
   crawlers?: ResolvedFarmAgentCrawlers;
 
   /**
-   * Serve `sitemap.ts`, `robots.ts`, `llms.ts` and `llms-full.ts` route files, as core does: set
-   * when the app has one, and always in development so a new file is picked up.
+   * Serve `sitemap.ts`, `robots.ts`, `manifest.ts`, `llms.ts` and `llms-full.ts` route files, as
+   * core does: set when the app has one, and always in development so a new file is picked up.
    */
   appMetadataRoutes?: boolean;
+
+  /**
+   * Serve `opengraph-image` and `twitter-image` files (static images and generated modules) and
+   * add the nearest one to the page head, as core does. `static` covers image files (`.png`,
+   * `.jpg`, `.jpeg`, `.gif`, `.webp`) and `generated` modules rendered with `@vercel/og`; each is
+   * set when the app has one, and both always in development so a new file is picked up.
+   */
+  metadataImages?: { static: boolean; generated: boolean };
 
   /** Whether debug mode is enabled */
   debug: boolean;

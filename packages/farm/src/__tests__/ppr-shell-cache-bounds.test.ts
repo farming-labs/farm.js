@@ -42,7 +42,12 @@ describe("PPR shell cache bounds", () => {
   it("the renderer's shells never evict the app's process-wide cache entries", async () => {
     const i18n = resolveFarmI18nConfig(undefined, { root: "/test", mode: "production" });
     const config = { root: "/test", srcDir: "src", outDir: "dist", basePath: "/", i18n };
-    const renderer = new ServerRenderer(config as any, {} as any, new FarmI18nRuntime(i18n)) as any;
+    const routeManager = { toRoutePathname: (pathname: string) => pathname };
+    const renderer = new ServerRenderer(
+      config as any,
+      routeManager as any,
+      new FarmI18nRuntime(i18n),
+    ) as any;
     await getFarmDataCache().setAsync("app:user:alice", "cached");
 
     // One more variant than the default 1,024-entry memory limit.

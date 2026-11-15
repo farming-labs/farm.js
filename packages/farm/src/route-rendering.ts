@@ -127,3 +127,20 @@ export function mergeRouteRenderingDirectiveConfig(
     directive: directiveConfig?.directive,
   };
 }
+
+/**
+ * The Cache-Control a shared cache may store for a page rendered with `view`, or null when the
+ * page renders per request. A static or revalidating page (and a PPR shell that may be cached)
+ * gets its `revalidate` as `s-maxage`, 60 seconds without one. Whether one request's render may
+ * use it (credentials, middleware data, request reads) is the server's to decide.
+ */
+export function resolveRouteSharedCacheControl(
+  view: Pick<RouteRenderingConfig, "ssg" | "revalidate" | "dynamic">,
+  pprCanCache = false,
+): string | null {
+  if (view.dynamic === "force-dynamic") return null;
+  if (!view.ssg && !pprCanCache) return null;
+  const revalidate =
+    typeof view.revalidate === "number" && view.revalidate > 0 ? view.revalidate : 60;
+  return `public, s-maxage=${revalidate}, stale-while-revalidate=300`;
+}

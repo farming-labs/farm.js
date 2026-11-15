@@ -65,7 +65,10 @@ export function transformFarmFormActionModule(options: {
   root: string;
   ssr: boolean;
   parse: (source: string) => AstNode;
+  /** The specifier the module imports a Farm runtime module by (see farmPlugin's transform). */
+  runtimeModule?: (specifier: string) => string;
 }): string | null {
+  const runtimeModule = options.runtimeModule ?? ((specifier: string) => specifier);
   // islx compiles both `"use server"` modules and inline `"use server"` functions; the runtime
   // is reached through Farm, so an app needs no dependency of its own.
   const result = transformActions({
@@ -75,8 +78,8 @@ export function transformFarmFormActionModule(options: {
     environment: options.ssr ? "server" : "client",
     parse: options.parse as never,
     runtime: {
-      server: "@farm.js/core/internal/islx-server",
-      client: "@farm.js/core/internal/islx-client",
+      server: runtimeModule("@farm.js/core/internal/islx-server"),
+      client: runtimeModule("@farm.js/core/internal/islx-client"),
     },
   });
   return result ? result.code : null;

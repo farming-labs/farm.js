@@ -10,6 +10,7 @@ import {
   isFarmPageNoIndex,
   renderFarmLlmsFullTxt,
   resolveFarmAgentOrigin,
+  resolveFarmI18nConfig,
   resolveFarmLlmsTxtConfig,
   stripFarmBasePath,
   stripFarmLocaleFromPathname,
@@ -51,6 +52,7 @@ function createLlmsHandler(
     layouts?: Record<string, Array<Record<string, unknown>>>;
     markdown?: EntryContext["markdown"];
     trailingSlash?: boolean;
+    i18n?: EntryContext["i18n"];
   } = {},
 ) {
   const config = resolveFarmLlmsTxtConfig(llmsTxt);
@@ -62,6 +64,7 @@ function createLlmsHandler(
     markdown,
     llmsTxt: config,
     trailingSlash: options.trailingSlash,
+    i18n: options.i18n,
   });
   const start = entry.indexOf("function createFarmLlmsTxtContext(");
   const end = entry.indexOf("/**\n * Serves a page's Markdown mirror", start);
@@ -385,6 +388,46 @@ describe("RSC llms.txt under a basePath", () => {
     expect(list).toContain("- [Home](https://shop.test/console/)");
     expect(list).toContain("- [Pricing](https://shop.test/console/pricing/)");
     expect(list).toContain("- [Legacy](https://shop.test/console/legacy.md)");
+  });
+
+  it("links each page in the default locale's URL under i18n and reads it there", async () => {
+    const handlerFor = (routing?: "prefix-always") =>
+      createLlmsHandler(
+        { full: true },
+        {
+          pages: {
+            "/page.tsx": { metadata: { title: "Home" } },
+            "/pricing/page.tsx": { metadata: { title: "Pricing" } },
+          },
+          basePath: "/console",
+          markdown: resolveMarkdownConfig({ expose: ["/"] }),
+          trailingSlash: true,
+          i18n: resolveFarmI18nConfig(
+            { locales: ["en", "fr"], defaultLocale: "en", ...(routing ? { routing } : {}) },
+            { basePath: "/console" },
+          ),
+        },
+      );
+
+    // Every locale is prefixed: '/console/index.md' answers with a 307 to '/console/en/index.md'.
+    const prefixed = handlerFor("prefix-always");
+    const list = await (await prefixed.run(
+      new Request("https://shop.test/console/en/llms.txt"),
+    ))!.text();
+    expect(list).toContain("- [Home](https://shop.test/console/en/index.md)");
+    expect(list).toContain("- [Pricing](https://shop.test/console/en/pricing/)");
+    await (await prefixed.run(new Request("https://shop.test/console/en/llms-full.txt")))!.text();
+    expect(prefixed.pageReads.map((request) => new URL(request.url).pathname)).toContain(
+      "/console/en/index.md",
+    );
+
+    // The default locale is unprefixed.
+    const plain = handlerFor();
+    const plainList = await (await plain.run(
+      new Request("https://shop.test/console/llms.txt"),
+    ))!.text();
+    expect(plainList).toContain("- [Home](https://shop.test/console/index.md)");
+    expect(plainList).toContain("- [Pricing](https://shop.test/console/pricing/)");
   });
 
   it("lists a page nested under app/<basePath>/ once, where it answers", async () => {

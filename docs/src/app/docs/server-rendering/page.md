@@ -114,6 +114,24 @@ export default function AboutPage() {
 }
 ```
 
+A `page.md` or `page.mdx` page opts in the same way, with an ESM export at the top level of its
+source. Farm reads the literal value without evaluating the page, so write a string, number, or
+boolean; an export inside a fenced code block is part of the content, not the page's config.
+`dynamic`, `revalidate`, and `ssg` are read this way. Pages the
+[docs engine](/docs/docs-engine) renders ignore them and follow `docs.prerender`.
+
+**src/app/docs/installation/page.mdx**
+
+```mdx
+---
+title: Installation
+---
+
+export const dynamic = "force-static";
+
+# Installation
+```
+
 ## ISR-style revalidation
 
 `revalidate` caches a static response and refreshes it after the configured number of seconds.
@@ -129,6 +147,18 @@ export default async function PricingPage() {
   return <PricingTable plans={plans} />;
 }
 ```
+
+In production a page with `revalidate` is sent with
+`Cache-Control: public, s-maxage=<revalidate>, stale-while-revalidate=300`, so a CDN or reverse
+proxy serves it and refreshes it in the background; a static page the server renders on request
+gets `s-maxage=60`. A render that is one visitor's is sent with `Cache-Control: private, no-store`
+instead: a request with a cookie other than Farm's deployment cookie or with an `Authorization`
+header, middleware request data, a render that reads the request or suspends, and a response that
+middleware let through (see [Responses behind middleware](/docs/cache-ppr#responses-behind-middleware)). A
+`Cache-Control` that middleware sets with `ctx.headers` does not replace the page's. Shareable
+responses never set the deployment cookie. `farm dev` renders these pages on each request without
+a shared policy. React Server Components apps follow the same rules, except that a page streams
+with its policy set up front, as described under [React Server Components](#react-server-components).
 
 ## PPR with Suspense
 
@@ -346,7 +376,9 @@ around server content, reaches the consumers in it) and keep their own state, an
 not render at first (a tab, a closed panel) is there when it does. `useId` returns the ids in the
 server HTML, unique across client components. A server page under a
 layout that hydrates (a client provider, say) hydrates inside that layout's tree, so its client
-components read the provider's context. That layout, and the other server layouts on its pages,
+components read the provider's context. So do a Markdown page's MDX components, and client
+components that declare a deferred `island` strategy: inside the tree they hydrate with the
+layout instead of waiting. That layout, and the other server layouts on its pages,
 render as server trees too: the browser rebuilds them from the HTML, so their modules and their
 server-only imports never reach it, and a navigation keeps the provider's state. A provider
 imported straight from a package fails the build; render it from a local `"use client"` module
@@ -455,14 +487,28 @@ Both setups follow the same route contract:
   prerenders at each URL that names its locale (`/fr/about`, below the base path); a URL without a
   locale (the default locale's under `"prefix-except-default"`) redirects visitors whose cookie or
   `Accept-Language` picks another locale, so it stays server-rendered unless `detection` is off, and
-  `routing: "none"` prerenders nothing. Pages with `revalidate` also render on each request for
-  now; the pipeline has no revalidating cache yet. A page that asks to be static and fails to render fails the build.
+  `routing: "none"` prerenders nothing. A page that asks to be static and fails to render fails the build.
+- **Revalidation.** Pages with `revalidate` render on each request and get the same
+  `Cache-Control` as in other Farm apps (see [ISR-style revalidation](#isr-style-revalidation)),
+  on the HTML, on the Flight payload, and on `<page>.rsc` alike, so a CDN serves the page and its
+  client navigations; the pipeline keeps no revalidating cache of its own. So does a static page
+  that renders on request instead of prerendering. Unlike other Farm apps, which keep a render
+  that suspends private, the page streams with its policy set before it does, so Suspense content
+  and an error boundary that catches inside it are part of the shared response. A request read
+  in `generateMetadata` or in an `async` page or layout makes the page private, as in other Farm
+  apps, but a read in a component that renders while the page streams is not seen. A shared
+  request has no cookie or `Authorization` header to read (either makes it private), but its
+  other headers, such as `Accept-Language` or the client address, are one visitor's, so do not
+  render them in a page that revalidates.
 - **Metadata.** Layouts and pages resolve `metadata`, `generateMetadata()`, and viewport exports in
   the same order and with the same title templates as other Farm apps, and the server renders the
   same head tags. A client navigation sets the next page's title and replaces the tags Farm rendered
   from metadata (description, canonical and alternate links, robots, Open Graph, JSON-LD) with
   that page's, as other Farm apps do; tags your components render (React 19 `<meta>` and `<title>`)
-  stay React's.
+  stay React's. [Metadata route files](/docs/routing#application-metadata-routes)
+  (`sitemap.ts`, `robots.ts`, `manifest.ts`, `llms.ts`, `llms-full.ts`) and `opengraph-image` and
+  `twitter-image` files are served as in other Farm apps, and the head names the nearest manifest
+  and images unless the metadata sets them.
 - **Images.** `<Image>` follows the app's `images` config. Without `sharp`, `provider: "auto"` keeps
   original image URLs, and the optimizer at `images.path` runs only when it can.
 - **Root layouts.** A root layout that renders `<html>` owns the document, as in Next.js, and the
@@ -507,9 +553,9 @@ Both setups follow the same route contract:
 - **Redirects, rewrites and headers.** The config [`redirects()`, `rewrites()` and
   `headers()`](/docs/configuration#route-rules) apply in `farm dev` and in production as in other
   Farm apps: redirects answer before any route or middleware, a rewrite applies only where no page,
-  API route, route file (`sitemap.ts`, `robots.ts`, `llms.ts`, `llms-full.ts`) or generated agent
-  file (`llms.txt`, `sitemap.xml`, `robots.txt`) answers, and headers apply to whatever answers, API
-  routes, agent files and redirects included; a response middleware let through keeps `Cache-Control: private, no-store`. A payload
+  API route, route file (`sitemap.ts`, `robots.ts`, `manifest.ts`, `llms.ts`, `llms-full.ts`),
+  metadata image or generated agent file (`llms.txt`, `sitemap.xml`, `robots.txt`) answers, and
+  headers apply to whatever answers, API routes, agent files and redirects included; a response middleware let through keeps `Cache-Control: private, no-store`. A payload
   request matches as its page, so a client navigation follows a redirect to the destination's
   payload. A static page any of them matches renders on each request instead of prerendering.
 

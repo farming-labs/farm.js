@@ -24,6 +24,8 @@ import {
   classifyFarmDocumentPrefix,
   createFarmStreamedDocumentTransform,
   extractFarmFullDocument,
+  takeFarmHoistedHead,
+  appendFarmHead,
   openFarmStreamedDocument,
   removeFarmDocumentTitles,
 } from "./full-document";
@@ -920,6 +922,16 @@ export class ServerRenderer {
   }
 
   /** The page a hydrating layout keeps as server HTML: islands again, or a server tree. */
+  /** The route root's strategy, inspecting packages with the dev server's latest plan's cache. */
+  private resolveRouteRootStrategy(
+    ...args: Parameters<typeof resolveFarmRouteRootStrategy>
+  ): ReturnType<typeof resolveFarmRouteRootStrategy> {
+    const resolve = () => resolveFarmRouteRootStrategy(...args);
+    return typeof this.routeManager.inspectPackages === "function"
+      ? this.routeManager.inspectPackages(resolve)
+      : resolve();
+  }
+
   private async isolateServerPage(element: unknown, serverTree: boolean): Promise<unknown> {
     if (islands && this.islandValues()) {
       const runtime = islands;
@@ -1039,7 +1051,11 @@ export class ServerRenderer {
     // Render to completion through the streaming renderer where there is one, so a
     // component that suspends (data hooks, lazy imports) resolves instead of failing
     // React's synchronous renderToString. Production buffers the same stream.
-    return { html: await this.renderElementToCompleteHTML(element, options), head: "" };
+    const { head, body } = takeFarmHoistedHead(
+      await this.renderElementToCompleteHTML(element, options),
+      true,
+    )!;
+    return { html: body, head };
   }
 
   /** Islands mode sends large prop values once, keyed by content (RFC 0003). */
@@ -1195,7 +1211,9 @@ export class ServerRenderer {
   }
 
   private getPPRCacheKey(pathname: string, search = "", locale = "", origin = ""): string {
-    const key = ["ppr", locale, normalizeRevalidatePath(pathname), search];
+    // A shell embeds its deployment's ID, and a shared cache adapter outlives a deployment, so
+    // each deployment keys its own shells, as in production.
+    const key = ["ppr", locale, normalizeRevalidatePath(pathname), search, this.getDeploymentId()];
     return createFarmCacheKey(origin ? [...key, origin] : key);
   }
 
@@ -1239,7 +1257,11 @@ export class ServerRenderer {
       key,
       { html },
       {
-        paths: [options.pathname],
+        // revalidatePath() takes the route path (`/pricing`), as the docs show, while the shell
+        // answers the public one (`/console/fr/pricing`): either clears it, as in production.
+        paths: [
+          ...new Set([options.pathname, this.routeManager.toRoutePathname(options.pathname)]),
+        ],
         tags: ["ppr"],
         revalidate: options.revalidate ?? false,
       },
@@ -1591,7 +1613,8 @@ export class ServerRenderer {
         completeRender(res.statusCode, match.route!.pattern);
         return;
       }
-      this.applyDeploymentHeaders(req, res);
+      // A miss renders the not-found page, which applies the same rules itself.
+      if (match.route) this.applyDeploymentHeaders(req, res);
 
       if (match.route) {
         const redirectLocation = resolveFarmTrailingSlashRedirect(url, this.config.trailingSlash);
@@ -1635,7 +1658,7 @@ export class ServerRenderer {
         }
         emitFarmEvent({ type: "route.notFound", pathname });
         await this.render404(req, res);
-        completeRender(404);
+        completeRender(res.statusCode);
         return;
       }
 
@@ -2006,7 +2029,7 @@ export class ServerRenderer {
       // Islands mode resolves the root's strategy as production does: declared, or inferred when
       // every client component in the root can wait for an interaction (RFC 0003, section 11).
       const hydrationIslandStrategy = this.islandValues()
-        ? resolveFarmRouteRootStrategy(
+        ? this.resolveRouteRootStrategy(
             route,
             { shouldHydrate, islandStrategy: moduleMetadata.islandStrategy ?? null },
             layouts.map((layout, index) => ({
@@ -2849,6 +2872,7 @@ export class ServerRenderer {
           metadataBase: (rootMetadata as { metadataBase?: unknown } | undefined)?.metadataBase,
           basePath: this.config.basePath,
           trailingSlash: this.config.trailingSlash,
+          i18n: this.i18nRuntime?.config,
         },
       );
       await sendWebResponse(
@@ -2930,9 +2954,14 @@ export class ServerRenderer {
     try {
       const { handleFarmDefaultMCPRequest } = await import("../agent-mcp-handler");
       const origin = new URL(request.url).origin;
+      const i18n = this.i18nRuntime?.config;
+      // Pages are linked on metadataBase, as sitemap.xml and llms.txt link them.
+      const metadataBase = await this.getRootMetadataBase();
       const response = await handleFarmDefaultMCPRequest(request, {
         server,
         basePath: this.config.basePath,
+        i18n,
+        metadataBase,
         listPages: async () => {
           const sources = await Promise.all(
             this.getAgentListedRoutes().map(async ([pattern, route]) => {
@@ -2951,8 +2980,11 @@ export class ServerRenderer {
             sources.filter((source) => source !== null),
             {
               origin,
+              metadataBase,
               basePath: this.config.basePath,
               markdown: resolveMarkdownConfig(this.config.md as any),
+              trailingSlash: this.config.trailingSlash,
+              i18n,
             },
           );
         },
@@ -3016,6 +3048,7 @@ export class ServerRenderer {
         include: config.include,
         exclude: config.exclude,
         trailingSlash: this.config.trailingSlash,
+        i18n: this.i18nRuntime?.config,
       },
     );
     return {
@@ -3051,18 +3084,20 @@ export class ServerRenderer {
   }
 
   /**
-   * The origin llms.txt and llms-full.txt link to: the root layout's `metadataBase`, else the
-   * request's origin, as for the sitemap and the production server.
+   * The origin llms.txt, llms-full.txt and list_pages link to: the root layout's
+   * `metadataBase`, else the request's origin, as for the sitemap and the production server.
    */
   private async getAgentOrigin(request: Request): Promise<string> {
+    return resolveFarmAgentOrigin(await this.getRootMetadataBase(), new URL(request.url).origin);
+  }
+
+  /** The root layout's `metadataBase`, which generated agent files and list_pages link to. */
+  private async getRootMetadataBase(): Promise<unknown> {
     const rootLayout = this.routeManager.getLayouts().get("/");
     const rootMetadata = rootLayout
       ? (await this.routeManager.loadLayoutModule(rootLayout.modulePath)).metadata
       : undefined;
-    return resolveFarmAgentOrigin(
-      (rootMetadata as { metadataBase?: unknown } | undefined)?.metadataBase,
-      new URL(request.url).origin,
-    );
+    return (rootMetadata as { metadataBase?: unknown } | undefined)?.metadataBase;
   }
 
   /**
@@ -3266,9 +3301,10 @@ export class ServerRenderer {
 
       wrapped = await this.wrapWithIntegrationProviders(wrapped);
 
+      // The error document goes out whole: wait for the layouts' Suspense boundaries.
       const html = await _runWithMiddlewareData(options.middlewareMap, () =>
         _runWithMiddlewareContext(options.middlewareContext, () =>
-          this.rendererRuntime.renderToString(wrapped, rendererRenderOptions()),
+          this.renderElementToCompleteHTML(wrapped),
         ),
       );
       res.statusCode = options.statusCode;
@@ -3900,11 +3936,26 @@ window.__FARM_I18N__ = ${getFarmI18nClientSnapshot() ? serializeInlineValue(getF
 <body class="">${earlyClient ? `\n  ${earlyClientScript}` : ""}
   <div id="root">`;
           // A full document opens from React's own <html> instead (documentTransform).
-          const securedShell = streamDocument ? "" : stampDocumentHTML(shell);
-          if (securedShell) {
-            htmlParts.push(securedShell);
-            staticShellParts?.push(securedShell);
-          }
+          // Farm's shell waits for React's first chunk: the head elements React writes first
+          // (a component's <meta> or <title>) go into its head.
+          let pendingShell = streamDocument ? "" : stampDocumentHTML(shell);
+          let heldHead = "";
+          const releaseShell = (complete: boolean): string | null => {
+            const split = takeFarmHoistedHead(heldHead, complete);
+            if (!split) return null;
+            // As in the buffered document, a component's <title> replaces the fallback one.
+            const shellHead =
+              !hasExplicitTitle && /<title[\s>]/i.test(split.head)
+                ? removeFarmDocumentTitles(pendingShell)
+                : pendingShell;
+            const opened = appendFarmHead(shellHead, split.head);
+            pendingShell = "";
+            heldHead = "";
+            htmlParts.push(opened);
+            staticShellParts?.push(opened);
+            res.write(opened);
+            return split.body;
+          };
 
           // A full document: its head gets the assets the buffered path composes in. They are
           // Farm's own markup, so they carry the nonce; the layout's markup kept only the nonces
@@ -4007,6 +4058,7 @@ window.__FARM_I18N__ = ${getFarmI18nClientSnapshot() ? serializeInlineValue(getF
               // A flush marker goes out in order with React's chunks, and stays out of what is
               // recorded (the PPR shell, the document check).
               if (flushMarker && chunk === flushMarker) {
+                if (pendingShell) releaseShell(true);
                 const marker = documentTransform
                   ? documentTransform.write(flushMarker.toString())
                   : flushMarker;
@@ -4025,9 +4077,20 @@ window.__FARM_I18N__ = ${getFarmI18nClientSnapshot() ? serializeInlineValue(getF
                   ? cspStreamDecoder.decode(chunk, { stream: true })
                   : chunk.toString()
                 : String(chunk);
-              const securedChunkText = cspNonceRewriter
+              let securedChunkText = cspNonceRewriter
                 ? cspNonceRewriter.write(chunkText)
                 : chunkText;
+              let held = false;
+              if (pendingShell) {
+                heldHead += securedChunkText;
+                const body = releaseShell(false);
+                if (body === null) {
+                  callback();
+                  return;
+                }
+                securedChunkText = body;
+                held = true;
+              }
               const outputText = documentTransform
                 ? documentTransform.write(securedChunkText)
                 : securedChunkText;
@@ -4042,10 +4105,19 @@ window.__FARM_I18N__ = ${getFarmI18nClientSnapshot() ? serializeInlineValue(getF
               if (documentTransform) {
                 if (outputText) res.write(outputText, onWrite);
                 else callback();
-              } else if (cspNonceRewriter) res.write(securedChunkText, onWrite);
+              } else if (cspNonceRewriter || held) res.write(securedChunkText, onWrite);
               else res.write(chunk, encoding, onWrite);
             },
             final: (callback) => {
+              // React ended before the shell went out: what it held is all there is.
+              if (pendingShell) {
+                const body = releaseShell(true);
+                if (body) {
+                  htmlParts.push(body);
+                  staticShellParts?.push(body);
+                  res.write(body);
+                }
+              }
               if (lateNavigationError) {
                 const navigationError = lateNavigationError;
                 lateNavigationError = null;
@@ -4130,10 +4202,9 @@ window.__FARM_I18N__ = ${getFarmI18nClientSnapshot() ? serializeInlineValue(getF
             resolve();
           };
 
-          // Queue the shell immediately, then start piping the Suspense stream.
-          // Waiting for the write callback can delay the fallback until the whole
-          // response is ready under some dev-server wrappers.
-          res.write(securedShell);
+          // The shell goes out with React's first chunk (releaseShell), without waiting for a
+          // write callback, which can delay the fallback until the whole response is ready under
+          // some dev-server wrappers.
           if (typeof (res as any).flush === "function") {
             (res as any).flush();
           }
@@ -4279,11 +4350,10 @@ window.__FARM_I18N__ = ${getFarmI18nClientSnapshot() ? serializeInlineValue(getF
     const NotFoundComponent = await this.loadNotFoundComponent();
     if (NotFoundComponent) {
       try {
-        content = await this.rendererRuntime.renderToString(
+        content = await this.renderElementToCompleteHTML(
           await this.wrapWithIntegrationProviders(
             this.rendererRuntime.createElement(NotFoundComponent, { pathname }),
           ),
-          rendererRenderOptions(),
         );
       } catch (error) {
         logger.warn(`not-found page could not render outside its layout, using Farm's: ${error}`);
@@ -4304,6 +4374,18 @@ window.__FARM_I18N__ = ${getFarmI18nClientSnapshot() ? serializeInlineValue(getF
       res.setHeader("Content-Type", "application/json");
       res.end(JSON.stringify({ error: "Not found", pathname }));
       return;
+    }
+
+    // The not-found page is a page document: it names this deployment, and a navigation from
+    // another deployment's page is refused, as for an app page. A page that threw notFound()
+    // has already passed that check and named it.
+    if (res.getHeader(FARM_DEPLOYMENT_ID_HEADER) === undefined) {
+      const deploymentMismatch = this.getDeploymentMismatch(req);
+      if (deploymentMismatch) {
+        await sendWebResponse(res, createFarmDeploymentMismatchResponse(deploymentMismatch));
+        return;
+      }
+      this.applyDeploymentHeaders(req, res);
     }
 
     // Agents that navigate in Markdown (a `.md` URL or `Accept: text/markdown`)
@@ -4359,11 +4441,10 @@ window.__FARM_I18N__ = ${getFarmI18nClientSnapshot() ? serializeInlineValue(getF
 
           element = await this.wrapWithIntegrationProviders(element);
 
-          // Render to string
-          const content = await this.rendererRuntime.renderToString(
-            element,
-            rendererRenderOptions(),
-          );
+          // The not-found document goes out whole, with its 404: renderToString would throw
+          // on a layout that suspends (a lazy component or a use() read), so wait for every
+          // Suspense boundary as a buffered page render does.
+          const content = await this.renderElementToCompleteHTML(element);
 
           const { head, metadata } = await this.notFoundMetadataHead(layoutModule, notFoundModule);
           const html = this.createFullHTML(content, false, pathname, head, { req, metadata });

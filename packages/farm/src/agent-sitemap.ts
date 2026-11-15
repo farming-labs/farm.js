@@ -4,8 +4,12 @@
  * its page file last changed. The development renderer and the generated production
  * server both build it here, so the two serve the same file.
  */
-import { applyFarmBasePath } from "./base-path";
-import { isFarmMetadataNoIndex, resolveFarmAgentOrigin } from "./llms-txt";
+import {
+  getFarmAgentPagePublicPath,
+  isFarmMetadataNoIndex,
+  resolveFarmAgentOrigin,
+  type FarmAgentPageI18n,
+} from "./llms-txt";
 import { matchesFarmMarkdownRoutePattern } from "./markdown";
 import type { MetadataRoute } from "./metadata-route";
 import { normalizeFarmTrailingSlashPathname } from "./trailing-slash";
@@ -70,7 +74,8 @@ export interface FarmSitemapPageSource {
  * as are pages whose metadata says noindex and pages behind a route `guard`. URLs are
  * absolute, on the root layout's `metadataBase` when it has one and the request's
  * origin otherwise, the same origin the generated llms.txt links to. Each is the URL the
- * page answers at, spelled as `trailingSlash` says, so none of them redirects.
+ * page answers at, in the default locale with i18n and spelled as `trailingSlash` says, so
+ * none of them redirects.
  */
 export function createFarmDefaultSitemap(
   sources: Iterable<FarmSitemapPageSource>,
@@ -81,6 +86,8 @@ export function createFarmDefaultSitemap(
     basePath?: string;
     /** The app's `trailingSlash`: pages answer at `/about/`. */
     trailingSlash?: boolean;
+    /** The app's resolved i18n config: pages are listed in the default locale's URL. */
+    i18n?: FarmAgentPageI18n;
   },
 ): MetadataRoute.Sitemap {
   const { include, exclude } = options.config;
@@ -105,7 +112,7 @@ export function createFarmDefaultSitemap(
     entries.set(path, {
       url: new URL(
         normalizeFarmTrailingSlashPathname(
-          applyFarmBasePath(path, options.basePath),
+          getFarmAgentPagePublicPath(path, options),
           options.trailingSlash === true,
         ),
         base,

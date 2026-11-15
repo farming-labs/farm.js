@@ -292,6 +292,150 @@ describe("production default sitemap", () => {
     }
   }, 180_000);
 
+  it("lists default-locale URLs and answers each agent file unprefixed under i18n", async () => {
+    const files = {
+      "src/app/layout.tsx": [
+        'export const metadata = { title: "Console", metadataBase: new URL("https://acme.test") };',
+        "export default function Layout({ children }) { return <main>{children}</main>; }",
+      ].join("\n"),
+      "src/app/page.tsx": "export default function Page() { return <p>home body</p>; }",
+      "src/app/about/page.tsx": "export default function Page() { return <p>about body</p>; }",
+      "src/app/team/page.tsx": "export default function Page() { return <p>team body</p>; }",
+      // Route files answer the same way as the generated files.
+      "src/app/blog/sitemap.ts":
+        'export default function sitemap() { return [{ url: "https://acme.test/blog" }]; }',
+      "src/app/manifest.ts": 'export default function manifest() { return { name: "Console" }; }',
+      "src/messages/en.json": "{}",
+      "src/messages/fr.json": "{}",
+    };
+    const expectAgentFiles = async (
+      options: Record<string, unknown>,
+      base: string,
+      expected: { sitemap: string[]; llms: string[] },
+    ) => {
+      const root = await fs.mkdtemp(path.join(os.tmpdir(), "farm-production-agent-i18n-"));
+      try {
+        await writeApp(root, files);
+        // '/team' has no mirror, so llms.txt links the page itself.
+        const handler = await buildApp(root, { md: { expose: ["/", "/about"] }, ...options });
+        const get = (pathname: string, headers: Record<string, string> = {}) =>
+          handler.fetch(
+            new Request(`https://acme.test${pathname}`, { redirect: "manual", headers }),
+          );
+        // A French browser: request signals that would pick the 'fr' locale for a page.
+        const french = { "accept-language": "fr" };
+
+        // The agent files answer where they are asked for, unprefixed: no locale redirect, no
+        // locale cookie, and no Vary on request signals. Crawlers read robots.txt at the origin
+        // root only.
+        const agentFiles = [
+          "/robots.txt",
+          "/sitemap.xml",
+          "/llms.txt",
+          "/llms-full.txt",
+          "/manifest.webmanifest",
+          "/blog/sitemap.xml",
+          "/.well-known/farmjs.json",
+          "/.well-known/ai-catalog.json",
+          "/mcp/server-card",
+        ].map((pathname) => `${base}${pathname}`);
+        if (base) agentFiles.push("/robots.txt");
+        for (const pathname of agentFiles) {
+          const response = await get(pathname, french);
+          expect({
+            pathname,
+            status: response.status,
+            location: response.headers.get("location"),
+            cookie: response.headers.get("set-cookie"),
+          }).toEqual({ pathname, status: 200, location: null, cookie: null });
+          expect(response.headers.get("vary") ?? "", pathname).not.toContain("Accept-Language");
+        }
+        const robots = await (await get(`${base}/robots.txt`)).text();
+        expect(robots).toContain(`Sitemap: https://acme.test${base}/sitemap.xml`);
+        const mcp = await handler.fetch(
+          new Request(`https://acme.test${base}/mcp`, {
+            method: "POST",
+            headers: { "content-type": "application/json", accept: "application/json" },
+            body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "ping" }),
+          }),
+        );
+        expect(mcp.status).toBe(200);
+
+        // The pages they list are at the default locale's URL, each answering without a redirect.
+        const sitemap = locs(await (await get(`${base}/sitemap.xml`)).text());
+        expect(sitemap).toEqual(expected.sitemap);
+        const llmsTxt = await (await get(`${base}/llms.txt`)).text();
+        const llms = [...llmsTxt.matchAll(/\]\((https:\/\/acme\.test[^)]*)\)/g)]
+          .map((match) => match[1])
+          // Pages only: the MCP section links the endpoint and the AI catalog.
+          .filter((url) => !/\/mcp$|\/\.well-known\//.test(url));
+        expect(llms).toEqual(expected.llms);
+        for (const url of [...sitemap, ...llms]) {
+          const response = await handler.fetch(new Request(url, { redirect: "manual" }));
+          expect({ url, status: response.status }).toEqual({ url, status: 200 });
+        }
+        // llms-full.txt inlines each mirror, read in-process without following redirects.
+        const full = await (await get(`${base}/llms-full.txt`)).text();
+        for (const body of ["home body", "about body"]) {
+          expect(full, body).toContain(body);
+        }
+
+        // Pages still redirect to the detected locale.
+        expect((await get(`${base}/about`, french)).headers.get("location")).toMatch(
+          new RegExp(`^${base}/fr/about/?$`),
+        );
+      } finally {
+        await fs.rm(root, { recursive: true, force: true });
+      }
+    };
+    const locales = { locales: ["en", "fr"], defaultLocale: "en" };
+
+    // Every locale is prefixed: '/about' answers with a 307 to '/en/about', and '/about.md'
+    // with a 307 to '/en/about.md'.
+    await expectAgentFiles({ i18n: { ...locales, routing: "prefix-always" } }, "", {
+      sitemap: ["https://acme.test/en", "https://acme.test/en/about", "https://acme.test/en/team"],
+      llms: [
+        "https://acme.test/en/index.md",
+        "https://acme.test/en/about.md",
+        "https://acme.test/en/team",
+      ],
+    });
+    await expectAgentFiles(
+      {
+        basePath: "/console",
+        trailingSlash: true,
+        i18n: { ...locales, routing: "prefix-always" },
+      },
+      "/console",
+      {
+        sitemap: [
+          "https://acme.test/console/en/",
+          "https://acme.test/console/en/about/",
+          "https://acme.test/console/en/team/",
+        ],
+        llms: [
+          "https://acme.test/console/en/index.md",
+          "https://acme.test/console/en/about.md",
+          "https://acme.test/console/en/team/",
+        ],
+      },
+    );
+    // The default locale is unprefixed, so the URLs stay the plain ones, and a French browser
+    // is no longer sent from '/console/sitemap.xml' to '/console/fr/sitemap.xml'.
+    await expectAgentFiles({ basePath: "/console", i18n: locales }, "/console", {
+      sitemap: [
+        "https://acme.test/console",
+        "https://acme.test/console/about",
+        "https://acme.test/console/team",
+      ],
+      llms: [
+        "https://acme.test/console/index.md",
+        "https://acme.test/console/about.md",
+        "https://acme.test/console/team",
+      ],
+    });
+  }, 240_000);
+
   describe("under trailingSlash and basePath", () => {
     let root: string;
     let get: (pathname: string) => Promise<Response>;
