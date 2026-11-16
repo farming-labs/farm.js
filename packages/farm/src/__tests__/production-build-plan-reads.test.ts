@@ -10,27 +10,46 @@ import { resolveConfig } from "../config";
 const packageRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
 const PAGES = 12;
 
-afterEach(() => {
-  vi.restoreAllMocks();
+// The route modules each hydration plan is computed for.
+const calls = vi.hoisted(() => ({ planned: [] as string[] }));
+vi.mock("../utils/client-component", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../utils/client-component")>();
+  return {
+    ...actual,
+    getClientModuleHydrationPlan: (
+      ...args: Parameters<typeof actual.getClientModuleHydrationPlan>
+    ) => {
+      calls.planned.push(args[0]);
+      return actual.getClientModuleHydrationPlan(...args);
+    },
+  };
 });
 
+afterEach(() => {
+  vi.restoreAllMocks();
+  calls.planned.length = 0;
+});
+
+function createApp(name: string) {
+  const root = fs.realpathSync(fs.mkdtempSync(path.join(packageRoot, `.tmp-${name}-`)));
+  const write = (relativePath: string, source: string) => {
+    fs.mkdirSync(path.dirname(path.join(root, relativePath)), { recursive: true });
+    fs.writeFileSync(path.join(root, relativePath), source);
+  };
+  fs.mkdirSync(path.join(root, "node_modules", "@farm.js"), { recursive: true });
+  fs.symlinkSync(packageRoot, path.join(root, "node_modules", "@farm.js", "core"), "junction");
+  write("package.json", '{"type":"module","private":true}');
+  write(
+    "src/app/layout.tsx",
+    "export default function Layout({ children }) { return <html><body>{children}</body></html>; }\n",
+  );
+  return { root, write };
+}
+
 describe("production build hydration plans", () => {
-  it("reads a module every route imports a bounded number of times, not once per route", async () => {
-    const root = fs.realpathSync(
-      fs.mkdtempSync(path.join(packageRoot, ".tmp-production-build-plan-reads-")),
-    );
-    const write = (relativePath: string, source: string) => {
-      fs.mkdirSync(path.dirname(path.join(root, relativePath)), { recursive: true });
-      fs.writeFileSync(path.join(root, relativePath), source);
-    };
+  it("reads a module every route imports a bounded number of times, and plans each page once", async () => {
+    const { root, write } = createApp("production-build-plan-reads");
     try {
-      fs.mkdirSync(path.join(root, "node_modules", "@farm.js"), { recursive: true });
-      fs.symlinkSync(packageRoot, path.join(root, "node_modules", "@farm.js", "core"), "junction");
-      write("package.json", '{"type":"module","private":true}');
-      write(
-        "src/app/layout.tsx",
-        "export default function Layout({ children }) { return <html><body>{children}</body></html>; }\n",
-      );
       write(
         "src/ui/index.ts",
         Array.from(
@@ -87,6 +106,12 @@ describe("production build hydration plans", () => {
       // source snapshot. Planned without one, the build read it again for every route.
       expect(barrelReads).toBeGreaterThan(0);
       expect(barrelReads).toBeLessThan(PAGES);
+      // The client and SSR route tables reuse the route manager's plans; they planned every page
+      // and layout again before.
+      const page = path.join(root, "src", "app", "page-0", "page.tsx");
+      const layout = path.join(root, "src", "app", "layout.tsx");
+      expect(calls.planned.filter((module) => module === page)).toHaveLength(1);
+      expect(calls.planned.filter((module) => module === layout)).toHaveLength(1);
     } finally {
       vi.restoreAllMocks();
       fs.rmSync(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });

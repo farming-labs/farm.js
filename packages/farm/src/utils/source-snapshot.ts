@@ -21,7 +21,8 @@ let volatile: Array<[scope: string, key: string]> | undefined;
 // The source files read while `traceFarmSourceReads` runs, so a result can say what it depends on.
 let trace: Set<string> | undefined;
 
-function stampOf(file: string): string {
+/** @internal A file's size and mtime, or `"missing"`: what tells an edit apart between two reads. */
+export function getFarmSourceStamp(file: string): string {
   try {
     const stat = fs.statSync(file);
     return `${stat.mtimeMs}:${stat.size}`;
@@ -50,7 +51,7 @@ export class FarmSourceSnapshotStore {
     const changed = new Map<string, string | undefined>();
     for (const file of edited) changed.set(file, undefined);
     for (const [file, stamp] of this.stamps) {
-      if (stampOf(file) !== stamp) changed.set(file, undefined);
+      if (getFarmSourceStamp(file) !== stamp) changed.set(file, undefined);
     }
     if (changed.size === 0) return changed;
     const replaced = new Set<string>();
@@ -81,7 +82,7 @@ export class FarmSourceSnapshotStore {
     for (const entries of this.entries.values()) {
       for (const entry of entries.values()) {
         for (const file of entry.files) {
-          if (!this.stamps.has(file)) this.stamps.set(file, stampOf(file));
+          if (!this.stamps.has(file)) this.stamps.set(file, getFarmSourceStamp(file));
         }
       }
     }

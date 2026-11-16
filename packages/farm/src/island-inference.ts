@@ -129,8 +129,20 @@ export function inferFarmRouteRootStrategy(owners: string[], root?: string): Far
   return result;
 }
 
+const NODE_MODULES = "node_modules";
+const NODE_MODULES_SEGMENT = `${path.sep}${NODE_MODULES}${path.sep}`;
+
+/**
+ * Whether a segment of `file` is `node_modules`. A route root's inference reads thousands of files
+ * (an icon barrel), once per route, so this matches substrings instead of splitting each path.
+ */
 function isInstalledPackageFile(file: string): boolean {
-  return file.split(path.sep).includes("node_modules");
+  return (
+    file.includes(NODE_MODULES_SEGMENT) ||
+    file.startsWith(`${NODE_MODULES}${path.sep}`) ||
+    file.endsWith(`${path.sep}${NODE_MODULES}`) ||
+    file === NODE_MODULES
+  );
 }
 
 function inferRouteRoot(owners: string[], root?: string): FarmIslandInference {

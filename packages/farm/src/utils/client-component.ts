@@ -784,6 +784,19 @@ export function getClientModuleMetadata(modulePath: string, root?: string): Clie
 }
 
 /**
+ * @internal What a `getClientModuleHydrationPlan` result depends on besides the files it reads: two
+ * calls with one key get the same plan while those files are unchanged.
+ */
+export function getClientModuleHydrationPlanKey(
+  modulePath: string,
+  root: string,
+  mode: FarmIsolatedClientHydrationMode,
+  options: FarmClientHydrationPlanOptions = {},
+): string {
+  return `${path.resolve(root)}\0${mode}\0${options.asyncOwnerIslands === true}\0${options.serverOwners === true}\0${options.serverTreeLayouts === true}\0${options.packageReferences === true}\0${path.resolve(modulePath)}`;
+}
+
+/**
  * Resolve hydration ownership without changing the legacy metadata contract.
  * The old metadata remains the conservative fallback; only an enabled and
  * completely supported graph moves ownership to leaf client modules.

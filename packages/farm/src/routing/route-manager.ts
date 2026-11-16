@@ -57,6 +57,7 @@ import { toFileModuleUrl } from "../utils/file-module";
 import {
   enforceFarmIsolatedHydrationRouteBudget,
   getClientModuleHydrationPlan,
+  getClientModuleHydrationPlanKey,
   createMarkdownPageHydrationPlanner,
   getFarmClientHydrationPlanOptions,
   usesFarmServerTree,
@@ -102,7 +103,7 @@ import {
   runWithLatestPackageClientBoundaryCache,
   runWithPackageClientBoundaryCacheFile,
 } from "../utils/package-client-boundary-cache";
-import { FarmSourceSnapshotStore } from "../utils/source-snapshot";
+import { FarmSourceSnapshotStore, getFarmSourceStamp } from "../utils/source-snapshot";
 import {
   createRouteDirectoryPattern,
   formatRouteSegment,
@@ -315,8 +316,16 @@ export class RouteManager {
   // walk every route's import graph again, seconds on a large app, before an edit could update.
   private ownerPlans = new Map<
     string,
-    { plan: ClientModuleHydrationPlan; files: ReadonlySet<string> }
+    {
+      plan: ClientModuleHydrationPlan;
+      files: ReadonlySet<string>;
+      /** The getClientModuleHydrationPlanKey of a page or layout plan. */
+      planKey?: string;
+    }
   >();
+  // Outside the dev server: the size and mtime each source file the last plan read had when it was
+  // read, so a production build can tell whether a route module's plan still holds.
+  private planStamps = new Map<string, string>();
   private sourceChangeTracking = false;
   private linkedSources = new Map<string, string | null>();
   // What the plans read, parsed and resolved, kept between dev plans while the files are unchanged.
@@ -826,6 +835,7 @@ export class RouteManager {
     key: string,
     edited: ReadonlySet<string> | null,
     compute: () => ClientModuleHydrationPlan,
+    planKey?: string,
   ): ClientModuleHydrationPlan {
     const previous = this.ownerPlans.get(key);
     if (previous && edited && ![...edited].some((file) => previous.files.has(file))) {
@@ -840,8 +850,38 @@ export class RouteManager {
       const source = this.planSourcePath(file);
       if (source) sources.add(source);
     }
-    this.ownerPlans.set(key, { plan: result, files: sources });
+    if (!this.sourceChangeTracking) {
+      for (const source of sources) {
+        if (!this.planStamps.has(source)) this.planStamps.set(source, getFarmSourceStamp(source));
+      }
+    }
+    this.ownerPlans.set(key, { plan: result, files: sources, planKey });
     return { ...result };
+  }
+
+  /**
+   * @internal The plans of the pages and layouts the last client manifest planned, by
+   * getClientModuleHydrationPlanKey, so a production build plans each route module once. A plan
+   * that read a source file changed since then is left out, as is every plan of the dev server,
+   * which replans after edits. Installed packages are not compared: they do not change during a
+   * build.
+   */
+  getRouteModuleHydrationPlans(): Map<string, ClientModuleHydrationPlan> {
+    const plans = new Map<string, ClientModuleHydrationPlan>();
+    if (this.sourceChangeTracking || !this.clientManifestCache) return plans;
+    const unchanged = new Map<string, boolean>();
+    const isUnchanged = (file: string) => {
+      let result = unchanged.get(file);
+      if (result === undefined) {
+        result = this.planStamps.get(file) === getFarmSourceStamp(file);
+        unchanged.set(file, result);
+      }
+      return result;
+    };
+    for (const { plan, files, planKey } of this.ownerPlans.values()) {
+      if (planKey && [...files].every(isUnchanged)) plans.set(planKey, plan);
+    }
+    return plans;
   }
 
   /**
@@ -935,15 +975,30 @@ export class RouteManager {
         if (source) edited.add(source);
       }
     }
-    if (!edited) this.ownerPlans.clear();
+    if (!edited) {
+      this.ownerPlans.clear();
+      this.planStamps.clear();
+    }
+    const layoutPlanOptions = islandsMode
+      ? { ...planOptions, serverTreeLayouts: true }
+      : planOptions;
     const layoutEntries = Array.from(this.layouts.values()).map((entry) => ({
       entry,
-      metadata: this.planRouteModule(`layout:${entry.modulePath}`, edited, () =>
-        getClientModuleHydrationPlan(
+      metadata: this.planRouteModule(
+        `layout:${entry.modulePath}`,
+        edited,
+        () =>
+          getClientModuleHydrationPlan(
+            entry.modulePath,
+            normalizedProjectRoot,
+            isolatedMode,
+            layoutPlanOptions,
+          ),
+        getClientModuleHydrationPlanKey(
           entry.modulePath,
           normalizedProjectRoot,
           isolatedMode,
-          islandsMode ? { ...planOptions, serverTreeLayouts: true } : planOptions,
+          layoutPlanOptions,
         ),
       ),
     }));
@@ -960,17 +1015,27 @@ export class RouteManager {
     const markdownPagePlan = () => ({
       ...(markdownPlan ??= this.planRouteModule("markdown", edited, markdownComponentsPlan)),
     });
+    const pagePlanOptions = { ...planOptions, serverOwners: islandsMode };
     const routeEntries = Array.from(this.routes.values()).map((entry) => ({
       entry,
       metadata: isFarmMarkdownPageFile(entry.modulePath)
         ? markdownPagePlan()
-        : this.planRouteModule(`page:${entry.modulePath}`, edited, () =>
-            getClientModuleHydrationPlan(entry.modulePath, normalizedProjectRoot, isolatedMode, {
-              ...planOptions,
-              serverOwners:
-                resolveFarmServerComponentsMode(this.config.experimental?.serverComponents) ===
-                "islands",
-            }),
+        : this.planRouteModule(
+            `page:${entry.modulePath}`,
+            edited,
+            () =>
+              getClientModuleHydrationPlan(
+                entry.modulePath,
+                normalizedProjectRoot,
+                isolatedMode,
+                pagePlanOptions,
+              ),
+            getClientModuleHydrationPlanKey(
+              entry.modulePath,
+              normalizedProjectRoot,
+              isolatedMode,
+              pagePlanOptions,
+            ),
           ),
     }));
     // Every Markdown page shares the components module, so one warning covers them all.

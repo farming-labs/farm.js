@@ -119,6 +119,7 @@ import {
   describeSuppressedAsyncHydration,
   enforceFarmIsolatedHydrationRouteBudget,
   getClientModuleHydrationPlan,
+  getClientModuleHydrationPlanKey,
   getClientModuleMetadata,
   getFarmClientHydrationPlanOptions,
   createMarkdownPageHydrationPlanner,
@@ -1563,7 +1564,9 @@ export async function buildUniversal(
         `[Farm.js] islands mode cannot hydrate these pages without shipping their server code to the browser:\n${islandsErrors.map((error) => `  - ${error}`).join("\n")}`,
       );
     }
-    const hydrationPlanCache = new Map<string, ClientModuleHydrationPlan>();
+    // The route manager planned every page and layout as the app initialized, with the same
+    // config; the client and SSR route tables start from those plans instead of planning again.
+    const hydrationPlanCache = routeManager.getRouteModuleHydrationPlans();
 
     const clientOutputDir = path.join(root, distDir, "client");
     const [productionViteResult] = await productionViteResultPromise;
@@ -1929,7 +1932,7 @@ function getCachedClientModuleHydrationPlan(
   cache: Map<string, ClientModuleHydrationPlan>,
   options: FarmClientHydrationPlanOptions = {},
 ): ClientModuleHydrationPlan {
-  const key = `${path.resolve(root)}\0${mode}\0${options.asyncOwnerIslands === true}\0${options.serverOwners === true}\0${options.serverTreeLayouts === true}\0${path.resolve(modulePath)}`;
+  const key = getClientModuleHydrationPlanKey(modulePath, root, mode, options);
   let plan = cache.get(key);
   if (!plan) {
     plan = getClientModuleHydrationPlan(modulePath, root, mode, options);
