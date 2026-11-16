@@ -15626,6 +15626,13 @@ async function resolveProjectInstalledPackageDir(
 }
 
 /**
+ * Files in `@prisma/client/runtime` that nothing loads at run time. The query engine and compiler
+ * bundles for every database are read only by `prisma generate`, which copies the one a client
+ * needs into the generated client. Source maps and type declarations aren't loaded either.
+ */
+const PRISMA_RUNTIME_GENERATE_ONLY_FILE = /^query_(?:engine|compiler)_bg\.|\.map$|\.d\.m?ts$/;
+
+/**
  * Copy the app's own Prisma client, and the client `prisma generate` wrote beside it, into the
  * Vercel function, where Nitro leaves `@prisma/client` external.
  *
@@ -15651,11 +15658,15 @@ export async function copyPrismaClientForVercel(
   const targetPrismaScopeDir = path.join(targetNodeModules, "@prisma");
   const targetGeneratedDir = path.join(targetNodeModules, ".prisma", "client");
   const targetClientDir = path.join(targetPrismaScopeDir, "client");
+  const runtimeDir = path.join(prismaClientDir, "runtime");
 
   await fs.mkdir(targetPrismaScopeDir, { recursive: true });
   await fs.cp(prismaClientDir, targetClientDir, {
     recursive: true,
     force: true,
+    filter: (source) =>
+      path.dirname(source) !== runtimeDir ||
+      !PRISMA_RUNTIME_GENERATE_ONLY_FILE.test(path.basename(source)),
   });
   await fs.cp(generatedClientDir, targetGeneratedDir, {
     recursive: true,
