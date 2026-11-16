@@ -25,6 +25,7 @@ import {
   classifyFarmDocumentPrefix,
   createFarmStreamedDocumentTransform,
   extractFarmFullDocument,
+  markFarmDocumentLayouts,
   takeFarmHoistedHead,
   appendFarmHead,
   openFarmStreamedDocument,
@@ -3498,7 +3499,7 @@ window.__FARM_I18N__ = ${getFarmI18nClientSnapshot() ? serializeInlineValue(getF
       // A layout that returns its own full `<html>` document is composed as the
       // document (Farm assets merged in) rather than nested inside the shell,
       // matching the production build and avoiding invalid nested documents.
-      const fullDocument = extractFarmFullDocument(content);
+      const fullDocument = extractFarmFullDocument(markFarmDocumentLayouts(content));
       let html: string;
       if (fullDocument) {
         const shouldReplaceLayoutTitle = hasExplicitTitle || rendererHasTitle;
@@ -3927,7 +3928,9 @@ window.__FARM_I18N__ = ${getFarmI18nClientSnapshot() ? serializeInlineValue(getF
                 (opening) =>
                   withEarlyClient(
                     openFarmStreamedDocument(
-                      hasExplicitTitle ? removeFarmDocumentTitles(opening) : opening,
+                      markFarmDocumentLayouts(
+                        hasExplicitTitle ? removeFarmDocumentTitles(opening) : opening,
+                      ),
                       {
                         fallbackIcon: !hasFavicon,
                         viewport: viewportTags,
@@ -4533,7 +4536,7 @@ ${i18nSnapshot ? `window.__FARM_I18N__ = ${serializeInlineValue(i18nSnapshot)};`
     // inside this shell (that yields invalid nested `<html>`/`<head>`/`<body>`).
     // Compose Farm's managed assets into the layout's document instead, matching
     // the production build's `hasFullDocument` path.
-    const fullDocument = extractFarmFullDocument(content);
+    const fullDocument = extractFarmFullDocument(markFarmDocumentLayouts(content));
     if (fullDocument) {
       return composeFarmFullDocument(
         metadataHead ? removeFarmDocumentTitles(fullDocument) : fullDocument,

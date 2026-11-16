@@ -197,12 +197,27 @@ const IDLE_NAVIGATION_STATE: FarmNavigationState = {
 
 function getActiveLayoutChainHeader(): string | undefined {
   if (typeof document === "undefined") return undefined;
-  const patterns = Array.from(
-    document.querySelectorAll<HTMLElement>('[data-farm-layout-boundary="true"]'),
-  )
-    .map((element) => element.dataset.farmLayoutPattern)
-    .filter((pattern): pattern is string => Boolean(pattern));
+  const patterns = [
+    // A layout that renders the document itself has no boundary element: the document names it.
+    ...readDocumentLayoutPatterns(),
+    ...Array.from(document.querySelectorAll<HTMLElement>('[data-farm-layout-boundary="true"]'))
+      .map((element) => element.dataset.farmLayoutPattern)
+      .filter((pattern): pattern is string => Boolean(pattern)),
+  ];
   return patterns.length > 0 ? JSON.stringify(patterns) : undefined;
+}
+
+function readDocumentLayoutPatterns(): string[] {
+  try {
+    const patterns: unknown = JSON.parse(
+      document.documentElement.getAttribute("data-farm-document-layouts") || "[]",
+    );
+    return Array.isArray(patterns)
+      ? patterns.filter((pattern): pattern is string => typeof pattern === "string")
+      : [];
+  } catch {
+    return [];
+  }
 }
 
 // Global router instance
