@@ -844,6 +844,8 @@ With that route, `/products/123?tab=info&locale=am&toast=saved` gives the compon
 
 After the route has consumed it, Farm can clean the URL to `/products/123?locale=am`. `tab=info` is removed because it matches the schema default, and `toast=saved` is removed because it is temporary.
 
+Farm writes this canonical URL to the address bar and history on a document load and on client navigation, in development and production, so Back returns to `/products/123?locale=am` rather than showing `toast=saved` again. A link's fragment is kept.
+
 `preserve` is used by Farm links. If the current page is `/products?locale=am`, then a link to `/products/[id]` carries `locale=am` unless the link already provides its own `locale`.
 
 The server render applies it from the request URL, so the rendered `href` already carries the param and the page hydrates with the same one, in development and production builds alike. Only routes that declare `preserve` are sent to the browser for this, and a build without any sends nothing.

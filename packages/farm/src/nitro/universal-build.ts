@@ -2862,6 +2862,35 @@ function historyScrollKey(state, path) {
   return readHistoryKey(state) || path;
 }
 
+// The URL a navigated page names as canonical (search.stripDefaults, search.temporary). A loaded
+// document applies it from its bootstrap script, which a navigation never runs, so a navigation
+// reads it from the same props and writes that URL to history. The fragment stays the link's.
+function resolveFarmCanonicalNavigationURL(html, url) {
+  const prefix = "window.__FARM_PROPS__=";
+  const separator = ";window.__FARM_INTEGRATION_API_MANIFEST__=";
+  const start = typeof html === "string" ? html.indexOf(prefix) : -1;
+  if (start === -1 || html.indexOf('"__farmCanonicalPath":', start) === -1) return url;
+  for (
+    let end = html.indexOf(separator, start + prefix.length);
+    end !== -1;
+    end = html.indexOf(separator, end + 1)
+  ) {
+    let canonicalPath;
+    try {
+      canonicalPath = JSON.parse(html.slice(start + prefix.length, end)).__farmCanonicalPath;
+    } catch {
+      // The separator was inside a string value; try the next one.
+      continue;
+    }
+    if (typeof canonicalPath !== "string" || !canonicalPath.startsWith("/")) return url;
+    const canonical = new URL(canonicalPath, url);
+    if (canonical.origin !== url.origin) return url;
+    canonical.hash = url.hash;
+    return canonical;
+  }
+  return url;
+}
+
 /*farm-router-end*/
 function hasAbsoluteNavigationHref(href) {
   return /^[a-zA-Z][a-zA-Z\\d+.-]*:/.test(href) || href.startsWith("//");
@@ -4341,8 +4370,14 @@ ${generateUniversalRouterStateProperties()}
         if (!this.swapContent(html)) {
           throw new Error("Farm could not swap the target document");
         }
-        this.writeHistoryEntry(action, url.pathname + url.search, options.state, url);
-        this.currentPath = to;
+        const historyUrl = resolveFarmCanonicalNavigationURL(html, url);
+        this.writeHistoryEntry(
+          action,
+          historyUrl.pathname + historyUrl.search,
+          options.state,
+          historyUrl,
+        );
+        this.currentPath = historyUrl.pathname + historyUrl.search;
         if (options.scroll !== false) {
           if (url.hash) getHashTargetElement(url.hash)?.scrollIntoView();
           else window.scrollTo(0, 0);
@@ -5745,8 +5780,14 @@ ${
           // The history entry comes first, as on the client-render path: swapContent shows the
           // page and its title, then waits for its islands, and a Back pressed meanwhile must
           // leave the page on screen, not the one before it. Its islands also hydrate at their URL.
-          this.writeHistoryEntry(action, url.pathname + url.search, options.state, url);
-          this.currentPath = to;
+          const historyUrl = resolveFarmCanonicalNavigationURL(html, url);
+          this.writeHistoryEntry(
+            action,
+            historyUrl.pathname + historyUrl.search,
+            options.state,
+            historyUrl,
+          );
+          this.currentPath = historyUrl.pathname + historyUrl.search;
           let swappedHtml = html;
           let swapped = await this.swapContent(
             html,
