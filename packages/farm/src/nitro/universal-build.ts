@@ -100,7 +100,7 @@ import type { Rollup, UserConfig as ViteUserConfig } from "vite";
 import os from "os";
 import path from "path";
 import { constants as fsConstants, existsSync, readFileSync, realpathSync, statSync } from "fs";
-import { readRouteRenderingDirectiveFromFile } from "../ssg";
+import { readRouteRenderingDirectiveFromFile, resolveRouteRenderingConfig } from "../ssg";
 import {
   FARM_LAYOUT_ELEMENT_CLIENT_SOURCE,
   FARM_SERVER_TREE_LAYOUT_CLIENT_SOURCE,
@@ -128,8 +128,13 @@ import {
   type FarmClientHydrationPlanOptions,
   type IsolatedClientBoundaryReference,
 } from "../utils/client-component";
-import type { FarmIsolatedClientHydrationMode } from "../types";
-import { isFarmMarkdownPageFile } from "../app-markdown";
+import type { FarmIsolatedClientHydrationMode, RouteModule } from "../types";
+import {
+  FARM_MARKDOWN_PRECOMPILED_PAGES,
+  isFarmMarkdownPageFile,
+  parseMarkdownFrontmatter,
+  readFarmMarkdownRouteConfig,
+} from "../app-markdown";
 import { resolveFarmMdxComponentsModulePath, resolveMdxConfig } from "../app-markdown-config";
 import type { ProgrammaticRedirectRoute } from "../routes";
 import type { NitroConfig } from "nitro/types";
@@ -241,6 +246,10 @@ import {
 } from "../integration-provider-build";
 import { loadFarmProductionVite, type FarmProductionViteRuntime } from "../build/production-vite";
 import { loadTailwindVitePlugin } from "../build/tailwind";
+import {
+  precompileFarmMarkdownPages,
+  type FarmMarkdownPrecompile,
+} from "../build/markdown-precompile";
 import { resolveFarmImageServerRuntime, SHARP_INSTALL_HINT } from "../image-runtime";
 import { VERCEL_OG_INSTALL_HINT } from "../optional-peer";
 import { mergeFarmFontCss } from "../font-vite";
@@ -538,6 +547,24 @@ function resolveNitroInternalRuntimeAliases(root: string): Record<string, string
         nitroRequire.resolve(specifier).split(path.sep).join("/"),
       ]),
     ),
+  };
+}
+
+/**
+ * Gives the temporary prerender server the Markdown pages the build compiled, so its renders run
+ * them instead of compiling each page. The deployed server is not built with it.
+ */
+function createPrerenderMarkdownPagesPlugin(pages: Promise<Map<string, string>>): Rollup.Plugin {
+  return {
+    name: "farm-prerender-markdown-pages",
+    async banner(chunk) {
+      if (!chunk.isEntry) return "";
+      const compiled = await pages;
+      if (compiled.size === 0) return "";
+      return `globalThis[Symbol.for(${JSON.stringify(
+        FARM_MARKDOWN_PRECOMPILED_PAGES.description,
+      )})] = new Map(${JSON.stringify([...compiled])});`;
+    },
   };
 }
 
@@ -1463,6 +1490,7 @@ export async function buildUniversal(
   // so discovery can share exact compiler results with both bundle graphs.
   const rendererBuild = options.rendererBuildLifetime ? undefined : new AbortController();
   const rendererBuildLifetime = options.rendererBuildLifetime ?? rendererBuild!.signal;
+  let markdownPrecompile: FarmMarkdownPrecompile | undefined;
 
   try {
     const routeRuntimeManifestPromise = options.routeRuntimeManifest
@@ -1493,6 +1521,10 @@ export async function buildUniversal(
           : {}),
       });
     }
+    markdownPrecompile = precompileFarmMarkdownPages(
+      collectFarmPrerenderedMarkdownBodies(pageRoutes),
+      farmCoreRoot,
+    );
     const routeSlots: UniversalRouteSlot[] = Array.from(
       routeManager.getRouteSlots().values(),
       (entry) => ({
@@ -1713,6 +1745,7 @@ export async function buildUniversal(
       configuredHeaderRoutes,
       nitroBuilderResultPromise,
       lifecyclePluginManager,
+      markdownPrecompile?.pages,
     );
 
     const runtimeManifestPath = await writeFarmRouteRuntimeManifest(
@@ -1736,7 +1769,27 @@ export async function buildUniversal(
     throw error;
   } finally {
     rendererBuild?.abort();
+    markdownPrecompile?.dispose();
   }
+}
+
+/**
+ * The bodies of the Markdown pages this build will likely prerender: those whose literal route
+ * config makes them static without revalidation, as collectSSGPages reads it. A page this misses
+ * still prerenders, compiling when it renders.
+ */
+function collectFarmPrerenderedMarkdownBodies(pageRoutes: UniversalPageRoute[]): string[] {
+  const bodies: string[] = [];
+  for (const route of pageRoutes) {
+    if (route.source === undefined || !isFarmMarkdownPageFile(route.modulePath)) continue;
+    const { body } = parseMarkdownFrontmatter(route.source);
+    const rendering = resolveRouteRenderingConfig(
+      readFarmMarkdownRouteConfig(body) as RouteModule,
+      route.source,
+    );
+    if (rendering.ssg && rendering.revalidate === undefined) bodies.push(body);
+  }
+  return bodies;
 }
 
 /**
@@ -13319,6 +13372,7 @@ async function buildNitroUniversal(
   configuredHeaderRoutes: UniversalConfiguredHeaderRoute[],
   nitroBuilderResultPromise: Promise<PromiseSettledResult<FarmNitroBuilder>>,
   pluginManager?: PluginManager,
+  markdownPrecompiledPages?: Promise<Map<string, string>>,
 ) {
   // Nitro is only needed while producing the deployment artifact. Keeping the
   // import lazy prevents this build-only dependency from leaking into an
@@ -14259,6 +14313,9 @@ function toFarmNodeResponse(request, response) {
             ? [configuredPlugins]
             : []),
         createPrerenderRuntimeResolverPlugin(config.root),
+        ...(markdownPrecompiledPages
+          ? [createPrerenderMarkdownPagesPlugin(markdownPrecompiledPages)]
+          : []),
       ];
     });
   });
