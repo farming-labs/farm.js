@@ -14912,7 +14912,13 @@ export async function installFarmCompileCacheLauncher(
   return true;
 }
 
-async function registerPrebuiltSSRPackageImport(
+/**
+ * Point `#farm-ssr-entry` at the prebuilt SSR entry in the server's package.json. Its chunks are
+ * ES modules in `.js` files, so a package.json without a `type` (Nitro writes one for traced
+ * dependencies) is marked `module`: otherwise Node parses the entry as CommonJS first, fails,
+ * parses it again as an ES module, and warns on every start.
+ */
+export async function registerPrebuiltSSRPackageImport(
   serverDir: string,
   ssrEntryFile: string,
   fs: typeof import("fs/promises"),
@@ -14929,6 +14935,7 @@ async function registerPrebuiltSSRPackageImport(
     packageJSON.imports && typeof packageJSON.imports === "object" ? packageJSON.imports : {};
   const outputEntry = `${FARM_SSR_OUTPUT_DIR}/${ssrEntryFile}`.replace(/\\/g, "/");
 
+  packageJSON.type ??= "module";
   packageJSON.imports = {
     ...existingImports,
     [FARM_SSR_PACKAGE_IMPORT]: `./${outputEntry}`,
