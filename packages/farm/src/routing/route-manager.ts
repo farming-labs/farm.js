@@ -1,3 +1,4 @@
+import type { FarmSearchPreserveRoute } from "../client/search-preserve-routes";
 import { resolveFarmServerComponentsMode } from "../server-components-mode";
 import { getFarmServerTreeLayoutPatterns } from "./layout-selector";
 import { loadFarmDevModule } from "../dev-module";
@@ -492,6 +493,31 @@ export class RouteManager {
    */
   getRoutes(): Map<string, RouteEntry> {
     return new Map(this.routes);
+  }
+
+  /**
+   * The pages whose programmatic definition declares `search.preserve`, for Farm links to carry
+   * those params from the current URL. Read from the evaluated routes files, without planning.
+   */
+  getSearchPreserveRoutes(): FarmSearchPreserveRoute[] {
+    const routes: FarmSearchPreserveRoute[] = [];
+    for (const entry of this.routes.values()) {
+      const preserve = getProgrammaticRouteSearchClientOptions(
+        this.programmaticPages.get(entry.modulePath)?.search,
+      )?.preserve;
+      if (!preserve?.length) continue;
+      routes.push({
+        pattern: entry.pattern,
+        segments: entry.route.segments.map((seg) => ({
+          segment: seg.segment,
+          isDynamic: seg.isDynamic,
+          isCatchAll: seg.isCatchAll,
+          isOptional: seg.isOptional,
+        })),
+        search: { preserve: [...preserve] },
+      });
+    }
+    return routes;
   }
 
   /**

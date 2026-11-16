@@ -846,6 +846,8 @@ After the route has consumed it, Farm can clean the URL to `/products/123?locale
 
 `preserve` is used by Farm links. If the current page is `/products?locale=am`, then a link to `/products/[id]` carries `locale=am` unless the link already provides its own `locale`.
 
+The server render applies it from the request URL, so the rendered `href` already carries the param and the page hydrates with the same one, in development and production builds alike. Only routes that declare `preserve` are sent to the browser for this, and a build without any sends nothing.
+
 Use this for tab state, pagination defaults, locale/tenant preservation, preview mode, and one-time params such as `toast=saved`. Keep security-sensitive values out of search params; they are user-editable URL state, not trusted server state.
 
 ## Route context
