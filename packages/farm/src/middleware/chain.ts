@@ -14,6 +14,7 @@ import type {
   MemoryRateLimitStorageOptions,
   MiddlewareResult,
 } from "./types";
+import { getFarmMiddlewareClientAddress } from "./client-address";
 import { matchesMiddlewarePredicate } from "./matcher";
 
 const DEFAULT_MEMORY_RATE_LIMIT_ENTRIES = 100_000;
@@ -199,7 +200,7 @@ function getCountedRateLimitKeys(ctx: MiddlewareContext): Map<string, RateLimitI
  * loudly is the only outcome that cannot be mistaken for working.
  */
 function requireRateLimitClientAddress(ctx: MiddlewareContext): string {
-  const address = ctx.request.socket?.remoteAddress;
+  const address = getFarmMiddlewareClientAddress(ctx.request);
   if (address) return address;
 
   throw new Error(
