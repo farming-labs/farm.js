@@ -14,6 +14,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import { parseAst } from "rolldown/parseAst";
+import { parseSync } from "rolldown/utils";
 import {
   farmSourceSnapshotPathKey,
   memoizeInFarmSourceSnapshot,
@@ -146,6 +147,12 @@ export function resolveFarmReactServerExport(importer: string, specifier: string
   return resolved;
 }
 
+/** The language Farm's analyses parse `file` as: TypeScript, with JSX outside `.ts` files. */
+function parseLang(file: string): "ts" | "tsx" {
+  const extension = path.extname(file).slice(1);
+  return extension === "ts" || extension === "mts" || extension === "cts" ? "ts" : "tsx";
+}
+
 const parsedModules = new Map<string, { size: number; mtimeMs: number; program: AstNode | null }>();
 
 /** `file` parsed, once per version of it: tracing reads the same package files for every import. */
@@ -162,9 +169,7 @@ function readModule(file: string): AstNode | null {
   let program: AstNode | null = null;
   try {
     const code = fs.readFileSync(file, "utf8");
-    const extension = path.extname(file).slice(1);
-    const lang = extension === "ts" || extension === "mts" || extension === "cts" ? "ts" : "tsx";
-    program = parseAst(code, { lang: lang as "tsx" }) as unknown as AstNode;
+    program = parseAst(code, { lang: parseLang(file) }) as unknown as AstNode;
   } catch {
     program = null;
   }
@@ -356,13 +361,12 @@ interface PackageImport {
 }
 
 function parseCode(code: string, file: string): AstNode | null {
-  const extension = path.extname(file).slice(1);
-  const lang = extension === "ts" || extension === "mts" || extension === "cts" ? "ts" : "tsx";
+  const lang = parseLang(file);
   // The scope islands-package-references.ts parses in: a build's transform of a server module
   // parses it once for both rewrites.
   return memoizeInFarmSourceSnapshot(`ast:${lang}`, code, () => {
     try {
-      return parseAst(code, { lang: lang as "tsx" }) as unknown as AstNode;
+      return parseAst(code, { lang }) as unknown as AstNode;
     } catch {
       return null;
     }
@@ -634,6 +638,104 @@ function staticImportSources(program: AstNode): string[] {
   return sources;
 }
 
+interface StaticImports {
+  /** What `staticImportSources` returns for the module's program. */
+  sources: string[];
+  /** Whether the module starts with `"use client"` (`isClientModule`). */
+  client: boolean;
+}
+
+// `export {} from "mod"` loads "mod", but the module record has no entry for it. Whitespace and
+// comments may separate the tokens; matching more than that only costs a program.
+const GAP = String.raw`(?:\s|\/\*[\s\S]*?\*\/|\/\/[^\n\r\u2028\u2029]*)*`;
+const EMPTY_EXPORT_LIST = new RegExp(String.raw`\bexport${GAP}\{${GAP}\}`);
+
+/**
+ * A module's static imports and its `"use client"` directive, or null when it does not parse, as
+ * `staticImportSources` and `isClientModule` read them from its program. The parser's module record
+ * lists them without building that program, the bulk of a parse; a module whose record cannot
+ * tell (a type-only import or export, an empty export list, a prologue that mentions
+ * "use client") reads them from the program.
+ */
+function scanFarmStaticImports(code: string, lang: "ts" | "tsx"): StaticImports | null {
+  let result: ReturnType<typeof parseSync>;
+  try {
+    // The options `parseAst` passes, so a module parses (or fails to) as it does there.
+    result = parseSync("file.js", code, { lang, preserveParens: false });
+  } catch {
+    return null;
+  }
+  if (result.errors.length > 0) return null;
+  const fromProgram = (): StaticImports => {
+    const program = result.program as unknown as AstNode;
+    return { sources: staticImportSources(program), client: isClientModule(program) };
+  };
+  const statements: Array<{ start: number; source: string }> = [];
+  for (const entry of result.module.staticImports) {
+    // `import type { a }` loads nothing and `import { type a }` loads the module; both are types.
+    if (entry.entries.some((binding) => binding.isType)) return fromProgram();
+    statements.push({ start: entry.start, source: entry.moduleRequest.value });
+  }
+  const imported = new Set(statements.map((statement) => statement.start));
+  for (const entry of result.module.staticExports) {
+    if (entry.entries.some((binding) => binding.isType)) return fromProgram();
+    // `import { a } from "mod"; export { a }` records an export of "mod" at the import statement:
+    // only a request inside an export statement of its own is that statement's `from`.
+    const request = entry.entries[0]?.moduleRequest;
+    if (
+      request &&
+      !imported.has(entry.start) &&
+      request.start >= entry.start &&
+      request.end <= entry.end
+    ) {
+      statements.push({ start: entry.start, source: request.value });
+    }
+  }
+  if (EMPTY_EXPORT_LIST.test(code)) return fromProgram();
+  statements.sort((left, right) => left.start - right.start);
+  // Directives come before every statement: without "use client" before the first import, the
+  // module has none.
+  const prologueEnd = statements[0]?.start ?? code.length;
+  if (code.slice(0, prologueEnd).includes("use client")) return fromProgram();
+  return { sources: statements.map((statement) => statement.source), client: false };
+}
+
+const scannedModules = new Map<
+  string,
+  { size: number; mtimeMs: number; imports: StaticImports | null }
+>();
+
+/** `scanFarmStaticImports` of `file`, once per version of it. */
+function readModuleImports(file: string): StaticImports | null {
+  let stat: fs.Stats;
+  try {
+    stat = fs.statSync(file);
+  } catch {
+    return null;
+  }
+  noteFarmSourceRead(file);
+  const cached = scannedModules.get(file);
+  if (cached && cached.size === stat.size && cached.mtimeMs === stat.mtimeMs) return cached.imports;
+  const parsed = parsedModules.get(file);
+  let imports: StaticImports | null;
+  if (parsed && parsed.size === stat.size && parsed.mtimeMs === stat.mtimeMs) {
+    // Another analysis has the program already.
+    imports = parsed.program
+      ? { sources: staticImportSources(parsed.program), client: isClientModule(parsed.program) }
+      : null;
+  } else {
+    let code: string | undefined;
+    try {
+      code = fs.readFileSync(file, "utf8");
+    } catch {
+      code = undefined;
+    }
+    imports = code === undefined ? null : scanFarmStaticImports(code, parseLang(file));
+  }
+  scannedModules.set(file, { size: stat.size, mtimeMs: stat.mtimeMs, imports });
+  return imports;
+}
+
 /** Files already walked without reaching `client-only`. */
 const clientOnlyFreeFiles = new Set<string>();
 
@@ -654,18 +756,31 @@ function resolveServerEntry(importer: string, specifier: string): string | null 
   );
 }
 
-function walkToClientOnly(file: string, seen: Set<string>): string[] | null {
+/**
+ * `resolved` holds the files the imports seen so far resolve to, by importing directory and source:
+ * an icon library's every icon module imports the same factory.
+ */
+function walkToClientOnly(
+  file: string,
+  seen: Set<string>,
+  resolved: Map<string, string | null>,
+): string[] | null {
   if (seen.has(file) || clientOnlyFreeFiles.has(file)) return null;
   seen.add(file);
-  const program = readModule(file);
+  const imports = readModuleImports(file);
   // `"use client"` is the boundary: what it imports is client code.
-  if (!program || isClientModule(program)) return null;
-  for (const source of staticImportSources(program)) {
+  if (!imports || imports.client) return null;
+  for (const source of imports.sources) {
     if (source === CLIENT_ONLY_PACKAGE) return [file];
-    const child = source.startsWith(".")
-      ? resolveRelative(file, source)
-      : resolveServerEntry(file, source);
-    const chain = child && walkToClientOnly(child, seen);
+    const key = `${path.dirname(file)}\0${source}`;
+    let child = resolved.get(key);
+    if (child === undefined) {
+      child = source.startsWith(".")
+        ? resolveRelative(file, source)
+        : resolveServerEntry(file, source);
+      resolved.set(key, child);
+    }
+    const chain = child && walkToClientOnly(child, seen, resolved);
     if (chain) return [file, ...chain];
   }
   return null;
@@ -681,13 +796,15 @@ export function findFarmClientOnlyImport(
   file: string,
 ): { specifier: string; chain: string[] } | null {
   if (!code.includes("import") && !code.includes("export")) return null;
-  const program = parseCode(code, file);
-  if (!program) return null;
-  for (const specifier of staticImportSources(program)) {
+  const imports = scanFarmStaticImports(code, parseLang(file));
+  if (!imports) return null;
+  // Within one check, each import resolves once from each directory.
+  const resolved = new Map<string, string | null>();
+  for (const specifier of imports.sources) {
     const entry = resolveServerEntry(file, specifier);
     if (!entry) continue;
     const seen = new Set<string>();
-    const chain = walkToClientOnly(entry, seen);
+    const chain = walkToClientOnly(entry, seen, resolved);
     if (chain) return { specifier, chain };
     for (const walked of seen) clientOnlyFreeFiles.add(walked);
   }
