@@ -14862,6 +14862,18 @@ function toFarmNodeResponse(request, response) {
       });
     });
   }
+  if (isVercel && docsPrerenderPages.some((pathname) => prerenderRoutes.includes(pathname))) {
+    // The deployed function reads docs content, and its pages' "Last updated" dates, from the
+    // copy bundled beside it. Give the temporary server the same copy, so a prerendered page
+    // shows the date the function would, not the time the build checked the file out.
+    nitroInstance.hooks.hook("prerender:init", (prerenderer) => {
+      prerenderer.hooks.hook("compiled", async () => {
+        await copyFarmDocsContentForVercel(config, root, prerenderer.options.output.serverDir, fs, {
+          log: false,
+        });
+      });
+    });
+  }
   nitroInstance.hooks.hook("rollup:before", (_nitro, rollupConfig) => {
     nameCodeSplittingGroups(rollupConfig);
   });
@@ -15310,11 +15322,16 @@ async function postProcessVercelOutput(
   logger.info("✅ Post-processed Vercel output for Build Output API v3");
 }
 
+/**
+ * Copies each docs root's content, with its "Last updated" manifest, beside a server entry.
+ * `log: false` keeps a second copy in the same build from repeating its messages.
+ */
 async function copyFarmDocsContentForVercel(
   config: ResolvedFarmConfig,
   root: string,
   nitroFuncDir: string,
   fs: typeof import("fs/promises"),
+  options: { log?: boolean } = {},
 ) {
   if (!config.docs?.enabled) return;
   // Nitro v3 emits the SSR entry at the function root. Its docs lookup searches
@@ -15326,6 +15343,7 @@ async function copyFarmDocsContentForVercel(
     config.srcDir,
     path.join(nitroFuncDir, "farm-docs-content"),
     fs,
+    options,
   );
   for (const [index, docsRoot] of extraRoots.entries()) {
     await copyFarmDocsRootContent(
@@ -15334,6 +15352,7 @@ async function copyFarmDocsContentForVercel(
       config.srcDir,
       path.join(nitroFuncDir, "farm-docs-roots", String(index)),
       fs,
+      options,
     );
   }
 }
@@ -15344,6 +15363,7 @@ async function copyFarmDocsRootContent(
   srcDir: string | undefined,
   bundledContentDir: string,
   fs: typeof import("fs/promises"),
+  { log = true }: { log?: boolean } = {},
 ) {
   const docsContentDir = resolveBuildDocsContentDir(docs, root, srcDir);
   if (!docsContentDir) return;
@@ -15352,7 +15372,7 @@ async function copyFarmDocsRootContent(
     fallback: "now",
   });
   const undatedPages = lastModifiedManifest.unknown?.length ?? 0;
-  if (undatedPages > 0) {
+  if (log && undatedPages > 0) {
     logger.warn(
       `${undatedPages} docs page(s) were last changed before this shallow clone's Git history, so they show no "Last updated" date. Build from a full clone (git fetch --unshallow) or set lastModified in the page's frontmatter.`,
     );
@@ -15370,7 +15390,9 @@ async function copyFarmDocsRootContent(
     `${JSON.stringify(lastModifiedManifest, null, 2)}\n`,
   );
 
-  logger.info(`📚 Bundled docs content for Vercel: ${path.relative(root, docsContentDir)}`);
+  if (log) {
+    logger.info(`📚 Bundled docs content for Vercel: ${path.relative(root, docsContentDir)}`);
+  }
 }
 
 interface StagedSharpRuntime {
