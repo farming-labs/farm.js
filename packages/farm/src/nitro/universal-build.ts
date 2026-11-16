@@ -200,12 +200,14 @@ import {
   FARM_CLIENT_MODULE_PRELOADS_PLACEHOLDER,
   readFarmClientModulePreloads,
 } from "./client-module-preloads";
+import { createFarmRouter } from "../router";
 import {
   createFarmClientRouteTable,
   FARM_CLIENT_ROUTE_TABLE_MODULE,
   FARM_CLIENT_ROUTE_TABLE_PLACEHOLDER,
   generateFarmClientRouteTableModule,
   readFarmClientRouteTable,
+  resolveFarmDocsClientRoutes,
   writeFarmClientRouteTable,
 } from "./client-route-table";
 import {
@@ -2402,11 +2404,36 @@ async function buildClient(
     return { clientLayouts, clientRouteSlots };
   });
 
+  // The docs runtime answers its own pages before the app's page routes, so the client table
+  // keeps one route per URL, the one the server renders (`src/app/docs/page.md` is docs content).
+  const docsEntryOwns = (pattern: string) =>
+    syntheticDocsEntry === "/" ||
+    pattern === syntheticDocsEntry ||
+    pattern.startsWith(`${syntheticDocsEntry}/`);
+  if (syntheticDocsEntry && clientPages.some((page) => !page.docs && docsEntryOwns(page.pattern))) {
+    const docsPagePaths = new Set(
+      discoverFarmDocsPages(
+        resolveFarmDocsContentDir(config.docs!, { root: config.root, srcDir: config.srcDir }),
+        config.docs!,
+      ).map((page) => page.href),
+    );
+    const resolved = resolveFarmDocsClientRoutes(clientPages, docsPagePaths);
+    for (const page of resolved.shadowed) {
+      logger.warn(
+        `⚠️  ${page.pattern} has the URL shape of the docs route ${syntheticDocsPatterns[1]}, whose pages answer first: the page renders only at paths without a docs page, and does not hydrate as a page there.`,
+      );
+    }
+    clientPages.splice(0, clientPages.length, ...resolved.pages);
+  }
+
   logger.info(
     `📱 Total hydratable routes detected: ${clientPages.length} pages, ${clientLayouts.filter((layout) => layout.shouldHydrate || layout.hasIsolatedClientBoundaries).length} layouts, and ${clientRouteSlots.length} slots`,
   );
   // One table for the client's lazy chunk and the server, which names each document's entries.
   const clientRouteTable = createFarmClientRouteTable(clientPages);
+  // The client and the server match with this table; an ambiguous one would leave every page
+  // without its client routes, so it fails the build here instead.
+  createFarmRouter(clientRouteTable.map((route) => ({ path: route.pattern, meta: route })));
   await writeFarmClientRouteTable(path.dirname(outputDir), clientRouteTable);
 
   // The web client, then (for an app with a `mobile` block) the mobile client: the same entry
@@ -3041,13 +3068,17 @@ function getFarmClientBootRoutes(routePathname) {
 
 /**
  * The production client's page directory, which decides route-group layouts. A docs route takes
- * the directory of the app page at its path, as the server's layouts do.
+ * the directory of the app page at its path, as the server's layouts do: the page whose place it
+ * took (resolveFarmDocsClientRoutes), else a less specific one.
  */
 export function generateClientPageDirectorySource(): string {
   return `function getFarmPageDirectory(pathname) {
   const path = getFarmRoutePathname(pathname);
   let matched = clientRouteMatcher.match(path);
-  if (matched && matched.route.meta.docs) matched = clientPageRouteMatcher.match(path);
+  if (matched && matched.route.meta.docs) {
+    if (matched.route.meta.directory) return matched.route.meta.directory;
+    matched = clientPageRouteMatcher.match(path);
+  }
   return matched ? matched.route.meta.directory || matched.route.meta.pattern : null;
 }`;
 }

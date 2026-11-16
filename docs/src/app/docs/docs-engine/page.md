@@ -55,6 +55,10 @@ src/app/docs/
     page.md
 ```
 
+These files are the docs engine's pages, which it answers before the app's page routes in
+development and production. An app page under the docs entry renders only at a path without a docs
+page.
+
 Use frontmatter for page metadata:
 
 ```md

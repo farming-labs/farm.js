@@ -5075,6 +5075,207 @@ export default function RootLayout({ children }) {
     }
   }, 120_000);
 
+  it("gives the docs runtime's pages in src/app/docs one client route, and hydrates the app", async () => {
+    const root = await createProductionFixture();
+
+    try {
+      const appDir = path.join(root, "src", "app");
+      await fs.mkdir(path.join(appDir, "about"), { recursive: true });
+      await fs.mkdir(path.join(appDir, "docs", "guide"), { recursive: true });
+      await fs.writeFile(
+        path.join(appDir, "counter.tsx"),
+        `
+"use client";
+
+import { useEffect, useState } from "react";
+
+export function Counter() {
+  const [count, setCount] = useState(0);
+  const [hydrated, setHydrated] = useState(false);
+  useEffect(() => setHydrated(true), []);
+  return (
+    <button data-counter data-hydrated={hydrated ? "true" : "false"} onClick={() => setCount(count + 1)}>
+      count:{count}
+    </button>
+  );
+}
+`.trim(),
+      );
+      await fs.writeFile(
+        path.join(appDir, "layout.tsx"),
+        `
+import { Counter } from "./counter";
+
+export default function RootLayout({ children }) {
+  return (
+    <div data-layout="root">
+      <nav>
+        <a href="/" data-nav="home">Home</a>
+        <a href="/about" data-nav="about">About</a>
+        <a href="/docs" data-nav="docs">Docs</a>
+      </nav>
+      <Counter />
+      {children}
+    </div>
+  );
+}
+`.trim(),
+      );
+      await fs.writeFile(
+        path.join(appDir, "page.tsx"),
+        `export default function Page() { return <main>home page</main>; }`,
+      );
+      await fs.writeFile(
+        path.join(appDir, "about", "page.tsx"),
+        `export default function Page() { return <main>about page</main>; }`,
+      );
+      // The docs runtime's content, as the docs show it: src/app/docs is also the app's route tree.
+      await fs.writeFile(path.join(appDir, "docs", "page.md"), `# Docs index\n\nThe docs index.`);
+      await fs.writeFile(
+        path.join(appDir, "docs", "guide", "page.md"),
+        `# Docs guide\n\nA nested docs page.`,
+      );
+
+      const config = await resolveConfig(
+        {
+          root,
+          srcDir: "src",
+          docs: { entry: "/docs", search: false },
+          images: { provider: "none" },
+          generateBuildId: () => "docs-client-route-owner-test",
+        },
+        "production",
+      );
+      await build(config, { root, preset: "node-server" });
+
+      // One route a URL: the docs runtime's, which answers its pages before any page route.
+      const clientRouteTable = JSON.parse(
+        await fs.readFile(path.join(root, ".farm", "client-route-table.json"), "utf8"),
+      ) as Array<{ pattern: string; docs?: true }>;
+      expect(clientRouteTable.map((route) => route.pattern).sort()).toEqual([
+        "/",
+        "/about",
+        "/docs",
+        "/docs/[...slug]",
+      ]);
+      expect(clientRouteTable.filter((route) => route.pattern.startsWith("/docs"))).toEqual([
+        expect.objectContaining({ pattern: "/docs", docs: true }),
+        expect.objectContaining({ pattern: "/docs/[...slug]", docs: true }),
+      ]);
+
+      const production = await startProductionServer(path.join(root, ".farm", ".output", "server"));
+      try {
+        const readBootRoutes = async (pathname: string) => {
+          const html = await (await fetch(`${production.origin}${pathname}`)).text();
+          const boot = html.match(/window\.__FARM_CLIENT_ROUTES__=([^;]*);/)?.[1];
+          return { html, boot: boot ? JSON.parse(boot) : undefined };
+        };
+        // The server renders the docs runtime's page at these paths, and names its docs route.
+        for (const [pathname, title, pattern] of [
+          ["/docs", "Docs index", "/docs"],
+          ["/docs/guide", "Docs guide", "/docs/[...slug]"],
+        ]) {
+          const { html, boot } = await readBootRoutes(pathname);
+          expect(html).toContain(title);
+          expect(html).toContain('id="nd-docs-layout"');
+          expect(boot).toEqual({
+            path: pathname,
+            routes: [expect.objectContaining({ pattern, docs: true })],
+          });
+        }
+        expect((await readBootRoutes("/about")).boot).toEqual({
+          path: "/about",
+          routes: [expect.objectContaining({ pattern: "/about" })],
+        });
+
+        const executablePath = await resolveInstalledChromiumExecutable();
+        if (!executablePath) return;
+        const browser = await chromium.launch({ headless: true, executablePath });
+        try {
+          const page = await browser.newPage();
+          const routeTableErrors: string[] = [];
+          const documentRequests: string[] = [];
+          page.on("console", (message) => {
+            if (/route table|Ambiguous/i.test(message.text())) {
+              routeTableErrors.push(message.text());
+            }
+          });
+          page.on("pageerror", (error) => {
+            if (/Ambiguous/i.test(error.message)) routeTableErrors.push(error.message);
+          });
+          page.on("request", (request) => {
+            if (request.isNavigationRequest() && request.frame() === page.mainFrame()) {
+              documentRequests.push(new URL(request.url()).pathname);
+            }
+          });
+          const counter = page.locator("[data-counter]");
+          const expectHydrated = async () => {
+            await expect
+              .poll(() => counter.getAttribute("data-hydrated"), { timeout: 15_000 })
+              .toBe("true");
+            await counter.click();
+            await expect.poll(() => counter.textContent()).toBe("count:1");
+          };
+          const markDocument = () =>
+            page.evaluate(() => {
+              (window as typeof window & { __farmDocument?: string }).__farmDocument = "kept";
+            });
+          const documentMark = () =>
+            page.evaluate(
+              () => (window as typeof window & { __farmDocument?: string }).__farmDocument,
+            );
+
+          try {
+            // The docs page hydrates the root layout around the docs runtime's page.
+            await page.goto(`${production.origin}/docs`);
+            await expect
+              .poll(() => page.locator("#nd-page").textContent())
+              .toContain("The docs index.");
+            await expectHydrated();
+
+            // The docs runtime owns its document's links: another page loads as a document.
+            await page.locator('[data-nav="about"]').click();
+            await page.waitForURL(`${production.origin}/about`);
+            await expect.poll(() => page.locator("main").textContent()).toBe("about page");
+            await expectHydrated();
+
+            // Between app pages, Farm's client navigates in the same document.
+            await markDocument();
+            documentRequests.length = 0;
+            await page.locator('[data-nav="home"]').click();
+            await page.waitForURL(`${production.origin}/`);
+            await expect.poll(() => page.locator("main").textContent()).toBe("home page");
+            await page.goBack();
+            await page.waitForURL(`${production.origin}/about`);
+            await expect.poll(() => page.locator("main").textContent()).toBe("about page");
+            expect(await documentMark()).toBe("kept");
+            expect(documentRequests).toEqual([]);
+
+            // Back to a docs path, which the docs runtime renders as a document.
+            await page.goBack();
+            await page.waitForURL(`${production.origin}/docs`);
+            await expect
+              .poll(() => page.locator("#nd-page").textContent())
+              .toContain("The docs index.");
+            expect(documentRequests).toEqual(["/docs"]);
+            await expectHydrated();
+            expect(routeTableErrors).toEqual([]);
+          } catch (error) {
+            throw new Error(
+              `${String(error)}\nRoute table errors:\n${routeTableErrors.join("\n")}\nDocument requests: ${documentRequests.join(", ")}\nServer output:\n${production.output()}`,
+            );
+          }
+        } finally {
+          await browser.close();
+        }
+      } finally {
+        await production.stop();
+      }
+    } finally {
+      await fs.rm(root, { recursive: true, force: true });
+    }
+  }, 120_000);
+
   const STANDALONE_DEPLOYMENT_COOKIE =
     "__farm_deployment=standalone-node-test; Path=/; HttpOnly; SameSite=Lax";
 
