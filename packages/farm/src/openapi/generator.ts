@@ -1,5 +1,6 @@
 import type { OpenAPIConfig } from "../config";
 import { resolveRouteOpenAPIConfig } from "./route-config";
+import { isMultipartSchema } from "../api/transport";
 import { toFileModuleUrl } from "../utils/file-module";
 import {
   getZodKind,
@@ -68,6 +69,43 @@ export interface OpenAPIGeneratorContext {
 
 type AllowedType = "string" | "number" | "boolean" | "array" | "object";
 const allowedType = new Set(["string", "number", "boolean", "array", "object"]);
+/** Whether a schema takes a File or Blob: Zod 4's z.file(), or a z.instanceof(File) check. */
+function isZodFileSchema(schema: unknown, kind: string | undefined): boolean {
+  if (kind === "file") return true;
+  if (kind !== "custom" || typeof Blob === "undefined") return false;
+  const check = (schema as any)?._def?.fn;
+  if (typeof check !== "function") return false;
+  try {
+    const sample = typeof File === "undefined" ? new Blob([]) : new File([], "farm-openapi-probe");
+    return check(sample) === true && check("farm-openapi-probe") !== true;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * OpenAPI requires each operationId to be unique. Path separators become underscores, so
+ * `/api/a_b` and `/api/a/b` would share one; a later operation gets a numbered suffix.
+ */
+function makeOperationIdsUnique(paths: Record<string, any>): void {
+  const used = new Set<string>();
+  for (const pathItem of Object.values(paths)) {
+    const operations = [
+      ...Object.values(pathItem ?? {}),
+      ...Object.values(pathItem?.["x-oai-additionalOperations"] ?? {}),
+    ];
+    for (const operation of operations) {
+      if (!operation || typeof operation !== "object") continue;
+      const operationId = (operation as { operationId?: unknown }).operationId;
+      if (typeof operationId !== "string") continue;
+      let unique = operationId;
+      for (let index = 2; used.has(unique); index += 1) unique = `${operationId}_${index}`;
+      (operation as { operationId: string }).operationId = unique;
+      used.add(unique);
+    }
+  }
+}
+
 function isStandardSchema(schema: unknown): boolean {
   return (
     !!schema &&
@@ -271,6 +309,16 @@ export class OpenAPIGenerator {
       return tupleSchema;
     }
 
+    // A file field (z.file(), or z.instanceof(File) / z.instanceof(Blob)) is a binary part.
+    if (isZodFileSchema(zodType, kind)) {
+      const description = (zodType as any).description;
+      return {
+        type: "string",
+        format: "binary",
+        ...(description === undefined ? {} : { description }),
+      };
+    }
+
     // For primitive types
     const baseSchema: any = {
       type: this.getTypeFromZodType(zodType),
@@ -439,6 +487,7 @@ export class OpenAPIGenerator {
       }
     }
 
+    makeOperationIdsUnique(spec.paths);
     this.addConfiguredPaths(spec);
 
     return spec;
@@ -607,7 +656,8 @@ export class OpenAPIGenerator {
         return {
           required: this.isRequiredField(bodySchema),
           content: {
-            "application/json": {
+            // A multipart() body is sent as form data, its files as binary parts.
+            [isMultipartSchema(bodySchema) ? "multipart/form-data" : "application/json"]: {
               schema: this.processZodType(bodySchema),
             },
           },

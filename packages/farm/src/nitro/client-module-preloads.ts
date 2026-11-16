@@ -145,7 +145,15 @@ export async function readFarmClientModulePreloads(
 export function encodeFarmClientModulePreloads(
   manifest: FarmClientModulePreloadManifest | null,
 ): string {
-  return JSON.stringify(JSON.stringify(manifest))
+  return encodeFarmBuildJSONPlaceholder(manifest);
+}
+
+/**
+ * A value as JSON in the contents of a JavaScript string literal of any quote style, for a
+ * server bundle placeholder that the server reads with `JSON.parse`.
+ */
+export function encodeFarmBuildJSONPlaceholder(value: unknown): string {
+  return JSON.stringify(JSON.stringify(value))
     .slice(1, -1)
     .replace(/'/g, "\\u0027")
     .replace(/`/g, "\\u0060")

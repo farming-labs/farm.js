@@ -49,6 +49,7 @@
     "build:examples": "node scripts/build-examples.js",
     "benchmark:frameworks": "node benchmarks/frameworks/run.mjs",
     "benchmark:client-chunking": "node benchmarks/client-chunking/run.mjs",
+    "benchmark:client-route-table": "node benchmarks/client-route-table/run.mjs",
     "benchmark:app-scale": "NODE_OPTIONS=--max-old-space-size=12288 pnpm --filter @farm.js/core build:runtime && pnpm --filter @farm.js/cli build && node benchmarks/app-scale/run.mjs",
     "benchmark:dev-scale": "NODE_OPTIONS=--max-old-space-size=12288 pnpm --filter @farm.js/core build:runtime && pnpm --filter @farm.js/cli build && node benchmarks/dev-scale/run.mjs",
     "benchmark:build-scale": "NODE_OPTIONS=--max-old-space-size=12288 pnpm --filter @farm.js/core build:runtime && pnpm --filter @farm.js/cli build && node benchmarks/build-scale/run.mjs",
@@ -113,6 +114,9 @@
       "nanoid@>=3.0.0 <3.3.18": "3.3.18",
       "nanoid@>=4.0.0 <5.1.16": "5.1.16",
       "nanostores@^1.0.1": "^1.5.4"
+    },
+    "patchedDependencies": {
+      "env-runner@0.2.3": "patches/env-runner@0.2.3.patch"
     }
   }
 }

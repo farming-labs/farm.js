@@ -371,6 +371,15 @@ Dynamically imported modules, other routes' chunks, and islands with a deferred 
 (`interaction`, `visible`, or `idle`) are not preloaded; they load when they are needed. Each
 chunk in that static closure is one request, which matters most over HTTP/1.1.
 
+The client's route table (every route whose page, layouts, or islands run in the browser) is its
+own chunk, `chunks/farm-client-routes-h<hash>.js`. The client entry every page loads keeps only a
+loader for each page that hydrates as a whole, so it does not grow with server-rendered pages, such
+as Markdown docs pages. Each document's bootstrap script names its own route's table entry, so the
+page hydrates without the table. The client loads the table on the first prefetch (a `Link` in view
+or under the pointer, or a pointer or focus on any link) or, at the latest, on the first
+navigation. A navigation that cannot load the table, such as one from a page whose deployment no
+longer serves it, loads the next page as a document.
+
 Farm aliases `@/` to `srcDir`. Aliases in `vite.resolve.alias` come before Farm's in dev and in
 both builds, and Vite uses the first one that matches, so an app alias for part of `@/` wins for
 the imports it matches and Farm's `@` handles the rest. For example, this sends

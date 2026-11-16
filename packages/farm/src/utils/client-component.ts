@@ -31,7 +31,11 @@ import {
   PackageInspectionTrace,
 } from "./package-client-boundary-cache";
 import { getFarmProjectSourceDir } from "./source-dir";
-import { memoizeInFarmSourceSnapshot, noteFarmSourceRead } from "./source-snapshot";
+import {
+  farmSourceSnapshotPathKey,
+  memoizeInFarmSourceSnapshot,
+  noteFarmSourceRead,
+} from "./source-snapshot";
 
 export { traceFarmSourceReads, withFarmSourceSnapshot } from "./source-snapshot";
 
@@ -781,6 +785,19 @@ export function collectFarmServerStylesheets(
 export function getClientModuleMetadata(modulePath: string, root?: string): ClientModuleMetadata {
   const resolvedPath = resolveModuleSourcePath(modulePath, root);
   return inspectClientModuleMetadata(resolvedPath, root, new Set(), true);
+}
+
+/**
+ * @internal What a `getClientModuleHydrationPlan` result depends on besides the files it reads: two
+ * calls with one key get the same plan while those files are unchanged.
+ */
+export function getClientModuleHydrationPlanKey(
+  modulePath: string,
+  root: string,
+  mode: FarmIsolatedClientHydrationMode,
+  options: FarmClientHydrationPlanOptions = {},
+): string {
+  return `${path.resolve(root)}\0${mode}\0${options.asyncOwnerIslands === true}\0${options.serverOwners === true}\0${options.serverTreeLayouts === true}\0${options.packageReferences === true}\0${path.resolve(modulePath)}`;
 }
 
 /**
@@ -2198,7 +2215,7 @@ export function resolveImportedModule(
 ): { path: string | null; local: boolean } {
   const resolved = memoizeInFarmSourceSnapshot(
     "resolution",
-    `${root ?? ""}\0${importerPath}\0${specifier}`,
+    `${root ? farmSourceSnapshotPathKey(root) : ""}\0${farmSourceSnapshotPathKey(importerPath)}\0${specifier}`,
     () => resolveImportedModuleUncached(importerPath, specifier, root),
     // A file added later may resolve an import that does not resolve now.
     (result) => result.path !== null,

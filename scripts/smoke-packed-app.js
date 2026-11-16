@@ -163,8 +163,26 @@ async function serveAndCheck(appDirectory) {
     }
     console.log(`Served / and ${moduleScript} from the packed app on port ${port}.`);
   } finally {
-    child.kill("SIGTERM");
+    await stopServer(child);
   }
+}
+
+// The server writes V8's code cache into .output/server/.compile-cache as it exits, so the
+// temporary app can only be removed once the process has gone: removing it while the cache is
+// being flushed fails with ENOTEMPTY.
+async function stopServer(child, timeoutMs = 10_000) {
+  if (child.exitCode !== null || child.signalCode !== null) return;
+  const exited = new Promise((resolve) => child.once("exit", resolve));
+  child.kill("SIGTERM");
+  let timer;
+  const timedOut = new Promise((resolve) => {
+    timer = setTimeout(() => resolve("timeout"), timeoutMs);
+  });
+  if ((await Promise.race([exited, timedOut])) === "timeout") {
+    child.kill("SIGKILL");
+    await exited;
+  }
+  clearTimeout(timer);
 }
 
 async function verifyCompilerStarter(appDirectory, browserPath) {

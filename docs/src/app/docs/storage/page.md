@@ -190,7 +190,10 @@ export default middleware().rateLimit({
 });
 ```
 
-The default bucket is the caller's address and the request path. A built app
+The default bucket is the limit's policy (`requests` and `window`), the caller's address, and the
+route the router serves: the path decoded once, without the base path, locale prefix, or a trailing
+slash, so `/api/login/` and `/api/%6Cogin` count against the same bucket as `/api/login`. Two limits
+on one path keep their own counts and windows; two with the same policy count a request once. A built app
 takes that address from the server's own connection, as the development server
 does. Behind a reverse proxy or a platform load balancer that connection belongs
 to the proxy, so set `server.trustProxy` to key on the last `x-forwarded-for` hop, the

@@ -37,6 +37,50 @@ const event = (): FarmInfraAnalyticsEvent => ({
   agent: { family: "unknown", category: "unknown", identity: "unknown" },
 });
 
+// MCP's Streamable HTTP transport: an initialize POST, then calls carrying the session ID.
+const MCP_HEADERS = {
+  "user-agent": "node",
+  "content-type": "application/json",
+  accept: "application/json, text/event-stream",
+};
+const initialize = (name: unknown) =>
+  JSON.stringify({
+    jsonrpc: "2.0",
+    id: 1,
+    method: "initialize",
+    params: { protocolVersion: "2025-06-18", capabilities: {}, clientInfo: { name, version: "1" } },
+  });
+const toolsCall = JSON.stringify({
+  jsonrpc: "2.0",
+  id: 2,
+  method: "tools/call",
+  params: { name: "search_docs", arguments: {} },
+});
+const CURSOR = {
+  family: "other",
+  category: "harness",
+  identity: "self-reported",
+  name: "Cursor",
+} as const;
+/** A stateless MCP server: reads the whole body, answers JSON, and calls a tool for tools/call. */
+const mcpServer = (headers: HeadersInit = {}, status = 200) =>
+  vi.fn(async (request: Request) => {
+    const body = await request.text();
+    return _runWithCurrentRequest(request, () => {
+      if (body.includes('"tools/call"'))
+        emitFarmEvent({
+          type: "mcp.tool.complete",
+          tool: "search_docs",
+          outcome: "success",
+          durationMs: 2,
+        } as never);
+      return new Response(JSON.stringify({ jsonrpc: "2.0", id: 1, result: { body } }), {
+        status,
+        headers: { "content-type": "application/json", ...headers },
+      });
+    });
+  });
+
 const sentEvents = (send: { mock: { calls: unknown[][] } }) =>
   send.mock.calls.flatMap(
     ([, init]) =>
@@ -288,6 +332,95 @@ describe("runtime plugin", () => {
     const events = sentEvents(send);
     expect(events.map((item) => item.kind)).toEqual(["request", "mcp.tool"]);
     expect(events[0]!.requestId).toBe(events[1]!.requestId);
+  });
+
+  it("names an MCP client in a session ID on its initialize, and each request after it", async () => {
+    const send = vi
+      .spyOn(globalThis, "fetch")
+      .mockResolvedValue(new Response(null, { status: 202 }));
+    const value = manager();
+    const work: Promise<unknown>[] = [];
+    const server = mcpServer();
+    const post = (body: string, headers: Record<string, string> = {}) =>
+      value.runRuntimeRequest(
+        new Request("https://app.example/mcp", {
+          method: "POST",
+          headers: { ...MCP_HEADERS, ...headers },
+          body,
+        }),
+        server,
+        {
+          kind: "api",
+          route: { pathname: "/mcp", pattern: "/mcp" },
+          waitUntil: (job) => work.push(job),
+        },
+      );
+    const initialized = await post(initialize("cursor-vscode"));
+    const session = initialized.headers.get("mcp-session-id")!;
+    expect(session).toMatch(/^farm\.cursor\.[0-9a-f]{32}$/);
+    // The server read the whole body and its answer passes through.
+    expect(initialized.status).toBe(200);
+    expect(initialized.headers.get("content-type")).toBe("application/json");
+    expect(JSON.parse(await initialized.text()).result.body).toBe(initialize("cursor-vscode"));
+    // The client sends the ID with each request after it, as MCP's transport requires.
+    const called = await post(toolsCall, {
+      "mcp-session-id": session,
+      "mcp-protocol-version": "2025-06-18",
+    });
+    expect(called.headers.has("mcp-session-id")).toBe(false);
+    await Promise.all(work);
+    const events = sentEvents(send);
+    expect(events.map(({ kind }) => kind).sort()).toEqual(["mcp.tool", "request", "request"]);
+    for (const item of events) expect(item.agent).toEqual(CURSOR);
+    expect(JSON.stringify(events)).not.toContain(session);
+  });
+
+  it("leaves an MCP response alone unless Farm can name the client and the server has no session", async () => {
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response(null, { status: 202 }));
+    const value = manager();
+    const sessionOf = async (
+      body: string,
+      server = mcpServer(),
+      headers: Record<string, string> = MCP_HEADERS,
+    ) => {
+      const response = await value.runRuntimeRequest(
+        new Request("https://app.example/mcp", { method: "POST", headers, body }),
+        server,
+        { kind: "api", route: { pathname: "/mcp", pattern: "/mcp" } },
+      );
+      // Whatever Farm does, the server always reads the body it was sent.
+      expect(JSON.parse(await response.text()).result.body).toBe(body);
+      return response.headers.get("mcp-session-id");
+    };
+    // A client Farm doesn't list.
+    expect(await sessionOf(initialize("my-agent"))).toBeNull();
+    // A server with sessions of its own keeps its ID.
+    expect(
+      await sessionOf(initialize("cursor-vscode"), mcpServer({ "mcp-session-id": "own" })),
+    ).toBe("own");
+    // A failed initialize.
+    expect(await sessionOf(initialize("cursor-vscode"), mcpServer({}, 500))).toBeNull();
+    // Not MCP's transport: a plain JSON POST is never read.
+    expect(
+      await sessionOf(initialize("cursor-vscode"), mcpServer(), {
+        "content-type": "application/json",
+      }),
+    ).toBeNull();
+    // Not JSON, larger than an initialize, or not JSON-RPC.
+    expect(
+      await sessionOf(initialize("cursor-vscode"), mcpServer(), {
+        ...MCP_HEADERS,
+        "content-type": "text/plain",
+      }),
+    ).toBeNull();
+    const large = JSON.stringify({
+      ...JSON.parse(initialize("cursor-vscode")),
+      pad: "x".repeat(70_000),
+    });
+    expect(await sessionOf(large)).toBeNull();
+    expect(await sessionOf("{not json")).toBeNull();
+    // A batch names its client as a single message does.
+    expect(await sessionOf(`[${initialize("claude-ai")}]`)).toMatch(/^farm\.claude\./);
   });
 
   it("does not mix app instances, unmatched URLs or unscoped MCP events", async () => {
@@ -726,6 +859,42 @@ describe("recorder for servers without a plugin runtime", () => {
         }),
       ),
     );
+  });
+});
+
+describe("recorder: MCP clients", () => {
+  it("names an MCP client in a session ID on its initialize, and its tool calls after it", async () => {
+    const send = vi.fn<typeof fetch>().mockResolvedValue(new Response(null, { status: 202 }));
+    const recorder = farmInfraAnalyticsRecorder(options, send);
+    const work: Promise<unknown>[] = [];
+    const server = mcpServer();
+    const post = (body: string, headers: Record<string, string> = {}) => {
+      const request = new Request("https://app.example/api/mcp", {
+        method: "POST",
+        headers: { ...MCP_HEADERS, ...headers },
+        body,
+      });
+      return recorder.record(
+        request,
+        { route: { pattern: "/api/mcp" } },
+        (job) => work.push(job),
+        () => server(request),
+      );
+    };
+    const initialized = await post(initialize("cursor-vscode"));
+    const session = initialized.headers.get("mcp-session-id")!;
+    expect(session).toMatch(/^farm\.cursor\.[0-9a-f]{32}$/);
+    expect(JSON.parse(await initialized.text()).result.body).toBe(initialize("cursor-vscode"));
+    await post(toolsCall, { "mcp-session-id": session });
+    expect((await post(initialize("my-agent"))).headers.has("mcp-session-id")).toBe(false);
+    await Promise.all(work);
+    await recorder.close();
+    expect(sentEvents(send).map(({ kind, agent }) => [kind, agent.name])).toEqual([
+      ["request", "Cursor"],
+      ["mcp.tool", "Cursor"],
+      ["request", "Cursor"],
+      ["request", "MCP client"],
+    ]);
   });
 });
 

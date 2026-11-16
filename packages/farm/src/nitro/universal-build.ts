@@ -101,7 +101,7 @@ import os from "os";
 import path from "path";
 import { constants as fsConstants, existsSync, readFileSync, realpathSync, statSync } from "fs";
 import { initSync as initModuleLexer, parse as lexModule } from "es-module-lexer";
-import { readRouteRenderingDirectiveFromFile } from "../ssg";
+import { readRouteRenderingDirectiveFromFile, resolveRouteRenderingConfig } from "../ssg";
 import {
   FARM_LAYOUT_ELEMENT_CLIENT_SOURCE,
   FARM_SERVER_TREE_LAYOUT_CLIENT_SOURCE,
@@ -119,6 +119,7 @@ import {
   describeSuppressedAsyncHydration,
   enforceFarmIsolatedHydrationRouteBudget,
   getClientModuleHydrationPlan,
+  getClientModuleHydrationPlanKey,
   getClientModuleMetadata,
   getFarmClientHydrationPlanOptions,
   createMarkdownPageHydrationPlanner,
@@ -129,8 +130,14 @@ import {
   type FarmClientHydrationPlanOptions,
   type IsolatedClientBoundaryReference,
 } from "../utils/client-component";
-import type { FarmIsolatedClientHydrationMode } from "../types";
-import { isFarmMarkdownPageFile } from "../app-markdown";
+import type { FarmIsolatedClientHydrationMode, RouteModule } from "../types";
+import { type FarmSourceSnapshotStore, withFarmSourceSnapshotOf } from "../utils/source-snapshot";
+import {
+  FARM_MARKDOWN_PRECOMPILED_PAGES,
+  isFarmMarkdownPageFile,
+  parseMarkdownFrontmatter,
+  readFarmMarkdownRouteConfig,
+} from "../app-markdown";
 import { resolveFarmMdxComponentsModulePath, resolveMdxConfig } from "../app-markdown-config";
 import type { ProgrammaticRedirectRoute } from "../routes";
 import type { NitroConfig } from "nitro/types";
@@ -144,6 +151,7 @@ import {
 import {
   applyFarmCronVercelCrons,
   createFarmCronCloudflareConfig,
+  toFarmCronCloudflareScheduledTasks,
   type FarmCronJob,
   mergeScheduledTasks,
   prepareFarmCronForNitro,
@@ -186,10 +194,19 @@ import {
 } from "../docs/adapter";
 import {
   createFarmClientModulePreloadPlugin,
+  encodeFarmBuildJSONPlaceholder,
   encodeFarmClientModulePreloads,
   FARM_CLIENT_MODULE_PRELOADS_PLACEHOLDER,
   readFarmClientModulePreloads,
 } from "./client-module-preloads";
+import {
+  createFarmClientRouteTable,
+  FARM_CLIENT_ROUTE_TABLE_MODULE,
+  FARM_CLIENT_ROUTE_TABLE_PLACEHOLDER,
+  generateFarmClientRouteTableModule,
+  readFarmClientRouteTable,
+  writeFarmClientRouteTable,
+} from "./client-route-table";
 import {
   createFarmDocsModulePreloadPlugin,
   encodeFarmDocsModulePreloads,
@@ -242,6 +259,10 @@ import {
 } from "../integration-provider-build";
 import { loadFarmProductionVite, type FarmProductionViteRuntime } from "../build/production-vite";
 import { loadTailwindVitePlugin } from "../build/tailwind";
+import {
+  precompileFarmMarkdownPages,
+  type FarmMarkdownPrecompile,
+} from "../build/markdown-precompile";
 import { resolveFarmImageServerRuntime, SHARP_INSTALL_HINT } from "../image-runtime";
 import { VERCEL_OG_INSTALL_HINT } from "../optional-peer";
 import { mergeFarmFontCss } from "../font-vite";
@@ -539,6 +560,24 @@ function resolveNitroInternalRuntimeAliases(root: string): Record<string, string
         nitroRequire.resolve(specifier).split(path.sep).join("/"),
       ]),
     ),
+  };
+}
+
+/**
+ * Gives the temporary prerender server the Markdown pages the build compiled, so its renders run
+ * them instead of compiling each page. The deployed server is not built with it.
+ */
+function createPrerenderMarkdownPagesPlugin(pages: Promise<Map<string, string>>): Rollup.Plugin {
+  return {
+    name: "farm-prerender-markdown-pages",
+    async banner(chunk) {
+      if (!chunk.isEntry) return "";
+      const compiled = await pages;
+      if (compiled.size === 0) return "";
+      return `globalThis[Symbol.for(${JSON.stringify(
+        FARM_MARKDOWN_PRECOMPILED_PAGES.description,
+      )})] = new Map(${JSON.stringify([...compiled])});`;
+    },
   };
 }
 
@@ -1472,6 +1511,7 @@ export async function buildUniversal(
   // so discovery can share exact compiler results with both bundle graphs.
   const rendererBuild = options.rendererBuildLifetime ? undefined : new AbortController();
   const rendererBuildLifetime = options.rendererBuildLifetime ?? rendererBuild!.signal;
+  let markdownPrecompile: FarmMarkdownPrecompile | undefined;
 
   try {
     const routeRuntimeManifestPromise = options.routeRuntimeManifest
@@ -1502,6 +1542,10 @@ export async function buildUniversal(
           : {}),
       });
     }
+    markdownPrecompile = precompileFarmMarkdownPages(
+      collectFarmPrerenderedMarkdownBodies(pageRoutes),
+      farmCoreRoot,
+    );
     const routeSlots: UniversalRouteSlot[] = Array.from(
       routeManager.getRouteSlots().values(),
       (entry) => ({
@@ -1562,7 +1606,11 @@ export async function buildUniversal(
         `[Farm.js] islands mode cannot hydrate these pages without shipping their server code to the browser:\n${islandsErrors.map((error) => `  - ${error}`).join("\n")}`,
       );
     }
-    const hydrationPlanCache = new Map<string, ClientModuleHydrationPlan>();
+    // The route manager planned every page and layout as the app initialized, with the same
+    // config; the client and SSR route tables start from those plans instead of planning again.
+    const hydrationPlanCache = routeManager.getRouteModuleHydrationPlans();
+    // What that plan read, parsed and resolved, for the client plans and the bundles' transforms.
+    const sourceSnapshot = routeManager.takeBuildSourceSnapshot();
 
     const clientOutputDir = path.join(root, distDir, "client");
     const [productionViteResult] = await productionViteResultPromise;
@@ -1601,6 +1649,7 @@ export async function buildUniversal(
         rendererBuildLifetime,
         routeManager.getProgrammaticClientRoutes(),
         mobileClient,
+        sourceSnapshot,
       );
     };
     const buildSSRBundle = () =>
@@ -1618,6 +1667,7 @@ export async function buildUniversal(
         isolatedClientBoundaryModules,
         hydrationPlanCache,
         rendererBuildLifetime,
+        sourceSnapshot,
       );
 
     // Route metadata and the client/SSR graphs read independent inputs. Drain
@@ -1676,6 +1726,7 @@ export async function buildUniversal(
           rendererBuildLifetime,
           routeManager.getProgrammaticClientRoutes(),
           mobileClient,
+          sourceSnapshot,
         );
       } catch (retryError) {
         if (!(retryError instanceof IncompleteClientBuildOutputError)) throw retryError;
@@ -1690,6 +1741,8 @@ export async function buildUniversal(
       }
     }
 
+    // Only the bundles' transforms read it.
+    sourceSnapshot?.clear();
     const ssrResult = ssrBuildResult.value;
     const routeRuntimeManifest = routeRuntimeManifestResult.value;
 
@@ -1722,6 +1775,7 @@ export async function buildUniversal(
       configuredHeaderRoutes,
       nitroBuilderResultPromise,
       lifecyclePluginManager,
+      markdownPrecompile?.pages,
     );
 
     const runtimeManifestPath = await writeFarmRouteRuntimeManifest(
@@ -1745,7 +1799,27 @@ export async function buildUniversal(
     throw error;
   } finally {
     rendererBuild?.abort();
+    markdownPrecompile?.dispose();
   }
+}
+
+/**
+ * The bodies of the Markdown pages this build will likely prerender: those whose literal route
+ * config makes them static without revalidation, as collectSSGPages reads it. A page this misses
+ * still prerenders, compiling when it renders.
+ */
+function collectFarmPrerenderedMarkdownBodies(pageRoutes: UniversalPageRoute[]): string[] {
+  const bodies: string[] = [];
+  for (const route of pageRoutes) {
+    if (route.source === undefined || !isFarmMarkdownPageFile(route.modulePath)) continue;
+    const { body } = parseMarkdownFrontmatter(route.source);
+    const rendering = resolveRouteRenderingConfig(
+      readFarmMarkdownRouteConfig(body) as RouteModule,
+      route.source,
+    );
+    if (rendering.ssg && rendering.revalidate === undefined) bodies.push(body);
+  }
+  return bodies;
 }
 
 /**
@@ -1928,7 +2002,7 @@ function getCachedClientModuleHydrationPlan(
   cache: Map<string, ClientModuleHydrationPlan>,
   options: FarmClientHydrationPlanOptions = {},
 ): ClientModuleHydrationPlan {
-  const key = `${path.resolve(root)}\0${mode}\0${options.asyncOwnerIslands === true}\0${options.serverOwners === true}\0${options.serverTreeLayouts === true}\0${path.resolve(modulePath)}`;
+  const key = getClientModuleHydrationPlanKey(modulePath, root, mode, options);
   let plan = cache.get(key);
   if (!plan) {
     plan = getClientModuleHydrationPlan(modulePath, root, mode, options);
@@ -1955,6 +2029,8 @@ async function buildClient(
    * block, and its documents use the mobile client when a shell asks for them.
    */
   mobile = false,
+  /** What the route manager's plan read, parsed and resolved (RouteManager.keepBuildSourceSnapshot). */
+  sourceSnapshot?: FarmSourceSnapshotStore,
 ) {
   // A mobile client from an earlier build must not outlive the `mobile` block.
   if (!mobile) await removeFarmMobileClientManifest(path.dirname(outputDir));
@@ -2060,7 +2136,12 @@ async function buildClient(
   // One source snapshot for every plan: routes share most of their import graphs (the layouts, a
   // component library and its barrels, the packages they import), which each route otherwise
   // read, parsed and resolved again. Planning is synchronous, so no file changes while it runs.
-  const { clientLayouts, clientRouteSlots } = withFarmSourceSnapshot(() => {
+  // It starts from what the route manager's plan learned, when the build kept that.
+  const plan = <T>(operation: () => T) =>
+    sourceSnapshot
+      ? withFarmSourceSnapshotOf(sourceSnapshot, operation)
+      : withFarmSourceSnapshot(operation);
+  const { clientLayouts, clientRouteSlots } = plan(() => {
     const clientLayouts = layoutRoutes.map((layout) => {
       try {
         const metadata = getCachedClientModuleHydrationPlan(
@@ -2316,6 +2397,9 @@ async function buildClient(
   logger.info(
     `📱 Total hydratable routes detected: ${clientPages.length} pages, ${clientLayouts.filter((layout) => layout.shouldHydrate || layout.hasIsolatedClientBoundaries).length} layouts, and ${clientRouteSlots.length} slots`,
   );
+  // One table for the client's lazy chunk and the server, which names each document's entries.
+  const clientRouteTable = createFarmClientRouteTable(clientPages);
+  await writeFarmClientRouteTable(path.dirname(outputDir), clientRouteTable);
 
   // The web client, then (for an app with a `mobile` block) the mobile client: the same entry
   // and graph with `platform()` as "mobile" and the shell's navigation delegate, written next to
@@ -2371,6 +2455,11 @@ async function buildClient(
         ? splitFarmClientRouter(clientHydrationCode)
         : { entry: clientHydrationCode, router: undefined };
     await fs.writeFile(clientEntryPath, clientEntry.entry);
+    // The route table the entry imports on its first navigation (client-route-table.ts).
+    await fs.writeFile(
+      path.join(clientEntryDir, `${FARM_CLIENT_ROUTE_TABLE_MODULE}.tsx`),
+      generateFarmClientRouteTableModule(clientRouteTable),
+    );
     if (clientEntry.router !== undefined) {
       await fs.writeFile(path.join(clientEntryDir, "farm-client-router.tsx"), clientEntry.router);
     }
@@ -2589,7 +2678,7 @@ async function buildClient(
           },
           farmIslandContainersPlugin(config),
           farmPlugin(
-            { ...config, isolatedClientBoundaryModules, programmaticClientRoutes },
+            { ...config, isolatedClientBoundaryModules, programmaticClientRoutes, sourceSnapshot },
             pluginManager,
           ),
           farmEnvironmentFunctionsPlugin(config),
@@ -2770,6 +2859,147 @@ function hasAbsoluteNavigationHref(href) {
   return /^[a-zA-Z][a-zA-Z\\d+.-]*:/.test(href) || href.startsWith("//");
 }
 `.trim();
+}
+
+/**
+ * The production client's route table (client-route-table.ts). It loads as its own chunk on the
+ * first navigation or prefetch, so the entry every page boots with does not grow with the routes
+ * (it keeps a loader per page that hydrates as a whole). A document names the entries its page
+ * boots with
+ * (`window.__FARM_CLIENT_ROUTES__`), which the server finds for its URL with the same matcher;
+ * without them, or for another URL (a rewrite), hydration waits for the table.
+ *
+ * `table: false` (no client routes) keeps an empty table and never loads one. `streamNavigations`
+ * (islands mode) loads the table with the lazy router instead of beside a navigation's page.
+ */
+export function generateFarmClientRouteTableRuntime(options: {
+  table: boolean;
+  docs: boolean;
+  streamNavigations?: boolean;
+}): string {
+  // A navigation that waits for the table fetches its page meanwhile, as a prefetch it then
+  // reads. A navigation that streams would lose its stream to a prefetch, which reads the whole
+  // page; islands mode, where navigations stream, loads the table with the router instead.
+  const prefetch = `const farmPrefetchWhileRouteTableLoads = ${!options.streamNavigations};`;
+  if (!options.table) {
+    return `${prefetch}
+const clientRoutes = [];
+const clientRouteMatcher = createFarmRouter([]);
+const clientPageRouteMatcher = clientRouteMatcher;
+function loadFarmClientRouteTable() { return null; }
+function prefetchFarmClientRouteTable() {}
+const farmClientRoutesBoot = null;`;
+  }
+  return `${prefetch}
+let clientRoutes = [];
+let clientRouteMatcher = createFarmRouter([]);
+let clientPageRouteMatcher = clientRouteMatcher;
+let farmClientRouteTableLoad = null;
+let farmClientRouteTableLoaded = false;
+
+function setFarmClientRoutes(routes) {
+  clientRoutes = routes.map(function(route) {
+    const load = typeof route.loader === "number" ? farmClientRouteLoaders[route.loader] : undefined;
+    return { ...route, navigation: "html-fragment", load: load || null };
+  });
+  clientRouteMatcher = createFarmRouter(clientRoutes.map(function(route) {
+    return { path: route.pattern, meta: route };
+  }));
+  clientPageRouteMatcher = ${
+    options.docs
+      ? `createFarmRouter(clientRoutes.filter(function(route) {
+    return !route.docs;
+  }).map(function(route) {
+    return { path: route.pattern, meta: route };
+  }))`
+      : "clientRouteMatcher"
+  };
+}
+
+// Null once the whole table is in place, else a promise that settles when it is.
+function loadFarmClientRouteTable() {
+  if (farmClientRouteTableLoaded) return null;
+  return farmClientRouteTableLoad || (farmClientRouteTableLoad = import("./${FARM_CLIENT_ROUTE_TABLE_MODULE}").then(function(module) {
+    setFarmClientRoutes(module.default);
+    farmClientRouteTableLoaded = true;
+  }, function(error) {
+    farmClientRouteTableLoad = null;
+    throw error;
+  }));
+}
+
+// A navigation to come (a prefetch, the lazy router) warms the table; that navigation handles a failure.
+function prefetchFarmClientRouteTable() {
+  const table = loadFarmClientRouteTable();
+  if (table) table.catch(function() {});
+}
+
+const farmClientRoutesBoot = (function() {
+  const boot = window.__FARM_CLIENT_ROUTES__;
+  if (boot && Array.isArray(boot.routes) && boot.path === getFarmRoutePathname(window.location.pathname)) {
+    setFarmClientRoutes(boot.routes);
+    return null;
+  }
+  return loadFarmClientRouteTable().catch(function(error) {
+    console.warn("[Farm.js] Could not load the client route table; the page was left as the server rendered it.", error);
+  });
+})();
+
+// A plain <a> has no prefetch, unlike Link: a pointer or focus reaching one warms the table its
+// navigation will read.
+const FARM_ROUTE_TABLE_INTENT_EVENTS = ["pointerover", "pointerdown", "focusin", "touchstart"];
+function warmFarmClientRouteTable(event) {
+  const target = event.target;
+  if (!target || !target.closest || !target.closest("a[href]")) return;
+  for (const type of FARM_ROUTE_TABLE_INTENT_EVENTS) {
+    document.removeEventListener(type, warmFarmClientRouteTable, true);
+  }
+  prefetchFarmClientRouteTable();
+}
+for (const type of FARM_ROUTE_TABLE_INTENT_EVENTS) {
+  document.addEventListener(type, warmFarmClientRouteTable, { capture: true, passive: true });
+}`;
+}
+
+/**
+ * The server half of the client route table runtime: `getFarmClientBootRoutes(routePathname)`
+ * names the entries a document's page boots with, those the client's `matchRoute` and
+ * `getFarmPageDirectory` read for that path, found with the same matcher over the same table.
+ * `tableSource` is a JavaScript string expression holding the table as JSON.
+ */
+export function generateFarmClientBootRoutesServerSource(tableSource: string): string {
+  return `// The client route table (client-route-table.ts), filled in from the client build. The client
+// loads it on its first navigation; a document names the entries its page boots with, found
+// with the client's own matcher, so its page hydrates without the table.
+const farmClientRouteTable = (() => {
+  try {
+    const table = JSON.parse(${tableSource});
+    if (!Array.isArray(table) || table.length === 0) return null;
+    const toRoute = function(route) { return { path: route.pattern, meta: route }; };
+    const routes = createFarmRouter(table.map(toRoute));
+    return {
+      routes: routes,
+      pages: table.some(function(route) { return route.docs; })
+        ? createFarmRouter(table.filter(function(route) { return !route.docs; }).map(toRoute))
+        : routes,
+    };
+  } catch {
+    return null;
+  }
+})();
+
+// The entries the client's matchRoute and getFarmPageDirectory read for this route path.
+function getFarmClientBootRoutes(routePathname) {
+  if (!farmClientRouteTable || typeof routePathname !== "string") return undefined;
+  const routes = [];
+  const matched = farmClientRouteTable.routes.match(routePathname);
+  if (matched) {
+    routes.push(matched.route.meta);
+    const page = matched.route.meta.docs ? farmClientRouteTable.pages.match(routePathname) : null;
+    if (page) routes.push(page.route.meta);
+  }
+  return { path: routePathname, routes: routes };
+}`;
 }
 
 /**
@@ -3541,6 +3771,8 @@ const farmRouterReady = [];
 const farmRouterObserved = new Set();
 
 function loadFarmRouter() {
+  // The router's first navigation needs the route table: fetch both at once.
+  if (!farmRouterLoading) prefetchFarmClientRouteTable();
   return farmRouterLoading || (farmRouterLoading = import("./farm-client-router").then(function(module) {
     farmLoadedRouter = module.spaRouter;
     // The router module installs itself as the global; this object stays it, so a reference taken
@@ -4286,7 +4518,10 @@ installFarmLinkPrefetch();
 
   // Generate imports for client components
   const imports: string[] = [];
-  const routeEntries: string[] = [];
+  // The route table itself is its own module (generateFarmClientRouteTableModule); the entry
+  // keeps the page modules a route loads, which only the bundler can name, in the order of the
+  // table's `loader` indexes (createFarmClientRouteTable).
+  const routeLoaders: string[] = [];
   const routeSlotEntries: string[] = [];
   const isolatedBoundaryModules = new Map<string, string>();
 
@@ -4297,19 +4532,11 @@ installFarmLinkPrefetch();
         toImportPath(boundary.modulePath),
       );
     }
-    const load = page.pageShouldHydrate
-      ? `() => import(${JSON.stringify(toImportPath(page.modulePath))}).then((module) => module.default)`
-      : "null";
-    routeEntries.push(`  {
-    pattern: ${JSON.stringify(page.pattern)},${
-      page.directory ? `\n    directory: ${JSON.stringify(page.directory)},` : ""
+    if (page.pageShouldHydrate) {
+      routeLoaders.push(
+        `  () => import(${JSON.stringify(toImportPath(page.modulePath))}).then((module) => module.default),`,
+      );
     }
-    pageShouldHydrate: ${JSON.stringify(page.pageShouldHydrate)},${page.docs ? "\n    docs: true," : ""}
-    ${page.hasIsolatedClientBoundaries ? "hasIsolatedClientBoundaries: true," : ""}
-    islandStrategy: ${JSON.stringify(page.islandStrategy)},
-    navigation: "html-fragment",
-    load: ${load},
-  }`);
   });
   const isolatedHydrationEnabled = isolatedBoundaryModules.size > 0;
   // Only an app with a server-tree page ships the code that rebuilds one.
@@ -4416,22 +4643,15 @@ setFarmTrailingSlashPreference(${JSON.stringify(trailingSlash)});
 installChunkErrorRecovery();
 ${clientCachePersistence.init}
 
-// Client component routes
-const clientRoutes = [
-${routeEntries.join(",\n")}
+// The page modules that hydrate, by their route's \`loader\` index
+const farmClientRouteLoaders = [
+${routeLoaders.join("\n")}
 ];
-const clientRouteMatcher = createFarmRouter(clientRoutes.map(function(route) {
-  return { path: route.pattern, meta: route };
-}));
-${
-  clientPages.some((page) => page.docs)
-    ? `const clientPageRouteMatcher = createFarmRouter(clientRoutes.filter(function(route) {
-  return !route.docs;
-}).map(function(route) {
-  return { path: route.pattern, meta: route };
-}));`
-    : "const clientPageRouteMatcher = clientRouteMatcher;"
-}
+${generateFarmClientRouteTableRuntime({
+  table: clientPages.length > 0,
+  docs: clientPages.some((page) => page.docs),
+  streamNavigations: islandValues,
+})}
 ${generateClientPageDirectorySource()}
 
 ${isolatedHydrationRuntime}
@@ -4932,6 +5152,8 @@ async function hydrate() {
   window.__FARM_PPR_HYDRATING__ = true;
   await farmClientRuntime.start();
 
+  // The route table, when the document named no entries for this URL.
+  await farmClientRoutesBoot;
   const pathname = window.location.pathname;
   const matched = matchRoute(pathname);
   ${
@@ -5348,6 +5570,21 @@ ${
       return;
     }
     
+    // The first navigation that matches a route waits for the client route table; a prefetch
+    // usually loaded it already (generateFarmClientRouteTableRuntime). Without it (a deployment
+    // that removed it, a network error), a document navigation is the safe fallback.
+    const routeTable = loadFarmClientRouteTable();
+    if (routeTable) {
+      if (farmPrefetchWhileRouteTableLoads && !options.refresh) this.prefetch(url.href);
+      try {
+        await routeTable;
+      } catch (error) {
+        console.warn("[Farm.js] Could not load the client route table; navigating to " + href + " in full.", error);
+        if (action === "push") window.location.assign(url.href);
+        else window.location.replace(url.href);
+        return;
+      }
+    }
     const pathname = url.pathname;
     const matched = matchRoute(pathname);
     const from = this.currentPath;
@@ -5736,6 +5973,7 @@ ${
     const url = new URL(href, window.location.href);
     if (isFarmExternalNavigationURL(url, window.location.origin)) return;
     if (isFarmDocsPath(url.pathname)) return;
+    prefetchFarmClientRouteTable();
     
     // A prefetch warms an ordinary future navigation, which reads the bare
     // URL key. Carrying the intercept identity here both missed every real
@@ -5857,6 +6095,7 @@ async function buildSSRInMemory(
   isolatedClientBoundaryModules: ReadonlySet<string>,
   hydrationPlanCache: Map<string, ClientModuleHydrationPlan>,
   rendererBuildLifetime: AbortSignal,
+  sourceSnapshot?: FarmSourceSnapshotStore,
 ): Promise<{
   bundle: OutputBundle;
   entryFile: string;
@@ -6317,7 +6556,14 @@ async function buildSSRInMemory(
         { ...createReactProductionModePlugin(), enforce: "pre" as const },
         farmServerOnlyEntriesPlugin(),
         farmIslandContainersPlugin(config),
-        farmPlugin({ ...config, isolatedClientBoundaryModules }, pluginManager),
+        farmPlugin(
+          {
+            ...config,
+            isolatedClientBoundaryModules,
+            sourceSnapshot,
+          },
+          pluginManager,
+        ),
         farmEnvironmentFunctionsPlugin(config),
         ...(hasRuntimeConfigModule
           ? [
@@ -7953,7 +8199,7 @@ ${instrumentationImport}
 ${imageRuntimeImport}
 ${imageNodeRuntimeImport}
 import { farmFontPreloadHeader } from "virtual:farm-font-runtime";
-import { isFarmRouteActive } from "@farm.js/core/router";
+import { createFarmRouter, isFarmRouteActive } from "@farm.js/core/router";
 ${rendererServerImports}
 
 ${routeClientGraphServerRuntime}
@@ -8010,7 +8256,7 @@ const farmUserConfig = ${
 const farmRuntimeConfigs = [${[...layerConfigValues, "farmUserConfig"].join(", ")}].filter(Boolean);
 const farmResolvedRuntimeConfig = Object.assign({}, ...farmRuntimeConfigs);
 
-function FarmDefault404Page() {
+function renderFarmDefault404Page() {
   return React.createElement(React.Fragment, null,
     React.createElement("style", null, ${JSON.stringify(DEFAULT_NOT_FOUND_STYLES)}),
     React.createElement("main", {
@@ -8035,6 +8281,12 @@ function FarmDefault404Page() {
     )
   );
 }
+
+// Renderers that compile their own components (Vue, Svelte) render a plain function as a
+// component only once it is marked; unmarked, Vue printed this page as "[object Object]".
+const FarmDefault404Page = typeof React.markFunctionComponent === "function"
+  ? React.markFunctionComponent(renderFarmDefault404Page)
+  : renderFarmDefault404Page;
 
 /** The app's not-found page, or Farm's, without layouts. */
 function createFarmNotFoundElement(pathname) {
@@ -8573,7 +8825,7 @@ function serializeFarmInlineValue(value) {
     .replace(/\\u2029/g, "\\\\u2029");
 }
 
-function renderFarmClientBootstrapScript(canonicalPath, selectedRouteSlots, pageProps) {
+function renderFarmClientBootstrapScript(canonicalPath, selectedRouteSlots, pageProps, routePathname) {
   const integrationManifest = ${
     hasRuntimeIntegrationConfig ? "getRegisteredIntegrationAPIManifest()" : "{}"
   };
@@ -8584,6 +8836,13 @@ function renderFarmClientBootstrapScript(canonicalPath, selectedRouteSlots, page
     serializeFarmInlineValue(integrationManifest) +
     ';window.__FARM_ROUTE_SLOTS__=' + serializedRouteSlots +
     ';window.__FARM_DEPLOYMENT_ID__=' + serializeFarmInlineValue(farmDeploymentId) + ';';
+  // The client boots at the canonical path when the script below moves it there.
+  const bootRoutes = getFarmClientBootRoutes(
+    typeof canonicalPath === "string" && canonicalPath.startsWith("/")
+      ? getFarmRoutePathname(canonicalPath.split(/[?#]/)[0])
+      : routePathname
+  );
+  if (bootRoutes) source += 'window.__FARM_CLIENT_ROUTES__=' + serializeFarmInlineValue(bootRoutes) + ';';
   if (typeof canonicalPath === "string" && canonicalPath.startsWith("/")) {
     const serializedPath = serializeFarmInlineValue(canonicalPath);
     source += 'if(location.pathname+location.search!==' + serializedPath + '){' +
@@ -9418,6 +9677,8 @@ const farmClientModulePreloads = (() => {
     return null;
   }
 })();
+${generateFarmClientBootRoutesServerSource(`"${FARM_CLIENT_ROUTE_TABLE_PLACEHOLDER}"`)}
+
 const farmClientEntryPreloadTags = farmClientModulePreloads
   ? farmClientModulePreloads.entry.map(renderFarmClientModulePreload).join("")
   : "";
@@ -10526,7 +10787,7 @@ ${
         : html.replace(/<[/]head>/i, clientStylesheet + "</head>");
   }
   if (!html.includes('id="__farm_route_slots_data__"')) {
-    html = html.replace(/<[/]body>/i, function() { return renderFarmClientBootstrapScript() + "\\n</body>"; });
+    html = html.replace(/<[/]body>/i, function() { return renderFarmClientBootstrapScript(undefined, undefined, undefined, pathname) + "\\n</body>"; });
   }
   if (!html.includes('src="/__farm_client_js_src__"')) {
     html = html.replace(
@@ -12150,7 +12411,8 @@ ${
             return '  ' + renderFarmClientBootstrapScript(
               pageProps.__farmCanonicalPath,
               farmDeferredData.data.slots,
-              farmDeferredData.data.page
+              farmDeferredData.data.page,
+              routePathname
             ) + '\\n' +
               '  ' + renderFarmClientEntryScript(early) + '\\n';
           };
@@ -12307,7 +12569,8 @@ ${
               () => '  ' + renderFarmClientBootstrapScript(
                 pageProps.__farmCanonicalPath,
                 farmDeferredData.data.slots,
-                farmDeferredData.data.page
+                farmDeferredData.data.page,
+                routePathname
               ) + renderFarmDeferredDataScript(farmDeferredData.records) + '\\n' +
                 '  ' + farmEntryScript + '\\n</body>',
             );
@@ -12325,7 +12588,7 @@ ${
 </head>
 <body>
   <div id="root">\${html}</div>
-  \${renderFarmClientBootstrapScript(pageProps.__farmCanonicalPath, farmDeferredData.data.slots, farmDeferredData.data.page)}\${renderFarmDeferredDataScript(farmDeferredData.records)}
+  \${renderFarmClientBootstrapScript(pageProps.__farmCanonicalPath, farmDeferredData.data.slots, farmDeferredData.data.page, routePathname)}\${renderFarmDeferredDataScript(farmDeferredData.records)}
   \${farmEntryScript}
 </body>
 </html>\`;
@@ -12678,7 +12941,7 @@ ${
         .replace(/<\\/head>/i, () => renderFarmRendererHydrationScript() + '\\n</head>')
         .replace(
           /<\\/body>/i,
-          () => '  ' + renderFarmClientBootstrapScript() + '\\n' +
+          () => '  ' + renderFarmClientBootstrapScript(undefined, undefined, undefined, routePathname) + '\\n' +
             '  ' + renderFarmClientEntryScript() + '\\n</body>',
         );
       fullHtml = ensureFarmDocumentMeta(fullHtml, notFoundMetadata.viewport);
@@ -12698,7 +12961,7 @@ ${
 </head>
 <body>
   <div id="root">\${html}</div>
-  \${renderFarmClientBootstrapScript()}
+  \${renderFarmClientBootstrapScript(undefined, undefined, undefined, routePathname)}
   \${renderFarmClientEntryScript()}
 </body>
 </html>\`;
@@ -13335,6 +13598,7 @@ async function buildNitroUniversal(
   configuredHeaderRoutes: UniversalConfiguredHeaderRoute[],
   nitroBuilderResultPromise: Promise<PromiseSettledResult<FarmNitroBuilder>>,
   pluginManager?: PluginManager,
+  markdownPrecompiledPages?: Promise<Map<string, string>>,
 ) {
   // Nitro is only needed while producing the deployment artifact. Keeping the
   // import lazy prevents this build-only dependency from leaking into an
@@ -13498,7 +13762,15 @@ async function buildNitroUniversal(
     );
   }
 
-  const scheduledTasks = mergeScheduledTasks(farmWorkflows.scheduledTasks, farmCron.scheduledTasks);
+  const portableScheduledTasks = mergeScheduledTasks(
+    farmWorkflows.scheduledTasks,
+    farmCron.scheduledTasks,
+  );
+  // Cloudflare sends the trigger's own schedule as controller.cron, written in its day-of-week
+  // numbering (see toFarmCronCloudflareSchedule), so the tasks are keyed the same way.
+  const scheduledTasks = preset.startsWith("cloudflare")
+    ? toFarmCronCloudflareScheduledTasks(portableScheduledTasks)
+    : portableScheduledTasks;
   const cloudflareCronConfig =
     farmCron.provider === "host" ? createFarmCronCloudflareConfig(farmCron.jobs) : undefined;
 
@@ -13507,17 +13779,25 @@ async function buildNitroUniversal(
   // content hash of the bytes browsers will actually receive. Substituting in
   // memory, before any consumer, covers the disk write below as well as the
   // prebuilt-SSR copies and prerendering that reuse this bundle directly.
-  const [clientCssHref, clientJsSrc, clientBootSrc, docsModulePreloads, clientModulePreloads] =
-    await Promise.all([
-      resolveHashedClientCssHref(clientOutputDir),
-      resolveHashedClientJsSrc(clientOutputDir),
-      resolveClientBootSrc(clientOutputDir),
-      readFarmDocsModulePreloads(path.join(root, distDir)),
-      readFarmClientModulePreloads(path.join(root, distDir)),
-    ]);
+  const [
+    clientCssHref,
+    clientJsSrc,
+    clientBootSrc,
+    docsModulePreloads,
+    clientModulePreloads,
+    clientRouteTable,
+  ] = await Promise.all([
+    resolveHashedClientCssHref(clientOutputDir),
+    resolveHashedClientJsSrc(clientOutputDir),
+    resolveClientBootSrc(clientOutputDir),
+    readFarmDocsModulePreloads(path.join(root, distDir)),
+    readFarmClientModulePreloads(path.join(root, distDir)),
+    readFarmClientRouteTable(path.join(root, distDir)),
+  ]);
   let nativeStylesheets: Record<string, string> | undefined;
   const encodedDocsModulePreloads = encodeFarmDocsModulePreloads(docsModulePreloads);
   const encodedClientModulePreloads = encodeFarmClientModulePreloads(clientModulePreloads);
+  const encodedClientRouteTable = encodeFarmBuildJSONPlaceholder(clientRouteTable);
   const encodedMobileShellClient = shouldBuildFarmMobileClient(config)
     ? encodeFarmMobileShellClient(
         await finalizeFarmMobileClient({
@@ -13546,6 +13826,11 @@ async function buildNitroUniversal(
       output.code = output.code
         .split(FARM_CLIENT_MODULE_PRELOADS_PLACEHOLDER)
         .join(encodedClientModulePreloads);
+    }
+    if (output.code.includes(FARM_CLIENT_ROUTE_TABLE_PLACEHOLDER)) {
+      output.code = output.code
+        .split(FARM_CLIENT_ROUTE_TABLE_PLACEHOLDER)
+        .join(encodedClientRouteTable);
     }
     // split/join rather than replaceAll: the package's lib target predates
     // ES2021, and a fixed token needs no regex escaping either way.
@@ -14282,6 +14567,9 @@ function toFarmNodeResponse(request, response) {
             ? [configuredPlugins]
             : []),
         createPrerenderRuntimeResolverPlugin(config.root),
+        ...(markdownPrecompiledPages
+          ? [createPrerenderMarkdownPagesPlugin(markdownPrecompiledPages)]
+          : []),
       ];
     });
   });
