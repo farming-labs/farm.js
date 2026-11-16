@@ -354,11 +354,15 @@ interface PackageImport {
 function parseCode(code: string, file: string): AstNode | null {
   const extension = path.extname(file).slice(1);
   const lang = extension === "ts" || extension === "mts" || extension === "cts" ? "ts" : "tsx";
-  try {
-    return parseAst(code, { lang: lang as "tsx" }) as unknown as AstNode;
-  } catch {
-    return null;
-  }
+  // The scope islands-package-references.ts parses in: a build's transform of a server module
+  // parses it once for both rewrites.
+  return memoizeInFarmSourceSnapshot(`ast:${lang}`, code, () => {
+    try {
+      return parseAst(code, { lang: lang as "tsx" }) as unknown as AstNode;
+    } catch {
+      return null;
+    }
+  });
 }
 
 function namespaceMembers(program: AstNode, local: string): string[] | null {

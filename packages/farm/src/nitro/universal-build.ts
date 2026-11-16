@@ -131,6 +131,7 @@ import {
   type IsolatedClientBoundaryReference,
 } from "../utils/client-component";
 import type { FarmIsolatedClientHydrationMode } from "../types";
+import { type FarmSourceSnapshotStore, withFarmSourceSnapshotOf } from "../utils/source-snapshot";
 import { isFarmMarkdownPageFile } from "../app-markdown";
 import { resolveFarmMdxComponentsModulePath, resolveMdxConfig } from "../app-markdown-config";
 import type { ProgrammaticRedirectRoute } from "../routes";
@@ -1567,6 +1568,8 @@ export async function buildUniversal(
     // The route manager planned every page and layout as the app initialized, with the same
     // config; the client and SSR route tables start from those plans instead of planning again.
     const hydrationPlanCache = routeManager.getRouteModuleHydrationPlans();
+    // What that plan read, parsed and resolved, for the client plans and the bundles' transforms.
+    const sourceSnapshot = routeManager.takeBuildSourceSnapshot();
 
     const clientOutputDir = path.join(root, distDir, "client");
     const [productionViteResult] = await productionViteResultPromise;
@@ -1605,6 +1608,7 @@ export async function buildUniversal(
         rendererBuildLifetime,
         routeManager.getProgrammaticClientRoutes(),
         mobileClient,
+        sourceSnapshot,
       );
     };
     const buildSSRBundle = () =>
@@ -1622,6 +1626,7 @@ export async function buildUniversal(
         isolatedClientBoundaryModules,
         hydrationPlanCache,
         rendererBuildLifetime,
+        sourceSnapshot,
       );
 
     // Route metadata and the client/SSR graphs read independent inputs. Drain
@@ -1680,6 +1685,7 @@ export async function buildUniversal(
           rendererBuildLifetime,
           routeManager.getProgrammaticClientRoutes(),
           mobileClient,
+          sourceSnapshot,
         );
       } catch (retryError) {
         if (!(retryError instanceof IncompleteClientBuildOutputError)) throw retryError;
@@ -1694,6 +1700,8 @@ export async function buildUniversal(
       }
     }
 
+    // Only the bundles' transforms read it.
+    sourceSnapshot?.clear();
     const ssrResult = ssrBuildResult.value;
     const routeRuntimeManifest = routeRuntimeManifestResult.value;
 
@@ -1959,6 +1967,8 @@ async function buildClient(
    * block, and its documents use the mobile client when a shell asks for them.
    */
   mobile = false,
+  /** What the route manager's plan read, parsed and resolved (RouteManager.keepBuildSourceSnapshot). */
+  sourceSnapshot?: FarmSourceSnapshotStore,
 ) {
   // A mobile client from an earlier build must not outlive the `mobile` block.
   if (!mobile) await removeFarmMobileClientManifest(path.dirname(outputDir));
@@ -2064,7 +2074,12 @@ async function buildClient(
   // One source snapshot for every plan: routes share most of their import graphs (the layouts, a
   // component library and its barrels, the packages they import), which each route otherwise
   // read, parsed and resolved again. Planning is synchronous, so no file changes while it runs.
-  const { clientLayouts, clientRouteSlots } = withFarmSourceSnapshot(() => {
+  // It starts from what the route manager's plan learned, when the build kept that.
+  const plan = <T>(operation: () => T) =>
+    sourceSnapshot
+      ? withFarmSourceSnapshotOf(sourceSnapshot, operation)
+      : withFarmSourceSnapshot(operation);
+  const { clientLayouts, clientRouteSlots } = plan(() => {
     const clientLayouts = layoutRoutes.map((layout) => {
       try {
         const metadata = getCachedClientModuleHydrationPlan(
@@ -2593,7 +2608,7 @@ async function buildClient(
           },
           farmIslandContainersPlugin(config),
           farmPlugin(
-            { ...config, isolatedClientBoundaryModules, programmaticClientRoutes },
+            { ...config, isolatedClientBoundaryModules, programmaticClientRoutes, sourceSnapshot },
             pluginManager,
           ),
           farmEnvironmentFunctionsPlugin(config),
@@ -5861,6 +5876,7 @@ async function buildSSRInMemory(
   isolatedClientBoundaryModules: ReadonlySet<string>,
   hydrationPlanCache: Map<string, ClientModuleHydrationPlan>,
   rendererBuildLifetime: AbortSignal,
+  sourceSnapshot?: FarmSourceSnapshotStore,
 ): Promise<{
   bundle: OutputBundle;
   entryFile: string;
@@ -6321,7 +6337,14 @@ async function buildSSRInMemory(
         { ...createReactProductionModePlugin(), enforce: "pre" as const },
         farmServerOnlyEntriesPlugin(),
         farmIslandContainersPlugin(config),
-        farmPlugin({ ...config, isolatedClientBoundaryModules }, pluginManager),
+        farmPlugin(
+          {
+            ...config,
+            isolatedClientBoundaryModules,
+            sourceSnapshot,
+          },
+          pluginManager,
+        ),
         farmEnvironmentFunctionsPlugin(config),
         ...(hasRuntimeConfigModule
           ? [

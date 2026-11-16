@@ -15,6 +15,8 @@ type SnapshotEntries = Map<string, Map<string, SnapshotEntry>>;
  * tokenized, parsed and resolved each shared module once per route that reaches it.
  */
 let snapshot: SnapshotEntries | undefined;
+// What an earlier analysis learned, which the active snapshot reads but does not add to.
+let base: SnapshotEntries | undefined;
 // Entries of the active snapshot that only hold for the current plan (a file that was missing).
 let volatile: Array<[scope: string, key: string]> | undefined;
 
@@ -41,6 +43,12 @@ export function getFarmSourceStamp(file: string): string {
 export class FarmSourceSnapshotStore {
   readonly entries: SnapshotEntries = new Map();
   private readonly stamps = new Map<string, string>();
+
+  /**
+   * `tracked: false` keeps entries for a process that edits no sources while it runs, a production
+   * build: nothing is stamped, so each plan does not stat every file the snapshot holds.
+   */
+  constructor(private readonly tracked = true) {}
 
   /**
    * Drops the entries that read a file changed on disk since the last plan, or one of `edited`
@@ -79,6 +87,7 @@ export class FarmSourceSnapshotStore {
 
   /** Records the stamp of every file an entry read that has none yet. */
   stamp(): void {
+    if (!this.tracked) return;
     for (const entries of this.entries.values()) {
       for (const entry of entries.values()) {
         for (const file of entry.files) {
@@ -116,6 +125,21 @@ export function withFarmSourceSnapshot<T>(operation: () => T, store?: FarmSource
 }
 
 /**
+ * @internal `withFarmSourceSnapshot` on top of what `store` holds: `operation` reuses its entries,
+ * and what it learns besides lasts only until it returns, so the store does not grow with each
+ * module a build transforms. For a process that edits no source after `store` was filled.
+ */
+export function withFarmSourceSnapshotOf<T>(store: FarmSourceSnapshotStore, operation: () => T): T {
+  if (snapshot) return operation();
+  base = store.entries;
+  try {
+    return withFarmSourceSnapshot(operation);
+  } finally {
+    base = undefined;
+  }
+}
+
+/**
  * @internal `compute()`, memoized by `scope` and `key` while a snapshot is active, and computed
  * every time outside one. A memoized answer reports the files its computation read to the active
  * trace again, so a result traced inside a snapshot depends on the same files as outside one. An
@@ -131,7 +155,7 @@ export function memoizeInFarmSourceSnapshot<T>(
   if (!snapshot) return compute();
   let entries = snapshot.get(scope);
   if (!entries) snapshot.set(scope, (entries = new Map()));
-  const memoized = entries.get(key);
+  const memoized = entries.get(key) ?? base?.get(scope)?.get(key);
   if (memoized) {
     if (trace) for (const file of memoized.files) trace.add(file);
     return memoized.value as T;

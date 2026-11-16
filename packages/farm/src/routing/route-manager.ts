@@ -793,6 +793,27 @@ export class RouteManager {
   }
 
   /**
+   * @internal A production build edits no source while it runs, so what the plan reads, parses and
+   * resolves as the app initializes stays valid for the build's later analyses of the same modules:
+   * the route tables' plans and the bundles' package import rewrites (takeBuildSourceSnapshot).
+   */
+  keepBuildSourceSnapshot(): void {
+    if (this.sourceChangeTracking) return;
+    this.sourceSnapshot ??= new FarmSourceSnapshotStore(false);
+  }
+
+  /**
+   * @internal Hands the snapshot keepBuildSourceSnapshot kept to the build, which clears it once
+   * its bundles are written; later plans start without one. Undefined on the dev server.
+   */
+  takeBuildSourceSnapshot(): FarmSourceSnapshotStore | undefined {
+    if (this.sourceChangeTracking) return undefined;
+    const store = this.sourceSnapshot;
+    this.sourceSnapshot = undefined;
+    return store;
+  }
+
+  /**
    * @internal A watched file changed. An edit to a script narrows the next replan to the route
    * modules that read it; a script added or removed (where an import may now resolve), or a
    * changed JSON file (a package manifest or tsconfig paths), replans everything. Other files
