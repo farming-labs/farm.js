@@ -7,7 +7,6 @@ import {
 import VueCompat, {
   Fragment,
   Suspense,
-  ErrorBoundary,
   createElement,
   isValidElement,
   markFunctionComponent,
@@ -19,7 +18,26 @@ export const name = "vue";
 export const capabilities = {
   streaming: { node: true, web: true },
 } as const;
-export { Fragment, Suspense, ErrorBoundary, createElement, isValidElement, markFunctionComponent };
+export { Fragment, Suspense, createElement, isValidElement, markFunctionComponent };
+
+/**
+ * Vue's server renderer never renders a boundary again after `onErrorCaptured`, so a throw
+ * inside it was dropped: the response was a 200 page, and a redirect() or notFound() never
+ * reached Farm. On the server the boundary passes its children through and the throw fails the
+ * render, as React's and Preact's do, so Farm answers with the route's error page and status,
+ * as in production. The client keeps the real boundary, and both take the same props.
+ */
+export const ErrorBoundary = defineComponent({
+  name: "FarmVueErrorBoundary",
+  props: {
+    Fallback: { type: [Object, Function], required: true },
+    fallbackProps: { type: Object, default: () => ({}) },
+  },
+  setup:
+    (_props, { slots }) =>
+    () =>
+      slots.default?.(),
+});
 
 /** Vue hydration does not require an inline bootstrap before the client entry. */
 export function generateHydrationScript(): string {
@@ -40,6 +58,10 @@ function createFarmVueServerApp(element: unknown) {
       setup: () => () => materializeVueElement(element),
     }),
   );
+  // Vue's production build logs an error a component throws and renders on without it, where
+  // its development build rethrows. Farm answers a thrown redirect(), notFound() or error with
+  // its status, so the server app rethrows in production too.
+  app.config.throwUnhandledErrorInProduction = true;
   appSetup?.(app, { ssr: true });
   return app;
 }
@@ -48,8 +70,48 @@ export async function renderToString(element: unknown): Promise<string> {
   return renderVueToString(createFarmVueServerApp(element));
 }
 
-export function renderToReadableStream(element: unknown): ReadableStream<Uint8Array> {
-  return renderVueToWebStream(createFarmVueServerApp(element)) as ReadableStream<Uint8Array>;
+export function renderToReadableStream(
+  element: unknown,
+  options?: { onError?(error: unknown): void },
+): ReadableStream<Uint8Array> {
+  let source: ReadableStream<Uint8Array>;
+  try {
+    source = renderVueToWebStream(createFarmVueServerApp(element)) as ReadableStream<Uint8Array>;
+  } catch (error) {
+    return new ReadableStream<Uint8Array>({
+      start(controller) {
+        controller.error(error);
+      },
+    });
+  }
+  // A failure before any output errors the stream, so Farm answers with the error's status. One
+  // after output has gone out is reported through onError and the stream ends, as React reports
+  // a late error: erroring a response that has started would reset the connection.
+  const reader = source.getReader();
+  let started = false;
+  return new ReadableStream<Uint8Array>({
+    async pull(controller) {
+      try {
+        const { done, value } = await reader.read();
+        if (done) {
+          controller.close();
+          return;
+        }
+        started = true;
+        controller.enqueue(value);
+      } catch (error) {
+        if (!started) {
+          controller.error(error);
+          return;
+        }
+        options?.onError?.(error);
+        controller.close();
+      }
+    },
+    cancel(reason) {
+      return reader.cancel(reason);
+    },
+  });
 }
 
 export function renderToPipeableStream(
@@ -60,7 +122,15 @@ export function renderToPipeableStream(
     onError(error: unknown): void;
   },
 ) {
-  const source = renderVueToNodeStream(createFarmVueServerApp(element));
+  let source: ReturnType<typeof renderVueToNodeStream>;
+  try {
+    source = renderVueToNodeStream(createFarmVueServerApp(element));
+  } catch (error) {
+    // Vue throws a component's synchronous setup error from the call itself: report it as the
+    // shell error it is, after the caller has its callbacks in place.
+    queueMicrotask(() => callbacks.onShellError(error));
+    return { pipe() {} };
+  }
   let shellReady = false;
   let shellErrored = false;
   let destination: (NodeJS.WritableStream & { destroy?(error?: unknown): void }) | undefined;

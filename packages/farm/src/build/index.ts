@@ -181,6 +181,8 @@ async function buildWithProductionNodeEnv(inputConfig: ResolvedFarmConfig, optio
       rendererBuild.signal,
     );
     const farmApp = createFarmApp(config, projectModuleServer);
+    // The universal build's later analyses start from what the plan as the app initializes learns.
+    if (options.universal !== false) farmApp.getRouteManager().keepBuildSourceSnapshot();
     await farmApp.initialize();
 
     const routeManager = farmApp.getRouteManager();

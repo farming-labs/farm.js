@@ -309,7 +309,38 @@ export function applyFarmCronVercelCrons(
 }
 
 export function createFarmCronCloudflareTriggers(jobs: FarmCronJob[]): string[] {
-  return [...new Set(jobs.flatMap((job) => job.schedule))];
+  return [...new Set(jobs.flatMap((job) => job.schedule).map(toFarmCronCloudflareSchedule))];
+}
+
+/**
+ * A schedule as Cloudflare Cron Triggers read it. Farm's portable schedules number the days of
+ * the week 0-6 from Sunday, as Vercel and Nitro do; Cloudflare numbers them 1-7 from Sunday, so
+ * `1-5` (weekdays) would run Sunday to Thursday and `0` would not be a day at all. Each day number
+ * in the day-of-week field moves up by one; step sizes, `*`, and the other fields stay as written.
+ */
+export function toFarmCronCloudflareSchedule(schedule: string): string {
+  const fields = schedule.trim().split(/\s+/);
+  if (fields.length !== 5) return schedule;
+  fields[4] = fields[4]!
+    .split(",")
+    .map((part) => {
+      const [range = "", step] = part.split("/");
+      const shifted = range.replace(/\d+/g, (day) => String(Number(day) + 1));
+      return step === undefined ? shifted : `${shifted}/${step}`;
+    })
+    .join(",");
+  return fields.join(" ");
+}
+
+/** Scheduled task names keyed by the schedule Cloudflare sends back as `controller.cron`. */
+export function toFarmCronCloudflareScheduledTasks(
+  scheduledTasks: Record<string, string | string[]>,
+): Record<string, string | string[]> {
+  return mergeScheduledTasks(
+    ...Object.entries(scheduledTasks).map(([schedule, tasks]) => ({
+      [toFarmCronCloudflareSchedule(schedule)]: tasks,
+    })),
+  );
 }
 
 export function createFarmCronCloudflareConfig(

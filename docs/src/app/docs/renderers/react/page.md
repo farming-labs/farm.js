@@ -564,11 +564,12 @@ satisfy all of these rules:
 | Component discovery | A top-level, capitalized function declaration, function expression, or arrow component in application `.tsx` or `.jsx`.                                                          |
 | Function shape      | Synchronous, non-generator, non-generic block body with zero parameters, one props identifier, or object props destructuring without computed keys.                              |
 | Props               | Object destructuring supports shorthand names, aliases, defaults, nested object and array patterns, and rest. Referenced primitive values join the dependency graph after mount. |
-| Body                | Top-level `useState` declarations, compiler-safe derived values and named handlers in any order (a derived value cannot read a later state), then one unconditional JSX return.  |
+| Body                | Top-level hook declarations, compiler-safe derived values and named handlers in any order (a derived value cannot read a later state), then one unconditional JSX return.        |
 | State               | `const [value, setValue] = useState(initial)`, including lazy initializers, multiple cells, and queued functional updates.                                                       |
 | Memoization         | `useMemo(() => value, deps)` and `useCallback(handler, deps)` whose dependency array names every state, prop, and local they read; read as the value or handler itself.          |
 | Refs                | `const ref = useRef(initial)`, read and written in handlers, and attached with `ref={ref}` to a static element below the root (not inside a list or conditional).                |
 | Effects             | `useEffect` and `useLayoutEffect` with a synchronous callback and an array of names; they close over the render and run after the DOM update.                                    |
+| Context             | `const value = useContext(Context)` or a destructuring with literal defaults, for a module-level context, in a component with destructured props or none.                        |
 | Root                | Exactly one lowercase host JSX element such as `button`, `section`, `input`, or `div`.                                                                                           |
 | Tree                | A statically known host tree around eligible conditional, keyed-list, compiled keyed-row, and component-island boundaries.                                                       |
 | Text bindings       | State-driven text in a leaf host element.                                                                                                                                        |
@@ -578,6 +579,15 @@ satisfy all of these rules:
 | Keyed lists         | Item-keyed maps and imported `List`, including safe collection pipelines; eligible rows use direct bindings and recursive host-only conditions.                                  |
 | Range siblings      | Stable host siblings beside ranges may patch leaf text, attributes, `className`, and individual inline style properties.                                                         |
 | Component islands   | Stable imported or module-level component identifiers with explicit compiler-safe props and no JSX children, spread, `ref`, or `key`.                                            |
+
+A compiled component reads context through React. The component's own function runs each
+`useContext` declaration as written, so the nearest provider applies, and passes the names it binds
+to the compiled component as props. When the provider changes, a string, number, boolean, bigint,
+`null`, or `undefined` value patches the bindings that read it without rendering the component
+again; an object or function value renders it through React, as a changed object prop does.
+Destructure the fields you read, as in `const { tone } = useContext(Theme)`, to keep them on the
+patch path. A root without React DOM cannot run hooks, so a root whose tree reads context renders
+with React DOM.
 
 This component is eligible:
 

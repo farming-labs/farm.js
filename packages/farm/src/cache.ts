@@ -188,6 +188,8 @@ export interface FarmCacheStorage {
   /** `options.ttl` is in seconds, matching unstorage drivers that support expiry. */
   setItem<T = unknown>(key: string, value: T, options?: { ttl?: number }): Promise<unknown>;
   removeItem(key: string): Promise<unknown>;
+  /** Keys under `base`, as unstorage lists them; `clear` removes them one by one. */
+  getKeys?(base?: string): Promise<string[]>;
   clear?(base?: string): Promise<unknown>;
 }
 
@@ -228,11 +230,19 @@ export function storageCacheAdapter(
     delete: async (key: string) => {
       await storage.removeItem(await entryKey(key));
     },
-    clear: storage.clear
+    // unstorage's clear(base) only empties drivers mounted below `base`, so on a store whose
+    // driver is mounted at the root it removed nothing. Remove the listed keys instead, as
+    // Farm's namespaced stores do.
+    clear: storage.getKeys
       ? async () => {
-          await storage.clear!(base);
+          const keys = await storage.getKeys!(base);
+          await Promise.all(keys.map((key) => storage.removeItem(key)));
         }
-      : undefined,
+      : storage.clear
+        ? async () => {
+            await storage.clear!(base);
+          }
+        : undefined,
     getTagVersions: async (tags) => {
       const versions = await Promise.all(
         tags.map(async (tag) => {
@@ -700,7 +710,7 @@ export class FarmDataCache {
   ): Promise<number> {
     const normalized = normalizeCacheTag(tag);
     const count = this.invalidateTag(normalized) + (this.shells?.invalidateTag(normalized) ?? 0);
-    await this.adapter?.invalidateTags?.([this.createAdapterTag(normalized)]);
+    await this.invalidateAdapterTags([this.createAdapterTag(normalized)]);
     emitFarmEvent(
       options.source === "updateTag"
         ? { type: "cache.updateTag", tag: normalized, count }
@@ -737,7 +747,7 @@ export class FarmDataCache {
       this.countEntriesForTags([pathTag, "ppr"]) +
       (this.shells?.countEntriesForTags([pathTag, "ppr"]) ?? 0);
     const count = this.invalidateTag(pathTag) + (this.shells?.invalidateTag(pathTag) ?? 0);
-    await this.adapter?.invalidateTags?.([this.createAdapterTag(pathTag)]);
+    await this.invalidateAdapterTags([this.createAdapterTag(pathTag)]);
     emitFarmEvent({ type: "cache.revalidatePath", path: normalizedPath, count });
 
     if (pprCount > 0) {
@@ -1013,16 +1023,51 @@ export class FarmDataCache {
     return `${this.namespace}:tag:${tag}`;
   }
 
+  /**
+   * Bump the shared versions of these tags, so an entry captured with an older version is stale
+   * on every server. An adapter without `invalidateTags` keeps each tag's version as an entry of
+   * its own, through `get` and `set`.
+   */
+  private async invalidateAdapterTags(physicalTags: readonly string[]): Promise<void> {
+    const adapter = this.adapter;
+    if (!adapter) return;
+    if (adapter.invalidateTags) {
+      await adapter.invalidateTags(physicalTags);
+      return;
+    }
+    await Promise.all(
+      physicalTags.map(async (tag) => {
+        const current = normalizeAdapterVersion((await adapter.get<number>(tag))?.value);
+        const createdAt = Date.now();
+        await adapter.set<number>(tag, {
+          key: tag,
+          value: Math.max(createdAt, current + 1),
+          tags: [],
+          createdAt,
+          revalidate: false,
+        });
+      }),
+    );
+  }
+
   private async getAdapterTagVersions(
     tags: readonly string[],
     adapter = this.adapter,
     namespace = this.namespace,
   ): Promise<Readonly<Record<string, number>>> {
-    if (!adapter?.getTagVersions || tags.length === 0) return {};
+    if (!adapter || tags.length === 0) return {};
 
     const normalized = tags.map(normalizeCacheTag);
     const physicalTags = normalized.map((tag) => `${namespace}:tag:${tag}`);
-    const versions = await adapter.getTagVersions(physicalTags);
+    const versions: Readonly<Record<string, unknown>> = adapter.getTagVersions
+      ? await adapter.getTagVersions(physicalTags)
+      : Object.fromEntries(
+          await Promise.all(
+            physicalTags.map(
+              async (tag) => [tag, (await adapter.get<number>(tag))?.value] as const,
+            ),
+          ),
+        );
     return Object.fromEntries(
       normalized.map((tag, index) => [
         tag,

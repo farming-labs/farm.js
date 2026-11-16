@@ -1,5 +1,9 @@
 import { describe, expect, it } from "vitest";
-import { findClientServerFnViolation, formatServerFnBoundaryError } from "../server-query-boundary";
+import { formatFarmDiagnostic } from "../diagnostics";
+import {
+  createServerFnBoundaryDiagnostic,
+  findClientServerFnViolation,
+} from "../server-query-boundary";
 
 const QUERY_MODULE = `
 import { createServerQuery } from "@farm.js/core";
@@ -15,6 +19,7 @@ describe("findClientServerFnViolation", () => {
   it("flags createServerQuery definitions compiled for the client", () => {
     expect(findClientServerFnViolation(QUERY_MODULE, "/app/src/lib/scan-query.ts")).toEqual({
       factory: "createServerQuery",
+      start: QUERY_MODULE.indexOf("createServerQuery({"),
     });
   });
 
@@ -25,6 +30,7 @@ export const fn = createServerFn({ handler: async () => 1 });
 `;
     expect(findClientServerFnViolation(code, "/app/src/fn.ts")).toEqual({
       factory: "createServerFn",
+      start: code.indexOf("createServerFn({"),
     });
   });
 
@@ -98,14 +104,19 @@ export const scanQuery = createServerQuery({
   });
 });
 
-describe("formatServerFnBoundaryError", () => {
-  it("names the factory, the module, and both remediations", () => {
-    const message = formatServerFnBoundaryError(
-      { factory: "createServerQuery" },
-      "/app/src/lib/scan-query.ts",
+describe("createServerFnBoundaryDiagnostic", () => {
+  it("names the code, the factory, the module, its position, and both remediations", () => {
+    const message = formatFarmDiagnostic(
+      createServerFnBoundaryDiagnostic(
+        { factory: "createServerQuery", start: 0 },
+        "/app/src/lib/scan-query.ts",
+        { line: 8, column: 26 },
+      ),
+      "/app",
     );
-    expect(message).toContain("createServerQuery");
-    expect(message).toContain("/app/src/lib/scan-query.ts");
+    expect(message).toContain(
+      "src/lib/scan-query.ts:8:26 - error CLIENT_SERVER_FUNCTION: createServerQuery handlers run only on the server",
+    );
     expect(message).toContain("experimental.serverActions");
     expect(message).toContain("@farm.js/plugin/rsc");
     expect(message).toContain("createAPIClient");

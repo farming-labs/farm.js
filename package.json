@@ -114,6 +114,9 @@
       "nanoid@>=3.0.0 <3.3.18": "3.3.18",
       "nanoid@>=4.0.0 <5.1.16": "5.1.16",
       "nanostores@^1.0.1": "^1.5.4"
+    },
+    "patchedDependencies": {
+      "env-runner@0.2.3": "patches/env-runner@0.2.3.patch"
     }
   }
 }

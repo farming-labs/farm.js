@@ -54,7 +54,7 @@
     "build": "tsup",
     "dev": "tsup --watch",
     "type-check": "tsc --noEmit",
-    "test": "vitest run",
+    "test": "vitest run && vitest run --config vitest.production.config.ts",
     "clean": "rm -rf dist"
   },
   "dependencies": {

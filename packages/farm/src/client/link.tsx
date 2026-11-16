@@ -19,6 +19,7 @@ import type { FarmI18nLocale } from "../i18n/types";
 import { getFarmTrailingSlashPreference } from "../trailing-slash";
 import { applyFarmBasePath, getFarmBasePath } from "../base-path";
 import { useOptionalFarm } from "../provider";
+import { FARM_LINK_PREFETCH_DELAY } from "./link-prefetch";
 
 /**
  * Prefetch strategy (TanStack Router–style):
@@ -314,6 +315,18 @@ function normalizePrefetch(prefetch: LinkProps["prefetch"]): {
   return { intent: false, viewport: false, render: false };
 }
 
+/**
+ * The mode written into the HTML, so the router prefetches the anchor as this `Link` would when
+ * it never hydrates (installFarmLinkPrefetch). The default writes nothing.
+ */
+function prefetchAttribute(modes: ReturnType<typeof normalizePrefetch>): string | undefined {
+  if (modes.intent && modes.viewport) return undefined;
+  if (modes.render) return "render";
+  if (modes.viewport) return "viewport";
+  if (modes.intent) return "intent";
+  return "none";
+}
+
 function LinkInner<TRoute extends string = DefaultRouteHref, THref extends string = string>(
   {
     href,
@@ -322,7 +335,7 @@ function LinkInner<TRoute extends string = DefaultRouteHref, THref extends strin
     hash,
     trailingSlash,
     prefetch = true,
-    prefetchDelay = 50,
+    prefetchDelay = FARM_LINK_PREFETCH_DELAY,
     replace = false,
     scroll = true,
     viewTransition = false,
@@ -343,7 +356,8 @@ function LinkInner<TRoute extends string = DefaultRouteHref, THref extends strin
   const activePrefetch = useRef<symbol | null>(null);
   const farm = useOptionalFarm();
 
-  const { intent, viewport, render } = normalizePrefetch(prefetch);
+  const prefetchModes = normalizePrefetch(prefetch);
+  const { intent, viewport, render } = prefetchModes;
   const baseHref = resolveLinkHref(href, params, {
     query,
     hash,
@@ -548,6 +562,10 @@ function LinkInner<TRoute extends string = DefaultRouteHref, THref extends strin
       onTouchStart={handleTouchStart}
       {...props}
       data-farm-link=""
+      data-farm-prefetch={prefetchAttribute(prefetchModes)}
+      data-farm-prefetch-delay={
+        intent && prefetchDelay !== FARM_LINK_PREFETCH_DELAY ? String(prefetchDelay) : undefined
+      }
       data-replace={replace ? "" : undefined}
       data-no-scroll={!scroll ? "" : undefined}
       data-view-transition={

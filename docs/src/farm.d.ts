@@ -136,6 +136,7 @@ export type RoutePath =
   | "/docs/testing"
   | "/docs/themes"
   | "/docs/upgrading"
+  | "/openapi"
   | "/privacy"
   | "/telemetry"
   | "/terms";
@@ -263,6 +264,7 @@ export type RoutePattern =
   | "/docs/testing"
   | "/docs/themes"
   | "/docs/upgrading"
+  | "/openapi"
   | "/privacy"
   | "/telemetry"
   | "/terms";
@@ -390,6 +392,7 @@ export type RouteModulePattern =
   | "/docs/testing"
   | "/docs/themes"
   | "/docs/upgrading"
+  | "/openapi"
   | "/privacy"
   | "/telemetry"
   | "/terms";

@@ -42,6 +42,42 @@ A missing API URL fails while configuration loads instead of on the first conten
 
 Build the client once and reuse it in the integration and application server code.
 
+When the Farm and Strapi projects share a repository, generate a declaration from Strapi's local
+schemas:
+
+```json
+{
+  "scripts": {
+    "strapi:types": "farm-strapi generate --strapi-root ../cms --output src/strapi.generated.d.ts",
+    "strapi:types:check": "farm-strapi generate --strapi-root ../cms --output src/strapi.generated.d.ts --check"
+  }
+}
+```
+
+Run `pnpm strapi:types` after a content model changes and commit the generated declaration. The
+resource name and literal `fields` and `populate` arguments then determine each response type:
+
+```ts
+import { createStrapiClient, createStrapiCollection, resolveStrapiConfig } from "@farm.js/strapi";
+
+export const cms = createStrapiClient(resolveStrapiConfig({}));
+export const articles = createStrapiCollection(cms, "articles");
+
+const posts = await articles.find({
+  fields: ["title", "slug"],
+  populate: ["cover", "category"],
+});
+```
+
+Unpopulated relations and media are absent from the result type. Top-level population is inferred;
+deep object or dotted-path population is deliberately `unknown` and must be validated at the
+server-query boundary.
+`--check` never writes and exits unsuccessfully when the declaration is missing or stale, so it can
+run in CI. The generator reads only local `src/api/**/schema.json` and `src/components/**/*.json`
+files and is available programmatically from the server-only `@farm.js/strapi/schema` entry.
+
+You can still supply a manual document type when the Strapi project is not available locally:
+
 ```ts
 // src/lib/cms.server.ts
 import {
@@ -88,7 +124,7 @@ export const postsQuery = createServerQuery({
 });
 ```
 
-The generic describes the fields your application expects. Keep runtime validation on the server
+The generated or manual type is a compile-time contract. Keep runtime validation on the server
 query boundary because Strapi's returned fields still depend on permissions and `populate`.
 
 ## Invalidate on publish
