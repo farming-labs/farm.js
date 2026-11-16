@@ -65,7 +65,9 @@ function removeAll(selector: string): void {
  * both stay untouched.
  */
 export function applyFarmMetadataToDocument(metadata: NavigationMetadata, pathname: string): void {
-  document.title = resolveMetadataTitle(metadata?.title) || "Farm.js App";
+  // A page without a title renders none on a document load, and production navigation copies
+  // that empty title; a framework placeholder here would name the page only after a navigation.
+  document.title = resolveMetadataTitle(metadata?.title) || "";
 
   const rendered = renderMetadataHead(metadata, { pathname });
   const template = document.createElement("template");

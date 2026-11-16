@@ -54,6 +54,18 @@ describe("SPA navigation metadata", () => {
     router.destroy();
   });
 
+  it("leaves no title for a page without one, as its document load and production do", async () => {
+    window.history.replaceState(null, "", "/start");
+    document.title = "Start";
+    stubPageDataFetch({ "/untitled": {} });
+
+    const router = createRouter();
+    await router.navigate("/untitled", { scroll: false });
+
+    expect(document.title).toBe("");
+    router.destroy();
+  });
+
   it("replaces canonical, description, and Open Graph tags on navigation", async () => {
     window.history.replaceState(null, "", "/a");
     // The first page's head as the server rendered it: no managed markers.
