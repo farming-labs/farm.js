@@ -14,6 +14,9 @@
 import { AsyncLocalStorage } from "node:async_hooks";
 import type { FarmPlugin, FarmPluginRuntimeAfterEvent } from "../plugin";
 import {
+  _classifyFarmMCPSession,
+  _farmMCPClientSession,
+  _isFarmMCPRequest,
   classifyFarmAgent,
   classifyFarmClient,
   type FarmAgentIdentity,
@@ -396,6 +399,8 @@ interface State {
 interface RequestMetadata {
   id: string;
   agent: FarmClientIdentity;
+  /** For an MCP client's `initialize`: the session ID naming it, once the body is read. */
+  mcpSession: Promise<string | undefined> | undefined;
   /** Read from the request as it arrived, before a handler can rewrite it. */
   path: string | undefined;
   /** Read when an event is made: a handler may label the route while it answers. */
@@ -414,11 +419,82 @@ function beginRequest(
   return {
     id: uuid(),
     agent: classifyFarmClient(request),
+    mcpSession: readMCPClientSession(request),
     path: requestPath(request),
     route,
     completed: false,
     waitUntil,
   };
+}
+
+/** An `initialize` is a few hundred bytes; a larger body isn't read. */
+const MAX_MCP_BODY = 64 * 1024;
+
+/**
+ * An MCP client names itself only in `initialize`, and Farm's MCP servers are stateless, so a
+ * later tool call can't say which client made it. Reads the client's name from a clone of an
+ * `initialize` POST while the server answers; see withMCPClientSession and rfcs/0009.
+ */
+function readMCPClientSession(request: Request): Promise<string | undefined> | undefined {
+  if (
+    request.headers.has("mcp-session-id") ||
+    !_isFarmMCPRequest(request) ||
+    !request.body ||
+    request.bodyUsed ||
+    !/json/i.test(request.headers.get("content-type") ?? "") ||
+    Number(request.headers.get("content-length")) > MAX_MCP_BODY
+  )
+    return undefined;
+  let body: ReadableStream<Uint8Array>;
+  try {
+    body = request.clone().body!;
+  } catch {
+    return undefined;
+  }
+  return readMCPInitialize(body).catch(() => undefined);
+}
+
+async function readMCPInitialize(body: ReadableStream<Uint8Array>): Promise<string | undefined> {
+  const reader = body.getReader();
+  const decoder = new TextDecoder();
+  let text = "";
+  try {
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      text += decoder.decode(value, { stream: true });
+      if (text.length > MAX_MCP_BODY) return undefined;
+    }
+  } finally {
+    reader.cancel().catch(() => {});
+  }
+  const parsed: unknown = JSON.parse(text + decoder.decode());
+  const initialize = (Array.isArray(parsed) ? parsed : [parsed]).find(
+    (message) => message?.method === "initialize",
+  ) as { params?: { clientInfo?: { name?: unknown } } } | undefined;
+  return _farmMCPClientSession(initialize?.params?.clientInfo?.name);
+}
+
+/**
+ * The `initialize` response with the session ID naming its client, which MCP clients send with
+ * every later request. A server with sessions of its own keeps its ID. `undefined` leaves the
+ * response as it is.
+ */
+async function withMCPClientSession(
+  response: Response,
+  metadata: RequestMetadata,
+): Promise<Response | undefined> {
+  const session = await metadata.mcpSession;
+  if (!session || !response.ok || response.headers.has("mcp-session-id")) return undefined;
+  // The initialize request names its client too, as the calls after it will.
+  metadata.agent = _classifyFarmMCPSession(session) ?? metadata.agent;
+  const headers = new Headers(response.headers);
+  headers.set("Mcp-Session-Id", session);
+  return new Response(response.body, {
+    status: response.status,
+    statusText: response.statusText,
+    headers,
+  });
 }
 
 function requestEvent(
@@ -509,11 +585,19 @@ export function farmInfraAnalyticsPlugin(
             : undefined);
         if (!metadata || metadata.completed || !event.state) return;
         metadata.completed = true;
-        if (!METHODS.has(event.request.method)) return;
-        event.state.exporter.enqueue(
-          requestEvent(metadata, event.request.method, event.response.status, event.durationMs),
-        );
-        event.waitUntil(event.state.exporter.flush());
+        const { exporter } = event.state;
+        const record = () => {
+          if (!METHODS.has(event.request.method)) return;
+          exporter.enqueue(
+            requestEvent(metadata, event.request.method, event.response.status, event.durationMs),
+          );
+          event.waitUntil(exporter.flush());
+        };
+        if (!metadata.mcpSession) return record();
+        return withMCPClientSession(event.response, metadata).then((response) => {
+          record();
+          return response;
+        });
       },
       // Unhandled exceptions have no final HTTP status at this boundary. Do not fabricate a 500.
       error(event) {
@@ -572,13 +656,13 @@ export function farmInfraAnalyticsRecorder(
         background(exporter.flush());
         throw error;
       }
+      const durationMs = performance.now() - startedAt;
+      const named = metadata.mcpSession && (await withMCPClientSession(response, metadata));
       if (METHODS.has(request.method)) {
-        exporter.enqueue(
-          requestEvent(metadata, request.method, response.status, performance.now() - startedAt),
-        );
+        exporter.enqueue(requestEvent(metadata, request.method, response.status, durationMs));
       }
       background(exporter.flush());
-      return response;
+      return named || response;
     },
     close() {
       unsubscribe();

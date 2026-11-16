@@ -108,7 +108,7 @@ name from Farm's own list. The user-agent itself never leaves the app.
 | --------- | --------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------- |
 | `agent`   | A user-agent token an AI vendor documents for fetches a person asked for, or ChatGPT agent's Web Bot Auth `Signature-Agent` | ChatGPT-User, Claude-User, Perplexity-User, ChatGPT agent |
 | `crawler` | A documented AI crawler token                                                                                               | GPTBot, OAI-SearchBot, ClaudeBot, PerplexityBot, CCBot    |
-| `harness` | A coding agent's token, or MCP's Streamable HTTP headers (`Mcp-Protocol-Version`, `Mcp-Session-Id`)                         | Claude Code, Codex, any MCP client                        |
+| `harness` | A coding agent's token, the [MCP client](#mcp-clients) Farm named, or MCP's Streamable HTTP headers                         | Claude Code, Codex, Cursor, VS Code, any MCP client       |
 | `search`  | A search engine crawler token                                                                                               | Googlebot, Bingbot, Applebot, DuckDuckBot                 |
 | `preview` | A link preview token                                                                                                        | Slackbot, facebookexternalhit, Twitterbot, Discordbot     |
 | `monitor` | An uptime check or scheduler token                                                                                          | UptimeRobot, Vercel Cron, Farm.js clock                   |
@@ -124,6 +124,22 @@ curl and most scrapers don't send `Sec-Fetch-Site` or `Sec-Fetch-Dest`.
 Every kind is the client's own claim, not a verified identity: any client can send any header.
 Use it to understand traffic, never to grant access. `classifyFarmClient(request)` from
 `@farm.js/core` returns the same result anywhere you have the request, such as middleware.
+
+### MCP clients
+
+An MCP client names itself once, in its `initialize` message (`clientInfo.name`), and Farm's MCP
+servers answer each request on its own, so a tool call that comes later can't say who made it.
+While analytics is on, Farm reads a client's `initialize` request in the app (up to 64 KiB) and,
+for a client on its list, answers with an `Mcp-Session-Id` that names it, such as
+`farm.cursor.9f2c…`. MCP clients send that header with every later request, so each tool call is
+reported as Cursor, Claude, VS Code, Windsurf, Zed, ChatGPT, Codex, Gemini CLI or another listed
+client. Claude Code is named by its user-agent either way.
+
+- A client Farm doesn't list gets no session ID and is reported as `MCP client`.
+- A server that issues its own session IDs keeps them.
+- The body never leaves the app, and the session ID grants nothing: any client can send one.
+- Without `FARMJS_API_KEY`, or with `analytics: false`, Farm reads no request bodies and adds no
+  header.
 
 ### What `path` contains
 

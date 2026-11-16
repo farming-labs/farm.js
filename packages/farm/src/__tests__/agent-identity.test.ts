@@ -2,6 +2,7 @@
 
 import { afterEach, describe, expect, it } from "vitest";
 import {
+  _farmMCPClientSession,
   classifyFarmAgent,
   classifyFarmClient,
   FARM_INTERNAL_READ_HEADER,
@@ -223,6 +224,48 @@ describe("classifyFarmClient", () => {
     expect(
       client(userAgent("Claude-User/1.0"), { "mcp-protocol-version": "2025-06-18" }).name,
     ).toBe("Claude-User");
+  });
+
+  it("names an MCP client by the session ID Farm gave its initialize", () => {
+    const named = (clientInfoName: unknown, userAgent: string | null = "node") =>
+      client(userAgent, {
+        "mcp-protocol-version": "2025-06-18",
+        "mcp-session-id": _farmMCPClientSession(clientInfoName) ?? "",
+      });
+    expect(named("cursor-vscode")).toEqual({
+      family: "other",
+      category: "harness",
+      identity: "self-reported",
+      name: "Cursor",
+    });
+    expect(named("claude-ai")).toMatchObject({ family: "anthropic", name: "Claude" });
+    expect(named("Visual Studio Code")).toMatchObject({ family: "microsoft", name: "VS Code" });
+    expect(named("windsurf-client")).toMatchObject({ name: "Windsurf" });
+    // Clients differ in case; the name matches either way.
+    expect(named("CURSOR-VSCODE").name).toBe("Cursor");
+    // The session names the client even past a User-Agent that names another one.
+    expect(named("cursor-vscode", userAgent("Claude-User/1.0")).name).toBe("Cursor");
+    // A name Farm doesn't list gets no session ID, so the transport alone names the client.
+    for (const name of ["my-agent", "cursor-vscode-fork", "", 42, undefined])
+      expect(_farmMCPClientSession(name)).toBeUndefined();
+    expect(named("my-agent").name).toBe("MCP client");
+  });
+
+  it("holds each session ID to Farm's own form and its own list of clients", () => {
+    const session = _farmMCPClientSession("cursor-vscode")!;
+    expect(session).toMatch(/^farm\.cursor\.[0-9a-f]{32}$/);
+    // Each initialize gets its own ID.
+    expect(_farmMCPClientSession("cursor-vscode")).not.toBe(session);
+    const random = session.slice("farm.cursor.".length);
+    for (const forged of [
+      `farm.evil.${random}`,
+      `farm.cursor.${random}0`,
+      `farm.cursor.${random.toUpperCase()}`,
+      `farm.Cursor.${random}`,
+      `x-farm.cursor.${random}`,
+      "farm.cursor",
+    ])
+      expect(client(null, { "mcp-session-id": forged }).name).toBe("MCP client");
   });
 
   it("leaves silent, ambiguous and look-alike clients unknown", () => {

@@ -14,7 +14,10 @@ import { startProductionServer } from "./production-server";
 
 const packageRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
 
-/** Answers tools/list and tools/call over server-sent events; `broken` fails, `missing` is refused. */
+/**
+ * A stateless server: answers initialize, tools/list and tools/call over server-sent events;
+ * `broken` fails, `missing` is refused.
+ */
 const ADAPTER_SERVER = `let listed = 0;
 export function createFarmDocsRuntimeHandler(_config, options) {
   options.registerMCPServer?.({ name: "dev.farmjs/docs", version: "0.2.145", path: "/mcp" });
@@ -24,7 +27,15 @@ export function createFarmDocsRuntimeHandler(_config, options) {
     if (pathname !== "/mcp") return null;
     const message = await request.json();
     let reply;
-    if (message.method === "tools/list") {
+    if (message.method === "initialize") {
+      reply = {
+        result: {
+          protocolVersion: message.params.protocolVersion,
+          capabilities: { tools: {} },
+          serverInfo: { name: "dev.farmjs/docs", version: "0.2.145" },
+        },
+      };
+    } else if (message.method === "tools/list") {
       listed++;
       reply = {
         result: {
@@ -134,12 +145,36 @@ describe("a docs runtime's MCP server in production", () => {
         },
       });
       try {
+        // Cursor names itself only in initialize; Farm hands it a session ID that names it.
+        const initialized = await fetch(`${server.origin}/mcp`, {
+          method: "POST",
+          headers: {
+            "content-type": "application/json",
+            accept: "application/json, text/event-stream",
+          },
+          body: JSON.stringify({
+            jsonrpc: "2.0",
+            id: 0,
+            method: "initialize",
+            params: {
+              protocolVersion: "2025-06-18",
+              capabilities: {},
+              clientInfo: { name: "cursor-vscode", version: "2.1.0" },
+            },
+          }),
+        });
+        expect(initialized.status).toBe(200);
+        expect(await initialized.text()).toContain('"serverInfo"');
+        const session = initialized.headers.get("mcp-session-id")!;
+        expect(session).toMatch(/^farm\.cursor\.[0-9a-f]{32}$/);
         const callTool = async (id: number, name: string) => {
           const response = await fetch(`${server.origin}/mcp`, {
             method: "POST",
             headers: {
               "content-type": "application/json",
               accept: "application/json, text/event-stream",
+              "mcp-session-id": session,
+              "mcp-protocol-version": "2025-06-18",
             },
             body: JSON.stringify({
               jsonrpc: "2.0",
@@ -190,15 +225,33 @@ describe("a docs runtime's MCP server in production", () => {
           { timeout: 5_000 },
         );
         const calls = events().filter(({ kind }) => kind === "mcp.tool");
+        const cursor = {
+          family: "other",
+          category: "harness",
+          identity: "self-reported",
+          name: "Cursor",
+        };
         expect(calls).toEqual([
-          expect.objectContaining({ route: "/mcp", tool: "list_pages", outcome: "success" }),
-          expect.objectContaining({ route: "/mcp", tool: "broken", outcome: "error" }),
+          expect.objectContaining({
+            route: "/mcp",
+            tool: "list_pages",
+            outcome: "success",
+            agent: cursor,
+          }),
+          expect.objectContaining({
+            route: "/mcp",
+            tool: "broken",
+            outcome: "error",
+            agent: cursor,
+          }),
         ]);
         // Each call is tied to the request that carried it, and never carries its arguments.
         const requests = events().filter(
           ({ kind, method }) => kind === "request" && method === "POST",
         );
-        expect(requests).toHaveLength(3);
+        expect(requests).toHaveLength(4);
+        expect(requests.every(({ agent }) => agent.name === "Cursor")).toBe(true);
+        expect(JSON.stringify(events())).not.toContain(session);
         for (const call of calls) {
           expect(requests.map(({ requestId }) => requestId)).toContain(call.requestId);
         }
