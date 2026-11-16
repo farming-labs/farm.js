@@ -68,6 +68,7 @@ for (const [index, renderer] of ["html", "react"].entries()) {
           const isFarmBlockedNavigationURL = () => false;
           const isFarmDocsPath = () => false;
           const matchRoute = () => null;
+          const loadFarmClientRouteTable = () => null;
           const cancelPendingPageHydration = () => {};
           const activeRouteInterception = null;
           const matchInterceptedRouteSlot = () => null;
