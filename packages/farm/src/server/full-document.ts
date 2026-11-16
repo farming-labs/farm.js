@@ -20,15 +20,41 @@ export const HOISTED_HEAD_ELEMENT =
 /** Peel Farm's leading `display:contents` wrapper divs (the stream root and any layout-boundary
  * divs) and the head elements React hoisted in front of them, so the layout's own markup is
  * exposed. The hoisted elements come back in order, to return to the document's head. */
-function peelDocumentPrefix(markup: string): { inner: string; hoisted: string } {
+function peelDocumentPrefix(markup: string): {
+  inner: string;
+  hoisted: string;
+  layoutPatterns: string[];
+} {
   let inner = markup.replace(/^\s+/, "");
   let hoisted = "";
+  const layoutPatterns: string[] = [];
   let match: RegExpExecArray | null;
   while ((match = CONTENTS_WRAPPER.exec(inner) ?? HOISTED_HEAD_ELEMENT.exec(inner))) {
     if (!/^<div/i.test(match[0])) hoisted += match[0];
+    else {
+      const pattern = /\sdata-farm-layout-pattern="([^"]*)"/i.exec(match[0])?.[1];
+      if (pattern !== undefined) layoutPatterns.push(pattern);
+    }
     inner = inner.slice(match[0].length).replace(/^\s+/, "");
   }
-  return { inner, hoisted };
+  return { inner, hoisted, layoutPatterns };
+}
+
+/**
+ * Name, on its `<html>`, each layout whose boundary div wraps a rendered document. Such a layout
+ * renders the document itself, so the page has no boundary element for it: development client
+ * navigation reads this to know the layout is already there, keeping it and swapping only what
+ * changes instead of nesting a second copy of the layout inside the page. Markup that is not a
+ * document comes back unchanged.
+ */
+export function markFarmDocumentLayouts(markup: string): string {
+  const { inner, layoutPatterns } = peelDocumentPrefix(markup);
+  if (layoutPatterns.length === 0) return markup;
+  const html = /^(?:<!doctype[^>]*>\s*)?<html\b/i.exec(inner);
+  if (!html) return markup;
+  const value = JSON.stringify(layoutPatterns).replace(/&/g, "&amp;").replace(/'/g, "&#39;");
+  const at = markup.length - inner.length + html[0].length;
+  return `${markup.slice(0, at)} data-farm-document-layouts='${value}'${markup.slice(at)}`;
 }
 
 /** Put the head elements React hoisted out of a document back at the start of its `<head>`. */

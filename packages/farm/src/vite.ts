@@ -8109,10 +8109,22 @@ function findLayoutBoundary(root, pattern) {
   return null;
 }
 
+// A layout that renders the document itself has no boundary element: the document names it.
+function readDocumentLayoutPatterns() {
+  try {
+    const patterns = JSON.parse(document.documentElement.getAttribute('data-farm-document-layouts') || '[]');
+    return Array.isArray(patterns) ? patterns.filter((pattern) => typeof pattern === 'string') : [];
+  } catch {
+    return [];
+  }
+}
+
 function readActiveLayoutPatterns() {
-  return Array.from(document.querySelectorAll('[data-farm-layout-boundary="true"]'))
-    .map((element) => element.getAttribute('data-farm-layout-pattern'))
-    .filter(Boolean);
+  return readDocumentLayoutPatterns().concat(
+    Array.from(document.querySelectorAll('[data-farm-layout-boundary="true"]'))
+      .map((element) => element.getAttribute('data-farm-layout-pattern'))
+      .filter(Boolean),
+  );
 }
 
 ${FARM_NAVIGATION_SCRIPT_SOURCE}
