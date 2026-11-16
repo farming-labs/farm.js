@@ -1109,7 +1109,7 @@ export class ServerRenderer {
     await this.initialize();
     if (this.viteServer) await this.applyRendererAppSetup();
     setFarmBasePath(this.config.basePath);
-    _setFarmSearchPreserveRoutes(this.routeManager.getSearchPreserveRoutes());
+    this.publishSearchPreserveRoutes();
     setFarmTrailingSlashPreference(this.config.trailingSlash);
     let element = this.rendererRuntime.createElement(input.PageComponent, input.pageProps);
     if (input.LoadingComponent) {
@@ -1530,11 +1530,20 @@ export class ServerRenderer {
     return false;
   }
 
+  /**
+   * The pages with `search.preserve`, for the links this render draws (set per render, like the
+   * base path, so a routes-file edit applies to the next one). A route manager without the list,
+   * such as a partial test double, has none.
+   */
+  private publishSearchPreserveRoutes(): void {
+    _setFarmSearchPreserveRoutes(this.routeManager.getSearchPreserveRoutes?.() ?? []);
+  }
+
   async renderPage(req: FarmRequest, res: FarmResponse): Promise<void> {
     await this.initialize();
     if (this.viteServer) await this.applyRendererAppSetup();
     setFarmBasePath(this.config.basePath);
-    _setFarmSearchPreserveRoutes(this.routeManager.getSearchPreserveRoutes());
+    this.publishSearchPreserveRoutes();
     setFarmTrailingSlashPreference(this.config.trailingSlash);
     const cspNonce = createFarmCspNonce(this.security);
     if (cspNonce) {
