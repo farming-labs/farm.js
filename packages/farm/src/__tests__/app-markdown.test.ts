@@ -1,3 +1,4 @@
+import { pathToFileURL } from "node:url";
 import React from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
@@ -17,6 +18,18 @@ import {
   _isFarmMarkdownPageCheck,
 } from "../markdown";
 import * as appMarkdownRuntime from "../app-markdown-runtime";
+
+/** Runs `render` with the compiled pages the build gives its prerender server. */
+async function withPrecompiledPages<T>(pages: Map<string, string>, render: () => Promise<T>) {
+  const key = appMarkdownRuntime.FARM_MARKDOWN_PRECOMPILED_PAGES;
+  const scope = globalThis as { [key]?: Map<string, string> };
+  scope[key] = pages;
+  try {
+    return await render();
+  } finally {
+    delete scope[key];
+  }
+}
 
 describe("markdown request negotiation and errors", () => {
   it("preserves the response helpers through both existing entry points", () => {
@@ -131,6 +144,76 @@ describe("app markdown pages", () => {
     });
     expect(computed.revalidate).toBeUndefined();
     expect(computed.dynamic).toBeUndefined();
+  });
+
+  it("renders what evaluate from @mdx-js/mdx renders", async () => {
+    const [{ evaluate }, jsxRuntime, { default: remarkGfm }] = await Promise.all([
+      import("@mdx-js/mdx"),
+      import("react/jsx-runtime"),
+      import("remark-gfm"),
+    ]);
+    const Callout = (props: { children?: React.ReactNode; tone?: string }) =>
+      React.createElement("aside", { "data-tone": props.tone }, props.children);
+    const bodies = [
+      "# Title\n\nA paragraph with **bold**, _emphasis_, `code` and a [link](/docs).\n",
+      "| a | b |\n| - | :-: |\n| 1 | ~~2~~ |\n\n- [x] done\n- [ ] todo\n\nwww.example.com and a note[^1].\n\n[^1]: The note.\n",
+      'export const name = "Farm";\nexport const dynamic = "force-static";\n\n# Hello {name}\n\n{1 + 1} items, {[1, 2].map((n) => <span key={n}>{n}</span>)}\n',
+      '<Callout tone="warn">Read **this**</Callout>\n\n```ts\nconst value = 1;\n```\n\n> Quoted <Callout>inline</Callout>\n',
+      'export function Local() { return <b>local</b>; }\n\n<Local />\n\n<div className="box">{String(import.meta.url)}</div>\n',
+    ];
+    for (const body of bodies) {
+      const filePath = "/app/guide/page.mdx";
+      const source = `---\ntitle: Guide\n---\n${body}`;
+      // The page module's render before the build could hand it compiled code.
+      const evaluated = await evaluate(body, {
+        ...jsxRuntime,
+        baseUrl: pathToFileURL(filePath),
+        remarkPlugins: [remarkGfm],
+      });
+      const expected = renderToStaticMarkup(
+        React.createElement(
+          "article",
+          { className: "farm-markdown", "data-farm-markdown-page": "" },
+          React.createElement(evaluated.default, { components: { Callout } }),
+        ),
+      );
+      const mod = createFarmMarkdownRouteModule({ filePath, source, components: { Callout } });
+      expect(renderToStaticMarkup(await (mod.default as any)({}))).toBe(expected);
+
+      // The code the build compiles for its prerender pass renders the same page.
+      const precompiled = createFarmMarkdownRouteModule({
+        filePath,
+        source,
+        components: { Callout },
+      });
+      const code = await appMarkdownRuntime.compileFarmMarkdownPage(body);
+      const html = await withPrecompiledPages(new Map([[body, code]]), async () =>
+        renderToStaticMarkup(await (precompiled.default as any)({})),
+      );
+      expect(html).toBe(expected);
+    }
+  });
+
+  it("runs the code the build compiled for a page body instead of compiling it", async () => {
+    const source = "---\ntitle: Guide\n---\n# Compiled at render time\n";
+    const { body } = parseMarkdownFrontmatter(source);
+    const code = (await appMarkdownRuntime.compileFarmMarkdownPage(body)).replace(
+      "Compiled at render time",
+      "Compiled by the build",
+    );
+    const render = (filePath: string, pageSource: string) =>
+      (createFarmMarkdownRouteModule({ filePath, source: pageSource }).default as any)({});
+    const [precompiled, other] = await withPrecompiledPages(new Map([[body, code]]), async () => [
+      renderToStaticMarkup(await render("/app/guide/page.mdx", source)),
+      // A body the build did not compile is compiled when it renders.
+      renderToStaticMarkup(await render("/app/other/page.mdx", "# Not precompiled\n")),
+    ]);
+    expect(precompiled).toContain("<h1>Compiled by the build</h1>");
+    expect(other).toContain("<h1>Not precompiled</h1>");
+    // Without the build's code, as in a deployed server, the page compiles on its first render.
+    expect(renderToStaticMarkup(await render("/app/guide/page.mdx", source))).toContain(
+      "<h1>Compiled at render time</h1>",
+    );
   });
 
   it("loads lazily configured components once, on the first render, and retries a failure", async () => {
