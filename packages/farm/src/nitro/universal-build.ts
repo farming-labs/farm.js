@@ -10798,6 +10798,23 @@ function getApplicableLayouts(pathname, directory) {
   return applicable;
 }
 
+/**
+ * The element a layout renders in. A layout chain that hydrates is drawn the same way by React
+ * in the browser (createFarmLayoutElement, document-layout-client.ts), without a key.
+ */
+function createFarmLayoutBoundary(pattern, key, element) {
+  return React.createElement(
+    "div",
+    {
+      "data-farm-layout-boundary": "true",
+      "data-farm-layout-pattern": pattern,
+      "data-farm-layout-key": key,
+      style: { display: "contents" },
+    },
+    element,
+  );
+}
+
 ${
   config.docs?.enabled
     ? `async function wrapFarmDocsResponseWithLayouts(request, response) {
@@ -10830,8 +10847,11 @@ ${
   )
     ? (hydrationStrategies[0] || "load")
     : "load";
+  // The docs page takes the place of an app page: the same page and layout boundaries, which the
+  // browser draws around the docs HTML when the layouts hydrate (createLayoutPageBoundary).
   let wrappedElement = React.createElement("div", {
     id: "__farm_page__",
+    "data-farm-segment": "page",
     "data-farm-client": "false",
     "data-farm-layout-client": "true",
     "data-farm-island": "page",
@@ -10840,12 +10860,17 @@ ${
   });
 
   for (let index = applicableLayouts.length - 1; index >= 0; index--) {
-    const LayoutComponent = applicableLayouts[index].module.default;
+    const layout = applicableLayouts[index];
+    const LayoutComponent = layout.module.default;
     if (LayoutComponent) {
-      wrappedElement = React.createElement(LayoutComponent, {
-        children: wrappedElement,
-        params,
-      });
+      wrappedElement = createFarmLayoutBoundary(
+        layout.pattern,
+        undefined,
+        React.createElement(LayoutComponent, {
+          children: wrappedElement,
+          params,
+        }),
+      );
     }
   }
 
@@ -10861,6 +10886,18 @@ ${
   if (rootMarkup === undefined) {
     rootMarkup = await new Response(renderedRoot.stream).text();
     if (renderedRoot.streamErrors.length > 0) throw renderedRoot.streamErrors[0];
+  }
+  // A root layout that renders the document: #root holds its body, as on an app page
+  // (ensureFarmDocumentRoot), and the browser draws the layout's body content there without a
+  // boundary (createFarmLayoutElement). The docs runtime keeps its own document.
+  const rootOpen = '<div id="root">';
+  const rootStart = rootMarkup.indexOf(rootOpen);
+  const layoutDocument =
+    rootStart >= 0 ? extractFarmFullDocument(rootMarkup.slice(rootStart + rootOpen.length)) : null;
+  if (layoutDocument !== null) {
+    const layoutBody = /<body\\b[^>]*>([\\s\\S]*)<\\/body>/i.exec(layoutDocument);
+    rootMarkup =
+      rootMarkup.slice(0, rootStart) + rootOpen + (layoutBody ? layoutBody[1] : "") + "</div>";
   }
   let html = source.replace(
     bodyMatch[0],
@@ -12244,19 +12281,12 @@ ${
                       params,
                       ...slotProps,
                     });
-                wrappedElement = React.createElement(
-                  "div",
-                  {
-                    "data-farm-layout-boundary": "true",
-                    "data-farm-layout-pattern": layout.pattern,
-                    // A layout chain that hydrates is drawn by React in the browser
-                    // (document-layout-client.ts), without a key; it renders whole anyway.
-                    "data-farm-layout-key":
-                      farmLayoutKeyOf && !shouldHydrateLayout
-                        ? farmLayoutKeyOf(layout.pattern, params)
-                        : undefined,
-                    style: { display: "contents" },
-                  },
+                // A layout chain that hydrates renders whole anyway: it has no key.
+                wrappedElement = createFarmLayoutBoundary(
+                  layout.pattern,
+                  farmLayoutKeyOf && !shouldHydrateLayout
+                    ? farmLayoutKeyOf(layout.pattern, params)
+                    : undefined,
                   wrappedElement,
                 );
               }

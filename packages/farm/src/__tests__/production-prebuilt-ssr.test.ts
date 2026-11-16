@@ -8,7 +8,7 @@ import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { gzipSync } from "node:zlib";
-import { chromium } from "@playwright/test";
+import { chromium, type Page } from "@playwright/test";
 import { imageSize } from "image-size";
 import { describe, expect, it, vi } from "vitest";
 import { build } from "../build";
@@ -278,6 +278,22 @@ async function resolveInstalledChromiumExecutable(): Promise<string | null> {
     }
     return null;
   }
+}
+
+/**
+ * The hydration mismatches React reports on a page: in production, minified errors #418 to #425,
+ * after which React throws the server's HTML away and renders the tree on the client.
+ */
+function collectHydrationErrors(page: Page): string[] {
+  const errors: string[] = [];
+  const record = (message: string) => {
+    if (/hydrat|react error #4(1[89]|2[0-5])\b/i.test(message)) errors.push(message);
+  };
+  page.on("pageerror", (error) => record(error.message));
+  page.on("console", (message) => {
+    if (message.type() === "error") record(message.text());
+  });
+  return errors;
 }
 
 /** The header Farm Infra signed manifest requests with, which once unlocked a full view. */
@@ -5195,6 +5211,7 @@ export default function RootLayout({ children }) {
           const page = await browser.newPage();
           const routeTableErrors: string[] = [];
           const documentRequests: string[] = [];
+          const hydrationErrors = collectHydrationErrors(page);
           page.on("console", (message) => {
             if (/route table|Ambiguous/i.test(message.text())) {
               routeTableErrors.push(message.text());
@@ -5232,6 +5249,8 @@ export default function RootLayout({ children }) {
               .poll(() => page.locator("#nd-page").textContent())
               .toContain("The docs index.");
             await expectHydrated();
+            // React keeps the server's HTML: it draws the same tree around the docs page.
+            expect(hydrationErrors).toEqual([]);
 
             // The docs runtime owns its document's links: another page loads as a document.
             await page.locator('[data-nav="about"]').click();
@@ -5260,11 +5279,115 @@ export default function RootLayout({ children }) {
             expect(documentRequests).toEqual(["/docs"]);
             await expectHydrated();
             expect(routeTableErrors).toEqual([]);
+            expect(hydrationErrors).toEqual([]);
           } catch (error) {
             throw new Error(
-              `${String(error)}\nRoute table errors:\n${routeTableErrors.join("\n")}\nDocument requests: ${documentRequests.join(", ")}\nServer output:\n${production.output()}`,
+              `${String(error)}\nRoute table errors:\n${routeTableErrors.join("\n")}\nHydration errors:\n${hydrationErrors.join("\n")}\nDocument requests: ${documentRequests.join(", ")}\nServer output:\n${production.output()}`,
             );
           }
+        } finally {
+          await browser.close();
+        }
+      } finally {
+        await production.stop();
+      }
+    } finally {
+      await fs.rm(root, { recursive: true, force: true });
+    }
+  }, 120_000);
+
+  it("hydrates a docs page in a root layout that renders the document, under a base path", async () => {
+    const root = await createProductionFixture();
+
+    try {
+      const appDir = path.join(root, "src", "app");
+      const contentDir = path.join(root, "content", "docs");
+      await fs.mkdir(path.join(contentDir, "guide"), { recursive: true });
+      await fs.writeFile(
+        path.join(appDir, "counter.tsx"),
+        `
+"use client";
+
+import { useEffect, useState } from "react";
+
+export function Counter() {
+  const [count, setCount] = useState(0);
+  const [hydrated, setHydrated] = useState(false);
+  useEffect(() => setHydrated(true), []);
+  return (
+    <button data-counter data-hydrated={hydrated ? "true" : "false"} onClick={() => setCount(count + 1)}>
+      count:{count}
+    </button>
+  );
+}
+`.trim(),
+      );
+      await fs.writeFile(
+        path.join(appDir, "layout.tsx"),
+        `
+import { Counter } from "./counter";
+
+export default function RootLayout({ children }) {
+  return (
+    <html lang="en">
+      <body>
+        <div data-layout="root">
+          <Counter />
+          {children}
+        </div>
+      </body>
+    </html>
+  );
+}
+`.trim(),
+      );
+      // Docs content outside the app's route tree: no app page shares its paths.
+      await fs.writeFile(path.join(contentDir, "page.md"), `# Docs index\n\nThe docs index.`);
+      await fs.writeFile(
+        path.join(contentDir, "guide", "page.md"),
+        `# Docs guide\n\nA nested docs page.`,
+      );
+
+      const config = await resolveConfig(
+        {
+          root,
+          srcDir: "src",
+          basePath: "/workspace",
+          docs: { entry: "/docs", contentDir: "content/docs", search: false },
+          images: { provider: "none" },
+          generateBuildId: () => "docs-document-layout-hydration-test",
+        },
+        "production",
+      );
+      await build(config, { root, preset: "node-server" });
+
+      const production = await startProductionServer(path.join(root, ".farm", ".output", "server"));
+      try {
+        // The layout's body opens #root, as on an app page; the docs runtime keeps its document.
+        const html = await (await fetch(`${production.origin}/workspace/docs/guide`)).text();
+        expect(html).toContain('<div id="root"><div data-layout="root">');
+        expect(html.match(/<html[\s>]/gi)).toHaveLength(1);
+        expect(html).toContain(
+          '<div id="__farm_page__" data-farm-segment="page" data-farm-client="false"',
+        );
+
+        const executablePath = await resolveInstalledChromiumExecutable();
+        if (!executablePath) return;
+        const browser = await chromium.launch({ headless: true, executablePath });
+        try {
+          const page = await browser.newPage();
+          const hydrationErrors = collectHydrationErrors(page);
+          const counter = page.locator("[data-counter]");
+          for (const pathname of ["/workspace/docs", "/workspace/docs/guide"]) {
+            await page.goto(`${production.origin}${pathname}`);
+            await expect
+              .poll(() => counter.getAttribute("data-hydrated"), { timeout: 15_000 })
+              .toBe("true");
+            await counter.click();
+            await expect.poll(() => counter.textContent()).toBe("count:1");
+            expect(await page.locator("#nd-page").count()).toBe(1);
+          }
+          expect(hydrationErrors).toEqual([]);
         } finally {
           await browser.close();
         }
