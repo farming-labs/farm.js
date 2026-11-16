@@ -1,4 +1,5 @@
 import fs from "node:fs";
+import path from "node:path";
 
 interface SnapshotEntry {
   value: unknown;
@@ -22,6 +23,18 @@ let volatile: Array<[scope: string, key: string]> | undefined;
 
 // The source files read while `traceFarmSourceReads` runs, so a result can say what it depends on.
 let trace: Set<string> | undefined;
+
+/**
+ * @internal A path as a snapshot key: one spelling per file. On Windows, Vite hands transforms ids
+ * with forward slashes while plans build paths with `path.join` (backslashes); both must find the
+ * entry the other wrote. `paths` is for tests.
+ */
+export function farmSourceSnapshotPathKey(
+  file: string,
+  paths: Pick<typeof path, "resolve"> = path,
+): string {
+  return paths.resolve(file);
+}
 
 /** @internal A file's size and mtime, or `"missing"`: what tells an edit apart between two reads. */
 export function getFarmSourceStamp(file: string): string {

@@ -14,7 +14,11 @@
 import fs from "node:fs";
 import path from "node:path";
 import { parseAst } from "rolldown/parseAst";
-import { memoizeInFarmSourceSnapshot, noteFarmSourceRead } from "./utils/source-snapshot";
+import {
+  farmSourceSnapshotPathKey,
+  memoizeInFarmSourceSnapshot,
+  noteFarmSourceRead,
+} from "./utils/source-snapshot";
 
 type AstNode = Record<string, any>;
 
@@ -332,7 +336,7 @@ export function isFarmPackageClientExport(
   // depends on the importer only through the directory it resolves the package from.
   return memoizeInFarmSourceSnapshot(
     "package-client-export",
-    `${path.dirname(importer)}\0${specifier}\0${name}`,
+    `${farmSourceSnapshotPathKey(path.dirname(importer))}\0${specifier}\0${name}`,
     () => {
       const entry = resolveFarmPackageDefaultEntry(importer, specifier);
       return !entry || traceFarmExport(entry, name) !== "server";

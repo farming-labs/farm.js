@@ -31,7 +31,11 @@ import {
   PackageInspectionTrace,
 } from "./package-client-boundary-cache";
 import { getFarmProjectSourceDir } from "./source-dir";
-import { memoizeInFarmSourceSnapshot, noteFarmSourceRead } from "./source-snapshot";
+import {
+  farmSourceSnapshotPathKey,
+  memoizeInFarmSourceSnapshot,
+  noteFarmSourceRead,
+} from "./source-snapshot";
 
 export { traceFarmSourceReads, withFarmSourceSnapshot } from "./source-snapshot";
 
@@ -2211,7 +2215,7 @@ export function resolveImportedModule(
 ): { path: string | null; local: boolean } {
   const resolved = memoizeInFarmSourceSnapshot(
     "resolution",
-    `${root ?? ""}\0${importerPath}\0${specifier}`,
+    `${root ? farmSourceSnapshotPathKey(root) : ""}\0${farmSourceSnapshotPathKey(importerPath)}\0${specifier}`,
     () => resolveImportedModuleUncached(importerPath, specifier, root),
     // A file added later may resolve an import that does not resolve now.
     (result) => result.path !== null,

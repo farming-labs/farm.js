@@ -11,7 +11,12 @@ import {
 } from "../utils/client-component";
 import { resolveConfig } from "../config";
 import { RouteManager } from "../routing/route-manager";
-import { FarmSourceSnapshotStore, withFarmSourceSnapshotOf } from "../utils/source-snapshot";
+import {
+  FarmSourceSnapshotStore,
+  farmSourceSnapshotPathKey,
+  withFarmSourceSnapshotOf,
+} from "../utils/source-snapshot";
+import { isFarmPackageClientExport } from "../islands-react-server-exports";
 import {
   dropLatestPackageClientBoundaryCache,
   runWithPackageClientBoundaryCacheFile,
@@ -593,5 +598,51 @@ describe("source snapshot", () => {
     expect(reads.filter((file) => file.startsWith(path.join(root, "src/ui")))).toEqual([]);
     expect(reads).toContain(path.join(root, "src/app/b/page.tsx"));
     expect(size()).toBe(filled);
+  });
+
+  it("keys a file by one spelling, so a transform's Vite id finds what the plan stored", () => {
+    // Vite's Windows ids use forward slashes; plans build paths with path.join (backslashes).
+    expect(farmSourceSnapshotPathKey("C:/app/src/app/page.tsx", path.win32)).toBe(
+      farmSourceSnapshotPathKey("C:\\app\\src\\app\\page.tsx", path.win32),
+    );
+    expect(farmSourceSnapshotPathKey("C:/app/src/app", path.win32)).toBe("C:\\app\\src\\app");
+
+    const root = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), "farm-source-snapshot-")));
+    tempDirs.push(root);
+    writeFiles(root, {
+      "node_modules/toggle-kit/package.json": JSON.stringify({
+        name: "toggle-kit",
+        type: "module",
+        exports: { ".": "./index.js" },
+      }),
+      "node_modules/toggle-kit/index.js":
+        '"use client";\nexport function Toggle() { return null; }\n',
+      "src/app/page.tsx":
+        'import { Toggle } from "toggle-kit";\nexport default function Page() { return <Toggle />; }\n',
+    });
+    const page = path.join(root, "src/app/page.tsx");
+    // The same file as another spelling: the plan's path and the id a transform gets differ.
+    const id = `${root}/src/./app//page.tsx`;
+    const ask = (importer: string) => ({
+      boundary: isFarmPackageClientBoundary(importer, "toggle-kit", root),
+      client: isFarmPackageClientExport(importer, "toggle-kit", "Toggle"),
+    });
+    const store = new FarmSourceSnapshotStore(false);
+    const planned = withFarmSourceSnapshot(() => ask(page), store);
+    expect(planned).toEqual({ boundary: true, client: true });
+
+    const manifest = path.join(root, "node_modules/toggle-kit/package.json");
+    const reads: string[] = [];
+    const readFileSync = fs.readFileSync;
+    vi.spyOn(fs, "readFileSync").mockImplementation(((
+      file: fs.PathOrFileDescriptor,
+      ...rest: []
+    ) => {
+      if (typeof file === "string") reads.push(file);
+      return readFileSync.call(fs, file, ...rest);
+    }) as typeof fs.readFileSync);
+    expect(withFarmSourceSnapshotOf(store, () => ask(id))).toEqual(planned);
+    // Both answers come from the plan's entries: the manifest is not read again.
+    expect(reads.filter((file) => file === manifest)).toEqual([]);
   });
 });
