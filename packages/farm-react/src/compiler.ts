@@ -804,7 +804,9 @@ function isUseStateCall(
 
 type MemoHook = "useMemo" | "useCallback";
 type EffectHook = "useEffect" | "useLayoutEffect";
-type ReactHook = MemoHook | "useRef" | EffectHook | "useContext";
+/** Hooks that read a context, or with `use` a promise; the compiled wrapper calls them as written. */
+type ContextHook = "useContext" | "use";
+type ReactHook = MemoHook | "useRef" | EffectHook | ContextHook;
 
 /** The local hook name a call uses, whether imported from react or called on React. */
 function reactHookCall(
@@ -825,7 +827,8 @@ function reactHookCall(
       callee.property.name === "useRef" ||
       callee.property.name === "useEffect" ||
       callee.property.name === "useLayoutEffect" ||
-      callee.property.name === "useContext")
+      callee.property.name === "useContext" ||
+      callee.property.name === "use")
     ? (callee.property.name as ReactHook)
     : undefined;
 }
@@ -853,19 +856,20 @@ function isLiteralDefault(expression: t.Expression): boolean {
 }
 
 /**
- * The names a `const pattern = useContext(Context)` declaration binds, or why it cannot compile.
- * The compiled wrapper, which is the component's own function, runs the declaration as written,
- * so React reads the context and the names reach the compiled component as props. It can read
- * module bindings but no local of the component body, so the context must be module-level and
- * destructuring defaults literals.
+ * The names a `const pattern = useContext(Context)` or `use(Context)` declaration binds, or why it
+ * cannot compile. The compiled wrapper, which is the component's own function, runs the declaration
+ * as written, so React reads the context (or, for `use`, a promise, suspending the same component)
+ * and the names reach the compiled component as props. It can read module bindings but no local of
+ * the component body, so the argument must be module-level and destructuring defaults literals.
  */
 function contextDeclarationNames(
   declaration: t.VariableDeclarator,
+  hook: ContextHook,
   path: NodePath<t.FunctionDeclaration | t.FunctionExpression | t.ArrowFunctionExpression>,
 ): string[] | string {
   const [context, ...rest] = (declaration.init as t.CallExpression).arguments;
   if (!context || rest.length > 0 || !isModuleReference(context, path)) {
-    return "useContext needs one context defined or imported at module level";
+    return `${hook} needs one context defined or imported at module level`;
   }
   const names: string[] = [];
   const collect = (pattern: t.LVal | t.PatternLike): string | undefined => {
@@ -875,7 +879,7 @@ function contextDeclarationNames(
     }
     if (t.isAssignmentPattern(pattern)) {
       if (!isLiteralDefault(pattern.right)) {
-        return "useContext destructuring defaults must be literals";
+        return `${hook} destructuring defaults must be literals`;
       }
       return collect(pattern.left);
     }
@@ -890,7 +894,7 @@ function contextDeclarationNames(
     if (t.isObjectPattern(pattern)) {
       for (const property of pattern.properties) {
         if (t.isObjectProperty(property) && property.computed) {
-          return "computed useContext destructuring is not supported yet";
+          return `computed ${hook} destructuring is not supported yet`;
         }
         const reason = collect(
           t.isRestElement(property) ? property : (property.value as t.PatternLike),
@@ -899,7 +903,7 @@ function contextDeclarationNames(
       }
       return undefined;
     }
-    return "useContext values must be bound to names";
+    return `${hook} values must be bound to names`;
   };
   return collect(declaration.id) ?? names;
 }
@@ -10191,7 +10195,7 @@ function compileCandidate(
     value: t.Expression;
     dependencies?: string[];
   }> = [];
-  // useContext declarations move to the wrapper, which passes the names they bind as props.
+  // useContext and use declarations move to the wrapper, which passes the names they bind as props.
   const contextDeclarations: t.VariableDeclaration[] = [];
   const contextNames: string[] = [];
   let returned: t.ReturnStatement | undefined;
@@ -10252,8 +10256,9 @@ function compileCandidate(
       return "only top-level useState declarations, pure derived const values, named synchronous handlers, and one return are supported by the current compiler";
     }
     const declaration = statement.declarations[0];
-    if (reactHookCall(declaration.init, hookNames, reactNames) === "useContext") {
-      const names = contextDeclarationNames(declaration, path);
+    const contextHook = reactHookCall(declaration.init, hookNames, reactNames);
+    if (contextHook === "useContext" || contextHook === "use") {
+      const names = contextDeclarationNames(declaration, contextHook, path);
       if (typeof names === "string") return names;
       contextDeclarations.push(statement);
       contextNames.push(...names);
@@ -10337,7 +10342,7 @@ function compileCandidate(
     // A props identifier is the component's own object, which must not gain a key.
     const { wrapperProps } = propsPlan;
     if (wrapperProps && !t.isObjectExpression(wrapperProps)) {
-      return "useContext needs destructured props or no props parameter";
+      return "context reads need destructured props or no props parameter";
     }
     propsPlan = {
       definitionParameter: propsPlan.definitionParameter,
@@ -11753,7 +11758,8 @@ export async function compileReactModule(
                 specifier.imported.name === "useRef" ||
                 specifier.imported.name === "useEffect" ||
                 specifier.imported.name === "useLayoutEffect" ||
-                specifier.imported.name === "useContext")
+                specifier.imported.name === "useContext" ||
+                specifier.imported.name === "use")
             ) {
               hookNames.set(specifier.local.name, specifier.imported.name);
             }
