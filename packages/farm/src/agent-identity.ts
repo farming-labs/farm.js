@@ -118,6 +118,62 @@ const CLIENT_TOKENS: [string, string, Family, Category][] = [
   ["got", "got", "unknown", "script"],
 ];
 
+// MCP clients by the name each gives in `initialize` (`clientInfo.name`):
+// [names, slug, name, family]. Names from the clients' own handshakes (Claude Code 2.1.319 sends
+// `claude-code`) and the mcp-client-capabilities index (0.0.14). See rfcs/0009.
+const MCP_CLIENTS: [readonly string[], string, string, Family][] = [
+  [["claude-ai"], "claude", "Claude", "anthropic"],
+  [["claude-code"], "claude-code", "Claude Code", "anthropic"],
+  [["cursor-vscode"], "cursor", "Cursor", "other"],
+  [["Visual Studio Code", "Visual-Studio-Code"], "vscode", "VS Code", "microsoft"],
+  [["Windsurf", "windsurf-client"], "windsurf", "Windsurf", "other"],
+  [["Zed"], "zed", "Zed", "other"],
+  [["ChatGPT"], "chatgpt", "ChatGPT", "openai"],
+  [["Codex", "codex-mcp-client"], "codex", "Codex", "openai"],
+  [["gemini-cli-mcp-client"], "gemini-cli", "Gemini CLI", "google"],
+  [["antigravity-client"], "antigravity", "Antigravity", "google"],
+  [["github-copilot-developer"], "copilot-cli", "GitHub Copilot CLI", "microsoft"],
+  [["Xcode-copilot-xcode"], "copilot-xcode", "GitHub Copilot for Xcode", "microsoft"],
+  [
+    ["JetBrains-IU-copilot-intellij", "JetBrains-JBC-copilot-intellij"],
+    "jetbrains",
+    "JetBrains AI Assistant",
+    "other",
+  ],
+  [["Q-DEV-CLI"], "amazon-q", "Amazon Q Developer CLI", "other"],
+  [["Mistral"], "le-chat", "Le Chat", "other"],
+  [["Cline"], "cline", "Cline", "other"],
+  [["Roo-Code"], "roo-code", "Roo Code", "other"],
+  [["Kilo-Code"], "kilo-code", "Kilo Code", "other"],
+  [["goose"], "goose", "Goose", "other"],
+  [["opencode"], "opencode", "opencode", "other"],
+  [["amp-mcp-client"], "amp", "Amp", "other"],
+  [["crush"], "crush", "Crush", "other"],
+  [["factory-cli"], "factory", "Factory", "other"],
+  [["continue-cli-client"], "continue", "Continue", "other"],
+  [["com.raycast.macos"], "raycast", "Raycast", "other"],
+  [["Cherry Studio"], "cherry-studio", "Cherry Studio", "other"],
+  [["Jan-Streamable-Client"], "jan", "Jan", "other"],
+  [["@librechat/api-client"], "librechat", "LibreChat", "other"],
+  [["lobehub-mcp-client"], "lobehub", "LobeHub", "other"],
+  [["dust-mcp-client"], "dust", "Dust", "other"],
+  [["Glama"], "glama", "Glama", "other"],
+  [["@n8n/n8n-nodes-langchain.mcpClientTool"], "n8n", "n8n", "other"],
+  [["make-app-mcp-client"], "make", "Make", "other"],
+  [["apify-mcp-client"], "apify", "Apify", "other"],
+  [["arcade"], "arcade", "Arcade", "other"],
+  [["Alpic"], "alpic", "Alpic", "other"],
+  [["Postman-Client"], "postman", "Postman", "other"],
+  [["gitguardian"], "gitguardian", "GitGuardian", "other"],
+];
+const MCP_CLIENT_BY_NAME = new Map(
+  MCP_CLIENTS.flatMap(([names, slug]) => names.map((name) => [name.toLowerCase(), slug])),
+);
+const MCP_CLIENT_BY_SLUG = new Map<string, TokenMatch>(
+  MCP_CLIENTS.map(([, slug, name, family]) => [slug, { name, family, category: "harness" }]),
+);
+const MCP_SESSION = /^farm\.([a-z0-9-]{1,32})\.[0-9a-f]{32}$/;
+
 // One pass over the header: group i + 1 is CLIENT_TOKENS[i].
 const CLIENT_PATTERN = new RegExp(
   `(?:^|[\\s;(])(?:${CLIENT_TOKENS.map(([token]) => `(${token})`).join("|")})(?=[/\\s;)]|$)`,
@@ -191,6 +247,8 @@ export function classifyFarmAgent(userAgent: string | null | undefined): FarmAge
  */
 export function classifyFarmClient(request: Request): FarmClientIdentity {
   const { headers } = request;
+  const client = _classifyFarmMCPSession(headers.get("mcp-session-id"));
+  if (client) return client;
   const userAgent = (headers.get("user-agent") ?? "").slice(0, 2048);
   const match = matchToken(userAgent);
   if (match === false) return { ...UNKNOWN };
@@ -213,6 +271,37 @@ export function classifyFarmClient(request: Request): FarmClientIdentity {
 
 function declared({ name, family, category }: TokenMatch): FarmClientIdentity {
   return { family, category, identity: "self-reported", ...(name ? { name } : {}) };
+}
+
+/**
+ * @internal A session ID naming the MCP client whose `initialize` gave `clientInfoName`, for a
+ * stateless server to send back, or `undefined` for a client Farm doesn't list. The client
+ * sends it with every later request, so {@link classifyFarmClient} can name it. It carries
+ * Farm's own slug, never the client's string, and grants nothing. See rfcs/0009.
+ */
+export function _farmMCPClientSession(clientInfoName: unknown): string | undefined {
+  if (typeof clientInfoName !== "string") return undefined;
+  const slug = MCP_CLIENT_BY_NAME.get(clientInfoName.toLowerCase());
+  if (!slug) return undefined;
+  const random = crypto.getRandomValues(new Uint8Array(16));
+  return `farm.${slug}.${Array.from(random, (byte) => byte.toString(16).padStart(2, "0")).join("")}`;
+}
+
+/**
+ * @internal The MCP client a session ID from {@link _farmMCPClientSession} names, or
+ * `undefined` for any other session ID.
+ */
+export function _classifyFarmMCPSession(
+  sessionId: string | null | undefined,
+): FarmClientIdentity | undefined {
+  const slug = MCP_SESSION.exec(sessionId ?? "")?.[1];
+  const client = slug === undefined ? undefined : MCP_CLIENT_BY_SLUG.get(slug);
+  return client && declared(client);
+}
+
+/** @internal Whether a request is MCP's Streamable HTTP transport. See {@link isMcpRequest}. */
+export function _isFarmMCPRequest(request: Request): boolean {
+  return isMcpRequest(request);
 }
 
 /**

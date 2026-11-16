@@ -167,6 +167,31 @@ describe("apiMcp", () => {
     ).toThrow("needs a valid MCP name");
   });
 
+  it("answers a client that sends the session ID Farm Infra analytics gave its initialize", async () => {
+    // The server is stateless: it must accept a session ID it never issued (rfcs/0009).
+    const { endpoint } = createFixture();
+    const session = { "mcp-session-id": `farm.cursor.${"0a".repeat(16)}` };
+    const listed = await readMCP(
+      await sendMCP(endpoint, { jsonrpc: "2.0", id: 1, method: "tools/list" }, undefined, session),
+    );
+    expect(listed.result.tools.map(({ name }: { name: string }) => name)).toContain(
+      "create_project",
+    );
+    const response = await sendMCP(
+      endpoint,
+      {
+        jsonrpc: "2.0",
+        id: 2,
+        method: "tools/call",
+        params: { name: "create_project", arguments: { body: { name: "Docs" } } },
+      },
+      "Bearer token",
+      session,
+    );
+    expect(response.status).toBe(200);
+    expect(JSON.stringify(await readMCP(response))).toContain("p1");
+  });
+
   it("rejects unauthorized requests before MCP protocol handling", async () => {
     const { endpoint } = createFixture({ authorize: true });
     const response = await sendMCP(endpoint, {
