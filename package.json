@@ -50,6 +50,7 @@
     "benchmark:frameworks": "node benchmarks/frameworks/run.mjs",
     "benchmark:client-chunking": "node benchmarks/client-chunking/run.mjs",
     "benchmark:client-route-table": "node benchmarks/client-route-table/run.mjs",
+    "benchmark:client-route-matcher": "node benchmarks/client-route-matcher/run.mjs",
     "benchmark:app-scale": "NODE_OPTIONS=--max-old-space-size=12288 pnpm --filter @farm.js/core build:runtime && pnpm --filter @farm.js/cli build && node benchmarks/app-scale/run.mjs",
     "benchmark:dev-scale": "NODE_OPTIONS=--max-old-space-size=12288 pnpm --filter @farm.js/core build:runtime && pnpm --filter @farm.js/cli build && node benchmarks/dev-scale/run.mjs",
     "benchmark:build-scale": "NODE_OPTIONS=--max-old-space-size=12288 pnpm --filter @farm.js/core build:runtime && pnpm --filter @farm.js/cli build && node benchmarks/build-scale/run.mjs",
