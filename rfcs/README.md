@@ -12,3 +12,4 @@ implementation changes default behavior.
 | [0005: Explicit cron infrastructure and deployment synchronization](./0005-cron-infrastructure.md)    | Implementation in progress                 |                                                            |
 | [0006: Client components where `<f-island>` cannot go](./0006-islands-element-positions.md)           | Implemented (experimental, islands mode)   |                                                            |
 | [0007: Kept layouts that cannot decide a request](./0007-kept-layout-guards.md)                       | Draft                                      |                                                            |
+| [0008: Platform screens (`page.kt`, `page.swift`)](./0008-platform-screens.md)                        | Draft, open for discussion                 |                                                            |

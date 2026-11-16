@@ -70,6 +70,7 @@ function setup() {
       const isFarmBlockedNavigationURL = () => false;
       const isFarmDocsPath = () => false;
       const matchRoute = () => null;
+      const loadFarmClientRouteTable = () => null;
       const cancelPendingPageHydration = () => {};
       const activeRouteInterception = null;
       const matchInterceptedRouteSlot = () => null;

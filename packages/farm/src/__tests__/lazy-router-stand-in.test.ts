@@ -41,13 +41,16 @@ function createStandIn() {
   const code = entry
     .replace('import("./farm-client-router")', "__load()")
     .replace(/\nexport \{[^}]*\};\n$/, "\n");
+  // The entry's route table loader (generateFarmClientRouteTableRuntime).
+  const prefetchRouteTable = vi.fn();
   const standIn = new Function(
     "__load",
     "IDLE_NAVIGATION_STATE",
     "hasAbsoluteNavigationHref",
+    "prefetchFarmClientRouteTable",
     `${code}\nreturn spaRouter;`,
-  )(load, {}, () => false);
-  return { standIn, realRouter, load, observers };
+  )(load, {}, () => false, prefetchRouteTable);
+  return { standIn, realRouter, load, observers, prefetchRouteTable };
 }
 
 afterEach(() => {
@@ -56,6 +59,14 @@ afterEach(() => {
 });
 
 describe("the lazy router stand-in", () => {
+  it("fetches the client route table with the router, once", async () => {
+    const { standIn, load, prefetchRouteTable } = createStandIn();
+    expect(prefetchRouteTable).not.toHaveBeenCalled();
+    await Promise.all([standIn.prefetch("/a"), standIn.prefetch("/b")]);
+    expect(load).toHaveBeenCalledTimes(1);
+    expect(prefetchRouteTable).toHaveBeenCalledTimes(1);
+  });
+
   it("stays the global router after the router loads, keeping wrapped methods", async () => {
     const { standIn, realRouter } = createStandIn();
     expect((window as any).__FARM_SPA_ROUTER__).toBe(standIn);

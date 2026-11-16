@@ -116,19 +116,50 @@ export function createMarkdownMetadata(
   };
 }
 
-async function evaluateMdxSource(source: string, filePath: string) {
-  const [{ evaluate }, runtime, remarkGfmModule] = await Promise.all([
+/**
+ * Internal: compiles a Markdown page's body (without its frontmatter) to the code a render runs.
+ * The code does not depend on the page's path, which is given when it runs. The build compiles
+ * the pages it prerenders with it, so the prerender pass runs what a render would compile.
+ */
+export async function compileFarmMarkdownPage(body: string): Promise<string> {
+  const [{ compile }, remarkGfmModule] = await Promise.all([
     import("@mdx-js/mdx"),
-    import("react/jsx-runtime"),
     import("remark-gfm"),
   ]);
-  const remarkGfm = remarkGfmModule.default;
-
-  return evaluate(source, {
-    ...runtime,
-    baseUrl: pathToFileURL(filePath),
-    remarkPlugins: [remarkGfm],
+  // What `evaluate` from @mdx-js/mdx compiles with.
+  const compiled = await compile(body, {
+    outputFormat: "function-body",
+    remarkPlugins: [remarkGfmModule.default],
   });
+  return String(compiled);
+}
+
+const AsyncFunction = Object.getPrototypeOf(async () => {}).constructor as new (
+  code: string,
+) => (options: Record<string, unknown>) => Promise<{ default: ComponentType<any> }>;
+
+/** Runs compiled page code as `run` from @mdx-js/mdx does, without loading the compiler. */
+async function runFarmMarkdownPage(code: string, filePath: string) {
+  const { Fragment, jsx, jsxs } = await import("react/jsx-runtime");
+  return new AsyncFunction(code)({ Fragment, jsx, jsxs, baseUrl: pathToFileURL(filePath) });
+}
+
+/**
+ * Internal: where the build's prerender server puts the code of the pages it prerenders, keyed by
+ * page body. Only that temporary server sets it; a deployed server compiles on first render.
+ */
+export const FARM_MARKDOWN_PRECOMPILED_PAGES = Symbol.for("farm.markdown.precompiledPages");
+
+function precompiledFarmMarkdownPage(body: string): string | undefined {
+  const pages = (globalThis as { [FARM_MARKDOWN_PRECOMPILED_PAGES]?: Map<string, string> })[
+    FARM_MARKDOWN_PRECOMPILED_PAGES
+  ];
+  return pages?.get(body);
+}
+
+async function evaluateMdxSource(body: string, filePath: string) {
+  const code = precompiledFarmMarkdownPage(body) ?? (await compileFarmMarkdownPage(body));
+  return runFarmMarkdownPage(code, filePath);
 }
 
 type FarmMarkdownRouteConfig = Pick<RouteModule, "dynamic" | "revalidate" | "ssg">;

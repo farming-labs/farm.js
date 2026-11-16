@@ -163,6 +163,7 @@ import {
   resolveFarmIsolatedClientHydrationMode,
   stripUseClientDirective,
 } from "./utils/client-component";
+import { type FarmSourceSnapshotStore, withFarmSourceSnapshotOf } from "./utils/source-snapshot";
 import {
   dropLatestPackageClientBoundaryCache,
   resolvePackageClientBoundaryCacheFile,
@@ -373,6 +374,11 @@ interface FarmVitePluginOptions extends FarmConfig {
   isolatedClientBoundaryModules?: ReadonlySet<string>;
   /** @internal Component modules of programmatic routes, read from the evaluated routes files. */
   programmaticClientRoutes?: ProgrammaticClientRoutes;
+  /**
+   * @internal A production build: what the route manager's plan read, parsed and resolved
+   * (RouteManager.keepBuildSourceSnapshot), which the package import rewrites start from.
+   */
+  sourceSnapshot?: FarmSourceSnapshotStore;
 }
 
 type TypeArtifactSelection = Pick<
@@ -5489,78 +5495,85 @@ export { manifest };
       ) {
         const file = id.split("?", 1)[0]!;
         const projectRoot = actionConfig.root || server?.config.root || process.cwd();
-        // Server code only: a package's `react-server` build, as React Server Components resolve
-        // it, and the files that build reaches.
-        if (transformOptions?.ssr === true) {
-          if (farmReactServerFiles.has(file)) {
-            for (const child of farmRelativeImportFiles(code, file))
-              farmReactServerFiles.add(child);
+        // A build's plan already read, parsed and resolved most of what these analyses ask, and
+        // in its snapshot they parse this module once between them.
+        const buildSnapshot = isBuild ? options.sourceSnapshot : undefined;
+        const rewrite = () => {
+          // Server code only: a package's `react-server` build, as React Server Components resolve
+          // it, and the files that build reaches.
+          if (transformOptions?.ssr === true) {
+            if (farmReactServerFiles.has(file)) {
+              for (const child of farmRelativeImportFiles(code, file))
+                farmReactServerFiles.add(child);
+            }
+            // A module client code also reaches stays client code, as it is in React Server
+            // Components' client graph: its packages keep their default build.
+            const serverModule =
+              farmReactServerFiles.has(file) ||
+              !getFarmClientReachableModules(
+                path.resolve(projectRoot, actionConfig.srcDir || "src"),
+                projectRoot,
+              ).has(path.resolve(file));
+            const reactServer = !serverModule
+              ? null
+              : rewriteFarmReactServerImports({
+                  code,
+                  file,
+                  reference: (specifier, exportName) =>
+                    ensureFarmPackageClientReference(projectRoot, specifier, exportName, file),
+                  onServerFile: (serverFile) => farmReactServerFiles.add(serverFile),
+                });
+            if (reactServer !== null) {
+              code = reactServer;
+              rewrotePackageImports = true;
+            }
+            // The package's own `"use client"` modules render through their client references.
+            const internal = farmReactServerFiles.has(file)
+              ? rewriteFarmReactServerClientModuleImports({
+                  code,
+                  file,
+                  reference: (clientFile) =>
+                    ensureFarmInternalClientReference(projectRoot, clientFile),
+                })
+              : null;
+            if (internal !== null) {
+              code = internal;
+              rewrotePackageImports = true;
+            }
           }
-          // A module client code also reaches stays client code, as it is in React Server
-          // Components' client graph: its packages keep their default build.
-          const serverModule =
-            farmReactServerFiles.has(file) ||
-            !getFarmClientReachableModules(
-              path.resolve(projectRoot, actionConfig.srcDir || "src"),
-              projectRoot,
-            ).has(path.resolve(file));
-          const reactServer = !serverModule
-            ? null
-            : rewriteFarmReactServerImports({
-                code,
-                file,
-                reference: (specifier, exportName) =>
-                  ensureFarmPackageClientReference(projectRoot, specifier, exportName, file),
-                onServerFile: (serverFile) => farmReactServerFiles.add(serverFile),
-              });
-          if (reactServer !== null) {
-            code = reactServer;
+          const rewritePackageImports = (source: string) =>
+            rewriteFarmPackageClientImports({
+              code: source,
+              file,
+              root: projectRoot,
+              isClientPackage: (specifier) =>
+                isFarmPackageClientBoundary(file, specifier, projectRoot),
+            });
+          // Each module that imports a package would otherwise read the package's whole entry graph.
+          const routeManager = farmApp?.getRouteManager();
+          const source = code;
+          const referenced = routeManager
+            ? routeManager.inspectPackages(() => rewritePackageImports(source))
+            : rewritePackageImports(source);
+          if (referenced !== null) {
+            code = referenced;
             rewrotePackageImports = true;
           }
-          // The package's own `"use client"` modules render through their client references.
-          const internal = farmReactServerFiles.has(file)
-            ? rewriteFarmReactServerClientModuleImports({
-                code,
-                file,
-                reference: (clientFile) =>
-                  ensureFarmInternalClientReference(projectRoot, clientFile),
-              })
-            : null;
-          if (internal !== null) {
-            code = internal;
-            rewrotePackageImports = true;
+          // Server code only: in the browser React's own cache is the one RSC has there too.
+          if (transformOptions?.ssr === true) {
+            const cached = rewriteFarmReactCacheImport(
+              code,
+              file,
+              runtimeModule?.(FARM_REACT_CACHE_MODULE),
+            );
+            if (cached !== null) {
+              code = cached;
+              rewrotePackageImports = true;
+            }
           }
-        }
-        const rewritePackageImports = (source: string) =>
-          rewriteFarmPackageClientImports({
-            code: source,
-            file,
-            root: projectRoot,
-            isClientPackage: (specifier) =>
-              isFarmPackageClientBoundary(file, specifier, projectRoot),
-          });
-        // Each module that imports a package would otherwise read the package's whole entry graph.
-        const routeManager = farmApp?.getRouteManager();
-        const source = code;
-        const referenced = routeManager
-          ? routeManager.inspectPackages(() => rewritePackageImports(source))
-          : rewritePackageImports(source);
-        if (referenced !== null) {
-          code = referenced;
-          rewrotePackageImports = true;
-        }
-        // Server code only: in the browser React's own cache is the one RSC has there too.
-        if (transformOptions?.ssr === true) {
-          const cached = rewriteFarmReactCacheImport(
-            code,
-            file,
-            runtimeModule?.(FARM_REACT_CACHE_MODULE),
-          );
-          if (cached !== null) {
-            code = cached;
-            rewrotePackageImports = true;
-          }
-        }
+        };
+        if (buildSnapshot) withFarmSourceSnapshotOf(buildSnapshot, rewrite);
+        else rewrite();
       }
       if (
         islandsServerFns() &&

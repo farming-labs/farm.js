@@ -2158,7 +2158,8 @@ export function Chart() {}
     expect(source).toContain("Navigation itself signals intent");
     expect(source).toContain("pageShouldHydrate:");
     expect(source).toContain("page.pageShouldHydrate");
-    expect(source).toContain("load: ${load}");
+    // Each hydrating page loads with a dynamic import, attached to its table entry.
+    expect(source).toContain("load: load || null");
     expect(source).not.toContain("imports.push(`import Page${index}");
   });
 

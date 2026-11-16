@@ -25,6 +25,8 @@ async function createTemporaryDirectory(): Promise<string> {
 export async function loadCompiledAndOriginal(
   source: string,
   reactivity: ReactCompilerReactivity = "hybrid",
+  /** Rewrites the compiled code before it loads, for example to count render-plan runs. */
+  instrument: (code: string) => string = (code) => code,
 ): Promise<{
   compiled: Record<string, React.ComponentType<Record<string, unknown>>>;
   original: Record<string, React.ComponentType<Record<string, unknown>>>;
@@ -48,7 +50,7 @@ export async function loadCompiledAndOriginal(
     return import(/* @vite-ignore */ file);
   };
   return {
-    compiled: await load(result.code),
+    compiled: await load(instrument(result.code)),
     original: await load(source),
     names: result.compiled,
     reasons: result.diagnostics.map((diagnostic) => diagnostic.reason),

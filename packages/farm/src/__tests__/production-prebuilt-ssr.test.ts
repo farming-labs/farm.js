@@ -231,6 +231,16 @@ async function readClientBundle(root: string): Promise<string> {
   return fs.readFile(path.join(clientDir, fingerprinted ?? "farm-client.js"), "utf8");
 }
 
+/** The client route table chunk, which the entry imports on the first navigation. */
+async function readClientRouteTableChunk(root: string): Promise<string> {
+  const chunksDir = path.join(root, ".farm", "client", "chunks");
+  const table = (await fs.readdir(chunksDir)).find((name) =>
+    /^farm-client-routes-h[0-9a-f]+\.js$/.test(name),
+  );
+  if (!table) throw new Error("the client build wrote no route table chunk");
+  return fs.readFile(path.join(chunksDir, table), "utf8");
+}
+
 async function readAllClientJavaScript(root: string): Promise<string> {
   const readDirectory = async (clientDir: string): Promise<string> => {
     const entries = await fs.readdir(clientDir, { withFileTypes: true });
@@ -5018,7 +5028,9 @@ export default function RootLayout({ children }) {
 
       const clientBundle = await readClientBundle(root);
       expect(clientBundle).toContain("layout-effect-fired");
-      expect(clientBundle).toContain("/docs/[...slug]");
+      // The docs routes are in the route table, which the entry leaves to its own chunk.
+      expect(await readClientRouteTableChunk(root)).toContain("/docs/[...slug]");
+      expect(clientBundle).not.toContain("/docs/[...slug]");
 
       await runProductionRequest(
         path.join(root, ".farm", ".output", "server"),
