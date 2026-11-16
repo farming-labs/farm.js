@@ -5,6 +5,7 @@ import {
   createFarmClientRouteTable,
   FARM_CLIENT_ROUTE_TABLE_MODULE,
   generateFarmClientRouteTableModule,
+  resolveFarmDocsClientRoutes,
   type FarmClientRouteTableEntry,
 } from "../nitro/client-route-table";
 import {
@@ -13,6 +14,7 @@ import {
   generateFarmClientRouteTableRuntime,
 } from "../nitro/universal-build";
 import { createFarmRouter } from "../router";
+import { AmbiguousRouteError } from "../routing/specificity";
 
 const page = (
   pattern: string,
@@ -307,6 +309,137 @@ describe("the client route table", () => {
         expect(order.filter((step) => !step.startsWith("prefetch"))).toEqual([]);
       },
     );
+  });
+
+  describe("docs routes and app pages at the same paths", () => {
+    const docsRoutes = [page("/docs", { docs: true }), page("/docs/[...slug]", { docs: true })];
+    const patterns = (pages: readonly { pattern: string }[]) => pages.map((entry) => entry.pattern);
+
+    /** The resolved table, checked as the client and the server read it. */
+    function resolve(pages: ReturnType<typeof page>[], docsPagePaths: string[]) {
+      const resolved = resolveFarmDocsClientRoutes(pages, new Set(docsPagePaths));
+      const resolvedTable = createFarmClientRouteTable(resolved.pages);
+      const getBootRoutes = createServer(resolvedTable);
+      return { ...resolved, table: resolvedTable, getBootRoutes };
+    }
+
+    it("leaves the docs content's own pages to the docs routes, which the server renders", async () => {
+      // The documented layout: src/app/docs/page.md and src/app/docs/guide/page.md are the
+      // docs content, which the docs runtime answers before any page route.
+      const pages = [
+        ...docsRoutes,
+        page("/docs/guide"),
+        page("/about", { pageShouldHydrate: true }),
+        page("/docs"),
+        page("/"),
+      ];
+      // Both the client and the server matched with this table, and refused it.
+      expect(() =>
+        createFarmRouter(pages.map((entry) => ({ path: entry.pattern, meta: entry }))),
+      ).toThrow(AmbiguousRouteError);
+      expect(createServer(createFarmClientRouteTable(pages))("/docs")).toBeUndefined();
+
+      const {
+        table: resolvedTable,
+        getBootRoutes,
+        shadowed,
+      } = resolve(pages, ["/docs", "/docs/guide"]);
+      expect(patterns(resolvedTable)).toEqual(["/docs", "/docs/[...slug]", "/about", "/"]);
+      expect(resolvedTable[2]).toMatchObject({ pattern: "/about", loader: 0 });
+      expect(shadowed).toEqual([]);
+      expect(getBootRoutes("/docs")!.routes).toEqual([resolvedTable[0]]);
+      expect(getBootRoutes("/docs/guide")!.routes).toEqual([resolvedTable[1]]);
+
+      const { client } = createClient({
+        pathname: "/elsewhere",
+        importTable: async () => ({ default: resolvedTable }),
+      });
+      await client.boot;
+      expect(client.match("/docs")!.route).toMatchObject({ pattern: "/docs", docs: true });
+      expect(client.match("/docs/guide")!.route).toMatchObject({ docs: true });
+      expect(client.directory("/docs/guide")).toBeNull();
+    });
+
+    it("keeps a route group's directory for the docs route that took its page's place", async () => {
+      const pages = [
+        ...docsRoutes,
+        page("/docs", { directory: "/(site)/docs" }),
+        page("/docs/guide", { directory: "/(site)/docs/guide" }),
+        page("/docs/[...slug]", { directory: "/(site)/docs/[...slug]" }),
+      ];
+      const {
+        table: resolvedTable,
+        getBootRoutes,
+        shadowed,
+      } = resolve(pages, ["/docs", "/docs/guide"]);
+      expect(resolvedTable).toEqual([
+        expect.objectContaining({ pattern: "/docs", docs: true, directory: "/(site)/docs" }),
+        expect.objectContaining({
+          pattern: "/docs/[...slug]",
+          docs: true,
+          directory: "/(site)/docs/[...slug]",
+        }),
+        expect.objectContaining({
+          pattern: "/docs/guide",
+          docs: true,
+          directory: "/(site)/docs/guide",
+        }),
+      ]);
+      expect(patterns(shadowed)).toEqual(["/docs/[...slug]"]);
+
+      // The server's layouts read the app page's directory at these paths; so does the client,
+      // from the entries a document names and from the whole table.
+      const full = createClient({
+        pathname: "/elsewhere",
+        importTable: async () => ({ default: resolvedTable }),
+      }).client;
+      await full.boot;
+      for (const [pathname, directory] of [
+        ["/docs", "/(site)/docs"],
+        ["/docs/guide", "/(site)/docs/guide"],
+        ["/docs/other", "/(site)/docs/[...slug]"],
+      ]) {
+        const booted = createClient({
+          pathname,
+          boot: JSON.parse(JSON.stringify(getBootRoutes(pathname))),
+          importTable: () => {
+            throw new Error("the document named this page's entries");
+          },
+        }).client;
+        expect(booted.directory(pathname), pathname).toBe(directory);
+        expect(full.directory(pathname), pathname).toBe(directory);
+      }
+    });
+
+    it("leaves a static path the docs runtime has no page for to the app page", () => {
+      const { table: resolvedTable, shadowed } = resolve(
+        [...docsRoutes, page("/docs", { pageShouldHydrate: true }), page("/docs/[...rest]")],
+        ["/docs/guide"],
+      );
+      expect(resolvedTable).toEqual([
+        expect.objectContaining({ pattern: "/docs/[...slug]", docs: true }),
+        expect.objectContaining({ pattern: "/docs", loader: 0 }),
+      ]);
+      expect(resolvedTable[1].docs).toBeUndefined();
+      expect(patterns(shadowed)).toEqual(["/docs/[...rest]"]);
+    });
+
+    it("resolves a docs runtime at the root", () => {
+      const { table: resolvedTable } = resolve(
+        [page("/", { docs: true }), page("/[...slug]", { docs: true }), page("/"), page("/intro")],
+        ["/", "/intro"],
+      );
+      expect(patterns(resolvedTable)).toEqual(["/", "/[...slug]"]);
+      expect(resolvedTable.every((entry) => entry.docs)).toBe(true);
+    });
+
+    it("drops the docs content's pages when no layout hydrates, so there are no docs routes", () => {
+      const { table: resolvedTable } = resolve(
+        [page("/docs", { pageShouldHydrate: true }), page("/about", { pageShouldHydrate: true })],
+        ["/docs"],
+      );
+      expect(resolvedTable).toEqual([expect.objectContaining({ pattern: "/about", loader: 0 })]);
+    });
   });
 
   it("never loads a table for an app without client routes", () => {
