@@ -569,7 +569,7 @@ satisfy all of these rules:
 | Memoization         | `useMemo(() => value, deps)` and `useCallback(handler, deps)` whose dependency array names every state, prop, and local they read; read as the value or handler itself.          |
 | Refs                | `const ref = useRef(initial)`, read and written in handlers, and attached with `ref={ref}` to a static element below the root (not inside a list or conditional).                |
 | Effects             | `useEffect` and `useLayoutEffect` with a synchronous callback and an array of names; they close over the render and run after the DOM update.                                    |
-| Context             | `const value = useContext(Context)` or a destructuring with literal defaults, for a module-level context, in a component with destructured props or none.                        |
+| Context             | `const value = useContext(Context)` or React 19 `use(Context)`, or a destructuring with literal defaults, for a module-level context, with destructured props or none.           |
 | Root                | Exactly one lowercase host JSX element such as `button`, `section`, `input`, or `div`.                                                                                           |
 | Tree                | A statically known host tree around eligible conditional, keyed-list, compiled keyed-row, and component-island boundaries.                                                       |
 | Text bindings       | State-driven text in a leaf host element.                                                                                                                                        |
@@ -581,13 +581,13 @@ satisfy all of these rules:
 | Component islands   | Stable imported or module-level component identifiers with explicit compiler-safe props and no JSX children, spread, `ref`, or `key`.                                            |
 
 A compiled component reads context through React. The component's own function runs each
-`useContext` declaration as written, so the nearest provider applies, and passes the names it binds
-to the compiled component as props. When the provider changes, a string, number, boolean, bigint,
-`null`, or `undefined` value patches the bindings that read it without rendering the component
-again; an object or function value renders it through React, as a changed object prop does.
-Destructure the fields you read, as in `const { tone } = useContext(Theme)`, to keep them on the
-patch path. A root without React DOM cannot run hooks, so a root whose tree reads context renders
-with React DOM.
+`useContext` or `use` declaration as written, so the nearest provider applies, and passes the names
+it binds to the compiled component as props. When the provider changes, a string, number, boolean,
+bigint, `null`, or `undefined` value patches the bindings that read it without rendering the
+component again; an object or function value renders it through React, as a changed object prop
+does. Destructure the fields you read, as in `const { tone } = useContext(Theme)`, to keep them on
+the patch path. A root without React DOM cannot run hooks, so a root whose tree reads context
+renders with React DOM.
 
 This component is eligible:
 

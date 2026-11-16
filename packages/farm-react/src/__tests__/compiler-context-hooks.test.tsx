@@ -253,3 +253,67 @@ describe("useContext in compiled components", () => {
     expect(result.compiled).toEqual([]);
   });
 });
+
+// React 19 reads context with use(Context) too. React 18 has no use, so these run on React 19 only.
+const useSource = source.replaceAll("useContext", "use");
+
+describe.skipIf(typeof (React as { use?: unknown }).use !== "function")(
+  "use(Context) in compiled components",
+  () => {
+    it("compiles use(Context) reads and patches primitive changes like useContext", async () => {
+      const { compiled, original, names, code } = await loadCompiledAndOriginal(
+        useSource,
+        "hybrid",
+        countRenderPlans,
+      );
+      expect(names).toEqual(["Counter", "Card"]);
+      expect(code).toMatch(/const \{\s*tone,\s*size = 2\s*\} = use\(Theme\);/);
+
+      const reference = document.createElement("div");
+      const subject = document.createElement("div");
+      document.body.append(reference, subject);
+      let referenceControls!: ReturnType<typeof mountApp>;
+      let subjectControls!: ReturnType<typeof mountApp>;
+      await act(async () => {
+        referenceControls = mountApp(reference, original);
+        subjectControls = mountApp(subject, compiled);
+      });
+      expect(renderPlans("Counter")).toBe(1);
+      for (const step of [
+        (controls: ReturnType<typeof mountApp>) => controls.setLabel!("total"),
+        (controls: ReturnType<typeof mountApp>) => controls.setTone!("dark"),
+      ]) {
+        await act(async () => {
+          step(referenceControls);
+          step(subjectControls);
+        });
+        expect(normalizedDom(subject)).toBe(normalizedDom(reference));
+      }
+      await act(async () => {
+        reference.querySelector<HTMLElement>("#add")!.click();
+        subject.querySelector<HTMLElement>("#add")!.click();
+      });
+      expect(normalizedDom(subject)).toBe(normalizedDom(reference));
+      expect(subject.querySelector("output")!.textContent).toBe("total: 2");
+      expect(renderPlans("Counter")).toBe(1);
+    });
+
+    it.each([
+      { name: "use of a body local", body: "const local = Theme; const theme = use(local);" },
+      { name: "a computed use read", body: "const theme = use(Theme).tone;" },
+    ])("keeps $name on React", async ({ body }) => {
+      const result = await compileReactModule(
+        `import { createContext, use, useState } from "react";
+        const Theme = createContext({ tone: "light" });
+        export function Clicks() {
+          ${body}
+          const [count, setCount] = useState(0);
+          return <button onClick={() => setCount(count + 1)}>{count}</button>;
+        }`,
+        "/app/Clicks.tsx",
+        normalizeReactCompilerOptions(true),
+      );
+      expect(result.compiled).toEqual([]);
+    });
+  },
+);
