@@ -294,6 +294,70 @@ describe("react-server builds in islands mode", () => {
       }
     });
 
+    it("follows every statement that loads a module, in source order", () => {
+      const root = project({
+        ...packages,
+        // Each reaches entry-kit through a different statement form.
+        "node_modules/hidden-kit/package.json": '{"name":"hidden-kit","exports":"./index.js"}',
+        "node_modules/hidden-kit/index.js":
+          'import { a } from "./a.js";\nexport { a };\nexport {} from "./empty.js";\n',
+        "node_modules/hidden-kit/a.js": "export const a = 1;\n",
+        "node_modules/hidden-kit/empty.js": 'export * from "entry-kit";\n',
+        "node_modules/typed-kit/package.json": '{"name":"typed-kit","exports":"./index.ts"}',
+        "node_modules/typed-kit/index.ts":
+          'import type { Button } from "entry-kit";\nexport type * from "entry-kit";\nexport { type a } from "./a.ts";\n',
+        "node_modules/typed-kit/a.ts":
+          'import { type Button } from "entry-kit";\nexport type a = 1;\n',
+        "node_modules/prologue-kit/package.json": '{"name":"prologue-kit","exports":"./index.js"}',
+        "node_modules/prologue-kit/index.js":
+          '// not "use client": a comment\n"use strict";\nimport "entry-kit";\n',
+        "node_modules/directive-kit/package.json":
+          '{"name":"directive-kit","exports":"./index.js"}',
+        "node_modules/directive-kit/index.js":
+          '"use strict";\n/* note */ \'use client\';\nimport "entry-kit";\n',
+      });
+      const page = path.join(root, "src/page.tsx");
+      const kitFile = (file: string) => path.join(root, "node_modules", file);
+      expect(findFarmClientOnlyImport('import "hidden-kit";\n', page)).toEqual({
+        specifier: "hidden-kit",
+        chain: [
+          kitFile("hidden-kit/index.js"),
+          kitFile("hidden-kit/empty.js"),
+          kitFile("entry-kit/index.js"),
+        ],
+      });
+      // `import { type a }` still loads the module; `import type` and `export type` do not.
+      expect(findFarmClientOnlyImport('export * from "typed-kit";\n', page)).toEqual({
+        specifier: "typed-kit",
+        chain: [
+          kitFile("typed-kit/index.ts"),
+          kitFile("typed-kit/a.ts"),
+          kitFile("entry-kit/index.js"),
+        ],
+      });
+      expect(findFarmClientOnlyImport('import "prologue-kit";\n', page)).toEqual({
+        specifier: "prologue-kit",
+        chain: [kitFile("prologue-kit/index.js"), kitFile("entry-kit/index.js")],
+      });
+      expect(findFarmClientOnlyImport('import "directive-kit";\n', page)).toBeNull();
+      // The first statement that reaches it names it, whatever its form.
+      expect(
+        findFarmClientOnlyImport(
+          'import { b } from "boundary-kit";\nexport { Button } from "entry-kit";\nimport "deep-kit";\n',
+          page,
+        ),
+      ).toEqual({ specifier: "entry-kit", chain: [kitFile("entry-kit/index.js")] });
+      expect(
+        findFarmClientOnlyImport('import { Button as B } from "entry-kit";\nexport { B };\n', page),
+      ).toEqual({ specifier: "entry-kit", chain: [kitFile("entry-kit/index.js")] });
+      expect(findFarmClientOnlyImport('export {} from "entry-kit";\n', page)).toEqual({
+        specifier: "entry-kit",
+        chain: [kitFile("entry-kit/index.js")],
+      });
+      // A module that does not parse is not checked, as before.
+      expect(findFarmClientOnlyImport('import { from "entry-kit";\n', page)).toBeNull();
+    });
+
     it("finds a package again after an earlier import walked part of it clean", () => {
       const root = project(packages);
       const page = path.join(root, "src/page.tsx");
