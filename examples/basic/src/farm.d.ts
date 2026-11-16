@@ -39,6 +39,7 @@ export type RoutePath =
   | "/feature-lab/static-metadata"
   | `/feature-lab/static/${string}`
   | "/hmr-e2e"
+  | "/link-options-e2e"
   | "/markdown"
   | "/navigation-loading/first"
   | "/navigation-loading/second"
@@ -89,6 +90,7 @@ export type RoutePattern =
   | "/feature-lab/static-metadata"
   | "/feature-lab/static/[slug]"
   | "/hmr-e2e"
+  | "/link-options-e2e"
   | "/markdown"
   | "/navigation-loading/first"
   | "/navigation-loading/second"
@@ -138,6 +140,7 @@ export type RouteModulePattern =
   | "/feature-lab/static-metadata"
   | "/feature-lab/static/[slug]"
   | "/hmr-e2e"
+  | "/link-options-e2e"
   | "/markdown"
   | "/navigation-loading/first"
   | "/navigation-loading/second"

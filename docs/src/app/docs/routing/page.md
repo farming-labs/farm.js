@@ -249,7 +249,8 @@ focus, or touch can retry while successful route data remains deduplicated by th
 A `Link` prefetches the same way on a page that never hydrates, such as a page with no client
 component or a server component in islands mode. It writes a mode other than the default into its
 HTML (`data-farm-prefetch="intent"`, and `data-farm-prefetch-delay` for a `prefetchDelay` other
-than 50ms), and the router follows it.
+than 50ms), and the router follows it. Its `replace`, `scroll={false}`, and `viewTransition`
+options apply to a click there too, in development and production.
 In a production islands build, the client router loads when a viewport-prefetch link in a hydrated
 island first nears the viewport, or on the first link hover, focus, tap, or navigation, and then
 prefetches. `Link`s in server components follow their modes once the router has loaded.
