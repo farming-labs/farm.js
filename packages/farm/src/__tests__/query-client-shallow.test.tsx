@@ -161,6 +161,73 @@ describe("useQueryState shallow routing", () => {
     expect(value).toEqual(["react", "vite"]);
   });
 
+  it("navigates through the Farm router when shallow is false, so the server renders the URL", async () => {
+    // The router writes history and notifies observers once the page is on screen.
+    const navigate = vi.fn(async (href: string, _options: unknown) => {
+      window.history.pushState(null, "", href);
+      notifyHistoryChange("url-search");
+    });
+    const historyWrite = vi.spyOn(window.history, "replaceState");
+    (window as any).__FARM_SPA_ROUTER__ = { navigate };
+
+    let setQuery!: (value: string | null) => void;
+    function App() {
+      const [query, set] = useQueryState("q", asString, {
+        shallow: false,
+        history: "replaceState",
+        scroll: true,
+      });
+      setQuery = set;
+      return createElement("output", null, query ?? "none");
+    }
+
+    root = createRoot(container);
+    act(() => {
+      root?.render(createElement(App));
+    });
+    await act(async () => {
+      setQuery("b");
+    });
+
+    expect(navigate).toHaveBeenCalledTimes(1);
+    expect(navigate).toHaveBeenCalledWith("/?q=b", { replace: true, scroll: true });
+    // The router owns the history write; the hook does not write the URL itself.
+    expect(historyWrite).not.toHaveBeenCalled();
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    });
+    expect(window.location.search).toBe("?q=b");
+    expect(container.textContent).toBe("b");
+  });
+
+  it("returns to the URL's value when a non-shallow navigation does not happen", async () => {
+    // A navigation blocker (or a failed navigation) leaves the URL as it was.
+    const navigate = vi.fn(async () => {});
+    (window as any).__FARM_SPA_ROUTER__ = { navigate };
+
+    let setQuery!: (value: string | null) => void;
+    function App() {
+      const [query, set] = useQueryState("q", asString, { shallow: false });
+      setQuery = set;
+      return createElement("output", null, query ?? "none");
+    }
+
+    root = createRoot(container);
+    act(() => {
+      root?.render(createElement(App));
+    });
+    await act(async () => {
+      setQuery("b");
+    });
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    });
+
+    expect(navigate).toHaveBeenCalledWith("/?q=b", { replace: false, scroll: false });
+    expect(window.location.search).toBe("");
+    expect(container.textContent).toBe("none");
+  });
+
   it("does not trigger SPA navigation when shallow is true and Farm router is installed", async () => {
     vi.useFakeTimers();
     const popstate = vi.fn();
