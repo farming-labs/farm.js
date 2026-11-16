@@ -20,6 +20,8 @@ import { getFarmTrailingSlashPreference } from "../trailing-slash";
 import { applyFarmBasePath, getFarmBasePath } from "../base-path";
 import { useOptionalFarm } from "../provider";
 import { FARM_LINK_PREFETCH_DELAY } from "./link-prefetch";
+import { getFarmSearchPreserveRoutes } from "./search-preserve-routes";
+import { _peekCurrentRequest } from "../server/request-bridge";
 
 /**
  * Prefetch strategy (TanStack Router–style):
@@ -648,21 +650,21 @@ function mergeQueryParams(
 }
 
 function applyPreservedSearchParams(href: string): string {
-  if (typeof window === "undefined") return href;
-
-  const manifest = (window as any).__FARM_MANIFEST__;
-  const routes =
-    manifest?.routes && typeof manifest.routes === "object" ? Object.values(manifest.routes) : [];
+  const routes = getFarmSearchPreserveRoutes();
   if (routes.length === 0) return href;
+  // The server render reads the request URL, so the href it renders is the one the page hydrates.
+  const documentUrl =
+    typeof window === "undefined" ? _peekCurrentRequest()?.url : window.location.href;
+  if (!documentUrl) return href;
 
-  const url = resolveFarmNavigationURL(href, window.location.href);
+  const url = resolveFarmNavigationURL(href, documentUrl);
   const route = routes.find((candidate: any) => matchManifestRoute(url.pathname, candidate));
   const preserve = Array.isArray((route as any)?.search?.preserve)
     ? ((route as any).search.preserve as string[])
     : [];
   if (preserve.length === 0) return href;
 
-  const current = new URLSearchParams(window.location.search);
+  const current = new URL(documentUrl).searchParams;
   let changed = false;
 
   for (const key of preserve) {

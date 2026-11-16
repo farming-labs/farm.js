@@ -63,6 +63,7 @@ import {
   resolveFarmRequestURL,
 } from "./request";
 import { _peekCurrentRequest, _resolveCurrentCspNonce } from "./request-bridge";
+import { _setFarmSearchPreserveRoutes } from "../client/search-preserve-routes";
 import { createFarmCacheKey, getFarmDataCache, normalizeRevalidatePath } from "../cache";
 import { resolveFarmNotFoundComponentPath } from "../not-found";
 import { getFarmAppDirectories } from "../layers";
@@ -1108,6 +1109,7 @@ export class ServerRenderer {
     await this.initialize();
     if (this.viteServer) await this.applyRendererAppSetup();
     setFarmBasePath(this.config.basePath);
+    _setFarmSearchPreserveRoutes(this.routeManager.getSearchPreserveRoutes());
     setFarmTrailingSlashPreference(this.config.trailingSlash);
     let element = this.rendererRuntime.createElement(input.PageComponent, input.pageProps);
     if (input.LoadingComponent) {
@@ -1532,6 +1534,7 @@ export class ServerRenderer {
     await this.initialize();
     if (this.viteServer) await this.applyRendererAppSetup();
     setFarmBasePath(this.config.basePath);
+    _setFarmSearchPreserveRoutes(this.routeManager.getSearchPreserveRoutes());
     setFarmTrailingSlashPreference(this.config.trailingSlash);
     const cspNonce = createFarmCspNonce(this.security);
     if (cspNonce) {

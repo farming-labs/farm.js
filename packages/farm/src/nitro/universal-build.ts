@@ -1,4 +1,5 @@
 import { randomBytes } from "node:crypto";
+import type { FarmSearchPreserveRoute } from "../client/search-preserve-routes";
 import { FARM_NATIVE_TREE_CONTENT_TYPE } from "../mobile/native-tree-type";
 
 /** Replaced with the client CSS by href, for the native tier's tree (apps with a mobile block). */
@@ -314,6 +315,8 @@ type UniversalPageRoute = {
   modulePath: string;
   source?: string;
   markdownSourcePath?: string;
+  /** The page's `search.preserve`, which Farm links honor (see `getSearchPreserveRoutes`). */
+  searchPreserve?: FarmSearchPreserveRoute;
 };
 type UniversalBoundaryRoute = {
   pattern: string;
@@ -1486,14 +1489,19 @@ export async function buildUniversal(
 
     // Get page routes first (needed for both client and SSR builds)
     const pageRoutes: UniversalPageRoute[] = [];
+    const searchPreserveRoutes = new Map(
+      routeManager.getSearchPreserveRoutes().map((route) => [route.pattern, route]),
+    );
     for (const [pattern, entry] of routeManager.getRoutes()) {
       const markdownSourcePath =
         entry.markdownSourcePath ||
         (isFarmMarkdownPageFile(entry.modulePath) ? entry.modulePath : undefined);
+      const searchPreserve = searchPreserveRoutes.get(entry.pattern);
       pageRoutes.push({
         pattern,
         ...(entry.directory ? { directory: entry.directory } : {}),
         modulePath: entry.modulePath,
+        ...(searchPreserve ? { searchPreserve } : {}),
         ...(markdownSourcePath
           ? {
               source: readFileSync(markdownSourcePath, "utf8"),
@@ -6980,6 +6988,12 @@ function generateVirtualEntryCode(
 ): string {
   // `renderer: false`: no pages, so every miss answers JSON rather than a rendered page.
   const farmRendererDisabled = isFarmRendererDisabled(config.renderer);
+  // Pages whose search.preserve Farm links honor; none leaves the runtime and documents unchanged.
+  const searchPreserveRoutes = pageRoutes.flatMap((route) =>
+    route.searchPreserve ? [route.searchPreserve] : [],
+  );
+  const searchPreserveRoutesSource =
+    searchPreserveRoutes.length > 0 ? JSON.stringify(searchPreserveRoutes) : "";
   // Islands mode runs `"use server"` actions posted to a page (RFC 0003).
   const farmIslandsMode =
     resolveFarmServerComponentsMode(config.experimental?.serverComponents) === "islands";
@@ -7625,7 +7639,7 @@ function renderFarmServerTreeLayout(Layout, props, outlets) {
     hasFarmServerStorageConfig(config.storage)
       ? "\n  _registerFarmStorageModules,\n  disposeFarmStorage,\n  initFarmStorage,"
       : ""
-  }
+  }${searchPreserveRoutesSource ? "\n  _setFarmSearchPreserveRoutes," : ""}
 } from "@farm.js/core/internal/production-runtime";${
     farmMobileClient
       ? `\nimport { _applyFarmMobileShellClient } from "@farm.js/core/internal/production-runtime";\n// The mobile client documents load when a mobile shell asks for them (RFC 0004, 7.2), filled in\n// once the client build has finished (see buildNitroUniversal). A shell's document stays out of\n// shared caches, which the adapter learns as it does for a guarded response.\nconst farmMobileShellClient = JSON.parse("${FARM_MOBILE_SHELL_CLIENT_PLACEHOLDER}");\nfunction applyFarmMobileShellResponse(request, response, context) {\n  return _applyFarmMobileShellClient(request, response, farmMobileShellClient, () =>\n    context?.onGuardedResponse?.()\n  );\n}`
@@ -8451,7 +8465,14 @@ function fetchFarmInnerRequest(request, context) {
 const farmLocalAPIBasePath = ${JSON.stringify(resolveFarmAPIServerBasePath(config.api))};
 // Deployment skew protection (see the deployment docs): documents embed this ID, page responses
 // name it, and a page request from a browser holding another deployment's page is refused.
-const farmDeploymentId = ${JSON.stringify(config.deploymentId)};
+const farmDeploymentId = ${JSON.stringify(config.deploymentId)};${
+    searchPreserveRoutesSource
+      ? `
+// Pages with search.preserve: Farm links render the same href here and in the browser.
+const farmSearchPreserveRoutes = ${searchPreserveRoutesSource};
+_setFarmSearchPreserveRoutes(farmSearchPreserveRoutes);`
+      : ""
+  }
 const farmDeploymentCookiePath = ${JSON.stringify(config.basePath || "/")};
 // Reports a failure Farm answers itself (an API or integration route's 500) to the plugin
 // runtime request.
@@ -8589,7 +8610,12 @@ function renderFarmClientBootstrapScript(canonicalPath, selectedRouteSlots, page
     ';window.__FARM_INTEGRATION_API_MANIFEST__=' +
     serializeFarmInlineValue(integrationManifest) +
     ';window.__FARM_ROUTE_SLOTS__=' + serializedRouteSlots +
-    ';window.__FARM_DEPLOYMENT_ID__=' + serializeFarmInlineValue(farmDeploymentId) + ';';
+    ';window.__FARM_DEPLOYMENT_ID__=' + serializeFarmInlineValue(farmDeploymentId) + ';'${
+      searchPreserveRoutesSource
+        ? ` +
+    'window[Symbol.for("farm.searchPreserveRoutes")]=' + serializeFarmInlineValue(farmSearchPreserveRoutes) + ';'`
+        : ""
+    };
   if (typeof canonicalPath === "string" && canonicalPath.startsWith("/")) {
     const serializedPath = serializeFarmInlineValue(canonicalPath);
     source += 'if(location.pathname+location.search!==' + serializedPath + '){' +
