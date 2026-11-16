@@ -127,12 +127,15 @@ describe("chunk error recovery", () => {
     cleanup();
   });
 
-  it("leaves a failed lazy router chunk to its own fallback", () => {
+  it.each([
+    ["lazy router", "/chunks/farm-client-router-hc7ecd88e.js"],
+    ["client route table", "/chunks/farm-client-routes-h0b2e94d1.js"],
+  ])("leaves a failed %s chunk to its own fallback", (_name, href) => {
     const reload = vi.fn();
     const dispose = installChunkErrorRecovery({ reload, storage: new MemoryStorage() });
     const link = document.createElement("link");
     link.rel = "modulepreload";
-    link.href = "/chunks/farm-client-router-hc7ecd88e.js";
+    link.href = href;
     const event = new Event("error");
     Object.defineProperty(event, "target", { value: link });
 

@@ -37,7 +37,9 @@ const CHUNK_ERROR_PATTERNS = [
   /module script failed/i,
 ];
 
-const LAZY_ROUTER_CHUNK = /\/farm-client-router-h[0-9a-f]+\.js(?:[?#]|$)/;
+// The lazy router and the client route table load on a hover or a link in view; the navigation
+// that needs them falls back to a document navigation when they fail.
+const LAZY_NAVIGATION_CHUNK = /\/farm-client-route(?:r|s)-h[0-9a-f]+\.js(?:[?#]|$)/;
 
 export function isChunkLoadError(errorLike: unknown): boolean {
   const values = collectErrorText(errorLike);
@@ -73,9 +75,9 @@ export function installChunkErrorRecovery(options: FarmChunkRecoveryOptions = {}
   }
 
   const recover = (errorLike: unknown) => {
-    // A link falls back to a document navigation without the lazy router, and reloading would
-    // lose the page on a mere hover.
-    if (LAZY_ROUTER_CHUNK.test(getEventTargetAssetUrl(errorLike) ?? "")) {
+    // A link falls back to a document navigation without the lazy router or the route table,
+    // and reloading would lose the page on a mere hover.
+    if (LAZY_NAVIGATION_CHUNK.test(getEventTargetAssetUrl(errorLike) ?? "")) {
       return;
     }
     if (!isChunkLoadError(errorLike)) {
