@@ -12,6 +12,11 @@ overrides:
   nanoid@>=4.0.0 <5.1.16: 5.1.16
   nanostores@^1.0.1: ^1.5.4
 
+patchedDependencies:
+  env-runner@0.2.3:
+    hash: l2rvdcd72z3xt3hjnj4k4adnyi
+    path: patches/env-runner@0.2.3.patch
+
 importers:
 
   .:
@@ -18186,7 +18191,7 @@ packages:
       miniflare: 4.20260710.0
       srvx: 0.11.22
 
-  /env-runner@0.2.3:
+  /env-runner@0.2.3(patch_hash=l2rvdcd72z3xt3hjnj4k4adnyi):
     resolution: {integrity: sha512-S8EFBKyznRwPVwayK187cYjvnpgC92xy+q0BIF++V965pfjMVVRbQ/HoTYGA/1EHmZ7E68k6Heq+4WnvVhOL5w==}
     hasBin: true
     dependencies:
@@ -18195,6 +18200,7 @@ packages:
       httpxy: 0.5.5
       srvx: 1.0.5
     dev: false
+    patched: true
 
   /error-stack-parser-es@1.0.5:
     resolution: {integrity: sha512-5qucVt2XcuGMcEGgWI7i+yZpmpByQ8J1lHhcL7PwqCwu9FPP3VUXzT4ltHe5i2z9dePwEHcDVOAfSnHsOlCXRA==}
@@ -22896,7 +22902,7 @@ packages:
       consola: 3.4.2
       crossws: 0.4.12(srvx@1.0.5)
       db0: 0.4.1
-      env-runner: 0.2.3
+      env-runner: 0.2.3(patch_hash=l2rvdcd72z3xt3hjnj4k4adnyi)
       h3: 2.0.8(crossws@0.4.12)(ocache@0.3.0)
       hookable: 6.1.1
       nf3: 0.3.24
