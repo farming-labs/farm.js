@@ -125,13 +125,20 @@ function createRateLimitMiddleware(config: RateLimitConfig): MiddlewareFunction 
   const storage = config.storage || defaultRateLimitStorage;
   assertAtomicRateLimitStorage(storage);
 
+  // The default bucket names this limit's policy, so two limits on one path keep their own
+  // counts and windows, and the route the router serves, so no spelling of its URL escapes it.
+  const defaultKeyPrefix = `rate-limit:${config.requests}/${windowMs}`;
+
   return async (ctx: MiddlewareContext, next) => {
     const key = config.keyGenerator
       ? config.keyGenerator(ctx)
-      : `${requireRateLimitClientAddress(ctx)}:${ctx.pathname}`;
+      : `${defaultKeyPrefix}:${requireRateLimitClientAddress(ctx)}:${rateLimitRoutePathname(ctx)}`;
 
-    const current = await storage.increment(key, windowMs);
+    // Two limits with the same policy on one request share a bucket: count the request once.
+    const counted = getCountedRateLimitKeys(ctx);
+    const current = counted.get(key) ?? (await storage.increment(key, windowMs));
     assertRateLimitIncrementResult(current);
+    counted.set(key, current);
     const now = Date.now();
     const resetIn = Math.max(1, Math.ceil((current.resetAt - now) / 1000));
     const remaining = Math.max(0, config.requests - current.count);
@@ -156,6 +163,30 @@ function createRateLimitMiddleware(config: RateLimitConfig): MiddlewareFunction 
 
     return next();
   };
+}
+
+/**
+ * The path a default rate-limit bucket names: the pathname the router matches (decoded once,
+ * without basePath or locale), without a trailing slash, so `/api/login/`, `/api/%6Cogin` and
+ * `/%61pi/login` count against the same bucket as `/api/login`, as middleware guards match them.
+ */
+function rateLimitRoutePathname(ctx: MiddlewareContext): string {
+  const pathname = ctx.routePathname ?? ctx.pathname;
+  return pathname.length > 1 ? pathname.replace(/\/+$/, "") || "/" : pathname;
+}
+
+const countedRateLimitKeys = new WeakMap<object, Map<string, RateLimitIncrementResult>>();
+
+/** The buckets this request already counted, keyed by its request object. */
+function getCountedRateLimitKeys(ctx: MiddlewareContext): Map<string, RateLimitIncrementResult> {
+  const owner = ctx.request as unknown;
+  if (!owner || typeof owner !== "object") return new Map();
+  let counted = countedRateLimitKeys.get(owner);
+  if (!counted) {
+    counted = new Map();
+    countedRateLimitKeys.set(owner, counted);
+  }
+  return counted;
 }
 
 /**

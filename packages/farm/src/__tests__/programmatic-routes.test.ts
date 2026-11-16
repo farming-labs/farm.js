@@ -3,7 +3,9 @@ import os from "os";
 import path from "path";
 import { afterEach, describe, expect, expectTypeOf, it, vi } from "vitest";
 import { z } from "zod";
+import { setFarmBasePath } from "../base-path";
 import { getFarmDataCache, invalidate, revalidatePath } from "../cache";
+import { _setFarmI18nSnapshotResolver } from "../i18n/bridge";
 import { defer, isDeferred, type Deferred } from "../deferred";
 import { notFound, redirect } from "../navigation";
 import {
@@ -659,6 +661,70 @@ describe("programmatic routes", () => {
     });
     expect(main).toHaveBeenCalledTimes(3);
   });
+
+  it.each([
+    ["below a basePath", "/console/products/123", { basePath: "/console" }],
+    ["in a non-default locale", "/console/fr/products/123", { basePath: "/console", locale: "fr" }],
+  ] as const)(
+    "lets revalidatePath clear route data by the route path %s",
+    async (_label, publicPath, setup) => {
+      const root = fs.mkdtempSync(path.join(os.tmpdir(), "farm-route-data-path-"));
+      tempDirs.push(root);
+      const routesFile = path.join(root, "src", "farm.route.tsx");
+      fs.mkdirSync(path.dirname(routesFile), { recursive: true });
+      fs.writeFileSync(routesFile, "export {};\n");
+
+      const main = vi.fn(async ({ params }: any) => ({ id: params.id }));
+      const ProductRoute = createRoute("/products/[id]", {
+        data: { key: ({ params }) => ["product-path", publicPath, params.id], main },
+        component: (() => null) as any,
+      });
+      const manager = new RouteManager(createConfig(root), {
+        environments: { ssr: { runner: { import: async () => ({ Route: ProductRoute }) } } },
+      } as any);
+      await manager.discoverRoutes();
+      const match = manager.matchRoute("/products/123");
+      const routeModule = await manager.loadRouteModule(match.route!.modulePath);
+      const resolveProps = () =>
+        (routeModule as any).__farmResolveRouteProps({
+          params: { id: "123" },
+          searchParams: Promise.resolve({}),
+          path: publicPath,
+        });
+
+      setFarmBasePath(setup.basePath);
+      if ("locale" in setup) {
+        _setFarmI18nSnapshotResolver(
+          () =>
+            ({
+              locale: setup.locale,
+              locales: ["en", "fr"],
+              defaultLocale: "en",
+              routing: "prefix-except-default",
+              basePath: setup.basePath,
+            }) as any,
+        );
+      }
+      try {
+        await resolveProps();
+        await resolveProps();
+        expect(main).toHaveBeenCalledTimes(1);
+
+        // The route path, as the routing docs write it.
+        revalidatePath("/products/123");
+        await resolveProps();
+        expect(main).toHaveBeenCalledTimes(2);
+
+        // The public path still works too.
+        revalidatePath(publicPath);
+        await resolveProps();
+        expect(main).toHaveBeenCalledTimes(3);
+      } finally {
+        setFarmBasePath(undefined);
+        _setFarmI18nSnapshotResolver(undefined);
+      }
+    },
+  );
 
   it.each([0, "0ms", "0s"] as const)(
     "never shares route data with staleTime %j between visitors",

@@ -7,6 +7,9 @@ import {
   type FarmCacheOptions,
   type RouteDataCacheKey,
 } from "./cache";
+import { stripFarmBasePath } from "./base-path";
+import { getActiveFarmI18nSnapshot } from "./i18n/bridge";
+import { stripFarmLocaleFromPathname } from "./i18n/routing";
 import { getFarmRouteContext } from "./route-context";
 import { normalizeFarmRouteRuntimeConfig, type FarmRouteRuntimeConfig } from "./route-runtime";
 import type { ServerFn } from "./server-fn";
@@ -1436,13 +1439,25 @@ async function resolveProgrammaticRouteData(
       ...(await resolveProgrammaticRouteDataKeys(dataHooks.tags, context)),
     ],
     paths: [
-      ...(typeof context.path === "string" ? [context.path] : []),
+      ...(typeof context.path === "string"
+        ? new Set([context.path, toRouteDataPathname(context.path)])
+        : []),
       ...(await resolveProgrammaticRouteDataKeys(dataHooks.paths, context)),
     ],
     revalidate,
   };
 
   return getFarmDataCache().getOrSet(cacheKey, () => dataHooks.main(context), cacheOptions);
+}
+
+/**
+ * The app path a rendered path names: without the basePath and the locale prefix. Route data is
+ * tagged by both, so `revalidatePath("/products/1")`, as the routing docs write it, clears the
+ * entry below a basePath or in a locale, and so does the public path.
+ */
+function toRouteDataPathname(path: string): string {
+  const i18n = getActiveFarmI18nSnapshot();
+  return i18n ? stripFarmLocaleFromPathname(path, i18n) : stripFarmBasePath(path);
 }
 
 async function resolveProgrammaticRouteDataKeys(

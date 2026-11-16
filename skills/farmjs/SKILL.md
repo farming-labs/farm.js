@@ -550,7 +550,9 @@ Built-in server plugins are imported from `@farm.js/core/plugin/server`, includi
 - Use `agent.crawlers: { search, training }` (`"allow"` or `"block"`, plus `rules` and `sitemap`)
   for a generated `/robots.txt` naming AI search and training crawlers. `public/robots.txt`, then
   `src/app/robots.ts`, win over it; it wins over the docs engine's robots.txt.
-- Use `md`/`mdx` for page mirrors and content routes; use `openapi` for API references.
+- Use `md`/`mdx` for page mirrors and content routes; use `openapi` for API references. It
+  documents every mounted API route, plugin routes included; keep internal routes out with
+  `openapi: { hidden: true }` (endpoint option or route-file export).
 - Every app serves a public `/.well-known/farmjs.json` manifest (Farm version and packages, MCP
   tools and schemas, WebMCP tools, integration providers, plugin names; never config or env), the
   same document for every reader, Farm Infra included. MCP servers with `authorize` or behind a

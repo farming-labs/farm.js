@@ -1,0 +1,55 @@
+diff --git a/dist/_chunks/common-base-runner.d.mts b/dist/_chunks/common-base-runner.d.mts
+index 5f6144b3448463845565597baf2686d50ce3260f..d0087a337d280130cb588c672c2f140e2d118e7d 100644
+--- a/dist/_chunks/common-base-runner.d.mts
++++ b/dist/_chunks/common-base-runner.d.mts
+@@ -58,7 +58,7 @@ export declare abstract class BaseEnvRunner implements EnvRunner, AsyncDisposabl
+   close(cause?: unknown): Promise<void>;
+   [Symbol.asyncDispose](): Promise<void>;
+   /** Briefly back off (~3s total) while the worker is still starting. */
+-  protected _waitForAddress(): Promise<void>;
++  protected _waitForAddress(timeout?: number): Promise<void>;
+   /** Placeholder origin for relative inputs; requests go to the worker address regardless. */
+   protected _resolveFetchInput(input: string | URL | Request): string | URL | Request;
+   protected _handleMessage(message: any): void;
+diff --git a/dist/_chunks/common-base-runner.mjs b/dist/_chunks/common-base-runner.mjs
+index 57e557dea157f2e6ef24316282082d923b531e8c..0027d87e29faa7d6956772b0027dae6d21546b69 100644
+--- a/dist/_chunks/common-base-runner.mjs
++++ b/dist/_chunks/common-base-runner.mjs
+@@ -118,8 +118,22 @@ var BaseEnvRunner = class {
+ 		const status = this.closed ? "closed" : this.ready ? "ready" : "pending";
+ 		return `${this.constructor.name}#${this._name}(${status})`;
+ 	}
+-	async _waitForAddress() {
+-		for (let i = 0; i < 5 && !this._address && !this.closed; i++) await new Promise((r) => setTimeout(r, 100 * Math.pow(2, i)));
++	async _waitForAddress(timeout = 3100) {
++		if (this._address || this.closed) return;
++		await new Promise((resolve) => {
++			const done = () => {
++				clearTimeout(timer);
++				this._messageListeners.delete(onMessage);
++				this._pendingRequests.delete(done);
++				resolve();
++			};
++			const onMessage = () => {
++				if (this._address) done();
++			};
++			const timer = setTimeout(done, timeout);
++			this._messageListeners.add(onMessage);
++			this._pendingRequests.add(done);
++		});
+ 	}
+ 	_resolveFetchInput(input) {
+ 		if (typeof input === "string" && !URL.canParse(input)) return new URL(input, "http://localhost");
+diff --git a/dist/_chunks/miniflare-runner.mjs b/dist/_chunks/miniflare-runner.mjs
+index 7fc4c54e5001f39f1295bc80401330806146ebfc..c6a4884f75b07ea5f54b87d95a50d8e80b750f68 100644
+--- a/dist/_chunks/miniflare-runner.mjs
++++ b/dist/_chunks/miniflare-runner.mjs
+@@ -956,7 +956,7 @@ var MiniflareEnvRunner = class extends BaseEnvRunner {
+ 		if (!this.closed) await this.close();
+ 	}
+ 	async fetch(input, init) {
+-		for (let i = 0; i < 5 && !this._address && !this.closed; i++) await new Promise((r) => setTimeout(r, 100 * Math.pow(2, i)));
++		await this._waitForAddress();
+ 		if (!this.#miniflare || this.closed) return new Response("miniflare env runner is unavailable", { status: 503 });
+ 		const resolved = this._resolveFetchInput(input);
+ 		const request = typeof resolved === "string" || resolved instanceof URL ? new Request(resolved, init) : new Request(new Request(resolved.url, resolved), {

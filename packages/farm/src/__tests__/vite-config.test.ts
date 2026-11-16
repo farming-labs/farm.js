@@ -62,7 +62,7 @@ describe("Farm Vite server-only entries", () => {
     const resolveId = createResolveId(process.cwd());
 
     expect(() => resolveId("@farm.js/core/og", "/app/src/components/share.tsx", {})).toThrow(
-      "@farm.js/core/og is server-only and cannot be imported into client code (imported by /app/src/components/share.tsx)",
+      "/app/src/components/share.tsx - error CLIENT_SERVER_ONLY_ENTRY: @farm.js/core/og is server-only and cannot be imported into client code.",
     );
     expect(
       resolveId("@farm.js/core/og", "/app/src/app/api/card/route.tsx", { ssr: true }),
@@ -83,7 +83,7 @@ describe("Farm Vite server-only entries", () => {
       "\0farm:server-only",
     );
     expect(() => resolveId("server-only", "/app/src/server/db.ts", {})).toThrow(
-      '/app/src/server/db.ts imports "server-only", so it must not reach the browser',
+      '/app/src/server/db.ts - error CLIENT_SERVER_ONLY_IMPORT: This module imports "server-only", so it must not reach the browser',
     );
   });
 

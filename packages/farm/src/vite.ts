@@ -163,6 +163,7 @@ import {
   resolveFarmIsolatedClientHydrationMode,
   stripUseClientDirective,
 } from "./utils/client-component";
+import { type FarmSourceSnapshotStore, withFarmSourceSnapshotOf } from "./utils/source-snapshot";
 import {
   dropLatestPackageClientBoundaryCache,
   resolvePackageClientBoundaryCacheFile,
@@ -211,15 +212,19 @@ import {
   resolveFarmPublicFilePath,
   shouldBypassFarmRouterForDottedPath,
 } from "./dev-static";
-import { findClientServerFnViolation, formatServerFnBoundaryError } from "./server-query-boundary";
+import {
+  createServerFnBoundaryDiagnostic,
+  findClientServerFnViolation,
+} from "./server-query-boundary";
 
 /** The @farm.js/plugin/rsc transform that turns client imports of server functions into stubs. */
 const SERVER_FN_TRANSFORM_PLUGIN = "@farm.js/plugin/rsc:server-fn-actions";
 import {
   analyzeClientBoundary,
-  formatClientBoundaryWarning,
+  createClientBoundaryDiagnostic,
   shouldInspectClientBoundary,
 } from "./client-boundary-env";
+import { createFarmDiagnostic, createFarmSourceLocator, formatFarmDiagnostic } from "./diagnostics";
 import {
   createFarmDeploymentMismatchResponse,
   FARM_DEPLOYMENT_ID_HEADER,
@@ -369,6 +374,11 @@ interface FarmVitePluginOptions extends FarmConfig {
   isolatedClientBoundaryModules?: ReadonlySet<string>;
   /** @internal Component modules of programmatic routes, read from the evaluated routes files. */
   programmaticClientRoutes?: ProgrammaticClientRoutes;
+  /**
+   * @internal A production build: what the route manager's plan read, parsed and resolved
+   * (RouteManager.keepBuildSourceSnapshot), which the package import rewrites start from.
+   */
+  sourceSnapshot?: FarmSourceSnapshotStore;
 }
 
 type TypeArtifactSelection = Pick<
@@ -625,7 +635,14 @@ export function farmServerOnlyEntriesPlugin(
             return FARM_SERVER_ONLY_PACKAGE_ID;
           }
           this.error(
-            `${importer ?? "A module"} imports "server-only", so it must not reach the browser, but client code imports it. Move what the client needs out of that module, or call it from a server component, server function or API route.`,
+            formatFarmDiagnostic(
+              createFarmDiagnostic(
+                "CLIENT_SERVER_ONLY_IMPORT",
+                importer ?? "<unknown module>",
+                `${importer ? "This module" : "A module"} imports "server-only", so it must not reach the browser, but client code imports it.`,
+              ),
+              root,
+            ),
           );
         }
         if (!options?.ssr && isBuiltin(id)) {
@@ -651,7 +668,14 @@ export function farmServerOnlyEntriesPlugin(
         const importedBy = importer ? ` (imported by ${importer})` : "";
         if (!options?.ssr) {
           this.error(
-            `${id} is server-only and cannot be imported into client code${importedBy}. Use it from an API route or another server module.`,
+            formatFarmDiagnostic(
+              createFarmDiagnostic(
+                "CLIENT_SERVER_ONLY_ENTRY",
+                importer ?? id,
+                `${id} is server-only and cannot be imported into client code.`,
+              ),
+              root,
+            ),
           );
         }
         vercelOgInstalled ||= isOptionalPeerInstalled(root, "@vercel/og");
@@ -1776,15 +1800,20 @@ const warnedClientBoundaryIds = new Set<string>();
 /**
  * Warn once per module about server-only access in client-compiled code:
  * module-scope non-public process.env reads (undefined in the browser, #560)
- * and node: builtin imports (stubbed by farmServerOnlyEntriesPlugin).
- * Diagnostics only; behavior is unchanged (#1065).
+ * and Node builtin imports (stubbed by farmServerOnlyEntriesPlugin).
+ * Diagnostics only; behavior is unchanged (#1065). Each finding is reported
+ * with its code and its position in the original source.
  */
-function warnClientBoundaryOnce(
-  context: { parse(code: string): unknown },
+async function warnClientBoundaryOnce(
+  context: {
+    parse(code: string): unknown;
+    resolve(source: string, importer?: string): Promise<{ id: string } | null>;
+    getCombinedSourcemap(): unknown;
+  },
   id: string,
   code: string,
   config: FarmVitePluginOptions,
-): void {
+): Promise<void> {
   if (warnedClientBoundaryIds.has(id)) return;
 
   let program: unknown;
@@ -1795,17 +1824,30 @@ function warnClientBoundaryOnce(
     return;
   }
   const publicKeys = new Set(Object.keys((config as any).env?.public ?? {}));
-  const findings = analyzeClientBoundary(program as any, publicKeys);
-
-  if (
-    findings.envKeys.length === 0 &&
-    findings.publicEnvKeys.length === 0 &&
-    findings.builtinImports.length === 0
-  ) {
-    return;
+  const findings = [];
+  for (const finding of analyzeClientBoundary(program as any, publicKeys)) {
+    // A bare specifier counts only when the browser gets Farm's stub for it, not a package the
+    // app installed under the builtin's name (`events`, `buffer`).
+    if (finding.kind === "builtin" && !finding.name.startsWith("node:")) {
+      const resolved = await context.resolve(finding.name, id).catch(() => null);
+      if (!resolved?.id.startsWith(FARM_BROWSER_BUILTIN_PREFIX)) continue;
+    }
+    findings.push(finding);
   }
+  if (findings.length === 0) return;
+
   warnedClientBoundaryIds.add(id);
-  logger.warn(formatClientBoundaryWarning(id, findings));
+  const locate = createFarmSourceLocator(code, () => context.getCombinedSourcemap());
+  logger.warn(
+    findings
+      .map((finding) =>
+        formatFarmDiagnostic(
+          createClientBoundaryDiagnostic(id, finding, locate(finding.start)),
+          config.root,
+        ),
+      )
+      .join("\n"),
+  );
 }
 
 /**
@@ -2529,6 +2571,7 @@ export function farmPlugin(
         openAPIManager = new OpenAPIManager(appDirs, options.openapi, {
           mode: "development",
           apiBaseURL: typeof options.api?.baseURL === "string" ? options.api.baseURL : undefined,
+          routes: () => apiRouteManager.getRoutes().values(),
           loadModule: (filePath) => apiRouteManager.loadModule(filePath),
         });
         const spec = await openAPIManager.generateSpec();
@@ -5452,78 +5495,85 @@ export { manifest };
       ) {
         const file = id.split("?", 1)[0]!;
         const projectRoot = actionConfig.root || server?.config.root || process.cwd();
-        // Server code only: a package's `react-server` build, as React Server Components resolve
-        // it, and the files that build reaches.
-        if (transformOptions?.ssr === true) {
-          if (farmReactServerFiles.has(file)) {
-            for (const child of farmRelativeImportFiles(code, file))
-              farmReactServerFiles.add(child);
+        // A build's plan already read, parsed and resolved most of what these analyses ask, and
+        // in its snapshot they parse this module once between them.
+        const buildSnapshot = isBuild ? options.sourceSnapshot : undefined;
+        const rewrite = () => {
+          // Server code only: a package's `react-server` build, as React Server Components resolve
+          // it, and the files that build reaches.
+          if (transformOptions?.ssr === true) {
+            if (farmReactServerFiles.has(file)) {
+              for (const child of farmRelativeImportFiles(code, file))
+                farmReactServerFiles.add(child);
+            }
+            // A module client code also reaches stays client code, as it is in React Server
+            // Components' client graph: its packages keep their default build.
+            const serverModule =
+              farmReactServerFiles.has(file) ||
+              !getFarmClientReachableModules(
+                path.resolve(projectRoot, actionConfig.srcDir || "src"),
+                projectRoot,
+              ).has(path.resolve(file));
+            const reactServer = !serverModule
+              ? null
+              : rewriteFarmReactServerImports({
+                  code,
+                  file,
+                  reference: (specifier, exportName) =>
+                    ensureFarmPackageClientReference(projectRoot, specifier, exportName, file),
+                  onServerFile: (serverFile) => farmReactServerFiles.add(serverFile),
+                });
+            if (reactServer !== null) {
+              code = reactServer;
+              rewrotePackageImports = true;
+            }
+            // The package's own `"use client"` modules render through their client references.
+            const internal = farmReactServerFiles.has(file)
+              ? rewriteFarmReactServerClientModuleImports({
+                  code,
+                  file,
+                  reference: (clientFile) =>
+                    ensureFarmInternalClientReference(projectRoot, clientFile),
+                })
+              : null;
+            if (internal !== null) {
+              code = internal;
+              rewrotePackageImports = true;
+            }
           }
-          // A module client code also reaches stays client code, as it is in React Server
-          // Components' client graph: its packages keep their default build.
-          const serverModule =
-            farmReactServerFiles.has(file) ||
-            !getFarmClientReachableModules(
-              path.resolve(projectRoot, actionConfig.srcDir || "src"),
-              projectRoot,
-            ).has(path.resolve(file));
-          const reactServer = !serverModule
-            ? null
-            : rewriteFarmReactServerImports({
-                code,
-                file,
-                reference: (specifier, exportName) =>
-                  ensureFarmPackageClientReference(projectRoot, specifier, exportName, file),
-                onServerFile: (serverFile) => farmReactServerFiles.add(serverFile),
-              });
-          if (reactServer !== null) {
-            code = reactServer;
+          const rewritePackageImports = (source: string) =>
+            rewriteFarmPackageClientImports({
+              code: source,
+              file,
+              root: projectRoot,
+              isClientPackage: (specifier) =>
+                isFarmPackageClientBoundary(file, specifier, projectRoot),
+            });
+          // Each module that imports a package would otherwise read the package's whole entry graph.
+          const routeManager = farmApp?.getRouteManager();
+          const source = code;
+          const referenced = routeManager
+            ? routeManager.inspectPackages(() => rewritePackageImports(source))
+            : rewritePackageImports(source);
+          if (referenced !== null) {
+            code = referenced;
             rewrotePackageImports = true;
           }
-          // The package's own `"use client"` modules render through their client references.
-          const internal = farmReactServerFiles.has(file)
-            ? rewriteFarmReactServerClientModuleImports({
-                code,
-                file,
-                reference: (clientFile) =>
-                  ensureFarmInternalClientReference(projectRoot, clientFile),
-              })
-            : null;
-          if (internal !== null) {
-            code = internal;
-            rewrotePackageImports = true;
+          // Server code only: in the browser React's own cache is the one RSC has there too.
+          if (transformOptions?.ssr === true) {
+            const cached = rewriteFarmReactCacheImport(
+              code,
+              file,
+              runtimeModule?.(FARM_REACT_CACHE_MODULE),
+            );
+            if (cached !== null) {
+              code = cached;
+              rewrotePackageImports = true;
+            }
           }
-        }
-        const rewritePackageImports = (source: string) =>
-          rewriteFarmPackageClientImports({
-            code: source,
-            file,
-            root: projectRoot,
-            isClientPackage: (specifier) =>
-              isFarmPackageClientBoundary(file, specifier, projectRoot),
-          });
-        // Each module that imports a package would otherwise read the package's whole entry graph.
-        const routeManager = farmApp?.getRouteManager();
-        const source = code;
-        const referenced = routeManager
-          ? routeManager.inspectPackages(() => rewritePackageImports(source))
-          : rewritePackageImports(source);
-        if (referenced !== null) {
-          code = referenced;
-          rewrotePackageImports = true;
-        }
-        // Server code only: in the browser React's own cache is the one RSC has there too.
-        if (transformOptions?.ssr === true) {
-          const cached = rewriteFarmReactCacheImport(
-            code,
-            file,
-            runtimeModule?.(FARM_REACT_CACHE_MODULE),
-          );
-          if (cached !== null) {
-            code = cached;
-            rewrotePackageImports = true;
-          }
-        }
+        };
+        if (buildSnapshot) withFarmSourceSnapshotOf(buildSnapshot, rewrite);
+        else rewrite();
       }
       if (
         islandsServerFns() &&
@@ -5584,13 +5634,19 @@ export { manifest };
           // @farm.js/plugin/rsc transform makes client imports safe.
           const violation = findClientServerFnViolation(code, id);
           if (violation) {
-            this.error(formatServerFnBoundaryError(violation, id));
+            const locate = createFarmSourceLocator(code, () => this.getCombinedSourcemap());
+            this.error(
+              formatFarmDiagnostic(
+                createServerFnBoundaryDiagnostic(violation, id, locate(violation.start)),
+                currentConfig.root,
+              ),
+            );
           }
         }
       }
 
       if (!transformOptions?.ssr && shouldInspectClientBoundary(id, code)) {
-        warnClientBoundaryOnce(this, id, code, farmApp?.getConfig() ?? options);
+        await warnClientBoundaryOnce(this, id, code, farmApp?.getConfig() ?? options);
       }
 
       if (typeof imageImports.transform === "function") {
@@ -6950,7 +7006,7 @@ ${isolatedHydrationImport}
 import { installChunkErrorRecovery, SPARouter } from '@farm.js/core/client'
 import { createClientPluginManager } from '@farm.js/core/plugin/client'
 import { isFarmRouteActive } from '@farm.js/core/router'
-import { isFarmBlockedNavigationURL, replayFarmQueuedInteraction, scheduleFarmIslandHydration, createFarmSearchParams, searchParamsToObject, setFarmBasePath, setFarmTrailingSlashPreference, stripFarmBasePath } from '@farm.js/core/internal/client-runtime'
+import { installFarmLinkPrefetch, isFarmBlockedNavigationURL, replayFarmQueuedInteraction, scheduleFarmIslandHydration, createFarmSearchParams, searchParamsToObject, setFarmBasePath, setFarmTrailingSlashPreference, stripFarmBasePath } from '@farm.js/core/internal/client-runtime'
 import { reviveDeferredData } from '@farm.js/core/deferred'
 import {
   createFarmDeploymentMismatchError,
@@ -8923,6 +8979,9 @@ document.addEventListener('click', function(event) {
   
   spaRouter.navigate(href, { replace, scroll, viewTransition });
 });
+
+// Link anchors on a page that does not hydrate prefetch through the router as Link would.
+installFarmLinkPrefetch();
 
 if (import.meta.hot) {
   import.meta.hot.on('vite:beforeUpdate', () => {

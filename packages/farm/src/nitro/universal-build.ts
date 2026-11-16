@@ -100,6 +100,7 @@ import type { Rollup, UserConfig as ViteUserConfig } from "vite";
 import os from "os";
 import path from "path";
 import { constants as fsConstants, existsSync, readFileSync, realpathSync, statSync } from "fs";
+import { initSync as initModuleLexer, parse as lexModule } from "es-module-lexer";
 import { readRouteRenderingDirectiveFromFile, resolveRouteRenderingConfig } from "../ssg";
 import {
   FARM_LAYOUT_ELEMENT_CLIENT_SOURCE,
@@ -118,6 +119,7 @@ import {
   describeSuppressedAsyncHydration,
   enforceFarmIsolatedHydrationRouteBudget,
   getClientModuleHydrationPlan,
+  getClientModuleHydrationPlanKey,
   getClientModuleMetadata,
   getFarmClientHydrationPlanOptions,
   createMarkdownPageHydrationPlanner,
@@ -129,6 +131,7 @@ import {
   type IsolatedClientBoundaryReference,
 } from "../utils/client-component";
 import type { FarmIsolatedClientHydrationMode, RouteModule } from "../types";
+import { type FarmSourceSnapshotStore, withFarmSourceSnapshotOf } from "../utils/source-snapshot";
 import {
   FARM_MARKDOWN_PRECOMPILED_PAGES,
   isFarmMarkdownPageFile,
@@ -148,6 +151,7 @@ import {
 import {
   applyFarmCronVercelCrons,
   createFarmCronCloudflareConfig,
+  toFarmCronCloudflareScheduledTasks,
   type FarmCronJob,
   mergeScheduledTasks,
   prepareFarmCronForNitro,
@@ -1158,6 +1162,23 @@ export async function minifyFarmServerChunk(
   return restoreLiteralModuleSpecifiers(result.code, fileName, rolldownUtils);
 }
 
+let moduleLexerReady = false;
+
+/** The source ranges of a module's import() arguments, or null when es-module-lexer cannot read it. */
+function lexDynamicImportArguments(code: string): Array<{ start: number; end: number }> | null {
+  if (!moduleLexerReady) {
+    initModuleLexer();
+    moduleLexerReady = true;
+  }
+  try {
+    return lexModule(code)[0]
+      .filter((entry) => entry.d > -1)
+      .map((entry) => ({ start: entry.s, end: entry.e }));
+  } catch {
+    return null;
+  }
+}
+
 /**
  * Oxc prints whichever quote is shortest, so `import("./chunk.mjs")` comes out
  * as import(`./chunk.mjs`). The value is the same, but Miniflare/workerd and
@@ -1174,43 +1195,34 @@ export function restoreLiteralModuleSpecifiers(
   const hasRequireTemplate = code.includes("require(`");
   if (!hasImportTemplate && !hasRequireTemplate) return code;
 
-  const parsed = parseSync(fileName, code, { lang: "js", sourceType: "module" });
-  if (parsed.errors.length > 0) {
-    throw new Error(`Failed to minify ${fileName}: ${parsed.errors[0].message}`);
-  }
   const replacements: Array<{ start: number; end: number; text: string }> = [];
 
-  // Fast path: the module record lists every import() argument without
-  // materializing the AST in JavaScript, which is most of the cost on a large
-  // server chunk. A template with no escapes, line breaks or substitutions is
-  // its own value. Anything else, and require() calls, which the module record
-  // does not list, take the AST path. Rolldown's CommonJS interop helper prints
-  // as `__require(`, which the AST path leaves alone, so only a `require(` that
-  // no identifier character precedes needs it.
+  // Fast path: es-module-lexer lists every import() argument without parsing
+  // the chunk, which is most of the cost on a large server chunk. A template
+  // with no escapes, line breaks or substitutions is its own value. Anything
+  // else, code the lexer cannot read, and require() calls, which it does not
+  // list, take the AST path. Rolldown's CommonJS interop helper prints as
+  // `__require(`, which the AST path leaves alone, so only a `require(` that no
+  // identifier character precedes needs it.
   let needsAst = hasRequireTemplate && /(?<![\w$])require\(`/.test(code);
-  if (!needsAst) {
-    // Oxc can list one import() twice: a parenthesized destructuring such as
-    // `({ a } = await import(...))` is parsed as a cover grammar first.
-    const seenStarts = new Set<number>();
-    for (const { moduleRequest } of parsed.module.dynamicImports) {
-      if (seenStarts.has(moduleRequest.start)) continue;
-      seenStarts.add(moduleRequest.start);
-      const source = code.slice(moduleRequest.start, moduleRequest.end);
-      if (!source.startsWith("`")) continue;
-      const value = source.slice(1, -1);
-      if (source.length < 2 || !source.endsWith("`") || /[\\\r\n`]|\$\{/.test(value)) {
-        needsAst = true;
-        break;
-      }
-      replacements.push({
-        start: moduleRequest.start,
-        end: moduleRequest.end,
-        text: toAsciiStringLiteral(value),
-      });
+  const dynamicImports = needsAst ? null : lexDynamicImportArguments(code);
+  if (!dynamicImports) needsAst = true;
+  for (const { start, end } of dynamicImports ?? []) {
+    const source = code.slice(start, end);
+    if (!source.startsWith("`")) continue;
+    const value = source.slice(1, -1);
+    if (source.length < 2 || !source.endsWith("`") || /[\\\r\n`]|\$\{/.test(value)) {
+      needsAst = true;
+      break;
     }
+    replacements.push({ start, end, text: toAsciiStringLiteral(value) });
   }
   if (needsAst) {
     replacements.length = 0;
+    const parsed = parseSync(fileName, code, { lang: "js", sourceType: "module" });
+    if (parsed.errors.length > 0) {
+      throw new Error(`Failed to minify ${fileName}: ${parsed.errors[0].message}`);
+    }
     const restore = (node: { type: string; start: number; end: number } | undefined) => {
       if (node?.type !== "TemplateLiteral") return;
       const template = node as import("rolldown/utils").ESTree.TemplateLiteral;
@@ -1585,7 +1597,11 @@ export async function buildUniversal(
         `[Farm.js] islands mode cannot hydrate these pages without shipping their server code to the browser:\n${islandsErrors.map((error) => `  - ${error}`).join("\n")}`,
       );
     }
-    const hydrationPlanCache = new Map<string, ClientModuleHydrationPlan>();
+    // The route manager planned every page and layout as the app initialized, with the same
+    // config; the client and SSR route tables start from those plans instead of planning again.
+    const hydrationPlanCache = routeManager.getRouteModuleHydrationPlans();
+    // What that plan read, parsed and resolved, for the client plans and the bundles' transforms.
+    const sourceSnapshot = routeManager.takeBuildSourceSnapshot();
 
     const clientOutputDir = path.join(root, distDir, "client");
     const [productionViteResult] = await productionViteResultPromise;
@@ -1624,6 +1640,7 @@ export async function buildUniversal(
         rendererBuildLifetime,
         routeManager.getProgrammaticClientRoutes(),
         mobileClient,
+        sourceSnapshot,
       );
     };
     const buildSSRBundle = () =>
@@ -1641,6 +1658,7 @@ export async function buildUniversal(
         isolatedClientBoundaryModules,
         hydrationPlanCache,
         rendererBuildLifetime,
+        sourceSnapshot,
       );
 
     // Route metadata and the client/SSR graphs read independent inputs. Drain
@@ -1699,6 +1717,7 @@ export async function buildUniversal(
           rendererBuildLifetime,
           routeManager.getProgrammaticClientRoutes(),
           mobileClient,
+          sourceSnapshot,
         );
       } catch (retryError) {
         if (!(retryError instanceof IncompleteClientBuildOutputError)) throw retryError;
@@ -1713,6 +1732,8 @@ export async function buildUniversal(
       }
     }
 
+    // Only the bundles' transforms read it.
+    sourceSnapshot?.clear();
     const ssrResult = ssrBuildResult.value;
     const routeRuntimeManifest = routeRuntimeManifestResult.value;
 
@@ -1972,7 +1993,7 @@ function getCachedClientModuleHydrationPlan(
   cache: Map<string, ClientModuleHydrationPlan>,
   options: FarmClientHydrationPlanOptions = {},
 ): ClientModuleHydrationPlan {
-  const key = `${path.resolve(root)}\0${mode}\0${options.asyncOwnerIslands === true}\0${options.serverOwners === true}\0${options.serverTreeLayouts === true}\0${path.resolve(modulePath)}`;
+  const key = getClientModuleHydrationPlanKey(modulePath, root, mode, options);
   let plan = cache.get(key);
   if (!plan) {
     plan = getClientModuleHydrationPlan(modulePath, root, mode, options);
@@ -1999,6 +2020,8 @@ async function buildClient(
    * block, and its documents use the mobile client when a shell asks for them.
    */
   mobile = false,
+  /** What the route manager's plan read, parsed and resolved (RouteManager.keepBuildSourceSnapshot). */
+  sourceSnapshot?: FarmSourceSnapshotStore,
 ) {
   // A mobile client from an earlier build must not outlive the `mobile` block.
   if (!mobile) await removeFarmMobileClientManifest(path.dirname(outputDir));
@@ -2104,7 +2127,12 @@ async function buildClient(
   // One source snapshot for every plan: routes share most of their import graphs (the layouts, a
   // component library and its barrels, the packages they import), which each route otherwise
   // read, parsed and resolved again. Planning is synchronous, so no file changes while it runs.
-  const { clientLayouts, clientRouteSlots } = withFarmSourceSnapshot(() => {
+  // It starts from what the route manager's plan learned, when the build kept that.
+  const plan = <T>(operation: () => T) =>
+    sourceSnapshot
+      ? withFarmSourceSnapshotOf(sourceSnapshot, operation)
+      : withFarmSourceSnapshot(operation);
+  const { clientLayouts, clientRouteSlots } = plan(() => {
     const clientLayouts = layoutRoutes.map((layout) => {
       try {
         const metadata = getCachedClientModuleHydrationPlan(
@@ -2633,7 +2661,7 @@ async function buildClient(
           },
           farmIslandContainersPlugin(config),
           farmPlugin(
-            { ...config, isolatedClientBoundaryModules, programmaticClientRoutes },
+            { ...config, isolatedClientBoundaryModules, programmaticClientRoutes, sourceSnapshot },
             pluginManager,
           ),
           farmEnvironmentFunctionsPlugin(config),
@@ -4037,7 +4065,7 @@ function isFarmDocsPath() {
 // Farm.js Client Runtime (no client components)
 ${cssImport}
 ${layoutImports}
-import { createClientCancellation, createClientPluginManager, createPluginlessClientRuntime, getFarmIslandValueHeaders, getHashTargetElement, installChunkErrorRecovery, isFarmBlockedNavigationURL, isFarmExternalNavigationURL, reconcileFarmDocumentHead, runFarmNavigationDelegates, setFarmBasePath, setFarmTrailingSlashPreference, stripFarmBasePath } from "@farm.js/core/internal/client-runtime";
+import { createClientCancellation, createClientPluginManager, createPluginlessClientRuntime, getFarmIslandValueHeaders, getHashTargetElement, installChunkErrorRecovery, installFarmLinkPrefetch, isFarmBlockedNavigationURL, isFarmExternalNavigationURL, reconcileFarmDocumentHead, runFarmNavigationDelegates, setFarmBasePath, setFarmTrailingSlashPreference, stripFarmBasePath } from "@farm.js/core/internal/client-runtime";
 import { createFarmDeploymentMismatchError, createFarmDeploymentRequestHeaders, isFarmDeploymentMismatchResponse } from "@farm.js/core/deployment";
 ${clientPluginEntry.imports}
 ${clientCachePersistence.imports}
@@ -4322,6 +4350,9 @@ document.addEventListener("click", function(e) {
   e.preventDefault();
   spaRouter.navigate(href);
 });
+
+// Link anchors on a page that does not hydrate prefetch through the router as Link would.
+installFarmLinkPrefetch();
 `.trim();
   }
 
@@ -4438,7 +4469,7 @@ ${layoutImports}
 ${rendererClientImports}
 ${isolatedHydrationImport}
 ${providerClientCode.imports}
-import { createClientCancellation, createClientPluginManager, createPluginlessClientRuntime, getFarmIslandValueHeaders, getHashTargetElement, installChunkErrorRecovery, isFarmBlockedNavigationURL, isFarmExternalNavigationURL, reconcileFarmDocumentHead, runFarmNavigationDelegates, scheduleFarmIslandHydration, createFarmSearchParams, searchParamsToObject, setFarmBasePath, setFarmTrailingSlashPreference, stripFarmBasePath } from "@farm.js/core/internal/client-runtime";
+import { createClientCancellation, createClientPluginManager, createPluginlessClientRuntime, getFarmIslandValueHeaders, getHashTargetElement, installChunkErrorRecovery, installFarmLinkPrefetch, isFarmBlockedNavigationURL, isFarmExternalNavigationURL, reconcileFarmDocumentHead, runFarmNavigationDelegates, scheduleFarmIslandHydration, createFarmSearchParams, searchParamsToObject, setFarmBasePath, setFarmTrailingSlashPreference, stripFarmBasePath } from "@farm.js/core/internal/client-runtime";
 import { createFarmDeploymentMismatchError, createFarmDeploymentRequestHeaders, isFarmDeploymentMismatchResponse } from "@farm.js/core/deployment";
 import { createFarmRouter, isFarmRouteActive, matchFarmRoute } from "@farm.js/core/router";
 ${clientPluginEntry.imports}
@@ -5832,6 +5863,9 @@ void farmClientRuntime.start();
 /*farm-router-start*/
 spaRouter.initializeHistory();
 window.__FARM_SPA_ROUTER__ = spaRouter;
+// Link anchors on a page that does not hydrate prefetch through the router as Link would. In
+// islands mode this runs once the router loads, so a page still loads it only when it needs it.
+installFarmLinkPrefetch();
 /*farm-router-end*/
 
 window.addEventListener("beforeunload", function(event) {
@@ -5895,6 +5929,7 @@ async function buildSSRInMemory(
   isolatedClientBoundaryModules: ReadonlySet<string>,
   hydrationPlanCache: Map<string, ClientModuleHydrationPlan>,
   rendererBuildLifetime: AbortSignal,
+  sourceSnapshot?: FarmSourceSnapshotStore,
 ): Promise<{
   bundle: OutputBundle;
   entryFile: string;
@@ -6037,6 +6072,7 @@ async function buildSSRInMemory(
     const openAPIManager = new OpenAPIManager(appDirs, config.openapi, {
       mode: "production",
       apiBaseURL: config.api.baseURL,
+      routes: () => apiRouteManager.getRoutes().values(),
       loadModule: (filePath) => apiRouteManager.loadModule(filePath),
     });
     const spec = await openAPIManager.generateSpec();
@@ -6354,7 +6390,14 @@ async function buildSSRInMemory(
         { ...createReactProductionModePlugin(), enforce: "pre" as const },
         farmServerOnlyEntriesPlugin(),
         farmIslandContainersPlugin(config),
-        farmPlugin({ ...config, isolatedClientBoundaryModules }, pluginManager),
+        farmPlugin(
+          {
+            ...config,
+            isolatedClientBoundaryModules,
+            sourceSnapshot,
+          },
+          pluginManager,
+        ),
         farmEnvironmentFunctionsPlugin(config),
         ...(hasRuntimeConfigModule
           ? [
@@ -8047,7 +8090,7 @@ const farmUserConfig = ${
 const farmRuntimeConfigs = [${[...layerConfigValues, "farmUserConfig"].join(", ")}].filter(Boolean);
 const farmResolvedRuntimeConfig = Object.assign({}, ...farmRuntimeConfigs);
 
-function FarmDefault404Page() {
+function renderFarmDefault404Page() {
   return React.createElement(React.Fragment, null,
     React.createElement("style", null, ${JSON.stringify(DEFAULT_NOT_FOUND_STYLES)}),
     React.createElement("main", {
@@ -8072,6 +8115,12 @@ function FarmDefault404Page() {
     )
   );
 }
+
+// Renderers that compile their own components (Vue, Svelte) render a plain function as a
+// component only once it is marked; unmarked, Vue printed this page as "[object Object]".
+const FarmDefault404Page = typeof React.markFunctionComponent === "function"
+  ? React.markFunctionComponent(renderFarmDefault404Page)
+  : renderFarmDefault404Page;
 
 /** The app's not-found page, or Farm's, without layouts. */
 function createFarmNotFoundElement(pathname) {
@@ -13536,7 +13585,15 @@ async function buildNitroUniversal(
     );
   }
 
-  const scheduledTasks = mergeScheduledTasks(farmWorkflows.scheduledTasks, farmCron.scheduledTasks);
+  const portableScheduledTasks = mergeScheduledTasks(
+    farmWorkflows.scheduledTasks,
+    farmCron.scheduledTasks,
+  );
+  // Cloudflare sends the trigger's own schedule as controller.cron, written in its day-of-week
+  // numbering (see toFarmCronCloudflareSchedule), so the tasks are keyed the same way.
+  const scheduledTasks = preset.startsWith("cloudflare")
+    ? toFarmCronCloudflareScheduledTasks(portableScheduledTasks)
+    : portableScheduledTasks;
   const cloudflareCronConfig =
     farmCron.provider === "host" ? createFarmCronCloudflareConfig(farmCron.jobs) : undefined;
 
@@ -14040,6 +14097,13 @@ function toFarmNodeResponse(request, response) {
             // in flight overlaps the worker's rendering with this thread's per-route work.
             concurrency: Math.min(os.availableParallelism(), 8),
             routes: prerenderRoutes.map(toPrerenderPublicPath),
+            // Cloudflare's asset server answers a directory index (about/index.html) at the
+            // trailing-slash URL and redirects the other spelling to it, so a page is written as
+            // about.html unless trailingSlash asks for the slash, as Nitro's Netlify and Vercel
+            // presets already write it.
+            ...(preset.startsWith("cloudflare")
+              ? { autoSubfolderIndex: config.trailingSlash === true }
+              : {}),
           },
         }
       : {}),
