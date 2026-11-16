@@ -87,7 +87,11 @@ lets the browser give `useId` the ids in the HTML. The full contract is islx's
   cannot do (React's browser client sends it as a temporary reference), and an action can return
   one that captured values.
 - **Navigation.** A navigation fetches the page's HTML, streamed, with only the layouts the
-  browser does not keep, and hydrates the islands it brings.
+  browser does not keep, and hydrates the islands it brings. A kept layout still runs on the
+  server, so a guard in it (`redirect()`, `notFound()`, an auth check) decides the navigation.
+  The build skips that run for a layout that cannot decide a request: one whose modules, followed
+  through every import, never throw, await, read `headers()`, `cookies()` or another
+  per-request value, and import no package besides React and `Link`.
 
 ## How it compares with React Server Components
 
