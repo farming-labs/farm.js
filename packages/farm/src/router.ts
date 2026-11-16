@@ -1,16 +1,14 @@
 import {
   AmbiguousRouteError,
-  compareRouteSpecificity,
-  getRoutePatternShape,
+  getRouteSpecificityKey,
   type RouteSegmentSpecificity,
 } from "./routing/specificity";
 import {
-  matchSegmentParts,
+  matchDecodedParts,
   normalizePathname,
   normalizeRoutePattern,
   parseRoutePattern,
-  splitNormalizedPathname,
-  splitPathname,
+  splitDecodedPathname,
   type RouterSegment,
 } from "./routing/matcher";
 
@@ -64,6 +62,8 @@ interface NormalizedRouterRoute<TMeta> {
   route: FarmRouterRoute<TMeta>;
   segments: RouterSegment[];
   specificity: RouteSegmentSpecificity[];
+  /** `getRouteSpecificityKey(specificity)`, which the router sorts by. */
+  specificityKey: string;
   index: number;
 }
 
@@ -73,7 +73,7 @@ export function createFarmRouter<TMeta = unknown>(
   const normalizedRoutes = routes.map(normalizeRouteInput);
   const patternsByShape = new Map<string, string>();
   for (const entry of normalizedRoutes) {
-    const shape = getRoutePatternShape(entry.route.path, "router");
+    const shape = getRouterRouteShape(entry);
     const existingPattern = patternsByShape.get(shape);
     if (existingPattern) {
       throw new AmbiguousRouteError(
@@ -106,10 +106,10 @@ export function createFarmRouter<TMeta = unknown>(
         };
       }
 
-      const parts = splitNormalizedPathname(normalizedPathname);
+      const parts = splitDecodedPathname(normalizedPathname);
 
       for (const entry of normalizedRoutes) {
-        const params = matchSegmentParts(entry.segments, parts);
+        const params = matchDecodedParts(entry.segments, parts);
         if (params) {
           return {
             route: entry.route,
@@ -183,12 +183,12 @@ export function isFarmRouteActive(
 ): boolean {
   const normalizedPathname = normalizePathname(pathname);
   const segments = parseRoutePattern(pattern);
-  const parts = splitNormalizedPathname(normalizedPathname);
-  if (matchSegmentParts(segments, parts)) return true;
+  const parts = splitDecodedPathname(normalizedPathname);
+  if (matchDecodedParts(segments, parts)) return true;
   if (options.exact !== false) return false;
 
   if (segments.length === 0) return normalizedPathname === "/";
-  return matchSegmentParts(segments, parts, true) !== null;
+  return matchDecodedParts(segments, parts, true) !== null;
 }
 
 function normalizeRouteInput<TMeta>(
@@ -198,6 +198,7 @@ function normalizeRouteInput<TMeta>(
   const route = typeof input === "string" ? { path: input } : input;
   const segments = parseRoutePattern(route.path);
   const path = normalizeRoutePattern(route.path);
+  const specificity = segments.map(getRouterSegmentSpecificity);
 
   return {
     route: {
@@ -205,9 +206,23 @@ function normalizeRouteInput<TMeta>(
       path,
     },
     segments,
-    specificity: segments.map(getRouterSegmentSpecificity),
+    specificity,
+    specificityKey: getRouteSpecificityKey(specificity),
     index,
   };
+}
+
+/**
+ * The URLs a parsed route matches, without its parameter names: what
+ * `getRoutePatternShape(path, "router")` returns, read from the segments already parsed.
+ */
+function getRouterRouteShape<TMeta>(entry: NormalizedRouterRoute<TMeta>): string {
+  if (entry.segments.length === 0) return "/";
+  return JSON.stringify(
+    entry.segments.map((segment, index) =>
+      segment.type === "static" ? `static:${segment.value}` : entry.specificity[index],
+    ),
+  );
 }
 
 function matchSegments(
@@ -215,15 +230,21 @@ function matchSegments(
   pathname: string,
   allowTrailingSegments = false,
 ): FarmRouterParams | null {
-  return matchSegmentParts(segments, splitPathname(pathname), allowTrailingSegments);
+  return matchDecodedParts(
+    segments,
+    splitDecodedPathname(normalizePathname(pathname)),
+    allowTrailingSegments,
+  );
 }
 
 function compareRoutes<TMeta>(
   left: NormalizedRouterRoute<TMeta>,
   right: NormalizedRouterRoute<TMeta>,
 ) {
-  const specificity = compareRouteSpecificity(left.specificity, right.specificity);
-  if (specificity !== 0) return specificity;
+  // compareRouteSpecificity, through its string key, then the input order.
+  if (left.specificityKey !== right.specificityKey) {
+    return left.specificityKey < right.specificityKey ? -1 : 1;
+  }
   return left.index - right.index;
 }
 

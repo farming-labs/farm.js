@@ -1,8 +1,8 @@
 import {
-  matchSegmentParts,
+  matchDecodedParts,
   normalizePathname,
   parseRoutePattern,
-  splitNormalizedPathname,
+  splitDecodedPathname,
 } from "./matcher";
 import { getRouteGroupScope, isInRouteGroupScope } from "./route-groups";
 
@@ -39,9 +39,9 @@ export function createFarmLayoutSelector<T extends { pattern: string }>(
     for (const { layout, segments, groupScope } of prepared) {
       // Root-only apps retain their no-URL-parsing path. No request paths are cached.
       if (segments !== null) {
-        parts ??= splitNormalizedPathname(normalizePathname(pathname.replace(/\/$/, "") || "/"));
+        parts ??= splitDecodedPathname(normalizePathname(pathname.replace(/\/$/, "") || "/"));
         // Prefix matching includes exact matches.
-        if (matchSegmentParts(segments, parts, true) === null) continue;
+        if (matchDecodedParts(segments, parts, true) === null) continue;
       }
       if (groupScope !== null) {
         if (directory === undefined) directory = resolveRouteDirectory?.(pathname) ?? null;
