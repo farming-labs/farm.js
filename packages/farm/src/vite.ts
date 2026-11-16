@@ -92,7 +92,7 @@ import {
   resolveMarkdownMirrorTarget,
 } from "./markdown";
 import { applyFarmBasePath, stripFarmBasePath } from "./base-path";
-import { toFarmTrailingSlashPageRequest } from "./trailing-slash";
+import { resolveFarmTrailingSlashRedirect, toFarmTrailingSlashPageRequest } from "./trailing-slash";
 import { FARM_NATIVE_TREE_CONTENT_TYPE } from "./mobile/native-tree-type";
 import { resolveFarmLlmsTxtConfig } from "./llms-txt";
 import { resolveFarmAgentCrawlers } from "./agent-crawlers";
@@ -4632,6 +4632,22 @@ window.__FARM_MANIFEST__ = ${inlineValue({
                   res.statusCode = 404;
                   res.setHeader("Content-Type", "application/json");
                   res.end(JSON.stringify({ error: "Route not found" }));
+                  return;
+                }
+
+                // A document request for this URL answers with the trailing-slash 308 (in
+                // production too), which the navigation follows. A redirect() to '/about' with
+                // trailingSlash lands here, and would otherwise stay at the non-canonical URL.
+                const trailingSlashLocation = resolveFarmTrailingSlashRedirect(
+                  targetRequestUrl,
+                  farmApp.getConfig().trailingSlash === true,
+                );
+                if (trailingSlashLocation) {
+                  await sendFarmPageDataRedirect(
+                    res,
+                    { location: trailingSlashLocation, status: 308 },
+                    farmConfig.deploymentId,
+                  );
                   return;
                 }
 
