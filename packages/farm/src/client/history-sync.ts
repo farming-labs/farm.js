@@ -21,6 +21,21 @@ export function writeFarmURLSearchHistory(action: "push" | "replace", href: stri
   return true;
 }
 
+/**
+ * Navigate to a URL whose search changed, through the installed SPA router, so the server renders
+ * the page for it (a query write that is not shallow). The router writes the history entry and
+ * notifies history observers once the page is on screen. `undefined` when no router is installed.
+ */
+export function navigateFarmURLSearch(
+  action: "push" | "replace",
+  href: string,
+  scroll: boolean,
+): Promise<void> | undefined {
+  const router = getInstalledFarmSPARouter();
+  if (!router || typeof router.navigate !== "function") return undefined;
+  return router.navigate(href, { replace: action === "replace", scroll });
+}
+
 function dispatchHistoryChange(kind: FarmHistoryChangeKind): void {
   window.dispatchEvent(
     new CustomEvent<FarmHistoryChangeDetail>(FARM_HISTORY_CHANGE_EVENT, {

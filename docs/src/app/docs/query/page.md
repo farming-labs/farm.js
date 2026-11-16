@@ -81,6 +81,13 @@ When Farm's SPA router is installed, shallow query pushes participate in its nor
 Back/forward blockers therefore receive the rendered query location and can restore a blocked
 traversal without inserting a duplicate entry.
 
+Writes are shallow by default: only the URL and the client hooks change, and the server does not
+render again. Pass `shallow: false` when server-rendered content depends on the query. Farm's SPA
+router then navigates to the new URL as a link to it would (`history: "replaceState"` replaces the
+entry and `scroll: true` scrolls to the top), so the page's `searchParams` and route data follow.
+The hook shows the new value right away. If the navigation is blocked or fails, it returns to the
+value in the URL.
+
 ## Multiple query values
 
 Use `useQueryStates` when several controls should update together. This keeps the browser URL as the source of shareable state for filters, pagination, and tabs.

@@ -8,6 +8,7 @@
 
 import { useState, useEffect, useCallback, useRef } from "react";
 import {
+  navigateFarmURLSearch,
   notifyHistoryChange,
   subscribeHistoryChange,
   writeFarmURLSearchHistory,
@@ -201,6 +202,17 @@ const commitURLUpdate = (
   if (newUrl === currentUrl) return;
 
   const historyAction = history === "replaceState" ? "replace" : "push";
+  if (!shallow) {
+    // Not shallow: the server renders the page for the new URL, as a Link to it would. The hooks
+    // already hold the new value; the router's history change re-syncs every reader once the page
+    // is on screen, and re-reading the URL when it settles undoes a blocked or failed navigation.
+    const navigation = navigateFarmURLSearch(historyAction, newUrl, scroll);
+    if (navigation) {
+      const resync = () => emitter.emitUpdate(getCurrentSearchParams());
+      void navigation.then(resync, resync);
+      return;
+    }
+  }
   if (!writeFarmURLSearchHistory(historyAction, newUrl)) {
     const historyState = window.history.state;
     const nextHistoryState =
