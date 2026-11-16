@@ -230,7 +230,11 @@ import {
 } from "../route-runtime-manifest";
 import type { FarmRouteRuntimeManifest, FarmRouteRuntimeManifestEntry } from "../route-runtime";
 import { createFarmVercelRouteRuntimeFunctions } from "./vercel-route-runtime";
-import { buildFarmVercelRoutes, createFarmVercelCanonicalSlashRoutes } from "./vercel-assets";
+import {
+  buildFarmVercelRoutes,
+  createFarmVercelCanonicalSlashRoutes,
+  createFarmVercelMarkdownRoutes,
+} from "./vercel-assets";
 import { listFarmClientOutputFiles, planFarmImmutableAssets } from "./immutable-assets";
 import {
   assertServerReadSSRAssetsSupported,
@@ -15292,6 +15296,7 @@ async function postProcessVercelOutput(
         ? createFarmVercelEdgeMiddlewareRoutes(edgeMiddleware.guardedPages, config.basePath)
         : [],
     canonicalSlashRoutes: createFarmVercelCanonicalSlashRoutes(prerenderedPages),
+    markdownRoutes: createFarmVercelMarkdownRoutes(prerenderedPages),
   });
 
   const vercelConfigWithWorkflowCrons = applyFarmWorkflowVercelCrons(

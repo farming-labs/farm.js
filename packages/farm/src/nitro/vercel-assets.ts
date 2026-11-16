@@ -43,6 +43,8 @@ export interface FarmVercelRoute {
   headers?: Record<string, string>;
   continue?: boolean;
   caseSensitive?: boolean;
+  /** Request conditions the route also needs to match. */
+  has?: Array<{ type: "header"; key: string; value?: string }>;
   /** The Edge function Vercel runs as routing middleware for a matching request. */
   middlewarePath?: string;
   middlewareRawSrc?: string[];
@@ -73,14 +75,26 @@ export interface FarmVercelRoute {
  * so it decides a request before Vercel serves a static file. Routes that send
  * a prerendered page's other trailing-slash spelling to the server come next,
  * also ahead of the static files that would otherwise answer it.
+ *
+ * Routes that send a prerendered page's Markdown requests to the server go
+ * first. Each prerendered page has a header route without `continue`, and a
+ * matching route without it ends routing, so a later route for the same URL
+ * is never reached.
  */
 export function buildFarmVercelRoutes(options: {
   presetRoutes: FarmVercelRoute[];
   runtimeRoutes: FarmVercelRoute[];
   middlewareRoutes?: FarmVercelRoute[];
   canonicalSlashRoutes?: FarmVercelRoute[];
+  markdownRoutes?: FarmVercelRoute[];
 }): FarmVercelRoute[] {
-  const { presetRoutes, runtimeRoutes, middlewareRoutes = [], canonicalSlashRoutes = [] } = options;
+  const {
+    presetRoutes,
+    runtimeRoutes,
+    middlewareRoutes = [],
+    canonicalSlashRoutes = [],
+    markdownRoutes = [],
+  } = options;
   const filesystemIndex = presetRoutes.findIndex((route) => route.handle === "filesystem");
   const sourceRoutes = filesystemIndex >= 0 ? presetRoutes.slice(0, filesystemIndex) : [];
   // Drop the preset's blanket immutable public-asset routes (the only
@@ -90,6 +104,7 @@ export function buildFarmVercelRoutes(options: {
   const preservedSourceRoutes = sourceRoutes.filter((route) => route.continue !== true);
 
   return [
+    ...markdownRoutes,
     ...preservedSourceRoutes,
     ...middlewareRoutes,
     ...canonicalSlashRoutes,
@@ -164,6 +179,29 @@ export function createFarmVercelCanonicalSlashRoutes(
   ];
   return groupFarmVercelRouteAlternatives(otherSpellings, escapeRegExp).map((group) => ({
     src: group.src,
+    dest: "/__nitro",
+  }));
+}
+
+/**
+ * An `Accept` header that names `text/markdown` or `text/plain`, the types Farm's server may
+ * answer a page URL with in Markdown. It matches more than the server serves Markdown for
+ * (`q=0`, HTML preferred), and the server weighs the header and answers those with HTML.
+ */
+export const FARM_VERCEL_MARKDOWN_ACCEPT_PATTERN = ".*text/(?:markdown|plain).*";
+
+/**
+ * The routes that send a request asking for Markdown at a prerendered page's URL to Farm's
+ * server. A static file cannot read `Accept`, so without them an agent asking for
+ * `text/markdown` gets the HTML file, where the same page rendered on request answers with its
+ * Markdown. The server runs every middleware, `runtime: "edge"` included, so a page that routing
+ * middleware guards stays guarded. Many pages take several routes: Vercel limits the length of
+ * each.
+ */
+export function createFarmVercelMarkdownRoutes(publicPaths: readonly string[]): FarmVercelRoute[] {
+  return groupFarmVercelRouteAlternatives([...new Set(publicPaths)], escapeRegExp).map((group) => ({
+    src: group.src,
+    has: [{ type: "header", key: "accept", value: FARM_VERCEL_MARKDOWN_ACCEPT_PATTERN }],
     dest: "/__nitro",
   }));
 }
