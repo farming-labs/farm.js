@@ -122,6 +122,12 @@ export async function middleware(
 }
 ```
 
+A request-first middleware can read the request body (`await request.json()`, `request.text()`,
+`request.formData()`), for example to verify a signed webhook, and the route still receives the
+whole body. Each such middleware reads its own copy. The body is copied only when middleware reads
+it, so a middleware that never does adds no work. A body over `server.bodySizeLimit` answers
+`413`, as it does when the route reads it.
+
 `redirect()`, `permanentRedirect()`, and `notFound()` from `@farm.js/core/navigation` also work in
 middleware: Farm answers with the redirect, or with a `404` and the app's `not-found.tsx` (Farm's
 built-in page when there is none), without running the page. The redirect target is sent as

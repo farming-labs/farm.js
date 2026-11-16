@@ -255,6 +255,8 @@ export function createWebRequestFromFarmRequest(
   options: FarmRequestURLOptions & {
     /** Aborts when the client goes away, as a production request's signal does. */
     signal?: AbortSignal;
+    /** The body to send instead of streaming the Node request's own. */
+    body?: ReadableStream<Uint8Array>;
   } = {},
 ): Request {
   const fullUrl = resolveFarmRequestURL(req, options).toString();
@@ -283,7 +285,7 @@ export function createWebRequestFromFarmRequest(
   };
 
   if (method !== "GET" && method !== "HEAD") {
-    init.body = Readable.toWeb(req) as ReadableStream<Uint8Array>;
+    init.body = options.body ?? (Readable.toWeb(req) as ReadableStream<Uint8Array>);
     init.duplex = "half";
   }
 

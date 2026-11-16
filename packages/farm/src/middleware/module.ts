@@ -1,4 +1,5 @@
-import { createWebRequestFromFarmRequest } from "../server/request";
+import { createFarmRequestBodyErrorResponse } from "../server-http";
+import { createFarmMiddlewareRequest } from "./request-body";
 import type {
   MiddlewareConfig,
   MiddlewareContext,
@@ -11,17 +12,6 @@ import type {
 export interface NormalizedMiddlewareModule {
   handlers: MiddlewareFunction[];
   config?: MiddlewareConfig;
-}
-
-function isWebRequest(request: unknown): request is Request {
-  return typeof Request !== "undefined" && request instanceof Request;
-}
-
-function toWebRequest(ctx: MiddlewareContext): Request {
-  if (isWebRequest(ctx.request)) {
-    return ctx.request;
-  }
-  return createWebRequestFromFarmRequest(ctx.request, { origin: ctx.url.origin });
 }
 
 function createRequestMiddlewareContext(
@@ -119,7 +109,20 @@ export function normalizeMiddlewareModule(
     return {
       handlers: [
         async (ctx) => {
-          return namedExport(toWebRequest(ctx), createRequestMiddlewareContext(ctx));
+          const middlewareRequest = createFarmMiddlewareRequest(ctx);
+          try {
+            return await namedExport(
+              middlewareRequest.request,
+              createRequestMiddlewareContext(ctx),
+            );
+          } catch (error) {
+            // A body over server.bodySizeLimit answers as the route would, not as a crash.
+            const response = createFarmRequestBodyErrorResponse(error);
+            if (response) return response;
+            throw error;
+          } finally {
+            middlewareRequest.release();
+          }
         },
       ],
       config: module.config,
