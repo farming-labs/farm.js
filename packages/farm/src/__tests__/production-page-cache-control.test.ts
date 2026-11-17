@@ -92,7 +92,8 @@ describe("production page Cache-Control", () => {
       pprConfig: ppr,
       hasRequestScopedRender: false,
     });
-    expect(headers["Cache-Control"]).toBe("s-maxage=60, stale-while-revalidate");
+    // The documented shared policy, with a stale-while-revalidate value as RFC 5861 requires.
+    expect(headers["Cache-Control"]).toBe("public, s-maxage=60, stale-while-revalidate=300");
   });
 
   it("leaves a dynamic page under a swr or cache route rule to the rule's policy", () => {
