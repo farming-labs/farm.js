@@ -26,6 +26,7 @@ import { resolveServerActionsConfig } from "../server-action-security";
 import { resolveFarmServerComponentsMode } from "../server-components-mode";
 import { createBundledEnv } from "../env";
 import { generateNativeMCPPluginSource } from "./native-mcp-source";
+import { createNitroStaticRangePlugin } from "./static-range";
 import { FARM_MOBILE_SESSION_PLUGIN } from "../mobile/session";
 import { FARM_NATIVE_SERVER_FN_PLUGIN } from "../mobile/native-server-fn-names";
 import { collectFarmNativeServerFns, findFarmNativeScreenFiles } from "../mobile/native-server-fns";
@@ -14600,20 +14601,20 @@ function toFarmNodeResponse(request, response) {
   const ssrRollupPlugin = canReusePrebuiltSSR
     ? prebuiltSSRPlugin
     : createServerReadSSRAssetsPlugin(ssrBundle, ssrOutputDir);
-  if (ssrRollupPlugin) {
-    const configuredRollupPlugins = nitroConfig.rollupConfig?.plugins;
-    nitroConfig.rollupConfig = {
-      ...nitroConfig.rollupConfig,
-      plugins: [
-        ...(Array.isArray(configuredRollupPlugins)
-          ? configuredRollupPlugins
-          : configuredRollupPlugins
-            ? [configuredRollupPlugins]
-            : []),
-        ssrRollupPlugin,
-      ],
-    };
-  }
+  const configuredRollupPlugins = nitroConfig.rollupConfig?.plugins;
+  nitroConfig.rollupConfig = {
+    ...nitroConfig.rollupConfig,
+    plugins: [
+      ...(Array.isArray(configuredRollupPlugins)
+        ? configuredRollupPlugins
+        : configuredRollupPlugins
+          ? [configuredRollupPlugins]
+          : []),
+      ...(ssrRollupPlugin ? [ssrRollupPlugin] : []),
+      // Added after the checks above: it changes no SSR output, only how public files answer `Range`.
+      createNitroStaticRangePlugin(resolveNitroPackageEntry(root)),
+    ],
+  };
 
   nitroConfig.minify = useFarmServerMinifier ? false : shouldMinify;
 
