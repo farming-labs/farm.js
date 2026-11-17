@@ -156,7 +156,9 @@ export function createServerQuery(options: AnyServerQueryOptions): ServerQuery<u
 
       const clientKey = createRouteDataCacheKey(routeKey);
       const cacheKey = createFarmCacheKey(["route-data", routeKey]);
+      let produced = false;
       const producer = async () => {
+        produced = true;
         const value = await options.handler(context);
         return _parseServerFnSchema(options.output, value, "output", "createServerQuery");
       };
@@ -175,6 +177,12 @@ export function createServerQuery(options: AnyServerQueryOptions): ServerQuery<u
         });
         updatedAt =
           (await cache.getEntryAsync(cacheKey, { allowStale: true }))?.createdAt ?? Date.now();
+        // Route data and other queries can store a value under the same key. A value this query
+        // did not produce still passes its output schema before it reaches the browser, so the
+        // schema keeps out fields another producer stored (a route's full database row).
+        if (!produced && options.output) {
+          data = _parseServerFnSchema(options.output, data, "output", "createServerQuery");
+        }
       }
 
       return createFarmServerQueryResult(data, {

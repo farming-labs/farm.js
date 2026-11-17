@@ -53,7 +53,7 @@ export const productQuery = createServerQuery({
 
 Farm adds the server-module boundary during compilation. Keep exported `createServerQuery` declarations out of files with `"use client"`, just like `createServerFn` declarations.
 
-The `input`, `output`, and middleware contracts are the same as `createServerFn`. Input is validated before the key and handler run. Output is validated before it enters either the server or browser cache.
+The `input`, `output`, and middleware contracts are the same as `createServerFn`. Input is validated before the key and handler run. Output is validated before it enters either the server or browser cache. A value that route data or another producer cached under the same key also passes the query's `output` schema before the query returns it, so a narrow schema keeps out fields another producer stored.
 
 ## Call on the server
 

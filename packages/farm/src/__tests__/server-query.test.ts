@@ -97,6 +97,33 @@ describe("createServerQuery", () => {
     expect(calls).toBe(1);
   });
 
+  it("applies its output schema to a value route data stored under its key", async () => {
+    // Route data has no output schema: a route can cache a full database row under the key a
+    // narrower query shares. The query's output contract still decides what reaches the browser.
+    const key = ["user", "u1"] as const;
+    const cacheKey = createFarmCacheKey(["route-data", key]);
+    const handler = vi.fn(async () => ({ id: "u1", name: "Ada" }));
+    const user = createServerQuery({
+      input: z.object({ id: z.string() }),
+      output: z.object({ id: z.string(), name: z.string() }),
+      key: () => key,
+      staleTime: "5m",
+      handler,
+    });
+
+    getFarmDataCache().set(
+      cacheKey,
+      { id: "u1", name: "Ada", passwordHash: "secret-hash" },
+      { tags: [createRouteDataCacheTag(key)], revalidate: 300 },
+    );
+    await expect(user({ id: "u1" })).resolves.toEqual({ id: "u1", name: "Ada" });
+    expect(handler).not.toHaveBeenCalled();
+
+    // A stored value the schema rejects is refused rather than sent.
+    getFarmDataCache().set(cacheKey, { id: "u1" }, { tags: [createRouteDataCacheTag(key)] });
+    await expect(user({ id: "u1" })).rejects.toThrow();
+  });
+
   it("honors subsecond stale times without rounding them to one second", async () => {
     vi.useFakeTimers();
     vi.setSystemTime(0);
