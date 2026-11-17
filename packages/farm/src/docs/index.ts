@@ -1,12 +1,15 @@
 export {
   createFarmDocsHandler,
   discoverFarmDocsPages,
+  getFarmDocsContentDirs,
   getFarmDocsDocumentNavigationMatchers,
   getFarmDocsRouteTypeEntries,
+  isFarmDocsContentFile,
   isFarmDocsRequest,
   loadFarmDocsPage,
   resolveFarmDocsContentDir,
 } from "./handler";
+export { invalidateFarmDocsLastModified } from "./last-modified";
 export {
   createFarmDocsAdapterHandler,
   getFarmDocsConfigModuleRoot,
