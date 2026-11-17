@@ -14,7 +14,10 @@ export {
   farmDocsLayoutsWrapPage,
   placeFarmDocsLayoutRoot,
 } from "../server/docs-layout-tree";
-export { isInRouteGroupScope as isInFarmRouteGroupScope } from "../routing/route-groups";
+export {
+  isInRouteGroupScope as isInFarmRouteGroupScope,
+  routeBoundaryCoversDirectory,
+} from "../routing/route-groups";
 export {
   mergeRouteRenderingDirectiveConfig,
   resolveRouteSharedCacheControl,

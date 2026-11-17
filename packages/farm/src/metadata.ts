@@ -240,7 +240,10 @@ export function addMetadataImageReference(
   const twitter = { ...metadata.twitter };
   if (!hasMetadataImages(twitter.images)) {
     twitter.images = [reference.href];
-    twitter.card = twitter.card || "summary_large_image";
+    // A Player Card's type comes from its players in appendTwitter.
+    if (resolveTwitterPlayers(metadata, resolveMetadataBase(metadata)).length === 0) {
+      twitter.card = twitter.card || "summary_large_image";
+    }
   }
 
   return {
@@ -380,7 +383,7 @@ export function renderMetadataHead(
     title: explicitTitle,
     description: resolvedMetadata.description,
   });
-  appendTwitter(tags, resolvedMetadata.twitter, metadataBase);
+  appendTwitter(tags, resolvedMetadata, metadataBase);
   appendVerification(tags, resolvedMetadata.verification);
 
   if (options.jsonLd) {
@@ -482,10 +485,14 @@ function appendOpenGraph(
   }
 }
 
-function appendTwitter(tags: string[], twitter: Metadata["twitter"], metadataBase?: string) {
-  if (!isRecord(twitter)) return;
+function appendTwitter(tags: string[], metadata: MetadataRecord, metadataBase?: string) {
+  const players = resolveTwitterPlayers(metadata, metadataBase);
+  if (!isRecord(metadata.twitter) && players.length === 0) return;
+  const twitter = (isRecord(metadata.twitter) ? metadata.twitter : {}) as NonNullable<
+    Metadata["twitter"]
+  >;
 
-  appendMetaName(tags, "twitter:card", twitter.card);
+  appendMetaName(tags, "twitter:card", twitter.card ?? (players.length > 0 ? "player" : undefined));
   appendMetaName(tags, "twitter:site", twitter.site);
   appendMetaName(tags, "twitter:creator", twitter.creator);
   appendMetaName(tags, "twitter:title", twitter.title);
@@ -494,6 +501,13 @@ function appendTwitter(tags: string[], twitter: Metadata["twitter"], metadataBas
   for (const image of normalizeMetadataImages(twitter.images, metadataBase)) {
     appendMetaName(tags, "twitter:image", image.url);
     appendMetaName(tags, "twitter:image:alt", image.alt);
+  }
+
+  for (const player of players) {
+    appendMetaName(tags, "twitter:player", player.playerUrl);
+    appendMetaName(tags, "twitter:player:stream", player.streamUrl);
+    appendMetaName(tags, "twitter:player:width", player.width);
+    appendMetaName(tags, "twitter:player:height", player.height);
   }
 }
 
@@ -658,6 +672,86 @@ function normalizeMetadataVideos(
         width: normalizeNumber(item.width),
         height: normalizeNumber(item.height),
         type: typeof item.type === "string" ? item.type : undefined,
+      };
+    })
+    .filter((item): item is NonNullable<typeof item> => item !== null);
+}
+
+/**
+ * Path of the player page Farm ships when a renderer is enabled. Static files are served
+ * from the origin root, so a `basePath` does not prefix it.
+ */
+export const FARM_VIDEO_PLAYER_PATH = "/_farm/video-player.html";
+
+const DEFAULT_TWITTER_PLAYER_SIZE = { width: 1200, height: 630 };
+
+/**
+ * The page's X Player Card entries: `twitter.players` when set, otherwise one that
+ * plays the first `openGraph.videos` file in Farm's player page, since X ignores
+ * og:video. Another card type or `players: []` opts out. Only same-origin videos
+ * qualify, so the player page never plays a URL the app did not serve.
+ */
+function resolveTwitterPlayers(metadata: MetadataRecord, metadataBase?: string) {
+  const twitter = isRecord(metadata.twitter) ? metadata.twitter : {};
+  if (twitter.players !== undefined) return normalizeTwitterPlayers(twitter.players, metadataBase);
+  if (twitter.card !== undefined && twitter.card !== "player") return [];
+  if (!isRecord(metadata.openGraph)) return [];
+
+  const video = normalizeMetadataVideos(metadata.openGraph.videos, metadataBase).find(
+    (entry) => !entry.type || entry.type.startsWith("video/"),
+  );
+  const src = video && toSameOriginPath(video.secureUrl ?? video.url, metadataBase);
+  if (!video || !src) return [];
+
+  const query = new URLSearchParams({ src });
+  const image = normalizeMetadataImages(
+    metadata.openGraph.images ?? (metadata.openGraph as any).image,
+    metadataBase,
+  )[0];
+  const poster = image && toSameOriginPath(image.url, metadataBase);
+  if (poster) query.set("poster", poster);
+  const size =
+    video.width && video.height
+      ? { width: video.width, height: video.height }
+      : DEFAULT_TWITTER_PLAYER_SIZE;
+  const playerPath = `${FARM_VIDEO_PLAYER_PATH}?${query}`;
+
+  return [
+    {
+      playerUrl: metadataBase ? new URL(playerPath, metadataBase).href : playerPath,
+      ...size,
+    },
+  ];
+}
+
+/** The path and query of `url` when it is on the page's origin, else `undefined`. */
+function toSameOriginPath(url: string, metadataBase?: string): string | undefined {
+  // Without a metadataBase, only a root-relative URL is known to be the page's own.
+  if (!metadataBase && !url.startsWith("/")) return undefined;
+  try {
+    const base = new URL(metadataBase ?? "http://farm.local");
+    const resolved = new URL(url, base);
+    return resolved.origin === base.origin ? `${resolved.pathname}${resolved.search}` : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+function normalizeTwitterPlayers(
+  value: unknown,
+  metadataBase?: string,
+): Array<{ playerUrl: string; streamUrl?: string; width?: number; height?: number }> {
+  return normalizeArray(value)
+    .map((item) => {
+      if (!isRecord(item)) return null;
+      const playerUrl = resolveMetadataUrl(item.playerUrl, metadataBase);
+      if (!playerUrl) return null;
+
+      return {
+        playerUrl,
+        streamUrl: resolveMetadataUrl(item.streamUrl, metadataBase),
+        width: normalizeNumber(item.width),
+        height: normalizeNumber(item.height),
       };
     })
     .filter((item): item is NonNullable<typeof item> => item !== null);

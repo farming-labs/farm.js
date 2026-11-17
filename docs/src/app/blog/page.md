@@ -7,6 +7,10 @@ description: "Releases, engineering notes, and ideas from the people building Fa
 
 Releases, engineering notes, and ideas.
 
+## [I asked 105 developer sites for Markdown. A third answered with HTML.](/blog/agent-markdown-scan)
+
+What 105 developer-tool sites send an AI agent that asks for Markdown. A third answer with only HTML, the median docs page is 35 times bigger as HTML, and the frameworks and build tools developers use are furthest behind.
+
 ## [How Farm draws a page natively, and when it bails out](/blog/native-internals)
 
 How a `page.tsx` becomes Android views and UIKit with no JavaScript on the phone, the three layers of bailout that fall back to the web page, and why a JSON tree from the server is not the bridge React Native removed.

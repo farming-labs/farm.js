@@ -98,16 +98,18 @@ export const metadata = {
       {
         url: "/videos/farmjs-link-preview.mp4",
         type: "video/mp4",
-        width: 2400,
-        height: 1260,
+        width: 1200,
+        height: 630,
       },
     ],
   },
+  // "player" overrides the layout's card, so X plays openGraph.videos in Farm's player page.
+  // No `images`: X then shows og:image, whose `?v=` changes when the image does.
   twitter: {
-    card: "summary_large_image",
+    card: "player",
+    site: "@farming_labs",
     title: homepageTitle,
     description: homepageDescription,
-    images: ["/opengraph-image"],
   },
 } satisfies Metadata;
 

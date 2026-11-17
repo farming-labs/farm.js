@@ -332,7 +332,7 @@ Farm sets these values during server rendering:
 
 - `<html lang>` from the resolved locale.
 - `<html dir>` from the locale direction.
-- `hreflang` links for every configured locale plus `x-default` when URLs use prefixes. Search engines only accept absolute alternate URLs, so Farm resolves them against the route's `metadataBase` when it is set and against the request origin otherwise. Forwarded host and protocol headers count only with `server.trustProxy`.
+- `hreflang` links for every configured locale plus `x-default` when URLs use prefixes. Search engines only accept absolute alternate URLs, so Farm resolves them against the route's `metadataBase` when it is set and against the request origin otherwise. Forwarded host and protocol headers count only with `server.trustProxy`. A page that lists its own language versions in `metadata.alternates.languages` owns its `hreflang` links: Farm adds none of its own, so a language never has two alternates with different URLs.
 - Locale-aware Open Graph and Twitter image URLs.
 - A serialized locale snapshot for hydration.
 

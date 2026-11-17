@@ -70,6 +70,7 @@ import {
   resolveFarmRequestURL,
 } from "./request";
 import { _peekCurrentRequest, _resolveCurrentCspNonce } from "./request-bridge";
+import { routeBoundaryCoversDirectory } from "../routing/route-groups";
 import { _setFarmSearchPreserveRoutes } from "../client/search-preserve-routes";
 import {
   createFarmCacheKey,
@@ -1798,7 +1799,7 @@ window.__FARM_I18N__ = ${i18nSnapshot ? serializeInlineValue(i18nSnapshot) : "nu
     let middlewareMap = new Map<string, any>();
     let middlewareContext = new Map<string, any>();
     let pluginExposedContext = new Map<string, any>();
-    let errorBoundaryEntry: { modulePath: string } | null = null;
+    let errorBoundaryEntry: { modulePath: string; pattern: string } | null = null;
     let pprRefreshRoute: string | null = null;
 
     const completeRender = (status = res.statusCode || 200, route = pathname) => {
@@ -2310,6 +2311,9 @@ window.__FARM_I18N__ = ${i18nSnapshot ? serializeInlineValue(i18nSnapshot) : "nu
 
       (req as any).__FARM_PAGE_PATH__ = route.modulePath;
       (req as any).__FARM_ROUTE__ = pathname;
+      // The outermost layout, which renders the document when one does: a route group's own root
+      // layout (`app/(admin)/layout.tsx`) when the app has no `app/layout.tsx`.
+      (req as any).__FARM_ROOT_LAYOUT_PATH__ = layouts[0]?.modulePath;
       (req as any).__FARM_IS_CLIENT_COMPONENT__ = isClientComponent;
       (req as any).__FARM_PAGE_SHOULD_HYDRATE__ = shouldHydrate;
       (req as any).__FARM_LAYOUT_SHOULD_HYDRATE__ = shouldHydrateLayout;
@@ -2719,6 +2723,7 @@ window.__FARM_I18N__ = ${i18nSnapshot ? serializeInlineValue(i18nSnapshot) : "nu
           error,
           statusCode: errorStatus,
           errorModulePath: errorBoundaryEntry.modulePath,
+          errorPattern: errorBoundaryEntry.pattern,
         });
 
         if (rendered) {
@@ -3526,6 +3531,8 @@ window.__FARM_I18N__ = ${i18nSnapshot ? serializeInlineValue(i18nSnapshot) : "nu
       error: unknown;
       statusCode: number;
       errorModulePath: string;
+      /** The boundary's directory pattern: it renders inside the layouts that cover it. */
+      errorPattern?: string;
     },
   ): Promise<boolean> {
     try {
@@ -3555,8 +3562,21 @@ window.__FARM_I18N__ = ${i18nSnapshot ? serializeInlineValue(i18nSnapshot) : "nu
       });
 
       let wrapped: any = errorElement;
+      // The boundary renders inside its own segment's layouts and those above it, never inside a
+      // deeper layout: a layout below the boundary that throws would throw again inside it.
+      const boundaryLayouts =
+        options.errorPattern === undefined
+          ? options.layouts
+          : options.layouts.filter(
+              (layout) =>
+                !("pattern" in layout) ||
+                routeBoundaryCoversDirectory(
+                  (layout as { pattern: string }).pattern,
+                  options.errorPattern!,
+                ),
+            );
       const layoutModules = await Promise.all(
-        options.layouts.map((layout) => this.routeManager.loadLayoutModule(layout.modulePath)),
+        boundaryLayouts.map((layout) => this.routeManager.loadLayoutModule(layout.modulePath)),
       );
       for (let i = layoutModules.length - 1; i >= 0; i--) {
         const LayoutComponent = layoutModules[i].default;
@@ -3814,12 +3834,15 @@ window.__FARM_I18N__ = ${getFarmI18nClientSnapshot() ? serializeInlineValue(getF
    * this up front keeps a route's first request on the buffered path too; a layout this cannot
    * call (async, a class, or one using hooks) falls back to detection from the stream.
    */
-  private async rootLayoutRendersDocument(): Promise<boolean> {
-    if (typeof this.routeManager.getLayouts !== "function") return false;
-    const rootLayout = this.routeManager.getLayouts().get("/");
-    if (!rootLayout) return false;
+  private async rootLayoutRendersDocument(req: FarmRequest): Promise<boolean> {
+    const modulePath =
+      ((req as any).__FARM_ROOT_LAYOUT_PATH__ as string | undefined) ??
+      (typeof this.routeManager.getLayouts === "function"
+        ? this.routeManager.getLayouts().get("/")?.modulePath
+        : undefined);
+    if (!modulePath) return false;
     try {
-      const Layout = (await this.routeManager.loadLayoutModule(rootLayout.modulePath)).default;
+      const Layout = (await this.routeManager.loadLayoutModule(modulePath)).default;
       if (
         typeof Layout !== "function" ||
         Layout.prototype?.isReactComponent ||
@@ -3873,7 +3896,7 @@ window.__FARM_I18N__ = ${getFarmI18nClientSnapshot() ? serializeInlineValue(getF
     // the whole document. So does the anonymous check behind a page's Markdown source, where a
     // late redirect() must still set the status.
     const streamDocument =
-      fullDocumentRoutes.has(fullDocumentRouteKey) || (await this.rootLayoutRendersDocument());
+      fullDocumentRoutes.has(fullDocumentRouteKey) || (await this.rootLayoutRendersDocument(req));
     if (
       !renderToPipeableStream ||
       _isFarmMarkdownPageCheck(req.headers?.[FARM_MARKDOWN_PAGE_CHECK_HEADER]) ||
@@ -4707,6 +4730,8 @@ window.__FARM_I18N__ = ${getFarmI18nClientSnapshot() ? serializeInlineValue(getF
       origin: req
         ? resolveFarmRequestURL(req, { trustProxy: this.config.server?.trustProxy }).origin
         : undefined,
+      languages: (metadata as { alternates?: { languages?: unknown } } | undefined)?.alternates
+        ?.languages,
     };
   }
 

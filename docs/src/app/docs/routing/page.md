@@ -1120,7 +1120,7 @@ array and render one `article:author` or `article:tag` per item. `section` rende
 
 ### Video previews
 
-`openGraph.videos` adds a short loop to the link preview in apps that play one, such as Messages and Discord. Other apps keep showing `openGraph.images`, so set both:
+`openGraph.videos` adds a short loop to the link preview in apps that play one, such as Messages, Telegram, and Discord. Other apps keep showing `openGraph.images`, so set both:
 
 **src/app/page.tsx**
 
@@ -1133,9 +1133,40 @@ export const metadata = {
 };
 ```
 
-Each entry renders `og:video`, plus `og:video:secure_url`, `og:video:type`, `og:video:width`, and `og:video:height` when set. `url` and `secureUrl` resolve against `metadataBase` like image URLs, and a plain string is shorthand for `{ url }`. Point `url` at the media file itself, such as an MP4 in `public/`, not at a player page. Discord plays the video only when `openGraph.type` is `"video"` or starts with `"video."`.
+Each entry renders `og:video`, plus `og:video:secure_url`, `og:video:type`, `og:video:width`, and `og:video:height` when set. `url` and `secureUrl` resolve against `metadataBase` like image URLs, and a plain string is shorthand for `{ url }`. Point `url` at the media file itself, such as an MP4 in `public/`, not at a player page. Files in `public/` answer `Range` requests with `206 Partial Content` in development and from a self-hosted server, which Safari and Messages need before they play a video. Discord plays the video only when `openGraph.type` is `"video"` or starts with `"video."`.
 
 Open Graph merges one level, so `videos` set in a layout applies to every page under it. Set it on the page that owns the video, or set `videos: []` in a page that should not inherit it.
+
+X ignores `og:video` and plays a link's video only in a Player Card, which loads a player page in an iframe. Farm adds one for you: a page with `openGraph.videos` also gets `twitter:card` set to `player` and a `twitter:player` that points at `/_farm/video-player.html`, a bare player page Farm serves when a renderer is enabled. Backend-only apps with `renderer: false` do not serve or build this page. With `metadataBase: "https://acme.test"`, the example above renders:
+
+```html
+<meta name="twitter:card" content="player" />
+<meta
+  name="twitter:player"
+  content="https://acme.test/_farm/video-player.html?src=%2Fog%2Fhome.mp4"
+/>
+<meta name="twitter:player:width" content="2400" />
+<meta name="twitter:player:height" content="1260" />
+```
+
+The player uses the first entry whose `type` is unset or starts with `video/`, and its `width` and `height`, or 1200 by 630 when they are unset. A first `openGraph.images` entry on the same origin becomes the player's poster. The player autoplays muted and loops videos up to 10 seconds long, as X's Player Card policy allows; longer videos wait for the play button. X also asks for `twitter:site` on a Player Card, so set it to your X handle.
+
+Only videos on the page's own origin get a player, so the player page never plays a URL your app did not serve: a relative URL, or one on the `metadataBase` origin. The player page is a static file, so a site-wide `X-Frame-Options: DENY` from `headers()` does not keep X from framing it. Files in `public/` are served before it, so a `public/_farm/video-player.html` replaces it.
+
+A `twitter.card` other than `"player"`, including one a layout sets, keeps that card, and `twitter: { players: [] }` turns the player off. Set `twitter.players` to use your own player page instead, such as one your video host provides:
+
+```tsx
+export const metadata = {
+  twitter: {
+    site: "@acme",
+    players: [{ playerUrl: "https://video.acme.test/embed/home", width: 1200, height: 630 }],
+  },
+};
+```
+
+Each entry renders `twitter:player`, `twitter:player:width`, and `twitter:player:height`, plus `twitter:player:stream` when `streamUrl` is set, and `card` defaults to `"player"`. `playerUrl` and `streamUrl` resolve against `metadataBase`. The page must load over HTTPS inside X's iframe, so serve it without `X-Frame-Options: DENY` or a `frame-ancestors` policy that blocks X.
+
+X shows `twitter:image`, or `og:image` when that is unset, until someone plays the card. Clients without Player Card support keep showing the image.
 
 ### Favicons
 

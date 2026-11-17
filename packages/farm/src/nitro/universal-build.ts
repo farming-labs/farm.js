@@ -26,6 +26,7 @@ import { resolveServerActionsConfig } from "../server-action-security";
 import { resolveFarmServerComponentsMode } from "../server-components-mode";
 import { createBundledEnv } from "../env";
 import { generateNativeMCPPluginSource } from "./native-mcp-source";
+import { createNitroStaticRangePlugin } from "./static-range";
 import { FARM_MOBILE_SESSION_PLUGIN } from "../mobile/session";
 import { FARM_NATIVE_SERVER_FN_PLUGIN } from "../mobile/native-server-fn-names";
 import { collectFarmNativeServerFns, findFarmNativeScreenFiles } from "../mobile/native-server-fns";
@@ -179,6 +180,8 @@ import {
 } from "../docs/adapter-client";
 import { farmDocsClientConfigPlugin } from "../docs/client-config";
 import { resolveFarmDocsFontAssets, toFarmDocsPublicFontAssets } from "../docs/fonts";
+import { FARM_VIDEO_PLAYER_PATH } from "../metadata";
+import { FARM_VIDEO_PLAYER_HTML } from "../video-player";
 import { compileFarmDocsManifest } from "../docs/compiler";
 import {
   discoverFarmDocsPages,
@@ -1766,6 +1769,9 @@ export async function buildUniversal(
     const { bundle: ssrBundle, entryFile: ssrEntryFile, configuredHeaderRoutes } = ssrResult;
     assertServerReadSSRAssetsSupported(ssrBundle, preset, root);
     await writeSSRAssetsToClient(ssrBundle, clientOutputDir);
+    if (!rendererDisabled) {
+      await writeFarmVideoPlayerToClient(clientOutputDir);
+    }
     if (config.docs.enabled) {
       await copyFarmDocsFontAssetsToClient(root, clientOutputDir);
     }
@@ -1888,6 +1894,21 @@ async function writeSSRAssetsToClient(bundle: OutputBundle, outputDir: string): 
     const filePath = path.join(outputDir, fileName);
     await fs.mkdir(path.dirname(filePath), { recursive: true });
     await fs.writeFile(filePath, output.source);
+  }
+}
+
+/**
+ * The page X frames for a page's `openGraph.videos` (see `FARM_VIDEO_PLAYER_HTML`). An app's own
+ * public file at the same path wins, as it does in development.
+ */
+async function writeFarmVideoPlayerToClient(outputDir: string): Promise<void> {
+  const fs = await import("fs/promises");
+  const filePath = path.join(outputDir, FARM_VIDEO_PLAYER_PATH.slice(1));
+  await fs.mkdir(path.dirname(filePath), { recursive: true });
+  try {
+    await fs.writeFile(filePath, FARM_VIDEO_PLAYER_HTML, { flag: "wx" });
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error;
   }
 }
 
@@ -3523,6 +3544,20 @@ ${
       !clientNavigation?.signal.aborted;
   },
 
+  // A prefetch made while a navigation swaps the page (an intent timer after the click, the
+  // incoming page's links) would ask for it as the outgoing page shows it: its layouts, its React
+  // root. It waits for the navigation to settle, and then skips the page it landed on.
+  whenNavigationSettles: function() {
+    return new Promise((resolve) => {
+      const listener = (state) => {
+        if (state.state !== "idle") return;
+        this.navigationListeners.delete(listener);
+        resolve();
+      };
+      this.navigationListeners.add(listener);
+    });
+  },
+
   finishNavigation: function(navigation) {
     if (this.activeNavigation?.id !== navigation.id) return;
     this.activeNavigation = null;
@@ -4488,6 +4523,13 @@ ${generateUniversalRouterStateProperties()}
     const url = new URL(href, window.location.href);
     if (isFarmExternalNavigationURL(url, window.location.origin)) return;
     if (isFarmDocsPath(url.pathname)) return;
+    if (this.activeNavigation) {
+      return this.whenNavigationSettles().then(() => {
+        if (url.pathname + url.search !== window.location.pathname + window.location.search) {
+          return this.prefetch(href);
+        }
+      });
+    }
     
     const pathname = url.pathname + url.search;
     if (this.readFreshPrefetch(pathname) !== undefined) return;
@@ -6042,6 +6084,13 @@ ${
     const url = new URL(href, window.location.href);
     if (isFarmExternalNavigationURL(url, window.location.origin)) return;
     if (isFarmDocsPath(url.pathname)) return;
+    if (this.activeNavigation) {
+      return this.whenNavigationSettles().then(() => {
+        if (url.pathname + url.search !== window.location.pathname + window.location.search) {
+          return this.prefetch(href);
+        }
+      });
+    }
     prefetchFarmClientRouteTable();
     
     // A prefetch warms an ordinary future navigation, which reads the bare
@@ -7868,6 +7917,7 @@ function renderFarmServerTreeLayout(Layout, props, outlets) {
       : ""
   }
   isInFarmRouteGroupScope,
+  routeBoundaryCoversDirectory,
   createFarmCacheKey,
   createFarmMetadataRouteResponse,
   createFarmAgentRobots,
@@ -9845,6 +9895,7 @@ function renderFarmI18nAlternateLinks(requestPath, snapshot, request, metadata) 
   return renderFarmLocaleAlternateLinks(routePathname, snapshot, {
     metadataBase: metadata ? metadata.metadataBase : undefined,
     origin: request ? resolveFarmI18nAlternateOrigin(request) : undefined,
+    languages: metadata && metadata.alternates ? metadata.alternates.languages : undefined,
   });
 }
 
@@ -12763,6 +12814,19 @@ ${
         ), middlewareHeaders), fullHtml);
       }
     } catch (error) {
+      // A Response the page, a layout, or generateMetadata throws answers the request as it is
+      // (a 3xx redirect, a 401 with its WWW-Authenticate), as development sends it.
+      if (error instanceof Response) {
+        emitFarmEvent({
+          type: "render.complete",
+          route: pathname,
+          pathname,
+          status: error.status,
+          durationMs: Date.now() - requestStartTime,
+        });
+        return applyProductionMiddlewareHeaders(error, middlewareHeaders);
+      }
+
       if (isFarmRedirectError(error)) {
         const redirect = getFarmRedirectError(error);
         const redirectUrl =
@@ -12848,7 +12912,13 @@ ${
           ...(middlewareData?.size ? { middleware: { data: middlewareData } } : {}),
         });
 
-        const applicableLayouts = getApplicableLayouts(errorRoutePathname, errorDirectory);
+        // The boundary renders inside its own segment's layouts and those above it, never inside a
+        // deeper layout: a layout below the boundary that throws would throw again inside it.
+        const applicableLayouts = getApplicableLayouts(errorRoutePathname, errorDirectory).filter(
+          function(layout) {
+            return routeBoundaryCoversDirectory(layout.pattern, errorBoundaryMatch.route.pattern);
+          }
+        );
         for (let i = applicableLayouts.length - 1; i >= 0; i--) {
           const LayoutComponent = applicableLayouts[i].module.default;
           if (LayoutComponent) {
@@ -14563,20 +14633,20 @@ function toFarmNodeResponse(request, response) {
   const ssrRollupPlugin = canReusePrebuiltSSR
     ? prebuiltSSRPlugin
     : createServerReadSSRAssetsPlugin(ssrBundle, ssrOutputDir);
-  if (ssrRollupPlugin) {
-    const configuredRollupPlugins = nitroConfig.rollupConfig?.plugins;
-    nitroConfig.rollupConfig = {
-      ...nitroConfig.rollupConfig,
-      plugins: [
-        ...(Array.isArray(configuredRollupPlugins)
-          ? configuredRollupPlugins
-          : configuredRollupPlugins
-            ? [configuredRollupPlugins]
-            : []),
-        ssrRollupPlugin,
-      ],
-    };
-  }
+  const configuredRollupPlugins = nitroConfig.rollupConfig?.plugins;
+  nitroConfig.rollupConfig = {
+    ...nitroConfig.rollupConfig,
+    plugins: [
+      ...(Array.isArray(configuredRollupPlugins)
+        ? configuredRollupPlugins
+        : configuredRollupPlugins
+          ? [configuredRollupPlugins]
+          : []),
+      ...(ssrRollupPlugin ? [ssrRollupPlugin] : []),
+      // Added after the checks above: it changes no SSR output, only how public files answer `Range`.
+      createNitroStaticRangePlugin(resolveNitroPackageEntry(root)),
+    ],
+  };
 
   nitroConfig.minify = useFarmServerMinifier ? false : shouldMinify;
 
