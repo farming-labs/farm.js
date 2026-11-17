@@ -2617,16 +2617,28 @@ function resolveConditionalExportTarget(value: unknown): string | null {
 
 function resolveSourceCandidate(candidates: Iterable<string>): string | null {
   for (const candidate of candidates) {
-    const paths = [candidate];
-    for (const extension of RESOLVABLE_SOURCE_EXTENSIONS) {
-      paths.push(`${candidate}${extension}`, path.join(candidate, `index${extension}`));
-    }
-    for (const sourcePath of paths) {
-      try {
-        if (fs.statSync(sourcePath).isFile()) return sourcePath;
-      } catch {
-        // Continue to the next candidate.
-      }
+    // Every importer of the same path probes the same extensions; a miss holds for this plan only.
+    const resolved = memoizeInFarmSourceSnapshot(
+      "source-candidate",
+      farmSourceSnapshotPathKey(candidate),
+      () => resolveSourceCandidatePath(candidate),
+      (result) => result !== null,
+    );
+    if (resolved) return resolved;
+  }
+  return null;
+}
+
+function resolveSourceCandidatePath(candidate: string): string | null {
+  const paths = [candidate];
+  for (const extension of RESOLVABLE_SOURCE_EXTENSIONS) {
+    paths.push(`${candidate}${extension}`, path.join(candidate, `index${extension}`));
+  }
+  for (const sourcePath of paths) {
+    try {
+      if (fs.statSync(sourcePath, { throwIfNoEntry: false })?.isFile()) return sourcePath;
+    } catch {
+      // An unreadable path (permissions, a broken link) is not a source file.
     }
   }
   return null;
