@@ -2700,135 +2700,9 @@ export function farmPlugin(
           });
         }
       }
-      const wrapFarmDocsResponseWithLayouts = async (
-        request: Request,
-        response: Response,
-      ): Promise<Response> => {
-        if (
-          request.method === "HEAD" ||
-          response.headers.has("x-farm-docs-adapter") ||
-          !response.headers.get("content-type")?.toLowerCase().includes("text/html")
-        ) {
-          return response;
-        }
-
-        const pathname = new URL(request.url).pathname;
-        const matchedRoute = routeManager.matchRoute(pathname);
-        const layoutEntries = matchedRoute.layouts.map((layout) => ({
-          ...layout,
-          metadata: getClientModuleMetadata(layout.modulePath, farmConfig.root),
-        }));
-        if (!layoutEntries.some((layout) => layout.metadata.shouldHydrate)) {
-          return response;
-        }
-
-        const source = await response.text();
-        const bodyMatch = source.match(/<body([^>]*)>([\s\S]*?)<\/body>/i);
-        if (!bodyMatch) {
-          return new Response(source, {
-            status: response.status,
-            statusText: response.statusText,
-            headers: response.headers,
-          });
-        }
-
-        // The app's layouts are authored for whichever renderer it selected, so
-        // they have to be composed and rendered through that renderer's server
-        // module. The production entry already resolves this the same way
-        // (nitro/universal-build.ts, rendererServerImports); importing react
-        // and react-dom/server literally here made dev disagree with prod for
-        // every non-React app.
-        const docsRenderer = resolveFarmRenderer((farmApp?.getConfig() ?? options).renderer);
-        const [rendererRuntime, layoutModules] = await Promise.all([
-          isReactRenderer(docsRenderer)
-            ? import("./renderer/react/server")
-            : loadFarmDevModule(server, docsRenderer.server),
-          Promise.all(
-            layoutEntries.map((layout) => routeManager.loadLayoutModule(layout.modulePath)),
-          ),
-        ]);
-        const hydrationStrategies = layoutEntries.flatMap((layout) =>
-          layout.metadata.shouldHydrate && layout.metadata.islandStrategy
-            ? [layout.metadata.islandStrategy]
-            : [],
-        );
-        const islandStrategy = hydrationStrategies.every(
-          (strategy) => strategy === hydrationStrategies[0],
-        )
-          ? (hydrationStrategies[0] ?? "load")
-          : "load";
-        const params = matchedRoute.params || {};
-        const toUrlPath = (absolutePath: string) => toViteModuleId(absolutePath, farmConfig.root);
-        const clientLayouts = Object.fromEntries(
-          layoutEntries.map((layout) => [
-            layout.pattern,
-            {
-              modulePath: toUrlPath(layout.modulePath),
-              pattern: layout.pattern,
-              shouldHydrate: layout.metadata.shouldHydrate,
-              islandStrategy: layout.metadata.islandStrategy,
-              preloads: [toUrlPath(layout.modulePath)],
-              assets: [],
-            },
-          ]),
-        );
-        const inlineValue = (value: unknown) =>
-          JSON.stringify(value).replace(/</g, "\\u003c").replace(/>/g, "\\u003e");
-        const pageModulePath = matchedRoute.route?.modulePath
-          ? toUrlPath(matchedRoute.route.modulePath)
-          : "";
-        const bootstrapScript = `<script>
-window.__FARM_PROPS__ = ${inlineValue({ params })};
-window.__FARM_ROUTE_SLOTS__ = [];
-window.__FARM_DEPLOYMENT_ID__ = ${inlineValue(farmConfig.deploymentId)};
-window.__FARM_PATH__ = ${inlineValue(pathname)};
-window.__FARM_IS_CLIENT__ = false;
-window.__FARM_PAGE_SHOULD_HYDRATE__ = false;
-window.__FARM_LAYOUT_SHOULD_HYDRATE__ = true;
-window.__FARM_SHOULD_HYDRATE__ = true;
-window.__FARM_ISLAND_STRATEGY__ = ${inlineValue(islandStrategy)};
-window.__FARM_PAGE_MODULE__ = ${inlineValue(pageModulePath)};
-window.__FARM_LOADING_MODULE__ = null;
-window.__FARM_MANIFEST__ = ${inlineValue({
-          routes: {},
-          layouts: clientLayouts,
-          slots: [],
-          clientEntry: "/@farm/client.js",
-          sharedAssets: [],
-        })};
-</script>`;
-
-        let wrappedElement: any = rendererRuntime.createElement("div", {
-          id: "__farm_page__",
-          "data-farm-client": "false",
-          "data-farm-layout-client": "true",
-          "data-farm-island": "page",
-          "data-farm-island-strategy": islandStrategy,
-          dangerouslySetInnerHTML: { __html: bootstrapScript + bodyMatch[2] },
-        });
-        for (let index = layoutModules.length - 1; index >= 0; index--) {
-          const LayoutComponent = layoutModules[index].default;
-          if (LayoutComponent) {
-            wrappedElement = rendererRuntime.createElement(LayoutComponent, {
-              children: wrappedElement,
-              params,
-            });
-          }
-        }
-
-        const rootMarkup = await rendererRuntime.renderToString(
-          rendererRuntime.createElement("div", { id: "root" }, wrappedElement),
-        );
-        const html = source.replace(bodyMatch[0], `<body${bodyMatch[1]}>${rootMarkup}</body>`);
-        const headers = new Headers(response.headers);
-        headers.delete("content-length");
-        headers.delete("etag");
-        return new Response(html, {
-          status: response.status,
-          statusText: response.statusText,
-          headers,
-        });
-      };
+      // A docs page under layouts that hydrate renders in an app page's tree, with its client.
+      const wrapFarmDocsResponseWithLayouts = (request: Request, response: Response) =>
+        farmApp.getServerRenderer().wrapDocsResponseWithLayouts(request, response);
       const farmDocsAPIHandler: FarmDocsAPIHandler | null =
         farmDocsDevRuntime && !farmDocsDevRuntime.hasFarmDocsRuntimeAdapter(farmConfig.docs)
           ? farmDocsDevRuntime.createFarmDocsAPIHandler({
@@ -7973,12 +7847,13 @@ async function tryHydrateImportedPage(
   hydrationOptions = {},
 ) {
   const modulePath = route?.modulePath;
-  if (!modulePath || signal?.aborted) {
+  const pageShouldHydrate = hydrationOptions.pageShouldHydrate !== false;
+  const layoutShouldHydrate = hydrationOptions.layoutShouldHydrate === true;
+  // Layouts that hydrate around server HTML need no page module: a docs runtime page has none.
+  if ((!modulePath && (pageShouldHydrate || !layoutShouldHydrate)) || signal?.aborted) {
     return false;
   }
 
-  const pageShouldHydrate = hydrationOptions.pageShouldHydrate !== false;
-  const layoutShouldHydrate = hydrationOptions.layoutShouldHydrate === true;
   const islandStrategy = hydrationOptions.islandStrategy || route.islandStrategy || 'load';
   let pageElement = null;
   // Import layouts before the page, root first, so Vite injects their CSS in the same
@@ -8824,7 +8699,8 @@ function farmIslandsOnlyDocument() {
       if (hydratedSlots) replayPreHydrationClicks();
       return
     }
-    if (!modulePath) {
+    // Layouts that hydrate around server HTML need no page module: a docs runtime page has none.
+    if (!modulePath && (pageShouldHydrate || !layoutShouldHydrate)) {
       console.error('[Farm.js] No page module path found')
       return
     }

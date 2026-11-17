@@ -1989,7 +1989,10 @@ export function Chart() {}
     const isolatedBootstrap = developmentSource.indexOf(
       "if (hasIsolatedClientBoundaries && !pageShouldHydrate && !layoutShouldHydrate)",
     );
-    const missingModuleGuard = developmentSource.indexOf("if (!modulePath)", isolatedBootstrap);
+    const missingModuleGuard = developmentSource.indexOf(
+      "if (!modulePath && (pageShouldHydrate || !layoutShouldHydrate))",
+      isolatedBootstrap,
+    );
     expect(isolatedBootstrap).toBeGreaterThan(-1);
     expect(missingModuleGuard).toBeGreaterThan(isolatedBootstrap);
     // An islands-only page releases the pre-hydration hold once its islands are scheduled,
