@@ -7731,8 +7731,9 @@ function renderFarmServerTreeLayout(Layout, props, outlets) {
         ? "\n    skipKeptRender: true,"
         : ""
     }${
-      // Islands mode: a server layout whose client components hydrate as islands of their own.
-      farmIslandsMode && clientMetadata.hasIsolatedClientBoundaries ? "\n    islands: true," : ""
+      // A layout whose client components hydrate as islands of their own (islands mode,
+      // isolatedClientHydration, or an async layout): it wraps a docs page as an app page.
+      clientMetadata.hasIsolatedClientBoundaries ? "\n    islands: true," : ""
     }
   }`);
   });
@@ -10866,8 +10867,8 @@ ${
 
   const pathname = getFarmRoutePathname(new URL(request.url).pathname);
   const applicableLayouts = getApplicableLayouts(pathname);
-  // Layouts with client components wrap the docs page: one that hydrates, or (islands mode) one
-  // whose client components are islands of their own, as on an app page.
+  // Layouts with client components wrap the docs page: one that hydrates, or one whose client
+  // components are islands of their own, as on an app page.
   if (!farmDocsLayoutsWrapPage(applicableLayouts)) return response;
   const shouldHydrateLayout = applicableLayouts.some((layout) => layout.shouldHydrate === true);
 
@@ -10897,7 +10898,8 @@ ${
       serverTree: layout.serverTree,
     })),
     params,
-    renderServerTreeLayout: renderFarmServerTreeLayout,
+    // Islands mode only: no other build marks a server-tree layout or imports this renderer.
+    renderServerTreeLayout: ${farmIslandsMode ? "renderFarmServerTreeLayout" : "undefined"},
     layoutKey: ${
       farmIslandsMode
         ? "function(pattern) { return getFarmLayoutKey(pattern, params); }"

@@ -5400,12 +5400,14 @@ export default function RootLayout({ children }) {
   }, 120_000);
 
   /**
-   * An islands-mode app (`serverComponents: { mode: "islands" }`) whose root server layout wraps
-   * the built-in docs runtime's pages, with links to two app pages and to /docs.
+   * An islands-mode app (`serverComponents: { mode: "islands" }`, unless `experimental` says
+   * otherwise) whose root server layout wraps the built-in docs runtime's pages, with links to two
+   * app pages and to /docs.
    */
   async function buildIslandsDocsFixture(
     name: string,
     files: Record<string, string>,
+    experimental: Record<string, unknown> = { serverComponents: { mode: "islands" } },
   ): Promise<string> {
     const root = await createProductionFixture(name);
     const appDir = path.join(root, "src", "app");
@@ -5435,7 +5437,7 @@ export default function RootLayout({ children }) {
         images: { provider: "none" },
         telemetry: false,
         generateBuildId: () => `${name}-test`,
-        experimental: { serverComponents: { mode: "islands" } },
+        experimental,
       },
       "production",
     );
@@ -5644,6 +5646,176 @@ export default function RootLayout({ children }) {
             expect(await counter(page).textContent()).toBe("count:1");
           },
         });
+      } finally {
+        await production.stop();
+      }
+    } finally {
+      await fs.rm(root, { recursive: true, force: true });
+    }
+  }, 120_000);
+
+  const docsLeafIslandCounter = `
+"use client";
+
+import { useEffect, useState } from "react";
+
+export function Counter() {
+  const [count, setCount] = useState(0);
+  const [hydrated, setHydrated] = useState(false);
+  useEffect(() => setHydrated(true), []);
+  return (
+    <button data-counter data-hydrated={hydrated ? "true" : "false"} onClick={() => setCount(count + 1)}>
+      count:{count}
+    </button>
+  );
+}
+`;
+
+  /** The #root markup before the page's own content: the layouts and the page boundary. */
+  function rootMarkupAroundPage(html: string): string {
+    const start = html.indexOf('<div id="root">');
+    const pageStart = html.indexOf('<div id="__farm_page__"', start);
+    expect(start).toBeGreaterThanOrEqual(0);
+    expect(pageStart).toBeGreaterThan(start);
+    return html.slice(start, html.indexOf(">", pageStart) + 1);
+  }
+
+  /**
+   * Outside islands mode, a layout's leaf client components are islands of their own when
+   * `isolatedClientHydration` plans them so, or when the layout is async (it never hydrates whole).
+   * The layout wraps docs pages there too, in the markup an app page has.
+   */
+  it.each([
+    {
+      name: "isolated-hydration-docs-leaf-layout",
+      layout: "export default function RootLayout",
+      experimental: { isolatedClientHydration: "enabled" },
+    },
+    {
+      name: "async-docs-leaf-layout",
+      layout: "export default async function RootLayout",
+      experimental: {},
+    },
+  ])(
+    "wraps docs pages in a leaf-island layout without server components ($name)",
+    async ({ name, layout, experimental }) => {
+      const root = await buildIslandsDocsFixture(
+        name,
+        {
+          "counter.tsx": docsLeafIslandCounter,
+          // A server layout whose only client component is a leaf island: it does not hydrate whole.
+          "layout.tsx": `
+import { Counter } from "./counter";
+
+${layout}({ children }) {
+  return (
+    <div data-layout="root">
+      ${islandsDocsNav}
+      <Counter />
+      {children}
+    </div>
+  );
+}
+`,
+        },
+        experimental,
+      );
+
+      try {
+        const production = await startProductionServer(
+          path.join(root, ".farm", ".output", "server"),
+        );
+        try {
+          // The docs page has the layout, its island, and the page boundary an app page has.
+          const docsHtml = await (await fetch(`${production.origin}/docs/guide`)).text();
+          const appHtml = await (await fetch(`${production.origin}/about`)).text();
+          expect(docsHtml).toContain("<f-island ");
+          expect(docsHtml.match(/<html[\s>]/gi)).toHaveLength(1);
+          expect(rootMarkupAroundPage(docsHtml)).toBe(rootMarkupAroundPage(appHtml));
+
+          const counter = (page: Page) => page.locator("[data-counter]");
+          await expectIslandsDocsLayoutInBrowser(production, {
+            // The island renders and hydrates.
+            async expectWorks(page) {
+              await expect
+                .poll(() => counter(page).getAttribute("data-hydrated"), { timeout: 15_000 })
+                .toBe("true");
+              await counter(page).click();
+              await expect.poll(() => counter(page).textContent()).toBe("count:1");
+            },
+            async expectKept(page) {
+              expect(await counter(page).textContent()).toBe("count:1");
+            },
+          });
+        } finally {
+          await production.stop();
+        }
+      } finally {
+        await fs.rm(root, { recursive: true, force: true });
+      }
+    },
+    120_000,
+  );
+
+  it("serves docs pages under a hydrating layout when a page has isolated islands", async () => {
+    // A page island loads the isolated graph runtime, which has no server-tree layout renderer:
+    // the docs wrapper referenced one anyway and answered 500.
+    const root = await buildIslandsDocsFixture(
+      "isolated-hydration-docs-hydrating-layout",
+      {
+        "counter.tsx": docsLeafIslandCounter,
+        "layout.tsx": `
+"use client";
+
+import { Counter } from "./counter";
+
+export default function RootLayout({ children }) {
+  return (
+    <div data-layout="root">
+      ${islandsDocsNav}
+      <Counter />
+      {children}
+    </div>
+  );
+}
+`,
+        "about/page.tsx": `
+import { Counter } from "../counter";
+
+export default function Page() {
+  return <main>about page<Counter /></main>;
+}
+`,
+      },
+      { isolatedClientHydration: "enabled" },
+    );
+
+    try {
+      const production = await startProductionServer(path.join(root, ".farm", ".output", "server"));
+      try {
+        const response = await fetch(`${production.origin}/docs/guide`);
+        expect(response.status).toBe(200);
+        expect(await response.text()).toContain(
+          '<div id="__farm_page__" data-farm-segment="page" data-farm-client="false" data-farm-layout-client="true"',
+        );
+
+        const executablePath = await resolveInstalledChromiumExecutable();
+        if (!executablePath) return;
+        const browser = await chromium.launch({ headless: true, executablePath });
+        try {
+          const page = await browser.newPage();
+          const hydrationErrors = collectHydrationErrors(page);
+          const counter = page.locator('[data-layout="root"] > [data-counter]');
+          await page.goto(`${production.origin}/docs/guide`);
+          await expect
+            .poll(() => counter.getAttribute("data-hydrated"), { timeout: 15_000 })
+            .toBe("true");
+          await counter.click();
+          await expect.poll(() => counter.textContent()).toBe("count:1");
+          expect(hydrationErrors).toEqual([]);
+        } finally {
+          await browser.close();
+        }
       } finally {
         await production.stop();
       }
