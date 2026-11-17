@@ -89,6 +89,17 @@ for (const [index, renderer] of ["html", "react"].entries()) {
       expect(fetch).toHaveBeenCalledTimes(1);
     });
 
+    it("lets a prefetch that starts during a navigation to the same URL wait for it", async () => {
+      const { page, requests, fetch, router } = setup();
+      const navigation = page();
+      const preload = page("/about", { prefetch: true });
+      expect(fetch).toHaveBeenCalledTimes(1);
+      requests[0].resolve(html("about"));
+      expect(await navigation).toBe("about");
+      expect(await preload).toBe("about");
+      expect(router.navigatingDocuments.size).toBe(0);
+    });
+
     it("keys a partial prefetch by the layouts on screen when it was made", async () => {
       const { page, requests, fetch, router } = setup();
       let chain = '["/docs"]';

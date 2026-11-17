@@ -3315,6 +3315,9 @@ ${
   navigationSequence: 0,
   activeNavigation: null,
   pendingPrefetches: new Map(),
+  // Navigations whose document is on its way, by cache key. A prefetch of the same page (an
+  // intent timer that fires after the click) waits for it instead of fetching the page again.
+  navigatingDocuments: new Map(),
   prefetchGeneration: 0,
   prefetchObserver: null,
   observedPrefetchLinks: new Map(),
@@ -3557,6 +3560,9 @@ ${
         this.pendingPrefetches.delete(key);
       }
     }
+    for (const key of this.navigatingDocuments.keys()) {
+      if (matches(key)) this.navigatingDocuments.delete(key);
+    }
   },
 
   clearCache: function() {
@@ -3564,6 +3570,7 @@ ${
     this.prefetchCache.clear();
     for (const pending of this.pendingPrefetches.values()) pending.valid = false;
     this.pendingPrefetches.clear();
+    this.navigatingDocuments.clear();
   },
 
   // Islands mode: a partial response (layouts kept, or only the page's payload) suits the page
@@ -3600,6 +3607,8 @@ ${
         cancellation.dispose();
       }
     }
+    const navigating = recover || fresh ? undefined : this.navigatingDocuments.get(cacheKey);
+    if (navigating && navigating.deploymentId === deploymentId) return navigating.promise;
 
     const generation = this.prefetchGeneration;
     // Only speculative requests have shared ownership. Ordinary navigations
@@ -3652,7 +3661,13 @@ ${
       store(html);
       return html;
     };
-    if (!record) return request();
+    if (!record) {
+      const navigation = { deploymentId, promise: request() };
+      this.navigatingDocuments.set(cacheKey, navigation);
+      return navigation.promise.finally(() => {
+        if (this.navigatingDocuments.get(cacheKey) === navigation) this.navigatingDocuments.delete(cacheKey);
+      });
+    }
     record.promise = request().finally(() => {
       if (this.pendingPrefetches.get(cacheKey) === record) this.pendingPrefetches.delete(cacheKey);
     });

@@ -67,6 +67,16 @@ describe("navigation during prefetch", () => {
     expect((router as any).pendingPrefetches.size).toBe(0);
   });
 
+  it("lets a prefetch that starts during a navigation to the same URL wait for it", async () => {
+    const navigation = await navigate();
+    const prefetched = router.prefetch("/destination");
+    expect(fetch).toHaveBeenCalledTimes(1);
+    requests[0].resolve(pageResponse());
+    await Promise.all([prefetched, navigation.done]);
+    expect(render).toHaveBeenCalledTimes(1);
+    expect((router as any).navigatingPages.size).toBe(0);
+  });
+
   it("reuses an already-completed prefetch without another request", async () => {
     const prefetched = router.prefetch("/destination");
     requests[0].resolve(pageResponse());
