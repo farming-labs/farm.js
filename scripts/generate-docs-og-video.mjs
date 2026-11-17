@@ -15,6 +15,8 @@ try {
   }));
 
   // Requires ffmpeg built with libx264. The output is silent, as link previews play muted.
+  // Frames render at 2x and scale down to the card size, which smooths text edges. Level 4.0
+  // keeps the reference frames veryslow picks within what phone decoders and Discord accept.
   const ffmpeg = spawn(
     "ffmpeg",
     [
@@ -29,8 +31,14 @@ try {
       "png",
       "-i",
       "-",
+      "-vf",
+      `scale=${CARD_SIZE.width}:${CARD_SIZE.height}:flags=lanczos`,
       "-c:v",
       "libx264",
+      "-profile:v",
+      "high",
+      "-level:v",
+      "4.0",
       "-preset",
       "veryslow",
       "-crf",

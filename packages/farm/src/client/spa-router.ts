@@ -576,12 +576,21 @@ export class SPARouter {
    */
   async prefetch(href: string): Promise<void> {
     if (this.destroyed) return;
+    // A prefetch made while a navigation swaps the page (an intent timer after the click, the
+    // incoming page's links) would ask for it as the outgoing page shows it. It waits, and then
+    // skips the page the navigation landed on.
+    const waited = Boolean(this.activeNavigation);
+    if (waited) {
+      await this.whenNavigationSettles();
+      if (this.destroyed) return;
+    }
     if (isFarmLocaleChangeHref(href)) return;
     const url = resolveFarmNavigationURL(href, window.location.href);
     if (isFarmExternalNavigationURL(url, window.location.origin)) return;
     if (this.options.shouldUseDocumentNavigation(url.pathname)) return;
     const fullPath = url.pathname + url.search;
     const interceptFrom = window.location.pathname + window.location.search;
+    if (waited && fullPath === interceptFrom) return;
 
     // Skip if already prefetching or cached
     if (this.prefetchingUrls.has(fullPath)) return;
@@ -1300,6 +1309,17 @@ export class SPARouter {
       !navigation.controller.signal.aborted &&
       !clientNavigation?.signal.aborted
     );
+  }
+
+  private whenNavigationSettles(): Promise<void> {
+    return new Promise((resolve) => {
+      const listener = (state: FarmNavigationState) => {
+        if (state.state !== "idle") return;
+        this.navigationListeners.delete(listener);
+        resolve();
+      };
+      this.navigationListeners.add(listener);
+    });
   }
 
   private finishNavigation(navigation: { id: number; controller: AbortController }): void {

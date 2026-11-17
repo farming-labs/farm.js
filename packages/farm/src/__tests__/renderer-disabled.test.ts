@@ -127,7 +127,12 @@ async function expectBackendResponses(origin: string): Promise<void> {
     await expect(page.text()).resolves.toBe(body);
   }
 
-  for (const pathname of ["/missing", "/missing/deeper", "/missing.json"]) {
+  for (const pathname of [
+    "/missing",
+    "/missing/deeper",
+    "/missing.json",
+    "/_farm/video-player.html",
+  ]) {
     const miss = await fetch(`${origin}${pathname}`);
     expect(miss.status).toBe(404);
     expect(miss.headers.get("content-type")).toMatch(/^application\/json/);

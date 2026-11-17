@@ -26,6 +26,7 @@ import { resolveServerActionsConfig } from "../server-action-security";
 import { resolveFarmServerComponentsMode } from "../server-components-mode";
 import { createBundledEnv } from "../env";
 import { generateNativeMCPPluginSource } from "./native-mcp-source";
+import { createNitroStaticRangePlugin } from "./static-range";
 import { FARM_MOBILE_SESSION_PLUGIN } from "../mobile/session";
 import { FARM_NATIVE_SERVER_FN_PLUGIN } from "../mobile/native-server-fn-names";
 import { collectFarmNativeServerFns, findFarmNativeScreenFiles } from "../mobile/native-server-fns";
@@ -1768,7 +1769,9 @@ export async function buildUniversal(
     const { bundle: ssrBundle, entryFile: ssrEntryFile, configuredHeaderRoutes } = ssrResult;
     assertServerReadSSRAssetsSupported(ssrBundle, preset, root);
     await writeSSRAssetsToClient(ssrBundle, clientOutputDir);
-    await writeFarmVideoPlayerToClient(clientOutputDir);
+    if (!rendererDisabled) {
+      await writeFarmVideoPlayerToClient(clientOutputDir);
+    }
     if (config.docs.enabled) {
       await copyFarmDocsFontAssetsToClient(root, clientOutputDir);
     }
@@ -3541,6 +3544,20 @@ ${
       !clientNavigation?.signal.aborted;
   },
 
+  // A prefetch made while a navigation swaps the page (an intent timer after the click, the
+  // incoming page's links) would ask for it as the outgoing page shows it: its layouts, its React
+  // root. It waits for the navigation to settle, and then skips the page it landed on.
+  whenNavigationSettles: function() {
+    return new Promise((resolve) => {
+      const listener = (state) => {
+        if (state.state !== "idle") return;
+        this.navigationListeners.delete(listener);
+        resolve();
+      };
+      this.navigationListeners.add(listener);
+    });
+  },
+
   finishNavigation: function(navigation) {
     if (this.activeNavigation?.id !== navigation.id) return;
     this.activeNavigation = null;
@@ -4506,6 +4523,13 @@ ${generateUniversalRouterStateProperties()}
     const url = new URL(href, window.location.href);
     if (isFarmExternalNavigationURL(url, window.location.origin)) return;
     if (isFarmDocsPath(url.pathname)) return;
+    if (this.activeNavigation) {
+      return this.whenNavigationSettles().then(() => {
+        if (url.pathname + url.search !== window.location.pathname + window.location.search) {
+          return this.prefetch(href);
+        }
+      });
+    }
     
     const pathname = url.pathname + url.search;
     if (this.readFreshPrefetch(pathname) !== undefined) return;
@@ -6060,6 +6084,13 @@ ${
     const url = new URL(href, window.location.href);
     if (isFarmExternalNavigationURL(url, window.location.origin)) return;
     if (isFarmDocsPath(url.pathname)) return;
+    if (this.activeNavigation) {
+      return this.whenNavigationSettles().then(() => {
+        if (url.pathname + url.search !== window.location.pathname + window.location.search) {
+          return this.prefetch(href);
+        }
+      });
+    }
     prefetchFarmClientRouteTable();
     
     // A prefetch warms an ordinary future navigation, which reads the bare
@@ -14600,20 +14631,20 @@ function toFarmNodeResponse(request, response) {
   const ssrRollupPlugin = canReusePrebuiltSSR
     ? prebuiltSSRPlugin
     : createServerReadSSRAssetsPlugin(ssrBundle, ssrOutputDir);
-  if (ssrRollupPlugin) {
-    const configuredRollupPlugins = nitroConfig.rollupConfig?.plugins;
-    nitroConfig.rollupConfig = {
-      ...nitroConfig.rollupConfig,
-      plugins: [
-        ...(Array.isArray(configuredRollupPlugins)
-          ? configuredRollupPlugins
-          : configuredRollupPlugins
-            ? [configuredRollupPlugins]
-            : []),
-        ssrRollupPlugin,
-      ],
-    };
-  }
+  const configuredRollupPlugins = nitroConfig.rollupConfig?.plugins;
+  nitroConfig.rollupConfig = {
+    ...nitroConfig.rollupConfig,
+    plugins: [
+      ...(Array.isArray(configuredRollupPlugins)
+        ? configuredRollupPlugins
+        : configuredRollupPlugins
+          ? [configuredRollupPlugins]
+          : []),
+      ...(ssrRollupPlugin ? [ssrRollupPlugin] : []),
+      // Added after the checks above: it changes no SSR output, only how public files answer `Range`.
+      createNitroStaticRangePlugin(resolveNitroPackageEntry(root)),
+    ],
+  };
 
   nitroConfig.minify = useFarmServerMinifier ? false : shouldMinify;
 
