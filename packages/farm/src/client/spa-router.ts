@@ -579,7 +579,8 @@ export class SPARouter {
     // A prefetch made while a navigation swaps the page (an intent timer after the click, the
     // incoming page's links) would ask for it as the outgoing page shows it. It waits, and then
     // skips the page the navigation landed on.
-    if (this.activeNavigation) {
+    const waited = Boolean(this.activeNavigation);
+    if (waited) {
       await this.whenNavigationSettles();
       if (this.destroyed) return;
     }
@@ -589,7 +590,7 @@ export class SPARouter {
     if (this.options.shouldUseDocumentNavigation(url.pathname)) return;
     const fullPath = url.pathname + url.search;
     const interceptFrom = window.location.pathname + window.location.search;
-    if (fullPath === interceptFrom) return;
+    if (waited && fullPath === interceptFrom) return;
 
     // Skip if already prefetching or cached
     if (this.prefetchingUrls.has(fullPath)) return;

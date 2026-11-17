@@ -4502,10 +4502,15 @@ ${generateUniversalRouterStateProperties()}
     const url = new URL(href, window.location.href);
     if (isFarmExternalNavigationURL(url, window.location.origin)) return;
     if (isFarmDocsPath(url.pathname)) return;
-    if (this.activeNavigation) return this.whenNavigationSettles().then(() => this.prefetch(href));
+    if (this.activeNavigation) {
+      return this.whenNavigationSettles().then(() => {
+        if (url.pathname + url.search !== window.location.pathname + window.location.search) {
+          return this.prefetch(href);
+        }
+      });
+    }
     
     const pathname = url.pathname + url.search;
-    if (pathname === window.location.pathname + window.location.search) return;
     if (this.readFreshPrefetch(pathname) !== undefined) return;
     
     return this.fetchPage(pathname, false, false)
@@ -6057,7 +6062,13 @@ ${
     const url = new URL(href, window.location.href);
     if (isFarmExternalNavigationURL(url, window.location.origin)) return;
     if (isFarmDocsPath(url.pathname)) return;
-    if (this.activeNavigation) return this.whenNavigationSettles().then(() => this.prefetch(href));
+    if (this.activeNavigation) {
+      return this.whenNavigationSettles().then(() => {
+        if (url.pathname + url.search !== window.location.pathname + window.location.search) {
+          return this.prefetch(href);
+        }
+      });
+    }
     prefetchFarmClientRouteTable();
     
     // A prefetch warms an ordinary future navigation, which reads the bare
@@ -6065,7 +6076,6 @@ ${
     // navigation (double fetch per prefetched link) and sent
     // X-Farm-Intercept-From, which bypasses the shared cache server-side.
     const pathname = url.pathname + url.search;
-    if (pathname === window.location.pathname + window.location.search) return;
     if (this.readFreshPrefetch(this.prefetchRequest(pathname).cacheKey) !== undefined) return;
     
     return this.fetchPage(pathname, undefined, false, false)
