@@ -5399,6 +5399,193 @@ export default function RootLayout({ children }) {
     }
   }, 120_000);
 
+  /**
+   * An islands-mode app (`serverComponents: { mode: "islands" }`) whose root server layout wraps
+   * the built-in docs runtime's pages, with links to two app pages and to /docs.
+   */
+  async function buildIslandsDocsFixture(
+    name: string,
+    files: Record<string, string>,
+  ): Promise<string> {
+    const root = await createProductionFixture(name);
+    const appDir = path.join(root, "src", "app");
+    await fs.mkdir(path.join(appDir, "about"), { recursive: true });
+    await fs.mkdir(path.join(appDir, "docs", "guide"), { recursive: true });
+    await fs.writeFile(
+      path.join(appDir, "page.tsx"),
+      `export default function Page() { return <main>home page</main>; }`,
+    );
+    await fs.writeFile(
+      path.join(appDir, "about", "page.tsx"),
+      `export default function Page() { return <main>about page</main>; }`,
+    );
+    await fs.writeFile(path.join(appDir, "docs", "page.md"), `# Docs index\n\nThe docs index.`);
+    await fs.writeFile(
+      path.join(appDir, "docs", "guide", "page.md"),
+      `# Docs guide\n\nA nested docs page.`,
+    );
+    for (const [file, source] of Object.entries(files)) {
+      await fs.writeFile(path.join(appDir, file), source.trim());
+    }
+    const config = await resolveConfig(
+      {
+        root,
+        srcDir: "src",
+        docs: { entry: "/docs", search: false },
+        images: { provider: "none" },
+        telemetry: false,
+        generateBuildId: () => `${name}-test`,
+        experimental: { serverComponents: { mode: "islands" } },
+      },
+      "production",
+    );
+    await build(config, { root, preset: "node-server" });
+    return root;
+  }
+
+  const islandsDocsNav = `
+<nav>
+  <a href="/" data-nav="home">Home</a>
+  <a href="/about" data-nav="about">About</a>
+  <a href="/docs" data-nav="docs">Docs</a>
+</nav>`;
+
+  /**
+   * Opens docs pages and app pages of an islands docs fixture in Chromium. `expectWorks` waits for
+   * the layout's client component to hydrate and changes its state; after a client navigation
+   * between app pages, `expectKept` checks that state is still there.
+   */
+  async function expectIslandsDocsLayoutInBrowser(
+    production: Awaited<ReturnType<typeof startProductionServer>>,
+    options: {
+      expectWorks(page: Page): Promise<void>;
+      expectKept(page: Page): Promise<void>;
+    },
+  ): Promise<void> {
+    const executablePath = await resolveInstalledChromiumExecutable();
+    if (!executablePath) return;
+    const browser = await chromium.launch({ headless: true, executablePath });
+    try {
+      const page = await browser.newPage();
+      const hydrationErrors = collectHydrationErrors(page);
+      const documentRequests: string[] = [];
+      page.on("request", (request) => {
+        if (request.isNavigationRequest() && request.frame() === page.mainFrame()) {
+          documentRequests.push(new URL(request.url()).pathname);
+        }
+      });
+      try {
+        for (const pathname of ["/docs", "/docs/guide"]) {
+          await page.goto(`${production.origin}${pathname}`);
+          await options.expectWorks(page);
+          expect(await page.locator("#nd-page").count()).toBe(1);
+        }
+        expect(hydrationErrors).toEqual([]);
+
+        // The docs runtime owns its document's links: an app page loads as a document.
+        await page.locator('[data-nav="about"]').click();
+        await page.waitForURL(`${production.origin}/about`);
+        await expect.poll(() => page.locator("main").textContent()).toBe("about page");
+        await options.expectWorks(page);
+        // Between app pages, the layout and its state stay in one document.
+        documentRequests.length = 0;
+        await page.locator('[data-nav="home"]').click();
+        await page.waitForURL(`${production.origin}/`);
+        await expect.poll(() => page.locator("main").textContent()).toBe("home page");
+        await options.expectKept(page);
+        expect(documentRequests).toEqual([]);
+        expect(hydrationErrors).toEqual([]);
+      } catch (error) {
+        throw new Error(
+          `${String(error)}\nHydration errors:\n${hydrationErrors.join("\n")}\nDocument requests: ${documentRequests.join(", ")}\nServer output:\n${production.output()}`,
+        );
+      }
+    } finally {
+      await browser.close();
+    }
+  }
+
+  it("hydrates a docs page inside an islands server layout's provider tree", async () => {
+    const root = await buildIslandsDocsFixture("islands-docs-provider-layout", {
+      "theme.tsx": `
+"use client";
+
+import { createContext, useContext, useEffect, useState } from "react";
+
+const ThemeContext = createContext(null);
+
+export function ThemeProvider({ children }) {
+  const [theme, setTheme] = useState("light");
+  return <ThemeContext.Provider value={{ theme, setTheme }}>{children}</ThemeContext.Provider>;
+}
+
+export function ThemeToggle() {
+  const context = useContext(ThemeContext);
+  const [hydrated, setHydrated] = useState(false);
+  useEffect(() => setHydrated(true), []);
+  if (!context) return <button data-theme-toggle data-hydrated="false">no provider</button>;
+  return (
+    <button
+      data-theme-toggle
+      data-hydrated={hydrated ? "true" : "false"}
+      onClick={() => context.setTheme(context.theme === "light" ? "dark" : "light")}
+    >
+      theme:{context.theme}
+    </button>
+  );
+}
+`,
+      // A server layout around a client provider, which hydrates as one server tree.
+      "layout.tsx": `
+import { ThemeProvider, ThemeToggle } from "./theme";
+
+export default function RootLayout({ children }) {
+  return (
+    <ThemeProvider>
+      <div data-layout="root">
+        ${islandsDocsNav}
+        <ThemeToggle />
+        {children}
+      </div>
+    </ThemeProvider>
+  );
+}
+`,
+    });
+
+    try {
+      const production = await startProductionServer(path.join(root, ".farm", ".output", "server"));
+      try {
+        // The docs page renders inside the layout's server tree, which the browser rebuilds.
+        const html = await (await fetch(`${production.origin}/docs/guide`)).text();
+        expect(html).toContain('data-layout="root"');
+        expect(html).toContain('<script type="f/tree"');
+        expect(html.indexOf('data-layout="root"')).toBeLessThan(html.indexOf('id="nd-page"'));
+        expect(html.match(/<html[\s>]/gi)).toHaveLength(1);
+
+        const toggle = (page: Page) => page.locator("[data-theme-toggle]");
+        await expectIslandsDocsLayoutInBrowser(production, {
+          // The provider's consumer works.
+          async expectWorks(page) {
+            await expect
+              .poll(() => toggle(page).getAttribute("data-hydrated"), { timeout: 15_000 })
+              .toBe("true");
+            await expect.poll(() => toggle(page).textContent()).toBe("theme:light");
+            await toggle(page).click();
+            await expect.poll(() => toggle(page).textContent()).toBe("theme:dark");
+          },
+          async expectKept(page) {
+            expect(await toggle(page).textContent()).toBe("theme:dark");
+          },
+        });
+      } finally {
+        await production.stop();
+      }
+    } finally {
+      await fs.rm(root, { recursive: true, force: true });
+    }
+  }, 120_000);
+
   const STANDALONE_DEPLOYMENT_COOKIE =
     "__farm_deployment=standalone-node-test; Path=/; HttpOnly; SameSite=Lax";
 

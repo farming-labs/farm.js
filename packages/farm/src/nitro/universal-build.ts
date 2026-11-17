@@ -10863,13 +10863,22 @@ ${
     const layout = applicableLayouts[index];
     const LayoutComponent = layout.module.default;
     if (LayoutComponent) {
+      // Islands mode: a layout around a client provider renders as a server tree, as on an app
+      // page, and the browser rebuilds it with the docs page at its outlet.
       wrappedElement = createFarmLayoutBoundary(
         layout.pattern,
         undefined,
-        React.createElement(LayoutComponent, {
-          children: wrappedElement,
-          params,
-        }),
+        layout.serverTree
+          ? await renderFarmServerTreeLayout(
+              LayoutComponent,
+              { params },
+              { children: wrappedElement },
+              layout.pattern,
+            )
+          : React.createElement(LayoutComponent, {
+              children: wrappedElement,
+              params,
+            }),
       );
     }
   }
