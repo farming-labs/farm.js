@@ -1,8 +1,8 @@
-// The tree a built-in docs runtime page (`docs.entry`, no adapter) renders in under layouts that
-// hydrate. The development server (FarmServerRenderer.renderDocsLayoutDocument) and the production
-// entry (wrapFarmDocsResponseWithLayouts in nitro/universal-build.ts) both build it here, so the
-// browser hydrates the same markup in either: the tree an app page has, with the docs runtime's
-// HTML as the page. The browser draws it with createFarmLayoutElement and createLayoutPageBoundary.
+// The tree a built-in docs runtime page (`docs.entry`, no adapter) renders in under layouts with
+// client components. The development server (ServerRenderer.wrapDocsResponseWithLayouts) and the
+// production entry (wrapFarmDocsResponseWithLayouts in nitro/universal-build.ts) both build it
+// here, so the browser gets the same markup from either: the tree an app page has, with the docs
+// runtime's HTML as the page.
 
 import { extractFarmFullDocument } from "./full-document";
 
@@ -17,6 +17,10 @@ interface FarmDocsLayout {
   Component: unknown;
   shouldHydrate?: boolean;
   islandStrategy?: string | null;
+  /** Islands mode: a layout around a client provider, rendered as a server tree. */
+  serverTree?: boolean;
+  /** Islands mode: a server layout whose client components are islands of their own. */
+  islands?: boolean;
 }
 
 /**
@@ -41,8 +45,18 @@ export function createFarmLayoutBoundary(
   );
 }
 
+/**
+ * Whether these layouts wrap the docs page: one hydrates, or (islands mode) one's client components
+ * are islands of their own, as on an app page. Otherwise the docs runtime's document is sent as is.
+ */
+export function farmDocsLayoutsWrapPage(layouts: readonly Omit<FarmDocsLayout, "Component">[]) {
+  return layouts.some((layout) => layout.shouldHydrate === true || layout.islands === true);
+}
+
 /** The strategy every hydrating layout names, else `load`: the strategy the docs page waits on. */
-export function resolveFarmDocsLayoutIslandStrategy(layouts: readonly FarmDocsLayout[]): string {
+export function resolveFarmDocsLayoutIslandStrategy(
+  layouts: readonly Omit<FarmDocsLayout, "Component">[],
+): string {
   const strategies = layouts.flatMap((layout) =>
     layout.shouldHydrate && layout.islandStrategy ? [layout.islandStrategy] : [],
   );
@@ -53,24 +67,35 @@ export function resolveFarmDocsLayoutIslandStrategy(layouts: readonly FarmDocsLa
 
 /**
  * The docs page in the place of an app page: its HTML inside the page boundary, and each layout
- * around it in its boundary, root first in `layouts`.
+ * around it in its boundary, root first in `layouts`. When a layout hydrates, the chain is one
+ * client root the browser draws, unkeyed, and a server-tree layout renders as its tree
+ * (`renderServerTreeLayout`) with the docs page at its outlet. Otherwise the layouts' client
+ * components are islands and each boundary takes its segment key (`layoutKey`, islands mode). The
+ * caller wraps a hydrating chain in its client graph, as for an app page.
  */
-export function createFarmDocsLayoutTree(
+export async function createFarmDocsLayoutTree(
   runtime: FarmElementFactory,
   options: {
     pageHtml: string;
     layouts: readonly FarmDocsLayout[];
     params: Record<string, string>;
-    islandStrategy: string;
+    renderServerTreeLayout?: (
+      Layout: unknown,
+      props: { params: Record<string, string> },
+      outlets: { children: unknown },
+      pattern: string,
+    ) => unknown;
+    layoutKey?: (pattern: string) => string | undefined;
   },
-): unknown {
+): Promise<unknown> {
+  const layoutHydrates = options.layouts.some((layout) => layout.shouldHydrate === true);
   let element = runtime.createElement("div", {
     id: "__farm_page__",
     "data-farm-segment": "page",
     "data-farm-client": "false",
-    "data-farm-layout-client": "true",
+    ...(layoutHydrates ? { "data-farm-layout-client": "true" } : {}),
     "data-farm-island": "page",
-    "data-farm-island-strategy": options.islandStrategy,
+    "data-farm-island-strategy": resolveFarmDocsLayoutIslandStrategy(options.layouts),
     dangerouslySetInnerHTML: { __html: options.pageHtml },
   });
   for (let index = options.layouts.length - 1; index >= 0; index--) {
@@ -79,8 +104,15 @@ export function createFarmDocsLayoutTree(
     element = createFarmLayoutBoundary(
       runtime,
       layout.pattern,
-      undefined,
-      runtime.createElement(layout.Component, { children: element, params: options.params }),
+      layoutHydrates ? undefined : options.layoutKey?.(layout.pattern),
+      layout.serverTree && layoutHydrates && options.renderServerTreeLayout
+        ? await options.renderServerTreeLayout(
+            layout.Component,
+            { params: options.params },
+            { children: element },
+            layout.pattern,
+          )
+        : runtime.createElement(layout.Component, { children: element, params: options.params }),
     );
   }
   return element;

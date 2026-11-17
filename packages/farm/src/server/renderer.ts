@@ -33,6 +33,7 @@ import {
 } from "./full-document";
 import {
   createFarmDocsLayoutTree,
+  farmDocsLayoutsWrapPage,
   placeFarmDocsLayoutRoot,
   resolveFarmDocsLayoutIslandStrategy,
 } from "./docs-layout-tree";
@@ -1190,9 +1191,9 @@ export class ServerRenderer {
   }
 
   /**
-   * A built-in docs runtime page (`docs.entry`, no adapter) under layouts that hydrate: the docs
-   * runtime's document with the layout chain rendered around its body, and the client that
-   * hydrates it with the boot data an app page has. Production renders the same tree
+   * A built-in docs runtime page (`docs.entry`, no adapter) under layouts that hydrate, or (islands
+   * mode) whose client components are islands: the docs runtime's document with the layout chain
+   * rendered around its body, and the client that hydrates it with the boot data an app page has. Production renders the same tree
    * (wrapFarmDocsResponseWithLayouts in nitro/universal-build.ts, with docs-layout-tree.ts).
    * Any other docs response is sent as it is.
    */
@@ -1211,6 +1212,7 @@ export class ServerRenderer {
     const matched = this.routeManager.matchRoute(pathname);
     // The hydration plan an app page reads its layouts from, which production bakes in.
     const routeManifest = this.routeManager.generateClientManifest(this.config.root);
+    const islandsMode = Boolean(islands && this.islandValues());
     const layouts = matched.layouts.map((layout) => {
       const entry = routeManifest.layouts.find((candidate) => candidate.pattern === layout.pattern);
       return {
@@ -1218,9 +1220,16 @@ export class ServerRenderer {
         modulePath: layout.modulePath,
         shouldHydrate: entry?.shouldHydrate === true,
         islandStrategy: entry?.islandStrategy ?? null,
+        hasIsolatedClientBoundaries: entry?.hasIsolatedClientBoundaries === true,
+        serverTree: entry?.serverTree === true,
+        islands: islandsMode && entry?.hasIsolatedClientBoundaries === true,
       };
     });
-    if (!layouts.some((layout) => layout.shouldHydrate)) return response;
+    if (!farmDocsLayoutsWrapPage(layouts)) return response;
+    const shouldHydrateLayout = layouts.some((layout) => layout.shouldHydrate);
+    const hasIsolatedClientBoundaries = layouts.some(
+      (layout) => layout.hasIsolatedClientBoundaries,
+    );
     const source = await response.text();
     const bodyMatch = /<body([^>]*)>([\s\S]*?)<\/body>/i.exec(source);
     if (!bodyMatch) {
@@ -1239,17 +1248,30 @@ export class ServerRenderer {
       Component: modules[index]?.default,
     }));
     const islandStrategy = resolveFarmDocsLayoutIslandStrategy(treeLayouts);
-    const tree = createFarmDocsLayoutTree(this.rendererRuntime, {
+    const tree = await createFarmDocsLayoutTree(this.rendererRuntime, {
       pageHtml: bodyMatch[2]!,
       layouts: treeLayouts,
       params: matched.params,
-      islandStrategy,
+      renderServerTreeLayout: islandsMode
+        ? (Layout, props, outlets, pattern) =>
+            islands!.renderFarmServerTreeLayout(
+              Layout as never,
+              props,
+              outlets as Record<string, unknown> as Record<string, never>,
+              pattern,
+            )
+        : undefined,
+      layoutKey: islandsMode ? (pattern) => getFarmLayoutKey(pattern, matched.params) : undefined,
     });
+    // Only a layout that hydrates renders as one client root; otherwise its client components
+    // render as islands, as on an app page.
     const rendered = await this.renderElementToDocumentParts(
       this.rendererRuntime.createElement(
         "div",
         { id: "root" },
-        await this.wrapWithIntegrationProviders(this.wrapClientGraph(tree)),
+        await this.wrapWithIntegrationProviders(
+          shouldHydrateLayout ? this.wrapClientGraph(tree) : tree,
+        ),
       ),
     );
     const rootMarkup = placeFarmDocsLayoutRoot(rendered.html);
@@ -1259,6 +1281,9 @@ export class ServerRenderer {
       modulePath: toViteModuleId(layout.modulePath, root),
       shouldHydrate: layout.shouldHydrate,
       islandStrategy: layout.islandStrategy,
+      ...(layout.hasIsolatedClientBoundaries ? { hasIsolatedClientBoundaries: true } : {}),
+      // Islands mode: the browser rebuilds this layout from its tree, not its module.
+      ...(shouldHydrateLayout && layout.serverTree ? { serverTree: true } : {}),
     }));
     const clientManifest = createFarmDevClientManifest(routeManifest, {
       sharedAssets: [
@@ -1271,7 +1296,8 @@ export class ServerRenderer {
       boot: { layoutPatterns: layouts.map((layout) => layout.pattern) },
     });
     const i18nSnapshot = getFarmI18nClientSnapshot();
-    // The docs page is no app page: the client hydrates the layouts around its HTML.
+    // The docs page is no app page: the client hydrates the layouts around its HTML, or their
+    // islands.
     const bootstrapScript = `<script>
 window.__FARM_PROPS__ = ${serializeInlineValue({ params: matched.params })};
 window.__FARM_ROUTE_SLOTS__ = [];
@@ -1279,9 +1305,10 @@ window.__FARM_DEPLOYMENT_ID__ = ${serializeInlineValue(this.getDeploymentId())};
 window.__FARM_PATH__ = ${serializeInlineValue(pathname)};
 window.__FARM_IS_CLIENT__ = false;
 window.__FARM_PAGE_SHOULD_HYDRATE__ = false;
-window.__FARM_LAYOUT_SHOULD_HYDRATE__ = true;
+window.__FARM_LAYOUT_SHOULD_HYDRATE__ = ${JSON.stringify(shouldHydrateLayout)};
 window.__FARM_LAYOUTS__ = ${serializeInlineValue(clientLayouts)};
-window.__FARM_SHOULD_HYDRATE__ = true;
+window.__FARM_SHOULD_HYDRATE__ = ${JSON.stringify(shouldHydrateLayout || hasIsolatedClientBoundaries)};
+window.__FARM_HAS_ISOLATED_CLIENT_BOUNDARIES__ = ${JSON.stringify(hasIsolatedClientBoundaries)};
 window.__FARM_ISLAND_STRATEGY__ = ${serializeInlineValue(islandStrategy)};
 window.__FARM_PAGE_MODULE__ = "";
 window.__FARM_LOADING_MODULE__ = null;

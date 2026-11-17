@@ -7687,6 +7687,9 @@ function renderFarmServerTreeLayout(Layout, props, outlets) {
     shouldHydrate: ${JSON.stringify(clientMetadata.shouldHydrate)},
     islandStrategy: ${JSON.stringify(clientMetadata.islandStrategy)},${
       treeLayoutPatterns.has(layout.pattern) ? "\n    serverTree: true," : ""
+    }${
+      // Islands mode: a server layout whose client components hydrate as islands of their own.
+      farmIslandsMode && clientMetadata.hasIsolatedClientBoundaries ? "\n    islands: true," : ""
     }
   }`);
   });
@@ -7866,7 +7869,7 @@ function renderFarmServerTreeLayout(Layout, props, outlets) {
   createFarmLayoutSelector,
   createFarmLayoutBoundary,${
     config.docs?.enabled
-      ? "\n  createFarmDocsLayoutTree,\n  placeFarmDocsLayoutRoot,\n  resolveFarmDocsLayoutIslandStrategy,"
+      ? "\n  createFarmDocsLayoutTree,\n  farmDocsLayoutsWrapPage,\n  placeFarmDocsLayoutRoot,"
       : ""
   }
   isInFarmRouteGroupScope,
@@ -10811,9 +10814,10 @@ ${
 
   const pathname = getFarmRoutePathname(new URL(request.url).pathname);
   const applicableLayouts = getApplicableLayouts(pathname);
-  if (!applicableLayouts.some((layout) => layout.shouldHydrate === true)) {
-    return response;
-  }
+  // Layouts with client components wrap the docs page: one that hydrates, or (islands mode) one
+  // whose client components are islands of their own, as on an app page.
+  if (!farmDocsLayoutsWrapPage(applicableLayouts)) return response;
+  const shouldHydrateLayout = applicableLayouts.some((layout) => layout.shouldHydrate === true);
 
   const source = await response.text();
   const bodyMatch = source.match(/<body([^>]*)>([\\s\\S]*?)<\\/body>/i);
@@ -10828,27 +10832,36 @@ ${
   const matchedRoute = matchPageRoute(pathname);
   const params = matchedRoute?.params || {};
   // The docs page takes the place of an app page: the same page and layout boundaries, which the
-  // browser draws around the docs HTML when the layouts hydrate. The development server renders
-  // the same tree (docs-layout-tree.ts).
-  const layouts = applicableLayouts.map((layout) => ({
-    pattern: layout.pattern,
-    Component: layout.module.default,
-    shouldHydrate: layout.shouldHydrate,
-    islandStrategy: layout.islandStrategy,
-  }));
-  const wrappedElement = createFarmDocsLayoutTree(React, {
+  // browser draws around the docs HTML (createLayoutPageBoundary). Islands mode: a layout around a
+  // client provider renders as a server tree, which the browser rebuilds with the docs page at its
+  // outlet. The development server renders the same tree (docs-layout-tree.ts).
+  const wrappedElement = await createFarmDocsLayoutTree(React, {
     pageHtml: bodyMatch[2],
-    layouts,
+    layouts: applicableLayouts.map((layout) => ({
+      pattern: layout.pattern,
+      Component: layout.module.default,
+      shouldHydrate: layout.shouldHydrate,
+      islandStrategy: layout.islandStrategy,
+      serverTree: layout.serverTree,
+    })),
     params,
-    islandStrategy: resolveFarmDocsLayoutIslandStrategy(layouts),
+    renderServerTreeLayout: renderFarmServerTreeLayout,
+    layoutKey: ${
+      farmIslandsMode
+        ? "function(pattern) { return getFarmLayoutKey(pattern, params); }"
+        : "undefined"
+    },
   });
 
+  // Only a layout that hydrates renders as one client root; otherwise its client components
+  // render as islands, as on an app page.
+  const rootElement = wrapWithFarmIntegrationProviders(wrappedElement);
   const renderedRoot = await renderFarmElement(
     ReactDOMServer,
     React.createElement(
       "div",
       { id: "root" },
-      wrapFarmRouteClientGraph(wrapWithFarmIntegrationProviders(wrappedElement)),
+      shouldHydrateLayout ? wrapFarmRouteClientGraph(rootElement) : rootElement,
     ),
   );
   let rootMarkup = renderedRoot.html;

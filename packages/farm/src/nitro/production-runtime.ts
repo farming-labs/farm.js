@@ -11,8 +11,8 @@ export { createFarmLayoutSelector } from "../routing/layout-selector";
 export {
   createFarmDocsLayoutTree,
   createFarmLayoutBoundary,
+  farmDocsLayoutsWrapPage,
   placeFarmDocsLayoutRoot,
-  resolveFarmDocsLayoutIslandStrategy,
 } from "../server/docs-layout-tree";
 export { isInRouteGroupScope as isInFarmRouteGroupScope } from "../routing/route-groups";
 export {
