@@ -101,12 +101,12 @@ test("blog connects the index, article, contents, and Markdown mirror", async ({
   // The index features the newest post and lists the rest, so these follow the collection.
   await expect(page.locator(".blog-featured h3 a")).toHaveAttribute(
     "href",
-    "/blog/native-internals",
+    "/blog/agent-markdown-scan",
   );
   await expect(page.locator(".blog-featured .blog-post-meta time")).toHaveText("Nov 2026");
   await expect(page.locator(".blog-featured .blog-post-meta time")).toHaveAttribute(
     "datetime",
-    "2026-11-08",
+    "2026-11-16",
   );
   await expect(page.locator(".blog-featured .blog-post-meta time")).toHaveCSS(
     "font-family",
@@ -137,7 +137,10 @@ test("blog connects the index, article, contents, and Markdown mirror", async ({
   await expect(page.locator(".blog-featured-bottom img")).toHaveAttribute("width", "36");
   await expect(page.locator(".blog-author small")).toHaveCSS("margin-top", "0px");
   await expect(page.locator(".blog-read-link")).toHaveText("Read article");
-  await expect(page.locator(".blog-read-link")).toHaveAttribute("href", "/blog/native-internals");
+  await expect(page.locator(".blog-read-link")).toHaveAttribute(
+    "href",
+    "/blog/agent-markdown-scan",
+  );
   await expect(page.locator(".blog-explore a")).toHaveCount(2);
   await expect(page.locator(".blog-explore a").first()).toHaveAttribute(
     "href",
@@ -1030,6 +1033,7 @@ for (const width of [280, 320, 345, 360, 1440]) {
         "/blog/agent-native",
         "/blog/web-to-native",
         "/blog/native-internals",
+        "/blog/agent-markdown-scan",
         "/blog",
         "/",
       ]) {
@@ -1087,6 +1091,7 @@ test("blog figure captions stay in view while their figures scroll sideways", as
       "/blog/agent-native",
       "/blog/web-to-native",
       "/blog/native-internals",
+      "/blog/agent-markdown-scan",
     ]) {
       await page.goto(pathname);
       const result = await page

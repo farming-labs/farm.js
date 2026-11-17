@@ -130,8 +130,29 @@ export const nativeInternalsSections = [
   ["try-it", "Try it"],
 ] as const satisfies BlogSections;
 
+export const agentScanPost: BlogPost = {
+  href: "/blog/agent-markdown-scan",
+  title: "I asked 105 developer sites for Markdown. A third answered with HTML.",
+  description:
+    "What 105 developer-tool sites send an AI agent that asks for Markdown, and why the frameworks they are built on are furthest behind.",
+  ...AUTHOR,
+  date: "Nov 2026",
+  dateTime: "2026-11-16",
+  category: "Research",
+};
+
+export const agentScanSections = [
+  ["the-short-version", "The short version"],
+  ["html-is-35-times-bigger", "HTML is 35 times bigger"],
+  ["the-tools-we-build-with-are-furthest-behind", "Frameworks are behind"],
+  ["what-a-framework-can-do-by-default", "Framework defaults"],
+  ["check-your-own-site", "Check your own site"],
+  ["how-i-measured", "How I measured"],
+] as const satisfies BlogSections;
+
 /** Every post. The index features the first and lists the rest. */
 export const posts: readonly { post: BlogPost; sections: BlogSections }[] = [
+  { post: agentScanPost, sections: agentScanSections },
   { post: nativeInternalsPost, sections: nativeInternalsSections },
   { post: agentNativePost, sections: agentNativeSections },
   { post: nativePost, sections: nativeSections },

@@ -27,7 +27,8 @@ export type FigureKind =
   | "agent-layers"
   | "agent-authorize"
   | "ast-native"
-  | "mobile-arch";
+  | "mobile-arch"
+  | "agent-scan";
 export type IconKey =
   | "stripe"
   | "cloudflare"
@@ -1126,6 +1127,24 @@ const G = {
   search: glyph("M11 3a8 8 0 1 0 0 16a8 8 0 1 0 0-16z", "m21 21-4.3-4.3"),
   model: glyph("M12 3l1.9 5.1L19 10l-5.1 1.9L12 17l-1.9-5.1L5 10l5.1-1.9z"),
   swap: glyph("m16 3 4 4-4 4", "M20 7H4", "m8 21-4-4 4-4", "M4 17h16"),
+  cloud: glyph("M17.5 19H9a7 7 0 1 1 6.71-9h1.79a4.5 4.5 0 1 1 0 9Z"),
+  card: glyph(
+    "M4 5h16a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V7a2 2 0 0 1 2-2z",
+    "M2 10h20",
+  ),
+  database: glyph(
+    "M3 5a9 3 0 1 0 18 0a9 3 0 1 0-18 0",
+    "M3 5v14a9 3 0 0 0 18 0V5",
+    "M3 12a9 3 0 0 0 18 0",
+  ),
+  layers: glyph(
+    "m12.83 2.18a2 2 0 0 0-1.66 0L2.6 6.08a1 1 0 0 0 0 1.83l8.58 3.91a2 2 0 0 0 1.66 0l8.58-3.9a1 1 0 0 0 0-1.83Z",
+    "m22 17.65-9.17 4.16a2 2 0 0 1-1.66 0L2 17.65",
+    "m22 12.65-9.17 4.16a2 2 0 0 1-1.66 0L2 12.65",
+  ),
+  wrench: glyph(
+    "M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z",
+  ),
 };
 type GlyphKey = keyof typeof G;
 
@@ -1666,6 +1685,50 @@ const landingStrata: FigureSpec = {
     }).join("");
     return {
       slots: { scan: rows, "scan:meta": `${done} / ${BOUNDARY_CHECKS.length}` },
+      wires: {},
+      states: {},
+    };
+  },
+};
+
+/* ---------- blog: what 105 developer sites send an agent that asks for Markdown ---------- */
+
+// The measured share per category from the November 16, 2026 scans, in the post's order. These are
+// the published numbers; change them only with a rerun of benchmarks/agent-readiness.
+const SCAN_ROWS: [GlyphKey, string, string, string][] = [
+  ["model", "AI companies", "9 of 11 docs pages", "82%"],
+  ["cloud", "Hosting", "6 of 8 docs pages", "75%"],
+  ["database", "Databases and backends", "12 of 17 docs pages", "71%"],
+  ["card", "Auth, payments, SaaS", "14 of 20 docs pages", "70%"],
+  ["layers", "Frameworks and UI", "10 of 26 docs pages", "38%"],
+  ["wrench", "Build tools and runtimes", "5 of 23 docs pages", "22%"],
+];
+const agentScan: FigureSpec = {
+  duration: 0.4 + SCAN_ROWS.length * BEAT + HOLD,
+  // Six rows need the extra height on phones, where type stops shrinking with the stage.
+  stage: { w: 440, h: 370 },
+  label:
+    "Share of docs pages that answer Accept: text/markdown with Markdown, by category: AI companies 82%, hosting 75%, databases 71%, SaaS 70%, frameworks 38%, build tools 22%",
+  panels: [{ id: "scan", x: 0, y: 0, w: 440, h: 370, title: "Accept: text/markdown · 105 sites" }],
+  wires: {},
+  frame(t) {
+    let done = 0;
+    const rows = SCAN_ROWS.map(([icon, name, sub, share], i) => {
+      const start = 0.4 + i * BEAT;
+      const end = start + BEAT * 0.75;
+      const finished = t >= end;
+      if (finished) done++;
+      return row(
+        icon,
+        name,
+        esc(sub),
+        finished ? share : "",
+        step(t, start, end),
+        t >= start && !finished ? "bf-von" : t < start ? "bf-item--wait" : "",
+      );
+    }).join("");
+    return {
+      slots: { scan: rows, "scan:meta": `${done} / ${SCAN_ROWS.length}` },
       wires: {},
       states: {},
     };
@@ -2572,6 +2635,7 @@ export const FIGURES: Record<FigureKind, FigureSpec> = {
   "agent-authorize": agentAuthorize,
   "ast-native": astNative,
   "mobile-arch": mobileArch,
+  "agent-scan": agentScan,
 };
 
 // The two callers stack, so a phone reads the refused run above the one that completes.
