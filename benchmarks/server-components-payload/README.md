@@ -37,8 +37,9 @@ a client navigation, and page errors are counted.
 
 ## Results
 
-2026-11-17, Apple M1, macOS 26.2, Node 24.21.0, Chrome 157, on `main` at cb949b16a with #2961
-(prefetches wait for a navigation to settle). Averages; KB = 1024 bytes.
+2026-11-17, Apple M1, macOS 26.2, Node 24.21.0, Chrome 157. Bytes on `main` at 310cdfe5e with the
+first navigation of a waiting layout root fetching only its payload; times on `main` at cb949b16a
+with #2961 (prefetches wait for a navigation to settle). Averages; KB = 1024 bytes.
 
 Three sections of the app:
 
@@ -53,11 +54,11 @@ Three sections of the app:
 
 | Section | Engine    | Document, br (raw) | First-load JS, br | Navigation data, br (raw) | Navigation JS, br |
 | ------- | --------- | ------------------ | ----------------- | ------------------------- | ----------------- |
-| docs    | `rsc`     | 16.3 KB (76.4 KB)  | 70.6 KB           | 12.0 KB (37.5 KB)         | 0                 |
+| docs    | `rsc`     | 16.3 KB (76.4 KB)  | 70.9 KB           | 12.0 KB (37.5 KB)         | 0                 |
 | docs    | `islands` | 16.0 KB (69.8 KB)  | 1.7 KB            | 2.6 KB (7.4 KB)           | 9.2 KB            |
-| shop    | `rsc`     | 5.5 KB (33.2 KB)   | 70.6 KB           | 3.8 KB (13.2 KB)          | 0                 |
-| shop    | `islands` | 5.8 KB (31.9 KB)   | 1.7 KB            | 2.1 KB (6.8 KB)           | 9.3 KB            |
-| blog    | `rsc`     | 17.9 KB (379.5 KB) | 70.6 KB           | 10.8 KB (203.7 KB)        | 0                 |
+| shop    | `rsc`     | 5.5 KB (33.2 KB)   | 70.9 KB           | 3.8 KB (13.2 KB)          | 0                 |
+| shop    | `islands` | 5.8 KB (31.9 KB)   | 1.7 KB            | 1.9 KB (5.1 KB)           | 9.3 KB            |
+| blog    | `rsc`     | 17.9 KB (379.5 KB) | 70.9 KB           | 10.8 KB (203.7 KB)        | 0                 |
 | blog    | `islands` | 9.0 KB (127.3 KB)  | 1.7 KB            | 9.1 KB (127.5 KB)         | 9.2 KB            |
 
 An islands page whose client components only react to clicks starts with the boot entry (RFC 0003,
@@ -82,9 +83,9 @@ This run had other work on the machine (load average 6 to 14), so absolute numbe
 | blog    | `rsc`     | 211 ms (87 ms)                   | 71 ms      | 56 (53-59)           |
 | blog    | `islands` | 96 ms (3 ms)                     | 68 ms      | 426 (311-434)        |
 
-- A first load sends 1.7 KB of JavaScript instead of 70.6 KB, does about half the main-thread work
+- A first load sends 1.7 KB of JavaScript instead of 70.9 KB, does about half the main-thread work
   and runs 3 to 4 ms of script instead of 60 to 87 ms: nothing on these pages hydrates at load.
-- Navigations carry a fifth of RSC's data on docs pages and a little over half on shop pages. On a
+- Navigations carry a fifth of RSC's data on docs pages and half on shop pages. On a
   content page (blog) Flight sends every token twice, as HTML and as rows: islands sends half the
   document, and its server renders 7.6 times as many pages per second.
 - Navigations paint within a millisecond of RSC on docs and shop pages and 3 ms sooner on blog
@@ -96,6 +97,7 @@ This run had other work on the machine (load average 6 to 14), so absolute numbe
   (`F-Layouts`, keyed by pattern and params); the server leaves both out.
 - shop: the catalog travels once, and a navigation leaves it out. The browser rebuilds a shop
   page in the layout's React tree from its payload, so a navigation carries only that payload,
-  not the page's HTML (`F-Render: tree`).
+  not the page's HTML (`F-Render: tree`). That holds from the first navigation, before the
+  layout has hydrated: the router creates the layout's root with the next page.
 
 `results/latest.json` has the per-page numbers of the last run.
