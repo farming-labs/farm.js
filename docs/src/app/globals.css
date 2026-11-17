@@ -789,10 +789,6 @@ svg.lucide:not([stroke]) {
   @apply flex h-12 items-center border-b border-white/10 px-4 uppercase tracking-normal text-white/58 last:border-b-0 hover:bg-white/[0.04] hover:text-white;
 }
 
-.farm-file-tree-item {
-  @apply relative flex h-7 w-full min-w-0 items-center gap-1.5 rounded-[3px] px-2 text-left text-[9px] font-normal tracking-normal transition-[background-color,color] duration-150 focus-visible:z-10 focus-visible:outline focus-visible:outline-1 focus-visible:outline-offset-[-1px] focus-visible:outline-white/60 sm:text-[10px];
-}
-
 .farm-install-tab {
   @apply relative flex h-7 min-w-0 items-center justify-center gap-1 border-r border-white/10 px-1 text-[8px] font-normal uppercase tracking-normal text-white/42 transition-[background-color,color] duration-150 last:border-r-0 hover:bg-white/[0.055] hover:text-white focus-visible:z-10 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-[-2px] focus-visible:outline-white aria-selected:bg-white aria-selected:text-black sm:h-8 sm:text-[9px];
 }

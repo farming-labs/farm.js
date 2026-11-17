@@ -1,27 +1,13 @@
 "use client";
 
-import {
-  Atom,
-  Braces,
-  Check,
-  ChevronRight,
-  File,
-  FileCode2,
-  FileJson2,
-  FileText,
-  Folder,
-  FolderOpen,
-  FolderTree,
-  Route,
-} from "../icons";
-import type { LucideIcon } from "lucide-react";
+import { Check, FolderTree, Route } from "../icons";
 import { type ReactNode, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { BoughIndex, type BoughNode } from "./tree-box-drawing";
 
 export type FileTreeNode = {
   name: string;
   type: "file" | "folder";
   children?: readonly FileTreeNode[];
-  extension?: string;
   meta?: string;
   defaultOpen?: boolean;
 };
@@ -38,19 +24,11 @@ export type FileTreeProps = {
   explorer?: (activePath: string) => ReactNode;
 };
 
-type FileTreeItemProps = {
-  node: FileTreeNode;
-  path: string;
-  depth: number;
-  activePath: string;
-  onSelect: (path: string) => void;
-};
-
 function cn(...classes: Array<string | false | null | undefined>) {
   return classes.filter(Boolean).join(" ");
 }
 
-function collectFilePaths(nodes: readonly FileTreeNode[], parentPath = "") {
+function collectFilePaths(nodes: readonly FileTreeNode[], parentPath = ""): string[] {
   return nodes.flatMap((node) => {
     const path = parentPath ? `${parentPath}/${node.name}` : node.name;
     if (node.type === "file") return [path];
@@ -80,106 +58,27 @@ function routeWire([x0, y0]: [number, number], [x1, y1]: [number, number], end: 
   ].join("");
 }
 
-function getFileIcon(extension?: string): LucideIcon {
-  if (extension === "tsx" || extension === "jsx") return Atom;
-  if (extension === "ts" || extension === "js") return FileCode2;
-  if (extension === "json") return FileJson2;
-  if (extension === "md" || extension === "mdx") return FileText;
-  if (extension === "route") return Braces;
-  return File;
+/** Tree rows keyed by path, so a row's id is the path the explorer shows. */
+function toTreeNodes(nodes: readonly FileTreeNode[], parentPath = ""): BoughNode[] {
+  return nodes.map((node) => {
+    const path = parentPath ? `${parentPath}/${node.name}` : node.name;
+    return {
+      id: path,
+      label: node.name,
+      meta: node.meta,
+      children: node.type === "folder" ? toTreeNodes(node.children ?? [], path) : undefined,
+    };
+  });
 }
 
-function FileTreeItem({ node, path, depth, activePath, onSelect }: FileTreeItemProps) {
-  const isFolder = node.type === "folder";
-  const hasChildren = isFolder && Boolean(node.children?.length);
-  const [isOpen, setIsOpen] = useState(node.defaultOpen ?? true);
-  const isSelected = !isFolder && activePath === path;
-  const FileIcon = getFileIcon(node.extension);
-  const FolderIcon = isOpen ? FolderOpen : Folder;
-
-  return (
-    <li className="min-w-0">
-      <button
-        aria-current={isSelected ? "true" : undefined}
-        aria-expanded={isFolder ? isOpen : undefined}
-        aria-label={
-          isFolder ? `${node.name} folder` : `${path}${node.meta ? `, ${node.meta}` : ""}`
-        }
-        className={cn(
-          "farm-file-tree-item group/file font-mono",
-          isFolder && !isSelected && "text-white/62 hover:bg-white/[0.035] hover:text-white/88",
-          !isFolder && !isSelected && "text-white/40 hover:bg-white/[0.035] hover:text-white/72",
-          isSelected && "bg-white/[0.055]",
-        )}
-        onClick={() => {
-          if (isFolder) setIsOpen((current) => !current);
-          else onSelect(path);
-        }}
-        type="button"
-      >
-        {isFolder ? (
-          <ChevronRight
-            aria-hidden
-            className={cn(
-              "size-3 shrink-0 text-white/34 transition-transform duration-200 motion-reduce:transition-none",
-              isOpen && "rotate-90",
-            )}
-            strokeWidth={1.5}
-          />
-        ) : (
-          <span aria-hidden className="size-3 shrink-0" />
-        )}
-
-        {isFolder ? (
-          <FolderIcon aria-hidden className="size-3.5 shrink-0 text-white/62" strokeWidth={1.4} />
-        ) : (
-          <FileIcon
-            aria-hidden
-            className={cn("size-3.5 shrink-0", isSelected ? "text-white/88" : "text-white/46")}
-            strokeWidth={1.35}
-          />
-        )}
-
-        <span className="min-w-0 flex-1 truncate">{node.name}</span>
-        {node.meta ? (
-          <span
-            className={cn("ml-2 shrink-0 text-[8px] uppercase", !isSelected && "text-white/28")}
-          >
-            {node.meta}
-          </span>
-        ) : null}
-      </button>
-
-      {hasChildren ? (
-        <div
-          aria-hidden={!isOpen}
-          className={cn(
-            "grid transition-[grid-template-rows,opacity] duration-200 ease-out motion-reduce:transition-none",
-            isOpen
-              ? "grid-rows-[1fr] opacity-100"
-              : "pointer-events-none grid-rows-[0fr] opacity-0",
-          )}
-          inert={!isOpen}
-        >
-          <ul className="farm-tree-guide ml-[13.5px] min-h-0 overflow-hidden border-l border-white/[0.08] pl-px">
-            {node.children?.map((child) => {
-              const childPath = `${path}/${child.name}`;
-              return (
-                <FileTreeItem
-                  key={childPath}
-                  activePath={activePath}
-                  depth={depth + 1}
-                  node={child}
-                  onSelect={onSelect}
-                  path={childPath}
-                />
-              );
-            })}
-          </ul>
-        </div>
-      ) : null}
-    </li>
-  );
+/** Folders start open unless they set `defaultOpen: false`. */
+function collectOpenFolders(nodes: readonly FileTreeNode[], parentPath = ""): string[] {
+  return nodes.flatMap((node) => {
+    if (node.type !== "folder") return [];
+    const path = parentPath ? `${parentPath}/${node.name}` : node.name;
+    const nested = collectOpenFolders(node.children ?? [], path);
+    return node.defaultOpen === false ? nested : [path, ...nested];
+  });
 }
 
 export function FileTree({
@@ -191,12 +90,15 @@ export function FileTree({
 }: FileTreeProps) {
   const filePaths = useMemo(() => collectFilePaths(data), [data]);
   const routeCount = useMemo(() => countFiles(data), [data]);
+  const treeNodes = useMemo(() => toTreeNodes(data), [data]);
+  const openFolders = useMemo(() => collectOpenFolders(data), [data]);
+  const filePathSet = useMemo(() => new Set(filePaths), [filePaths]);
   const [activePath, setActivePath] = useState(defaultSelectedPath ?? filePaths[0] ?? "");
   const [isPaused, setIsPaused] = useState(false);
   const [reducedMotion, setReducedMotion] = useState(false);
   const hasExplorer = Boolean(explorer);
   const bodyRef = useRef<HTMLDivElement>(null);
-  const listRef = useRef<HTMLUListElement>(null);
+  const listRef = useRef<HTMLDivElement>(null);
   const [wireAt, setWireAt] = useState<{
     row: number;
     edge: number;
@@ -211,7 +113,7 @@ export function FileTree({
     const list = listRef.current;
     if (!hasExplorer || !body || !list) return;
     const measure = () => {
-      const row = list.querySelector<HTMLElement>('[aria-current="true"]');
+      const row = list.querySelector<HTMLElement>('[role="treeitem"][aria-selected="true"]');
       const target = body.querySelector<HTMLElement>("[data-route-explorer-anchor]");
       if (!row || !target) return setWireAt(null);
       const box = body.getBoundingClientRect();
@@ -235,6 +137,9 @@ export function FileTree({
     measure();
     const observer = new ResizeObserver(measure);
     observer.observe(body);
+    // The tree grows and shrinks as folders open and close, which moves the selected row.
+    const tree = list.querySelector('[role="tree"]');
+    if (tree) observer.observe(tree);
     return () => observer.disconnect();
   }, [activePath, hasExplorer]);
 
@@ -292,24 +197,26 @@ export function FileTree({
       </div>
 
       <div className="relative flex min-h-0 flex-1" ref={bodyRef}>
-        <ul
+        <div
           className={cn(
             "min-h-0 flex-1 overflow-hidden px-2 py-1.5",
             explorer && "sm:max-w-[54%] sm:flex-none sm:basis-[54%]",
           )}
           ref={listRef}
         >
-          {data.map((node) => (
-            <FileTreeItem
-              key={node.name}
-              activePath={activePath}
-              depth={0}
-              node={node}
-              onSelect={setActivePath}
-              path={node.name}
-            />
-          ))}
-        </ul>
+          <BoughIndex
+            className="text-[10px] sm:text-[11px]"
+            defaultExpandedIds={openFolders}
+            label="Route files"
+            nodes={treeNodes}
+            onSelectedIdChange={(path) => {
+              // Folders only open and close; the explorer follows files.
+              if (filePathSet.has(path)) setActivePath(path);
+            }}
+            rowHeight={24}
+            selectedId={activePath}
+          />
+        </div>
         {explorer ? (
           <>
             <div className="hidden min-w-0 flex-1 border-l border-white/10 sm:block">
