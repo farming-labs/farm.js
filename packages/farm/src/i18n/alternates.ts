@@ -12,6 +12,12 @@ export interface FarmLocaleAlternateLinkOptions {
    * authority headers count). Used when no usable `metadataBase` is set.
    */
   origin?: string;
+  /**
+   * The page's own `metadata.alternates.languages`. A page that lists its language versions owns
+   * its hreflang links, so Farm adds none of its own: two links for one language with different
+   * URLs read as conflicting to search engines.
+   */
+  languages?: unknown;
 }
 
 /**
@@ -26,6 +32,13 @@ export function renderFarmLocaleAlternateLinks(
   options: FarmLocaleAlternateLinkOptions = {},
 ): string {
   if (config.routing === "none") return "";
+  if (
+    options.languages &&
+    typeof options.languages === "object" &&
+    Object.keys(options.languages).length > 0
+  ) {
+    return "";
+  }
   const base = resolveAlternateBase(options);
   const link = (hreflang: string, locale: string) =>
     `<link rel="alternate" hreflang="${escapeHtmlAttribute(hreflang)}" href="${escapeHtmlAttribute(

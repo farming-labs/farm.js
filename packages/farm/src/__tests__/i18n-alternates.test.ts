@@ -49,6 +49,24 @@ describe("renderFarmLocaleAlternateLinks", () => {
     });
   });
 
+  it("leaves hreflang to a page that lists its own language versions", () => {
+    // Farm's links next to the page's gave two hreflang="fr" links with different URLs.
+    const locales = resolveFarmI18nConfig({ locales: ["en", "fr"], defaultLocale: "en" });
+    expect(
+      renderFarmLocaleAlternateLinks("/about", locales, {
+        origin: "https://farm.test",
+        languages: { fr: "/fr/a-propos", en: "/about" },
+      }),
+    ).toBe("");
+    // An empty map lists no versions: Farm's links stay.
+    expect(
+      renderFarmLocaleAlternateLinks("/about", locales, {
+        origin: "https://farm.test",
+        languages: {},
+      }),
+    ).toContain('hreflang="fr"');
+  });
+
   it("resolves every locale and x-default against the request origin", () => {
     expect(
       alternates(

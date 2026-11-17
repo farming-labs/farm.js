@@ -4547,6 +4547,8 @@ window.__FARM_I18N__ = ${getFarmI18nClientSnapshot() ? serializeInlineValue(getF
       origin: req
         ? resolveFarmRequestURL(req, { trustProxy: this.config.server?.trustProxy }).origin
         : undefined,
+      languages: (metadata as { alternates?: { languages?: unknown } } | undefined)?.alternates
+        ?.languages,
     };
   }
 
