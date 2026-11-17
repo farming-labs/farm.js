@@ -103,8 +103,10 @@ export const metadata = {
       },
     ],
   },
+  // "player" overrides the layout's card, so X plays openGraph.videos in Farm's player page.
   twitter: {
-    card: "summary_large_image",
+    card: "player",
+    site: "@farming_labs",
     title: homepageTitle,
     description: homepageDescription,
     images: ["/opengraph-image"],
