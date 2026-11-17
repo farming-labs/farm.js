@@ -97,3 +97,21 @@ export function getZodArrayFieldKeys(schema: unknown): string[] {
   }
   return keys;
 }
+
+/**
+ * Form data names one value the same way for a string field and a one-element array. Give a field
+ * the schema declares as an array its single value as an array, as a repeated field arrives, so
+ * `tags: ["a"]` sent as form data validates like `tags: ["a", "b"]`.
+ */
+export function wrapZodArrayFieldValues<T extends Record<string, unknown>>(
+  values: T,
+  schema: unknown,
+): T {
+  for (const key of getZodArrayFieldKeys(schema)) {
+    if (!Object.prototype.hasOwnProperty.call(values, key)) continue;
+    const value = values[key];
+    if (value !== undefined && !Array.isArray(value))
+      (values as Record<string, unknown>)[key] = [value];
+  }
+  return values;
+}

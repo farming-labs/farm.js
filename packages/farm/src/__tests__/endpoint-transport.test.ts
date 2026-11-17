@@ -96,4 +96,41 @@ describe("endpoint multipart and stream transport", () => {
       },
     ]);
   });
+
+  it("validates a declared array field that the form sends once", async () => {
+    // One `tags` entry looks the same as a string field in form data; the schema's array still
+    // receives it as a one-element list, as `toFormData` and the generated client send it.
+    const response = await invokeAPIRouteEndpoint(
+      uploadEndpoint,
+      new Request("https://farm.test/api/uploads", {
+        method: "POST",
+        body: toFormData({
+          title: "Single tag",
+          attachment: new Blob(["farm"], { type: "text/plain" }),
+          tags: ["reports"],
+        }),
+      }),
+    );
+    expect(response.status).toBe(200);
+    const events = [];
+    for await (const event of readJSONStream<UploadEvent>(response)) events.push(event);
+    expect(events.at(-1)).toEqual({ phase: "complete", tags: ["reports"] });
+  });
+
+  it("validates a declared array field in a URL-encoded form sent once", async () => {
+    const endpoint = createEndpoint(
+      { method: "POST", body: z.object({ tags: z.array(z.string()) }) },
+      async ({ body }) => Response.json(body),
+    );
+    const response = await invokeAPIRouteEndpoint(
+      endpoint,
+      new Request("https://farm.test/api/tags", {
+        method: "POST",
+        headers: { "content-type": "application/x-www-form-urlencoded" },
+        body: "tags=reports",
+      }),
+    );
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual({ tags: ["reports"] });
+  });
 });

@@ -7,6 +7,7 @@ import { _resolveCurrentRequestForApp, _toAppRequestView } from "./server/reques
 import { applyFarmCacheInvalidationTargets, type FarmCacheInvalidationTarget } from "./cache";
 import { ServerActionError, ServerFnFailure, isServerFnFailure } from "./server-fn-error";
 import { getFarmRedirectError } from "./navigation-errors";
+import { wrapZodArrayFieldValues } from "./zod-schema";
 import type { EndpointMCPMetadata } from "./api/endpoint";
 
 export {
@@ -464,7 +465,9 @@ export function createServerFn(options: {
   const error = createServerFnErrorHandler(errors);
   const run = async (value: unknown, labelInputErrors: boolean) => {
     const formData = isFormData(value) ? value : undefined;
-    const rawInput = formData ? formDataToObject(formData) : value;
+    const rawInput = formData
+      ? wrapZodArrayFieldValues(formDataToObject(formData), options.input)
+      : value;
     let input: unknown;
     try {
       input = await _parseServerFnSchema(options.input, rawInput, "input");

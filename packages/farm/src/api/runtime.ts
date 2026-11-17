@@ -38,7 +38,7 @@ import {
   validateIntegrationRequestOrigin,
 } from "../integration-request-security";
 import { isMultipartSchema } from "./transport";
-import { getZodArrayFieldKeys } from "../zod-schema";
+import { getZodArrayFieldKeys, wrapZodArrayFieldValues } from "../zod-schema";
 
 const CROSS_SITE_JSON_BODY_MESSAGE =
   "This endpoint reads a JSON body, so a request from another origin must send Content-Type: " +
@@ -199,6 +199,7 @@ async function invokeAPIRouteEndpointInContext(
     const parsedBody = await readRequestBody(request);
     if (parsedBody.error) return parsedBody.error;
     body = parsedBody.body;
+    if (parsedBody.form && body) wrapZodArrayFieldValues(body, types.body);
   }
 
   const headers = Object.fromEntries(request.headers.entries());
@@ -374,6 +375,8 @@ export function createEndpointFailureResponse(failure: EndpointFailure<string, u
 interface RequestBodyParseResult {
   body?: unknown;
   error?: Response;
+  /** Parsed from multipart or URL-encoded form data, where one value and a list look alike. */
+  form?: true;
 }
 
 async function readRequestBody(request: Request): Promise<RequestBodyParseResult> {
@@ -381,7 +384,10 @@ async function readRequestBody(request: Request): Promise<RequestBodyParseResult
 
   if (contentType === "multipart/form-data") {
     try {
-      return { body: formDataToObject(await cloneFarmRequest(request).formData()) };
+      return {
+        body: formDataToObject(await cloneFarmRequest(request).formData()),
+        form: true,
+      };
     } catch {
       return invalidRequestBody("The request body is not valid multipart form data.");
     }
@@ -416,7 +422,7 @@ async function readRequestBody(request: Request): Promise<RequestBodyParseResult
   }
 
   if (contentType === "application/x-www-form-urlencoded") {
-    return { body: searchParamsToObject(new URLSearchParams(text)) };
+    return { body: searchParamsToObject(new URLSearchParams(text)), form: true };
   }
 
   if (!text) return { body: undefined };
