@@ -718,6 +718,9 @@ function readAppPackageIdentity(root: string | undefined): { name?: unknown; ver
   }
 }
 
+/** The page Request each Node request was given (see ServerRenderer.createPageRequest). */
+const pageRequests = new WeakMap<object, Request>();
+
 export class ServerRenderer {
   private config: FarmRendererResolvedConfig;
   private routeManager: RouteManager;
@@ -1587,6 +1590,17 @@ export class ServerRenderer {
    * it can stop.
    */
   private createPageRequest(req: FarmRequest, res: FarmResponse): Request {
+    // One Request per Node request: its body streams from the request once. A second Request
+    // over the same stream (the islands action check after a cold module load) found it
+    // already disturbed and threw, so the first POST after a start or an edit answered 500.
+    const existing = pageRequests.get(req as object);
+    if (existing) return existing;
+    const request = this.createPageRequestOnce(req, res);
+    pageRequests.set(req as object, request);
+    return request;
+  }
+
+  private createPageRequestOnce(req: FarmRequest, res: FarmResponse): Request {
     // A caller driving the renderer without Node streams (a test double) has no close events.
     const observable =
       typeof (req as { once?: unknown }).once === "function" &&
@@ -1783,7 +1797,7 @@ export class ServerRenderer {
       pluginExposedContext = getRequestContextSnapshot(req as object, {
         exposedOnly: true,
       });
-      // The action check above already read the body stream into a Request.
+      // The Request renderPage made for this request, whose body the action check may have read.
       const currentRequest = actionRequest ?? this.createPageRequest(req, res);
       const routeContext = await this.resolveRouteContext({
         request: currentRequest,
