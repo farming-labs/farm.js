@@ -93,6 +93,7 @@ import {
 } from "./markdown";
 import { applyFarmBasePath, stripFarmBasePath } from "./base-path";
 import { resolveFarmTrailingSlashRedirect, toFarmTrailingSlashPageRequest } from "./trailing-slash";
+import { toBakedMarkdownSourcePath } from "./markdown-source-path";
 import { FARM_NATIVE_TREE_CONTENT_TYPE } from "./mobile/native-tree-type";
 import { resolveFarmLlmsTxtConfig } from "./llms-txt";
 import { resolveFarmAgentCrawlers } from "./agent-crawlers";
@@ -3779,7 +3780,8 @@ window.__FARM_MANIFEST__ = ${inlineValue({
                   }
                   return {
                     source: await fs.promises.readFile(sourcePath, "utf8"),
-                    filePath: sourcePath,
+                    // Project-relative, as production sends it: never the machine's path.
+                    filePath: toBakedMarkdownSourcePath(farmApp.getConfig().root, sourcePath),
                   };
                 },
                 // The anonymous check goes through this server, so its guards and

@@ -503,7 +503,10 @@ describe("production default sitemap", () => {
         expect(text, pathname).not.toContain("# Redirected");
         expect(text, pathname).toContain(body);
       }
-      expect((await get("/console/notes.md")).headers.get("x-farm-markdown-source")).toBeTruthy();
+      // The project-relative source, as both modes send it: never the machine's absolute path.
+      expect((await get("/console/notes.md")).headers.get("x-farm-markdown-source")).toBe(
+        "src/app/notes/page.md",
+      );
       expect(await (await get("/console/llms-full.txt")).text()).toContain(
         "URL: https://acme.test/console/about.md\n\n# Console\n\nSource: /console/about\n\nabout body",
       );
