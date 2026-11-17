@@ -12808,6 +12808,19 @@ ${
         ), middlewareHeaders), fullHtml);
       }
     } catch (error) {
+      // A Response the page, a layout, or generateMetadata throws answers the request as it is
+      // (a 3xx redirect, a 401 with its WWW-Authenticate), as development sends it.
+      if (error instanceof Response) {
+        emitFarmEvent({
+          type: "render.complete",
+          route: pathname,
+          pathname,
+          status: error.status,
+          durationMs: Date.now() - requestStartTime,
+        });
+        return applyProductionMiddlewareHeaders(error, middlewareHeaders);
+      }
+
       if (isFarmRedirectError(error)) {
         const redirect = getFarmRedirectError(error);
         const redirectUrl =
