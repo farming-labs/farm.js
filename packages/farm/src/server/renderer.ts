@@ -32,6 +32,11 @@ import {
   removeFarmDocumentTitles,
 } from "./full-document";
 import {
+  createFarmDocsLayoutTree,
+  placeFarmDocsLayoutRoot,
+  resolveFarmDocsLayoutIslandStrategy,
+} from "./docs-layout-tree";
+import {
   describeSuppressedAsyncHydration,
   getClientModuleMetadata,
 } from "../utils/client-component";
@@ -1181,6 +1186,134 @@ export class ServerRenderer {
 
     return this.renderElementToCompleteHTML(await this.wrapWithIntegrationProviders(element), {
       rejectLateRedirects: true,
+    });
+  }
+
+  /**
+   * A built-in docs runtime page (`docs.entry`, no adapter) under layouts that hydrate: the docs
+   * runtime's document with the layout chain rendered around its body, and the client that
+   * hydrates it with the boot data an app page has. Production renders the same tree
+   * (wrapFarmDocsResponseWithLayouts in nitro/universal-build.ts, with docs-layout-tree.ts).
+   * Any other docs response is sent as it is.
+   */
+  async wrapDocsResponseWithLayouts(request: Request, response: Response): Promise<Response> {
+    if (
+      request.method === "HEAD" ||
+      response.headers.has("x-farm-docs-adapter") ||
+      !response.headers.get("content-type")?.toLowerCase().includes("text/html")
+    ) {
+      return response;
+    }
+    await this.initialize();
+    if (this.viteServer) await this.applyRendererAppSetup();
+    const pathname = new URL(request.url).pathname;
+    const root = this.config.root || process.cwd();
+    const matched = this.routeManager.matchRoute(pathname);
+    // The hydration plan an app page reads its layouts from, which production bakes in.
+    const routeManifest = this.routeManager.generateClientManifest(this.config.root);
+    const layouts = matched.layouts.map((layout) => {
+      const entry = routeManifest.layouts.find((candidate) => candidate.pattern === layout.pattern);
+      return {
+        pattern: layout.pattern,
+        modulePath: layout.modulePath,
+        shouldHydrate: entry?.shouldHydrate === true,
+        islandStrategy: entry?.islandStrategy ?? null,
+      };
+    });
+    if (!layouts.some((layout) => layout.shouldHydrate)) return response;
+    const source = await response.text();
+    const bodyMatch = /<body([^>]*)>([\s\S]*?)<\/body>/i.exec(source);
+    if (!bodyMatch) {
+      return new Response(source, {
+        status: response.status,
+        statusText: response.statusText,
+        headers: response.headers,
+      });
+    }
+
+    const modules = await Promise.all(
+      layouts.map((layout) => this.routeManager.loadLayoutModule(layout.modulePath)),
+    );
+    const treeLayouts = layouts.map((layout, index) => ({
+      ...layout,
+      Component: modules[index]?.default,
+    }));
+    const islandStrategy = resolveFarmDocsLayoutIslandStrategy(treeLayouts);
+    const tree = createFarmDocsLayoutTree(this.rendererRuntime, {
+      pageHtml: bodyMatch[2]!,
+      layouts: treeLayouts,
+      params: matched.params,
+      islandStrategy,
+    });
+    const rendered = await this.renderElementToDocumentParts(
+      this.rendererRuntime.createElement(
+        "div",
+        { id: "root" },
+        await this.wrapWithIntegrationProviders(this.wrapClientGraph(tree)),
+      ),
+    );
+    const rootMarkup = placeFarmDocsLayoutRoot(rendered.html);
+
+    const clientLayouts = layouts.map((layout) => ({
+      pattern: layout.pattern,
+      modulePath: toViteModuleId(layout.modulePath, root),
+      shouldHydrate: layout.shouldHydrate,
+      islandStrategy: layout.islandStrategy,
+    }));
+    const clientManifest = createFarmDevClientManifest(routeManifest, {
+      sharedAssets: [
+        ...this.devGlobalStylesheetAssets(),
+        ...this.collectDevStyleHrefs().map((href) => ({
+          tag: "link",
+          attrs: { rel: "stylesheet", href },
+        })),
+      ],
+      boot: { layoutPatterns: layouts.map((layout) => layout.pattern) },
+    });
+    const i18nSnapshot = getFarmI18nClientSnapshot();
+    // The docs page is no app page: the client hydrates the layouts around its HTML.
+    const bootstrapScript = `<script>
+window.__FARM_PROPS__ = ${serializeInlineValue({ params: matched.params })};
+window.__FARM_ROUTE_SLOTS__ = [];
+window.__FARM_DEPLOYMENT_ID__ = ${serializeInlineValue(this.getDeploymentId())};
+window.__FARM_PATH__ = ${serializeInlineValue(pathname)};
+window.__FARM_IS_CLIENT__ = false;
+window.__FARM_PAGE_SHOULD_HYDRATE__ = false;
+window.__FARM_LAYOUT_SHOULD_HYDRATE__ = true;
+window.__FARM_LAYOUTS__ = ${serializeInlineValue(clientLayouts)};
+window.__FARM_SHOULD_HYDRATE__ = true;
+window.__FARM_ISLAND_STRATEGY__ = ${serializeInlineValue(islandStrategy)};
+window.__FARM_PAGE_MODULE__ = "";
+window.__FARM_LOADING_MODULE__ = null;
+window.__FARM_MANIFEST__ = ${serializeInlineValue(clientManifest)};
+window.__FARM_INTEGRATION_API_MANIFEST__ = ${serializeInlineValue(getRegisteredIntegrationAPIManifest())};
+window.__FARM_I18N__ = ${i18nSnapshot ? serializeInlineValue(i18nSnapshot) : "null"};
+</script>`;
+    // Renderer-emitted head markup (<svelte:head>) goes last: the docs page's <title> comes first.
+    const head = [
+      ...this.collectDevStyleLinks(),
+      `<script type="module" src="/@vite/client"></script>`,
+      source.includes("window._$HY") ? "" : this.rendererRuntime.generateHydrationScript?.(),
+      bootstrapScript,
+    ]
+      .filter(Boolean)
+      .map((markup) => stampFarmCspNonce(markup!))
+      .concat(rendered.head || [])
+      .join("\n  ");
+    // The docs runtime loads the client entry itself when it mounts search.
+    const clientScript = source.includes('src="/@farm/client.js"')
+      ? ""
+      : `\n  ${stampFarmCspNonce(`<script type="module" src="/@farm/client.js"></script>`)}`;
+    const html = source
+      .replace(bodyMatch[0], () => `<body${bodyMatch[1]}>${rootMarkup}${clientScript}</body>`)
+      .replace(/<\/head>/i, () => `  ${head}\n</head>`);
+    const headers = new Headers(response.headers);
+    headers.delete("content-length");
+    headers.delete("etag");
+    return new Response(html, {
+      status: response.status,
+      statusText: response.statusText,
+      headers,
     });
   }
 
