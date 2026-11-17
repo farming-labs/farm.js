@@ -2150,6 +2150,9 @@ export class ServerRenderer {
 
       (req as any).__FARM_PAGE_PATH__ = route.modulePath;
       (req as any).__FARM_ROUTE__ = pathname;
+      // The outermost layout, which renders the document when one does: a route group's own root
+      // layout (`app/(admin)/layout.tsx`) when the app has no `app/layout.tsx`.
+      (req as any).__FARM_ROOT_LAYOUT_PATH__ = layouts[0]?.modulePath;
       (req as any).__FARM_IS_CLIENT_COMPONENT__ = isClientComponent;
       (req as any).__FARM_PAGE_SHOULD_HYDRATE__ = shouldHydrate;
       (req as any).__FARM_LAYOUT_SHOULD_HYDRATE__ = shouldHydrateLayout;
@@ -3654,12 +3657,15 @@ window.__FARM_I18N__ = ${getFarmI18nClientSnapshot() ? serializeInlineValue(getF
    * this up front keeps a route's first request on the buffered path too; a layout this cannot
    * call (async, a class, or one using hooks) falls back to detection from the stream.
    */
-  private async rootLayoutRendersDocument(): Promise<boolean> {
-    if (typeof this.routeManager.getLayouts !== "function") return false;
-    const rootLayout = this.routeManager.getLayouts().get("/");
-    if (!rootLayout) return false;
+  private async rootLayoutRendersDocument(req: FarmRequest): Promise<boolean> {
+    const modulePath =
+      ((req as any).__FARM_ROOT_LAYOUT_PATH__ as string | undefined) ??
+      (typeof this.routeManager.getLayouts === "function"
+        ? this.routeManager.getLayouts().get("/")?.modulePath
+        : undefined);
+    if (!modulePath) return false;
     try {
-      const Layout = (await this.routeManager.loadLayoutModule(rootLayout.modulePath)).default;
+      const Layout = (await this.routeManager.loadLayoutModule(modulePath)).default;
       if (
         typeof Layout !== "function" ||
         Layout.prototype?.isReactComponent ||
@@ -3713,7 +3719,7 @@ window.__FARM_I18N__ = ${getFarmI18nClientSnapshot() ? serializeInlineValue(getF
     // the whole document. So does the anonymous check behind a page's Markdown source, where a
     // late redirect() must still set the status.
     const streamDocument =
-      fullDocumentRoutes.has(fullDocumentRouteKey) || (await this.rootLayoutRendersDocument());
+      fullDocumentRoutes.has(fullDocumentRouteKey) || (await this.rootLayoutRendersDocument(req));
     if (
       !renderToPipeableStream ||
       _isFarmMarkdownPageCheck(req.headers?.[FARM_MARKDOWN_PAGE_CHECK_HEADER]) ||
