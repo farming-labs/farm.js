@@ -143,7 +143,23 @@ function CopyCodeButton({ code, label }: { code: string; label: string }) {
   );
 }
 
+// The homepage's samples are fixed, and auto-rotating tabs render them again on every switch.
+const highlightedCodeCache = new Map<string, string>();
+const HIGHLIGHTED_CODE_CACHE_SIZE = 64;
+
 function renderHighlightedCode(code: string, highlightLines: readonly number[] = []) {
+  const key = `${highlightLines.join(",")}\n${code}`;
+  const cached = highlightedCodeCache.get(key);
+  if (cached !== undefined) return cached;
+  const html = highlightCode(code, highlightLines);
+  if (highlightedCodeCache.size >= HIGHLIGHTED_CODE_CACHE_SIZE) {
+    highlightedCodeCache.delete(highlightedCodeCache.keys().next().value!);
+  }
+  highlightedCodeCache.set(key, html);
+  return html;
+}
+
+function highlightCode(code: string, highlightLines: readonly number[]) {
   const highlightedLineNumbers = new Set(highlightLines);
 
   // sugar-high repeats each token's color as an inline style. The token classes carry it in
