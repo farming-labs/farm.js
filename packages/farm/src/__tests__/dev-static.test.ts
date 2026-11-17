@@ -7,6 +7,7 @@ import {
   devServableFileExists,
   farmAppOwnsDocsEnginePath,
   isMalformedFarmRequestPathname,
+  isViteModuleRequest,
   resolveFarmPublicFilePath,
   shouldBypassFarmRouterForDottedPath,
 } from "../dev-static";
@@ -311,5 +312,38 @@ describe("createFarmPublicFileIndex", () => {
 
     expect(createFarmPublicFileIndex(() => false).get().size).toBe(0);
     expect(createFarmPublicFileIndex(() => path.join(root, "missing")).get().size).toBe(0);
+  });
+});
+
+describe("isViteModuleRequest", () => {
+  const request = (target: string) => isViteModuleRequest(new URL(target, "http://localhost"), {});
+
+  it("matches Vite's import flags, which carry no value", () => {
+    for (const target of [
+      "/README.md?import",
+      "/README.md?import=",
+      "/logo.svg?url",
+      "/data.txt?raw",
+      "/styles.css?inline",
+      "/worker.ts?worker",
+      "/worker.ts?sharedworker",
+      "/logo.svg?url&lang.svg",
+      "/logo.svg?url=a&url",
+      "/page.tsx?t=1700000000000&import",
+    ]) {
+      expect(request(target), target).toBe(true);
+    }
+  });
+
+  it("treats a query parameter with the same name and a value as an ordinary query", () => {
+    for (const target of [
+      "/check?url=example.com",
+      "/search?raw=1",
+      "/report?import=csv",
+      "/view?inline=true",
+      "/jobs?worker=a&sharedworker=b",
+    ]) {
+      expect(request(target), target).toBe(false);
+    }
   });
 });
