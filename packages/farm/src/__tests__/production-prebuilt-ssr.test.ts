@@ -5586,6 +5586,72 @@ export default function RootLayout({ children }) {
     }
   }, 120_000);
 
+  it("wraps docs pages in an islands server layout with a leaf island, and hydrates it", async () => {
+    const root = await buildIslandsDocsFixture("islands-docs-leaf-layout", {
+      "counter.tsx": `
+"use client";
+
+import { useEffect, useState } from "react";
+
+export function Counter() {
+  const [count, setCount] = useState(0);
+  const [hydrated, setHydrated] = useState(false);
+  useEffect(() => setHydrated(true), []);
+  return (
+    <button data-counter data-hydrated={hydrated ? "true" : "false"} onClick={() => setCount(count + 1)}>
+      count:{count}
+    </button>
+  );
+}
+`,
+      // A server layout whose only client component is a leaf island: it does not hydrate whole.
+      "layout.tsx": `
+import { Counter } from "./counter";
+
+export default function RootLayout({ children }) {
+  return (
+    <div data-layout="root">
+      ${islandsDocsNav}
+      <Counter />
+      {children}
+    </div>
+  );
+}
+`,
+    });
+
+    try {
+      const production = await startProductionServer(path.join(root, ".farm", ".output", "server"));
+      try {
+        // The layout's chrome wraps the docs runtime's page, which keeps its own document.
+        const html = await (await fetch(`${production.origin}/docs/guide`)).text();
+        expect(html).toContain('<div data-layout="root">');
+        expect(html).toContain("data-counter");
+        expect(html.indexOf('data-layout="root"')).toBeLessThan(html.indexOf('id="nd-page"'));
+        expect(html.match(/<html[\s>]/gi)).toHaveLength(1);
+
+        const counter = (page: Page) => page.locator("[data-counter]");
+        await expectIslandsDocsLayoutInBrowser(production, {
+          // The island renders and hydrates.
+          async expectWorks(page) {
+            await expect
+              .poll(() => counter(page).getAttribute("data-hydrated"), { timeout: 15_000 })
+              .toBe("true");
+            await counter(page).click();
+            await expect.poll(() => counter(page).textContent()).toBe("count:1");
+          },
+          async expectKept(page) {
+            expect(await counter(page).textContent()).toBe("count:1");
+          },
+        });
+      } finally {
+        await production.stop();
+      }
+    } finally {
+      await fs.rm(root, { recursive: true, force: true });
+    }
+  }, 120_000);
+
   const STANDALONE_DEPLOYMENT_COOKIE =
     "__farm_deployment=standalone-node-test; Path=/; HttpOnly; SameSite=Lax";
 

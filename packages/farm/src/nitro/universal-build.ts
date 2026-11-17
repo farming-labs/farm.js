@@ -7687,6 +7687,9 @@ function renderFarmServerTreeLayout(Layout, props, outlets) {
     shouldHydrate: ${JSON.stringify(clientMetadata.shouldHydrate)},
     islandStrategy: ${JSON.stringify(clientMetadata.islandStrategy)},${
       treeLayoutPatterns.has(layout.pattern) ? "\n    serverTree: true," : ""
+    }${
+      // Islands mode: a server layout whose client components hydrate as islands of their own.
+      farmIslandsMode && clientMetadata.hasIsolatedClientBoundaries ? "\n    islands: true," : ""
     }
   }`);
   });
@@ -10823,7 +10826,10 @@ ${
 
   const pathname = getFarmRoutePathname(new URL(request.url).pathname);
   const applicableLayouts = getApplicableLayouts(pathname);
-  if (!applicableLayouts.some((layout) => layout.shouldHydrate === true)) {
+  // Layouts with client components wrap the docs page: one that hydrates, or (islands mode) one
+  // whose client components are islands of their own, as on an app page.
+  const shouldHydrateLayout = applicableLayouts.some((layout) => layout.shouldHydrate === true);
+  if (!shouldHydrateLayout && !applicableLayouts.some((layout) => layout.islands === true)) {
     return response;
   }
 
@@ -10853,7 +10859,7 @@ ${
     id: "__farm_page__",
     "data-farm-segment": "page",
     "data-farm-client": "false",
-    "data-farm-layout-client": "true",
+    ...(shouldHydrateLayout ? { "data-farm-layout-client": "true" } : {}),
     "data-farm-island": "page",
     "data-farm-island-strategy": islandStrategy,
     dangerouslySetInnerHTML: { __html: bodyMatch[2] },
@@ -10867,8 +10873,12 @@ ${
       // page, and the browser rebuilds it with the docs page at its outlet.
       wrappedElement = createFarmLayoutBoundary(
         layout.pattern,
-        undefined,
-        layout.serverTree
+        ${
+          farmIslandsMode
+            ? "shouldHydrateLayout ? undefined : getFarmLayoutKey(layout.pattern, params)"
+            : "undefined"
+        },
+        layout.serverTree && shouldHydrateLayout
           ? await renderFarmServerTreeLayout(
               LayoutComponent,
               { params },
@@ -10883,12 +10893,15 @@ ${
     }
   }
 
+  // Only a layout that hydrates renders as one client root; otherwise its client components
+  // render as islands, as on an app page.
+  const rootElement = wrapWithFarmIntegrationProviders(wrappedElement);
   const renderedRoot = await renderFarmElement(
     ReactDOMServer,
     React.createElement(
       "div",
       { id: "root" },
-      wrapFarmRouteClientGraph(wrapWithFarmIntegrationProviders(wrappedElement)),
+      shouldHydrateLayout ? wrapFarmRouteClientGraph(rootElement) : rootElement,
     ),
   );
   let rootMarkup = renderedRoot.html;
