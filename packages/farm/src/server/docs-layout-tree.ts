@@ -19,7 +19,10 @@ interface FarmDocsLayout {
   islandStrategy?: string | null;
   /** Islands mode: a layout around a client provider, rendered as a server tree. */
   serverTree?: boolean;
-  /** Islands mode: a server layout whose client components are islands of their own. */
+  /**
+   * A layout whose client components are islands of their own (its plan's
+   * `hasIsolatedClientBoundaries`): in islands mode, with `isolatedClientHydration`, or async.
+   */
   islands?: boolean;
 }
 
@@ -46,8 +49,8 @@ export function createFarmLayoutBoundary(
 }
 
 /**
- * Whether these layouts wrap the docs page: one hydrates, or (islands mode) one's client components
- * are islands of their own, as on an app page. Otherwise the docs runtime's document is sent as is.
+ * Whether these layouts wrap the docs page: one hydrates, or one's client components are islands
+ * of their own, as on an app page. Otherwise the docs runtime's document is sent as is.
  */
 export function farmDocsLayoutsWrapPage(layouts: readonly Omit<FarmDocsLayout, "Component">[]) {
   return layouts.some((layout) => layout.shouldHydrate === true || layout.islands === true);

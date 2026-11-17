@@ -313,7 +313,9 @@ export default function RootLayout({ children }) {
 /**
  * Islands mode: a server layout wraps docs pages as it wraps an app page, as production does.
  * Around a client provider it renders as a server tree the browser rebuilds with the docs page at
- * its outlet; with only leaf client components, those hydrate as islands.
+ * its outlet; with only leaf client components, those hydrate as islands. Outside islands mode, a
+ * layout whose leaf client components are islands (isolatedClientHydration, or an async layout)
+ * wraps them too.
  */
 describe("a docs runtime page under an islands server layout in farm dev", () => {
   const nav = `<nav>
@@ -327,6 +329,10 @@ describe("a docs runtime page under an islands server layout in farm dev", () =>
     options: {
       /** The docs page renders inside the layout's server tree, which the browser rebuilds. */
       serverTree?: boolean;
+      /** The app's experimental config; islands mode unless given. */
+      experimental?: Record<string, unknown>;
+      /** Checks the docs page's HTML before the browser opens it. */
+      expectHtml?(html: string): void;
       expectWorks(page: Page): Promise<void>;
       expectKept(page: Page): Promise<void>;
     },
@@ -344,12 +350,13 @@ describe("a docs runtime page under an islands server layout in farm dev", () =>
       },
       {
         docs: { entry: "/docs", search: false },
-        experimental: { serverComponents: { mode: "islands" } },
+        experimental: options.experimental ?? { serverComponents: { mode: "islands" } },
       },
     );
 
     // The layout's chrome wraps the docs runtime's page, which keeps its own document.
     const html = await (await fetch(`${origin}/docs/guide`)).text();
+    if (options.expectHtml) options.expectHtml(html);
     expect(html).toContain('data-layout="root"');
     expect(html.indexOf('data-layout="root"')).toBeLessThan(html.indexOf('id="nd-page"'));
     expect(html.match(/<html[\s>]/gi)).toHaveLength(1);
@@ -483,4 +490,63 @@ export default function RootLayout({ children }) {
       },
     );
   }, 120_000);
+
+  it.each([
+    {
+      name: "isolatedClientHydration",
+      layout: "export default function RootLayout",
+      experimental: { isolatedClientHydration: "enabled" },
+    },
+    {
+      name: "an async layout",
+      layout: "export default async function RootLayout",
+      experimental: {},
+    },
+  ])(
+    "wraps docs pages in a leaf-island layout without server components ($name)",
+    async ({ layout, experimental }) => {
+      const counter = (page: Page) => page.locator("[data-counter]");
+      await expectIslandsDocsLayout(
+        {
+          // A server layout whose only client component is a leaf island: it does not hydrate whole.
+          "src/app/layout.tsx": `import { Counter } from "./counter";
+${layout}({ children }) {
+  return (
+    <div data-layout="root">
+      ${nav}
+      <Counter />
+      {children}
+    </div>
+  );
+}`,
+        },
+        {
+          experimental,
+          // The tree production renders for an app page under this layout.
+          expectHtml(html) {
+            expect(html).toContain(
+              '<div id="root"><div data-farm-layout-boundary="true" data-farm-layout-pattern="/" style="display:contents"><div data-layout="root">',
+            );
+            expect(html).toContain(
+              '<f-island src="/src/app/counter.tsx" export="Counter" props="_R_2_" strategy="load" style="display:contents"><button data-counter="true" data-hydrated="false">',
+            );
+            expect(html).toContain(
+              '<div id="__farm_page__" data-farm-segment="page" data-farm-client="false" data-farm-island="page" data-farm-island-strategy="load">',
+            );
+          },
+          async expectWorks(page) {
+            await expect
+              .poll(() => counter(page).getAttribute("data-hydrated"), { timeout: 15_000 })
+              .toBe("true");
+            await counter(page).click();
+            await expect.poll(() => counter(page).textContent()).toBe("count:1");
+          },
+          async expectKept(page) {
+            expect(await counter(page).textContent()).toBe("count:1");
+          },
+        },
+      );
+    },
+    120_000,
+  );
 });

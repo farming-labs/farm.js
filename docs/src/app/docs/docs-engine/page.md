@@ -59,9 +59,10 @@ These files are the docs engine's pages, which it answers before the app's page 
 development and production. An app page under the docs entry renders only at a path without a docs
 page.
 
-The built-in renderer draws the app's hydrating layouts around docs pages in development and
-production, so the layouts' client components (a theme toggle, a sidebar provider) work there too. A
-link between an app page and a docs page loads the other page as a document.
+The built-in renderer draws the app's layouts with client components around docs pages in
+development and production, whether a layout hydrates whole or its client components hydrate as
+islands of their own, so those components (a theme toggle, a sidebar provider, a counter) work there
+too. A link between an app page and a docs page loads the other page as a document.
 
 Use frontmatter for page metadata:
 

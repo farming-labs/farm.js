@@ -1201,8 +1201,8 @@ export class ServerRenderer {
   }
 
   /**
-   * A built-in docs runtime page (`docs.entry`, no adapter) under layouts that hydrate, or (islands
-   * mode) whose client components are islands: the docs runtime's document with the layout chain
+   * A built-in docs runtime page (`docs.entry`, no adapter) under layouts that hydrate, or whose
+   * client components are islands: the docs runtime's document with the layout chain
    * rendered around its body, and the client that hydrates it with the boot data an app page has. Production renders the same tree
    * (wrapFarmDocsResponseWithLayouts in nitro/universal-build.ts, with docs-layout-tree.ts).
    * Any other docs response is sent as it is.
@@ -1232,7 +1232,7 @@ export class ServerRenderer {
         islandStrategy: entry?.islandStrategy ?? null,
         hasIsolatedClientBoundaries: entry?.hasIsolatedClientBoundaries === true,
         serverTree: entry?.serverTree === true,
-        islands: islandsMode && entry?.hasIsolatedClientBoundaries === true,
+        islands: entry?.hasIsolatedClientBoundaries === true,
       };
     });
     if (!farmDocsLayoutsWrapPage(layouts)) return response;
