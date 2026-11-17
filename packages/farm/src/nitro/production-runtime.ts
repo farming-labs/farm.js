@@ -54,6 +54,7 @@ export {
   setFarmRouteLabel,
 } from "../route-label";
 export {
+  _getRequestCookieReadCount,
   _getRequestReadCount,
   _runWithCurrentRequest,
   _runWithFarmCspNonce,

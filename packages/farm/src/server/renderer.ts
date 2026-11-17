@@ -62,6 +62,7 @@ import {
   isFarmIntegrationProviderComponentReference,
 } from "../integrations";
 import {
+  _getRequestCookieReadCount,
   _getRequestReadCount,
   _runWithCurrentRequest,
   _runWithFarmCspNonce,
@@ -270,6 +271,8 @@ interface CachedSSGPage {
 
 interface CachedPPRShell {
   html: string;
+  /** The render read no cookies, so visitors with cookies get this shell too. */
+  cookieIndependent?: true;
 }
 
 export function shouldServePrerenderedPage(
@@ -1469,6 +1472,7 @@ window.__FARM_I18N__ = ${i18nSnapshot ? serializeInlineValue(i18nSnapshot) : "nu
     html: string,
     /** Started before the render, so an invalidation during it leaves the shell stale. */
     write?: FarmCacheWrite,
+    cookieIndependent = false,
   ): Promise<void> {
     const key = this.getPPRCacheKey(
       options.pathname,
@@ -1479,7 +1483,7 @@ window.__FARM_I18N__ = ${i18nSnapshot ? serializeInlineValue(i18nSnapshot) : "nu
     await (
       write ??
       (await this.dataCache.pprShellCache.startWriteAsync(this.getPPRShellWriteOptions(options)))
-    ).commit(key, { html });
+    ).commit(key, { html, ...(cookieIndependent ? { cookieIndependent: true } : {}) });
     emitFarmEvent({
       type: "ppr.shell.cached",
       route: options.pathname,
@@ -1501,11 +1505,6 @@ window.__FARM_I18N__ = ${i18nSnapshot ? serializeInlineValue(i18nSnapshot) : "nu
     const method = (req.method || "GET").toUpperCase();
     if (method !== "GET" && method !== "HEAD") {
       return "method";
-    }
-
-    // The deployment cookie names a release, not a visitor, so it alone keeps the shell shared.
-    if (withoutFarmDeploymentCookie(req.headers.cookie)) {
-      return "cookie";
     }
 
     if (req.headers.authorization) {
@@ -1548,10 +1547,21 @@ window.__FARM_I18N__ = ${i18nSnapshot ? serializeInlineValue(i18nSnapshot) : "nu
     return headers;
   }
 
-  private serveCachedPPRShell(res: FarmResponse, shell: CachedPPRShell, revalidate?: number): void {
+  private serveCachedPPRShell(
+    req: FarmRequest,
+    res: FarmResponse,
+    shell: CachedPPRShell,
+    revalidate?: number,
+  ): void {
     res.setHeader("Content-Type", "text/html; charset=utf-8");
     for (const [key, value] of Object.entries(this.getPPRHeaders("hit", revalidate))) {
       res.setHeader(key, value);
+    }
+    // A stored shell read no request state, so a visitor's cookies cannot change it, but the
+    // response to a request with cookies stays out of shared caches. The deployment cookie names
+    // a release, not a visitor.
+    if (withoutFarmDeploymentCookie(req.headers.cookie)) {
+      res.setHeader("Cache-Control", "private, no-store");
     }
     res.write(shell.html);
     res.end();
@@ -2067,7 +2077,7 @@ window.__FARM_I18N__ = ${i18nSnapshot ? serializeInlineValue(i18nSnapshot) : "nu
       );
       const canCachePPRShell = renderingConfig.ppr && !pprBypassReason && !islandsNavigationRequest;
       const pprI18nSnapshot = canCachePPRShell ? getFarmI18nClientSnapshot() : undefined;
-      const pprShellOptions: PPRShellCacheOptions | undefined = canCachePPRShell
+      let pprShellOptions: PPRShellCacheOptions | undefined = canCachePPRShell
         ? {
             pathname,
             search: url.search,
@@ -2095,6 +2105,8 @@ window.__FARM_I18N__ = ${i18nSnapshot ? serializeInlineValue(i18nSnapshot) : "nu
         }
       }
 
+      // The deployment cookie names a release, not a visitor.
+      const pprVisitorCookies = Boolean(withoutFarmDeploymentCookie(req.headers.cookie));
       if (pprShellOptions) {
         // Same locale for the lookup and the later store, so the two cannot diverge.
         const pprCacheKey = this.getPPRCacheKey(
@@ -2109,25 +2121,32 @@ window.__FARM_I18N__ = ${i18nSnapshot ? serializeInlineValue(i18nSnapshot) : "nu
           pprShellOptions.locale,
           pprShellOptions.origin,
         );
-        if (cachedPPRShell) {
+        if (cachedPPRShell && pprVisitorCookies && !cachedPPRShell.value.cookieIndependent) {
+          // The shell's render read cookies (the theme, an auth helper), so it is what a visitor
+          // without them sees: this visitor's page renders on its own and is not stored.
+          pprShellOptions = undefined;
+          emitFarmEvent({ type: "ppr.shell.bypass", route: pathname, reason: "cookie" });
+          emitFarmEvent({ type: "cache.bypass", route: pathname, reason: "cookie" });
+        } else if (cachedPPRShell) {
           emitFarmEvent({
             type: "ppr.shell.hit",
             route: pathname,
             key: pprCacheKey,
           });
-          this.serveCachedPPRShell(res, cachedPPRShell.value, renderingConfig.revalidate);
+          this.serveCachedPPRShell(req, res, cachedPPRShell.value, renderingConfig.revalidate);
           completeRender(res.statusCode || 200, pathname);
           return;
-        }
-        emitFarmEvent({
-          type: "ppr.shell.miss",
-          route: pathname,
-          key: pprCacheKey,
-        });
-        if (req.method !== "HEAD") {
-          pprShellWrite = await this.dataCache.pprShellCache.startWriteAsync(
-            this.getPPRShellWriteOptions(pprShellOptions),
-          );
+        } else {
+          emitFarmEvent({
+            type: "ppr.shell.miss",
+            route: pathname,
+            key: pprCacheKey,
+          });
+          if (req.method !== "HEAD") {
+            pprShellWrite = await this.dataCache.pprShellCache.startWriteAsync(
+              this.getPPRShellWriteOptions(pprShellOptions),
+            );
+          }
         }
       }
 
@@ -2138,6 +2157,10 @@ window.__FARM_I18N__ = ${i18nSnapshot ? serializeInlineValue(i18nSnapshot) : "nu
         (outerRequest ? _getRequestReadCount(outerRequest) : 0) +
         _getRequestReadCount(currentRequest);
       const requestReadsBeforeRender = countRequestReads();
+      const countRequestCookieReads = () =>
+        (outerRequest ? _getRequestCookieReadCount(outerRequest) : 0) +
+        _getRequestCookieReadCount(currentRequest);
+      const requestCookieReadsBeforeRender = countRequestCookieReads();
 
       let LoadingFallbackComponent: any = null;
       if (loadingBoundaryEntry) {
@@ -2582,6 +2605,10 @@ window.__FARM_I18N__ = ${i18nSnapshot ? serializeInlineValue(i18nSnapshot) : "nu
             const pprHeaders = renderingConfig.ppr
               ? this.getPPRHeaders(pprShellOptions ? "miss" : "bypass", renderingConfig.revalidate)
               : undefined;
+            // A page rendered for a visitor with cookies stays out of shared caches, as a hit does.
+            if (pprHeaders && pprShellOptions && pprVisitorCookies) {
+              pprHeaders["Cache-Control"] = "private, no-store";
+            }
 
             // Render with middleware data available
             await this.renderWithSSR(
@@ -2621,7 +2648,29 @@ window.__FARM_I18N__ = ${i18nSnapshot ? serializeInlineValue(i18nSnapshot) : "nu
                           });
                           return;
                         }
-                        return this.cachePPRShell(pprShellOptions, html, pprShellWrite);
+                        // A render that read cookies stores what a visitor without them sees,
+                        // and only from such a visitor.
+                        const renderReadCookies =
+                          countRequestCookieReads() !== requestCookieReadsBeforeRender;
+                        if (renderReadCookies && pprVisitorCookies) {
+                          emitFarmEvent({
+                            type: "ppr.shell.bypass",
+                            route: pathname,
+                            reason: "cookie",
+                          });
+                          emitFarmEvent({
+                            type: "cache.bypass",
+                            route: pathname,
+                            reason: "cookie",
+                          });
+                          return;
+                        }
+                        return this.cachePPRShell(
+                          pprShellOptions,
+                          html,
+                          pprShellWrite,
+                          !renderReadCookies,
+                        );
                       }
                     : undefined,
               },

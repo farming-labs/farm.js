@@ -1,7 +1,10 @@
 import { describe, expect, it } from "vitest";
 import { createServerFn } from "../server-fn";
 import { createServerQuery } from "../server-query";
+import { readFarmHeldValues, resolveFarmIslandRenderState } from "../client/island-values";
+import { _peekCurrentRequest, _resolveCurrentRequest } from "../server/request-bridge";
 import {
+  _getRequestCookieReadCount,
   _getRequestReadCount,
   _runWithCurrentRequest,
   createWebRequestFromFarmRequest,
@@ -175,6 +178,25 @@ describe("server function request reads", () => {
       expect(_getRequestReadCount(outer)).toBe(1);
       await expect(query(undefined)).resolves.toBe("alice");
       expect(_getRequestReadCount(outer)).toBe(2);
+    });
+  });
+});
+
+describe("cookie reads", () => {
+  it("counts the helpers that may read the visitor's cookies, not the framework's peeks", async () => {
+    const outer = new Request("https://farm.test/account", { headers: { cookie: "session=a" } });
+
+    await _runWithCurrentRequest(outer, async () => {
+      // Island bookkeeping and URL reads leave a PPR shell to visitors with cookies.
+      _peekCurrentRequest();
+      resolveFarmIslandRenderState();
+      readFarmHeldValues();
+      expect(_getRequestCookieReadCount(outer)).toBe(0);
+
+      // Auth helpers, the server api client, and integration clients resolve the request.
+      expect(_resolveCurrentRequest()).toBe(outer);
+      expect(_getRequestCookieReadCount(outer)).toBe(1);
+      expect(_getRequestReadCount(outer)).toBe(0);
     });
   });
 });
