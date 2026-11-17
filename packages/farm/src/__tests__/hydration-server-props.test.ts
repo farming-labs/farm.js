@@ -42,7 +42,10 @@ describe("development client initial page props", () => {
   const hydrateBody = extractBlock(source, "async function hydrate() {");
   const start = hydrateBody.indexOf("let pageProps = normalizeServerProps(window.__FARM_PROPS__);");
   // Only the props logic runs here; the hydration gates before it need a DOM.
-  const gates = extractBlock(hydrateBody.slice(start), "if (!modulePath) {");
+  const gates = extractBlock(
+    hydrateBody.slice(start),
+    "if (!modulePath && (pageShouldHydrate || !layoutShouldHydrate)) {",
+  );
   const propsStart = hydrateBody.indexOf(gates, start) + gates.length;
   const end = hydrateBody.indexOf("currentPageProps = pageProps;", propsStart);
   const resolveProps =
