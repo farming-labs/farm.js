@@ -445,7 +445,7 @@ const config = {
   metadata: {
     description: "Farm.js framework documentation powered by @farming-labs/docs.",
   },
-  favicon: "/favicon.svg",
+  favicon: "/favicon.ico",
   // The docs MCP describes Farm.js, so it reports the Farm.js version, not this site's.
   mcp: { version: FARM_VERSION },
   // List the hand-written /openapi.json (public APIs only) in /.well-known/api-catalog.
