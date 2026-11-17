@@ -179,6 +179,8 @@ import {
 } from "../docs/adapter-client";
 import { farmDocsClientConfigPlugin } from "../docs/client-config";
 import { resolveFarmDocsFontAssets, toFarmDocsPublicFontAssets } from "../docs/fonts";
+import { FARM_VIDEO_PLAYER_PATH } from "../metadata";
+import { FARM_VIDEO_PLAYER_HTML } from "../video-player";
 import { compileFarmDocsManifest } from "../docs/compiler";
 import {
   discoverFarmDocsPages,
@@ -1766,6 +1768,7 @@ export async function buildUniversal(
     const { bundle: ssrBundle, entryFile: ssrEntryFile, configuredHeaderRoutes } = ssrResult;
     assertServerReadSSRAssetsSupported(ssrBundle, preset, root);
     await writeSSRAssetsToClient(ssrBundle, clientOutputDir);
+    await writeFarmVideoPlayerToClient(clientOutputDir);
     if (config.docs.enabled) {
       await copyFarmDocsFontAssetsToClient(root, clientOutputDir);
     }
@@ -1888,6 +1891,21 @@ async function writeSSRAssetsToClient(bundle: OutputBundle, outputDir: string): 
     const filePath = path.join(outputDir, fileName);
     await fs.mkdir(path.dirname(filePath), { recursive: true });
     await fs.writeFile(filePath, output.source);
+  }
+}
+
+/**
+ * The page X frames for a page's `openGraph.videos` (see `FARM_VIDEO_PLAYER_HTML`). An app's own
+ * public file at the same path wins, as it does in development.
+ */
+async function writeFarmVideoPlayerToClient(outputDir: string): Promise<void> {
+  const fs = await import("fs/promises");
+  const filePath = path.join(outputDir, FARM_VIDEO_PLAYER_PATH.slice(1));
+  await fs.mkdir(path.dirname(filePath), { recursive: true });
+  try {
+    await fs.writeFile(filePath, FARM_VIDEO_PLAYER_HTML, { flag: "wx" });
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error;
   }
 }
 

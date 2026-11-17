@@ -686,7 +686,8 @@ export interface Metadata {
     /**
      * `og:video` entries. Point `url` at the media file itself (an MP4, for
      * example) rather than a player page; relative URLs resolve against
-     * `metadataBase` like `images`.
+     * `metadataBase` like `images`. A same-origin video also gets an X Player
+     * Card that plays it in Farm's player page; see `twitter.players`.
      */
     videos?:
       | string
@@ -742,6 +743,18 @@ export interface Metadata {
               type?: string;
             }
         >;
+    /**
+     * Player Card entries, rendered as `twitter:player` tags. X plays a link's
+     * video only through a Player Card and ignores `og:video`. When this is
+     * unset and `card` is unset or `"player"`, Farm plays the first same-origin
+     * `openGraph.videos` file in its own player page; `[]` turns that off.
+     * Point `playerUrl` at an HTTPS page that X can load in an iframe, and
+     * `width` and `height` at that iframe's size. `card` defaults to `"player"`
+     * when a player is set; relative URLs resolve against `metadataBase`.
+     */
+    players?:
+      | { playerUrl: string; streamUrl?: string; width: number; height: number }
+      | Array<{ playerUrl: string; streamUrl?: string; width: number; height: number }>;
   };
   alternates?: {
     canonical?: string;
