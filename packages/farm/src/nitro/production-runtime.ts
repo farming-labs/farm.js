@@ -9,6 +9,12 @@ export {
 export { farmSecretsMatch } from "../secret-compare";
 export { createFarmLayoutSelector } from "../routing/layout-selector";
 export {
+  createFarmDocsLayoutTree,
+  createFarmLayoutBoundary,
+  farmDocsLayoutsWrapPage,
+  placeFarmDocsLayoutRoot,
+} from "../server/docs-layout-tree";
+export {
   isInRouteGroupScope as isInFarmRouteGroupScope,
   routeBoundaryCoversDirectory,
 } from "../routing/route-groups";
