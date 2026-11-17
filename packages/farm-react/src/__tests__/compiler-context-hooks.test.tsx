@@ -317,3 +317,158 @@ describe.skipIf(typeof (React as { use?: unknown }).use !== "function")(
     });
   },
 );
+
+// Custom hooks that only read context, like the usual useTheme(), compile as context reads: the
+// wrapper calls them where the component did, and React resolves the provider inside them.
+const hookSource = source
+  .replace(
+    'export const Label = createContext("count");',
+    `export const Label = createContext("count");
+export function useTheme() {
+  const theme = useContext(Theme);
+  if (!theme) throw new Error("useTheme needs a Theme provider");
+  return theme;
+}
+const useLabel = () => useContext(Label);`,
+  )
+  .replace(
+    "const { tone, size = 2 } = useContext(Theme);",
+    "const { tone, size = 2 } = useTheme();",
+  )
+  .replace("const label = useContext(Label);", "const label = useLabel();")
+  .replace(
+    "const theme = useContext(Theme);\n  const [open",
+    "const theme = useTheme();\n  const [open",
+  );
+
+describe("custom context hooks in compiled components", () => {
+  it("compiles components whose custom hooks only read context, matching React", async () => {
+    const { compiled, original, names, code } = await loadCompiledAndOriginal(
+      hookSource,
+      "hybrid",
+      countRenderPlans,
+    );
+    expect(names).toEqual(["Counter", "Card"]);
+    expect(code).toMatch(
+      /const \{\s*tone,\s*size = 2\s*\} = useTheme\(\);\s*const label = useLabel\(\);/,
+    );
+
+    const reference = document.createElement("div");
+    const subject = document.createElement("div");
+    document.body.append(reference, subject);
+    let referenceControls!: ReturnType<typeof mountApp>;
+    let subjectControls!: ReturnType<typeof mountApp>;
+    await act(async () => {
+      referenceControls = mountApp(reference, original);
+      subjectControls = mountApp(subject, compiled);
+    });
+    expect(normalizedDom(subject)).toBe(normalizedDom(reference));
+    expect(renderPlans("Counter")).toBe(1);
+    for (const step of [
+      (controls: ReturnType<typeof mountApp>) => controls.setLabel!("total"),
+      (controls: ReturnType<typeof mountApp>) => controls.setTone!("dark"),
+    ]) {
+      await act(async () => {
+        step(referenceControls);
+        step(subjectControls);
+      });
+      expect(normalizedDom(subject)).toBe(normalizedDom(reference));
+    }
+    await act(async () => {
+      reference.querySelector<HTMLElement>("#add")!.click();
+      subject.querySelector<HTMLElement>("#add")!.click();
+    });
+    expect(normalizedDom(subject)).toBe(normalizedDom(reference));
+    expect(subject.querySelector("output")!.textContent).toBe("total: 2");
+    expect(renderPlans("Counter")).toBe(1);
+  });
+
+  it("throws the hook's own error without a provider value, as React does", async () => {
+    const { compiled, original } = await loadCompiledAndOriginal(
+      hookSource.replace('createContext({ tone: "light" })', "createContext(null)"),
+    );
+    for (const module of [original, compiled]) {
+      const host = document.createElement("div");
+      document.body.append(host);
+      const root = createRoot(host);
+      reactRoots.add(root);
+      const errors: unknown[] = [];
+      class Boundary extends React.Component<{ children: React.ReactNode }, { error?: unknown }> {
+        state: { error?: unknown } = {};
+        static getDerivedStateFromError(error: unknown) {
+          return { error };
+        }
+        componentDidCatch(error: unknown) {
+          errors.push(error);
+        }
+        render() {
+          return this.state.error ? <p>caught</p> : this.props.children;
+        }
+      }
+      const consoleError = console.error;
+      console.error = () => undefined;
+      try {
+        await act(async () =>
+          root.render(
+            <Boundary>
+              <module.Counter />
+            </Boundary>,
+          ),
+        );
+      } finally {
+        console.error = consoleError;
+      }
+      expect(host.textContent).toBe("caught");
+      expect(String(errors[0])).toContain("useTheme needs a Theme provider");
+    }
+  });
+
+  it.each([
+    {
+      name: "a hook with state",
+      hook: "function useTone() { const [tone] = useState('light'); return tone; }",
+    },
+    {
+      name: "a hook with an effect",
+      hook: "function useTone() { const theme = useContext(Theme); useEffect(() => {}, []); return theme; }",
+    },
+    {
+      name: "a hook that calls another custom hook",
+      hook: "function useInner() { return useContext(Theme); } function useTone() { return useInner(); }",
+    },
+    {
+      name: "a hook with parameters",
+      hook: "function useTone(fallback) { return useContext(Theme) ?? fallback; }",
+    },
+    {
+      name: "a hook whose return calls a function",
+      hook: "function useTone() { const theme = useContext(Theme); return String(theme.tone); }",
+    },
+    {
+      name: "a hook that logs during render",
+      hook: "function useTone() { const theme = useContext(Theme); if (theme) console.log(theme); return theme; }",
+    },
+    {
+      name: "a reassigned hook",
+      hook: "let useTone = () => useContext(Theme); useTone = () => useContext(Theme);",
+    },
+    {
+      name: "an imported hook",
+      hook: 'import { useTone } from "./theme";',
+    },
+  ])("keeps $name on React", async ({ hook }) => {
+    const result = await compileReactModule(
+      `import { createContext, useContext, useEffect, useState } from "react";
+      const Theme = createContext({ tone: "light" });
+      ${hook}
+      export function Clicks() {
+        const tone = useTone();
+        const [count, setCount] = useState(0);
+        return <button onClick={() => setCount(count + 1)}>{count}</button>;
+      }`,
+      "/app/Clicks.tsx",
+      normalizeReactCompilerOptions(true),
+    );
+    expect(result.compiled).toEqual([]);
+  });
+});
