@@ -75,10 +75,10 @@ export async function loadFarmDevModule<T = Record<string, any>>(
 }
 
 /**
- * @internal Invalidates `file` and the SSR modules that import it when that chain reaches one
- * of `targets` (modules whose exports something still holds, such as API route handlers), so
- * importing a target next runs the new code. Returns the targets reached; with none, it leaves
- * the graph to Vite.
+ * @internal Invalidates `file` and the SSR modules that import it, up to an importer that accepts
+ * its updates, when that chain reaches one of `targets` (modules whose exports something still
+ * holds, such as API route handlers), so importing a target next runs the new code. Returns the
+ * targets reached; with none, it leaves the graph to Vite.
  */
 export function invalidateFarmDevDependents(
   server: FarmDevModuleServer,
@@ -103,8 +103,20 @@ export function invalidateFarmDevDependents(
     queue.push(...node.importers);
   }
   if (reached.size === 0) return [];
+  // Stop where Vite's own invalidation stops: an importer that accepts the module's updates (an
+  // HMR boundary) keeps its state, so a content index that only loads pages stays evaluated.
+  const stale = new Set<EnvironmentModuleNode>();
+  const staleQueue = [...(graph.getModulesByFile(posix(file)) ?? [])];
+  while (staleQueue.length > 0) {
+    const node = staleQueue.pop()!;
+    if (stale.has(node)) continue;
+    stale.add(node);
+    for (const importer of node.importers) {
+      if (!importer.acceptedHmrDeps.has(node)) staleQueue.push(importer);
+    }
+  }
   const evaluatedModules = environment.runner?.evaluatedModules;
-  for (const node of seen) {
+  for (const node of stale) {
     graph.invalidateModule(node);
     const evaluated = node.id ? evaluatedModules?.getModuleById(node.id) : undefined;
     if (evaluated) evaluatedModules!.invalidateModule(evaluated);

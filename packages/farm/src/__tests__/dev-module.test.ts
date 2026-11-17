@@ -4,7 +4,11 @@ import os from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { createServer, type ViteDevServer, type RunnableDevEnvironment } from "vite";
-import { loadFarmDevModule, invalidateFailedFarmDevModules } from "../dev-module";
+import {
+  loadFarmDevModule,
+  invalidateFailedFarmDevModules,
+  invalidateFarmDevDependents,
+} from "../dev-module";
 
 const projects: Array<{ root: string; server: ViteDevServer }> = [];
 afterEach(async () => {
@@ -76,6 +80,37 @@ describe("development environment module loading", () => {
     await vi.waitFor(async () => {
       expect((await loadFarmDevModule(server, "/entry.js")).default).toBe("after");
     });
+  });
+
+  it("stops invalidating dependents at a module that accepts the edited module", async () => {
+    const { root, server } = await project();
+    // Writes below are invalidated by the call under test, not by Vite's watcher.
+    await server.watcher.close();
+    const page = path.join(root, "page.js");
+    const route = path.join(root, "route.js");
+    const index = path.join(root, "index.js");
+    await writeFile(page, 'export default "before";');
+    await writeFile(route, 'export { default } from "./page.js";');
+    await writeFile(
+      index,
+      [
+        "export const state = {};",
+        'export const load = () => import("./page.js");',
+        'if (import.meta.hot) import.meta.hot.accept(["./page.js"], () => {});',
+      ].join("\n"),
+    );
+    const indexBefore = await loadFarmDevModule(server, "/index.js");
+    expect((await loadFarmDevModule(server, "/route.js")).default).toBe("before");
+    expect((await indexBefore.load()).default).toBe("before");
+
+    await writeFile(page, 'export default "after";');
+    const reached = invalidateFarmDevDependents(server, page, new Set([route, index]));
+
+    expect(reached.sort()).toEqual([index, route].sort());
+    expect((await loadFarmDevModule(server, "/route.js")).default).toBe("after");
+    const indexAfter = await loadFarmDevModule(server, "/index.js");
+    expect(indexAfter.state).toBe(indexBefore.state);
+    expect((await indexAfter.load()).default).toBe("after");
   });
 
   it("recovers nested failed imports without replacing healthy module state", async () => {
