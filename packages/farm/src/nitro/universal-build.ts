@@ -1,4 +1,5 @@
 import { randomBytes } from "node:crypto";
+import { toBakedMarkdownSourcePath } from "../markdown-source-path";
 import type { FarmSearchPreserveRoute } from "../client/search-preserve-routes";
 import { FARM_NATIVE_TREE_CONTENT_TYPE } from "../mobile/native-tree-type";
 
@@ -44,6 +45,7 @@ import {
   FARM_DEFAULT_MCP_PATH,
 } from "../agent-mcp";
 import { FARM_VERSION } from "../version";
+import { canFarmSkipKeptLayoutRender } from "../islands-kept-layouts";
 import type { RedirectConfig, ResolvedFarmConfig, RewriteConfig } from "../config";
 import { hasCustomFarmRouteContext, resolveDeployOutputPath } from "../config";
 import {
@@ -2772,21 +2774,7 @@ async function buildClient(
 /**
  * Generate client hydration entry that imports and hydrates client components
  */
-/**
- * The X-Farm-Markdown-Source header is a diagnostic, not a filesystem
- * disclosure: production output must never bake the build machine's absolute
- * paths into every markdown response. Bake the project-relative path with
- * POSIX separators; a path outside the root falls back to its basename.
- */
-export function toBakedMarkdownSourcePath(root: string, filePath: string | undefined): string {
-  if (!filePath) return "";
-  if (!path.isAbsolute(filePath)) return filePath.split(path.sep).join("/");
-  const relative = path.relative(root, filePath);
-  if (!relative || relative.startsWith("..") || path.isAbsolute(relative)) {
-    return path.basename(filePath);
-  }
-  return relative.split(path.sep).join("/");
-}
+export { toBakedMarkdownSourcePath };
 
 export function generateUniversalRouterStateRuntime(streamNavigations = false): string {
   return `
@@ -4293,7 +4281,7 @@ function isFarmDocsPath() {
 // Farm.js Client Runtime (no client components)
 ${cssImport}
 ${layoutImports}
-import { createClientCancellation, createClientPluginManager, createPluginlessClientRuntime, getFarmIslandValueHeaders, getHashTargetElement, installChunkErrorRecovery, installFarmLinkPrefetch, isFarmBlockedNavigationURL, isFarmExternalNavigationURL, reconcileFarmDocumentHead, runFarmNavigationDelegates, setFarmBasePath, setFarmTrailingSlashPreference, stripFarmBasePath } from "@farm.js/core/internal/client-runtime";
+import { createClientCancellation, createClientPluginManager, createPluginlessClientRuntime, getFarmIslandValueHeaders, getHashTargetElement, installChunkErrorRecovery, installFarmLinkPrefetch, isFarmBlockedNavigationURL, isFarmExternalNavigationURL, readFarmLinkNavigateOptions, reconcileFarmDocumentHead, runFarmNavigationDelegates, setFarmBasePath, setFarmTrailingSlashPreference, stripFarmBasePath } from "@farm.js/core/internal/client-runtime";
 import { createFarmDeploymentMismatchError, createFarmDeploymentRequestHeaders, isFarmDeploymentMismatchResponse } from "@farm.js/core/deployment";
 ${clientPluginEntry.imports}
 ${clientCachePersistence.imports}
@@ -4582,7 +4570,7 @@ document.addEventListener("click", function(e) {
   if (e.defaultPrevented) return;
   
   e.preventDefault();
-  spaRouter.navigate(href);
+  spaRouter.navigate(href, readFarmLinkNavigateOptions(anchor));
 });
 
 // Link anchors on a page that does not hydrate prefetch through the router as Link would.
@@ -4698,7 +4686,7 @@ ${layoutImports}
 ${rendererClientImports}
 ${isolatedHydrationImport}
 ${providerClientCode.imports}
-import { createClientCancellation, createClientPluginManager, createPluginlessClientRuntime, getFarmIslandValueHeaders, getHashTargetElement, installChunkErrorRecovery, installFarmLinkPrefetch, isFarmBlockedNavigationURL, isFarmExternalNavigationURL, reconcileFarmDocumentHead, runFarmNavigationDelegates, scheduleFarmIslandHydration, createFarmSearchParams, searchParamsToObject, setFarmBasePath, setFarmTrailingSlashPreference, stripFarmBasePath } from "@farm.js/core/internal/client-runtime";
+import { createClientCancellation, createClientPluginManager, createPluginlessClientRuntime, getFarmIslandValueHeaders, getHashTargetElement, installChunkErrorRecovery, installFarmLinkPrefetch, isFarmBlockedNavigationURL, isFarmExternalNavigationURL, readFarmLinkNavigateOptions, reconcileFarmDocumentHead, runFarmNavigationDelegates, scheduleFarmIslandHydration, createFarmSearchParams, searchParamsToObject, setFarmBasePath, setFarmTrailingSlashPreference, stripFarmBasePath } from "@farm.js/core/internal/client-runtime";
 import { createFarmDeploymentMismatchError, createFarmDeploymentRequestHeaders, isFarmDeploymentMismatchResponse } from "@farm.js/core/deployment";
 import { createFarmRouter, isFarmRouteActive, matchFarmRoute } from "@farm.js/core/router";
 ${clientPluginEntry.imports}
@@ -6145,7 +6133,7 @@ document.addEventListener("click", function(e) {
   if (e.defaultPrevented) return;
   
   e.preventDefault();
-  spaRouter.navigate(href);
+  spaRouter.navigate(href, readFarmLinkNavigateOptions(anchor));
 });
 
 // Initial hydration
@@ -7688,6 +7676,10 @@ function renderFarmServerTreeLayout(Layout, props, outlets) {
     islandStrategy: ${JSON.stringify(clientMetadata.islandStrategy)},${
       treeLayoutPatterns.has(layout.pattern) ? "\n    serverTree: true," : ""
     }${
+      farmIslandsMode && canFarmSkipKeptLayoutRender(layout.modulePath, config.root)
+        ? "\n    skipKeptRender: true,"
+        : ""
+    }${
       // Islands mode: a server layout whose client components hydrate as islands of their own.
       farmIslandsMode && clientMetadata.hasIsolatedClientBoundaries ? "\n    islands: true," : ""
     }
@@ -9035,6 +9027,13 @@ function createFarmFlushToken() {
 }
 
 async function farmKeptLayoutsRender(ReactDOMServer, layouts, keptCount, params) {
+  // RFC 0007: the build proved these layouts cannot throw or read the request, so rendering them
+  // again would only produce markup the browser already shows.
+  let skip = true;
+  for (let index = 0; index < keptCount; index++) {
+    if (layouts[index].skipKeptRender !== true) skip = false;
+  }
+  if (skip) return true;
   let element = null;
   for (let index = keptCount - 1; index >= 0; index--) {
     const Layout = layouts[index].module.default;
@@ -15013,7 +15012,13 @@ export async function installFarmCompileCacheLauncher(
   return true;
 }
 
-async function registerPrebuiltSSRPackageImport(
+/**
+ * Point `#farm-ssr-entry` at the prebuilt SSR entry in the server's package.json. Its chunks are
+ * ES modules in `.js` files, so a package.json without a `type` (Nitro writes one for traced
+ * dependencies) is marked `module`: otherwise Node parses the entry as CommonJS first, fails,
+ * parses it again as an ES module, and warns on every start.
+ */
+export async function registerPrebuiltSSRPackageImport(
   serverDir: string,
   ssrEntryFile: string,
   fs: typeof import("fs/promises"),
@@ -15030,6 +15035,7 @@ async function registerPrebuiltSSRPackageImport(
     packageJSON.imports && typeof packageJSON.imports === "object" ? packageJSON.imports : {};
   const outputEntry = `${FARM_SSR_OUTPUT_DIR}/${ssrEntryFile}`.replace(/\\/g, "/");
 
+  packageJSON.type ??= "module";
   packageJSON.imports = {
     ...existingImports,
     [FARM_SSR_PACKAGE_IMPORT]: `./${outputEntry}`,
@@ -15599,6 +15605,13 @@ async function resolveProjectInstalledPackageDir(
 }
 
 /**
+ * Files in `@prisma/client/runtime` that nothing loads at run time. The query engine and compiler
+ * bundles for every database are read only by `prisma generate`, which copies the one a client
+ * needs into the generated client. Source maps and type declarations aren't loaded either.
+ */
+const PRISMA_RUNTIME_GENERATE_ONLY_FILE = /^query_(?:engine|compiler)_bg\.|\.map$|\.d\.m?ts$/;
+
+/**
  * Copy the app's own Prisma client, and the client `prisma generate` wrote beside it, into the
  * Vercel function, where Nitro leaves `@prisma/client` external.
  *
@@ -15624,11 +15637,15 @@ export async function copyPrismaClientForVercel(
   const targetPrismaScopeDir = path.join(targetNodeModules, "@prisma");
   const targetGeneratedDir = path.join(targetNodeModules, ".prisma", "client");
   const targetClientDir = path.join(targetPrismaScopeDir, "client");
+  const runtimeDir = path.join(prismaClientDir, "runtime");
 
   await fs.mkdir(targetPrismaScopeDir, { recursive: true });
   await fs.cp(prismaClientDir, targetClientDir, {
     recursive: true,
     force: true,
+    filter: (source) =>
+      path.dirname(source) !== runtimeDir ||
+      !PRISMA_RUNTIME_GENERATE_ONLY_FILE.test(path.basename(source)),
   });
   await fs.cp(generatedClientDir, targetGeneratedDir, {
     recursive: true,

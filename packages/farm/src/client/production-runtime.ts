@@ -7,6 +7,7 @@ export { setFarmTrailingSlashPreference } from "../trailing-slash";
 export { setFarmBasePath, stripFarmBasePath } from "../base-path";
 export { getHashTargetElement } from "./hash-target";
 export { installFarmLinkPrefetch } from "./link-prefetch";
+export { readFarmLinkNavigateOptions } from "./link-navigation";
 export { createFarmMetadataHeadReconciler, reconcileFarmDocumentHead } from "./document-head";
 export { isFarmBlockedNavigationURL, isFarmExternalNavigationURL } from "./navigation-url";
 export { getFarmIslandValueHeaders } from "./island-value-protocol";

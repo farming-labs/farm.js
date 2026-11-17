@@ -432,6 +432,7 @@ function createWebMiddlewareContext(
 
     rewrite(rewriteUrl: string): void {
       ctx._rewriteUrl = rewriteUrl;
+      syncRequest();
       const nextUrl = new URL(rewriteUrl, currentRequest.url);
       currentRequest = withFarmRequestClientAddress(
         new Request(nextUrl, currentRequest),
@@ -489,11 +490,17 @@ function createWebMiddlewareContext(
     },
   } satisfies MiddlewareContext;
 
+  // Request-first middleware that read the body leaves the route a copy holding it on ctx.request.
+  function syncRequest(): Request {
+    currentRequest = ctx.request as unknown as Request;
+    return currentRequest;
+  }
+
   return {
     ctx,
     headers,
-    getRequest: () => currentRequest,
-    getResponse: () => handledResponse || responseShim.getResponse(currentRequest.method),
+    getRequest: syncRequest,
+    getResponse: () => handledResponse || responseShim.getResponse(syncRequest().method),
   };
 }
 

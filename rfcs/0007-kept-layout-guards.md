@@ -1,6 +1,6 @@
 # Kept layouts that cannot decide a request
 
-Status: Draft.
+Status: Implemented (islands mode, experimental).
 
 ## Problem
 
@@ -101,16 +101,34 @@ today when the guard passes. An unmarked layout keeps today's behavior exactly.
   in `ssg.ts`). That analysis only suggests, because "request-bound work can live in a transitive
   import". Following the module graph is what makes this one sound enough to act on.
 
-## Open questions
+## Implementation
 
-1. The package allowlist: start with React and Farm's own client components only, or also common
-   pure UI packages (`clsx`, `tailwind-merge`, `class-variance-authority`, icon sets)? A longer
-   list marks more layouts; each entry is a package Farm vouches for.
-2. Client components in a layout's graph: hold them to the same proof (safest, marks fewer
-   layouts), or exempt them, since a client component that throws during the server render also
-   fails the document load?
-3. Should React Server Components mode use the same marks to leave a pure kept layout out of the
-   Flight payload? That is a separate change to RSC navigation and is out of scope here.
+- `packages/farm/src/islands-kept-layouts.ts` runs the proof (`explainFarmKeptLayoutRender`
+  returns the first module and reason that fails it). It follows imports with the same resolver
+  the hydration planner uses (`resolveImportedModule`), and parses with the planner's AST cache.
+- The production build writes `skipKeptRender: true` on a proven layout's entry in the server's
+  layout table. `farmKeptLayoutsRender` returns at once when every kept layout carries it, and
+  otherwise renders the whole kept chain as before: a proven layout can still provide context to
+  one that is not.
+- `farm dev` asks the same function on each navigation, and keeps the answer until a file it read
+  changes size or mtime.
+- Payload benchmark, docs navigation server time, medians of two rounds after a warm-up: islands
+  1.28 to 1.32 ms with the skip, 1.76 to 1.77 ms on the same build with the flag cleared; React
+  Server Components `.rsc` 1.31 to 1.32 ms.
+
+Decisions on the questions this RFC left open:
+
+1. **The allowlist starts minimal:** `react`, its JSX runtimes, and `Link` from
+   `@farm.js/core/client`. Adding a package is a one-line change once it is shown to do no I/O.
+2. **Client components are held to the same proof.** They render during the guard pass too.
+3. **React Server Components mode is unchanged.**
+
+Not implemented yet: the islands build report does not list which layouts were proven and why
+the others were not.
+
+Not a guard: a layout that throws by accident (a `TypeError` on a missing param) is not a
+construct the proof sees. Skipping it for a forged `f-layouts` header only leaves out markup; it
+cannot let a request through that a control would have stopped.
 
 ## Verification plan
 

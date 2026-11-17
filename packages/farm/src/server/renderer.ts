@@ -205,6 +205,7 @@ import { installFarmIslandValues, uninstallFarmIslandValues } from "../client/is
 import { resolveServerActionsConfig } from "../server-action-security";
 import { resolveFarmRouteRootStrategy } from "../island-inference";
 import { canBootFarmIslandsClient } from "../islands-client-boot";
+import { canFarmSkipKeptLayoutRender } from "../islands-kept-layouts";
 import { resolveFarmPlatform } from "../desktop/config";
 import { resolveFarmServerComponentsMode } from "../server-components-mode";
 import {
@@ -2425,7 +2426,14 @@ window.__FARM_I18N__ = ${i18nSnapshot ? serializeInlineValue(i18nSnapshot) : "nu
             // The browser chooses which layouts it says it keeps, so a kept layout still runs: a
             // guard in it decides this request. Only its markup is left out. A layout that fails
             // here renders whole, so notFound() and redirect() answer as on any other request.
-            if (keptLayouts > 0) {
+            // RFC 0007: layouts the analysis proves cannot throw or read the request skip it.
+            const keptRoot = this.config.root || process.cwd();
+            if (
+              keptLayouts > 0 &&
+              !layouts
+                .slice(0, keptLayouts)
+                .every((layout) => canFarmSkipKeptLayoutRender(layout.modulePath, keptRoot))
+            ) {
               let keptElement: unknown = null;
               for (let i = keptLayouts - 1; i >= 0; i--) {
                 const KeptLayout = layoutModules[i]?.default;
