@@ -13,6 +13,7 @@ import {
   serializeMiddlewareCookieDeletion,
 } from "./cookie-header";
 import { setFarmMiddlewareClientAddress } from "./client-address";
+import { setFarmMiddlewareRequestBodyLimit } from "./request-body";
 import { toMiddlewareRoutePathname } from "./matcher";
 
 /**
@@ -77,6 +78,7 @@ export function createContext(
   toRoutePathname?: (pathname: string) => string,
 ): MiddlewareContext {
   const url = resolveFarmRequestURL(req, { trustProxy: server?.trustProxy });
+  setFarmMiddlewareRequestBodyLimit(req, server?.bodySizeLimit);
   if (server?.trustProxy) {
     // The trusted proxy appends the address it saw, so that hop is the last one, as production
     // resolves it; anything before it was sent by the client.
