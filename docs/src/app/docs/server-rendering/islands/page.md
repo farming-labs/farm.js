@@ -96,40 +96,47 @@ lets the browser give `useId` the ids in the HTML. The full contract is islx's
 ## How it compares with React Server Components
 
 **Islands mode sends far less JavaScript on pages that do not hydrate at load, and costs about the
-same or less everywhere else, except for a few milliseconds on some navigations.** These are the
-numbers for one app built in both modes (`benchmarks/server-components-payload`), each cell `"rsc"`
-then `"islands"`.
+same or less everywhere else.** These are the numbers for one app built in both modes
+(`benchmarks/server-components-payload`), each cell `"rsc"` then `"islands"`.
 
 | Measure                    | Docs page       | Shop page      | Blog post      |
 | -------------------------- | --------------- | -------------- | -------------- |
-| First-load JavaScript      | 69.9 to 1.7 KB  | 69.9 to 1.7 KB | 69.9 to 1.7 KB |
-| HTML document              | 16.3 to 15.9 KB | 5.5 to 5.7 KB  | 17.9 to 8.9 KB |
-| Data per navigation        | 12.0 to 2.5 KB  | 3.8 to 2.0 KB  | 10.8 to 8.9 KB |
-| First-load main thread     | 163 to 86 ms    | 143 to 74 ms   | 216 to 99 ms   |
-| Navigation until painted   | 44 to 46 ms     | 46 to 50 ms    | 71 to 69 ms    |
-| Server requests per second | 434 to 458      | 682 to 769     | 48 to 349      |
+| First-load JavaScript      | 70.6 to 1.7 KB  | 70.6 to 1.7 KB | 70.6 to 1.7 KB |
+| HTML document              | 16.3 to 16.0 KB | 5.5 to 5.8 KB  | 17.9 to 9.0 KB |
+| Data per navigation        | 12.0 to 2.6 KB  | 3.8 to 2.1 KB  | 10.8 to 9.1 KB |
+| First-load main thread     | 154 to 86 ms    | 145 to 72 ms   | 211 to 96 ms   |
+| Navigation until painted   | 45 to 46 ms     | 45 to 45 ms    | 71 to 68 ms    |
+| Server requests per second | 441 to 470      | 628 to 628     | 56 to 426      |
 
 Sizes are brotli at quality 5. Times are medians with Chrome at 4x CPU throttling. Requests per
 second are the median of 8 rounds alternating between the modes, on one Node process. Measured
-2026-11-08 on an Apple M1 with other work running, at commit `55fb3580c`.
+2026-11-17 on an Apple M1 with other work running, at commit `cb949b16a` with the prefetch fix of
+[#2961](https://github.com/farming-labs/farm.js/pull/2961).
 
 - **First load.** 41 times less JavaScript and about half the main-thread work, because these pages'
   client components wait for a click.
-- **Server.** 6% and 13% more requests per second on docs and shop pages, within the spread of a
-  busy machine, and 7.3 times more on a long blog post, where Flight serializes every token.
-- **Navigation data.** A fifth of the data on docs pages, half on shop pages, and slightly less on
+- **Navigation data.** A fifth of the data on docs pages, a little over half on shop pages, and
+  slightly less on blog posts. A navigation carries the page as islx HTML (or its server tree,
+  under a layout that hydrates) and leaves out the layouts and values the browser already holds.
+- **Navigation on the server.** A docs navigation renders in 0.58 ms against 0.66 to 0.69 ms for
+  RSC's `.rsc` request (medians of 1,495 interleaved requests, uncompressed), and sends 7.3 KB
+  instead of 37.3 KB. The build skips the run of kept layouts that cannot decide a request.
+- **Server.** 7% more requests per second on docs pages, the same on shop pages, and 7.6 times more
+  on a long blog post, where Flight serializes every token.
+- **Navigation paint.** Within a millisecond of `"rsc"` on docs and shop pages, and 3 ms sooner on
   blog posts.
 
 Where islands mode does not win:
 
-- **The runtime still has to arrive.** It is about 87 KB, and it loads on the first navigation or
+- **The runtime still has to arrive.** It is about 92 KB, and it loads on the first navigation or
   interaction, so a visitor who navigates has downloaded more JavaScript in total than with
   `"rsc"`. The savings are in what a visit pays before the page can be used.
 - **A client component that hydrates at load** starts the runtime at once, so that page sends more
   JavaScript than `"rsc"`, not less: about 77 to 80 KB against 69.5 KB on a small app. The
   production build keeps navigation code in a separate 8 KB chunk, loaded on the first link hover,
   focus, tap, or navigation.
-- **Navigations paint 2 to 4 ms later** on docs and shop pages. Blog posts are 2 ms faster.
+- **A small page's HTML is a little larger.** The shop page is 0.3 KB larger, for islx's island
+  markers and props.
 
 To measure it yourself, see the benchmark's
 [README](https://github.com/farming-labs/farm.js/tree/main/benchmarks/server-components-payload).

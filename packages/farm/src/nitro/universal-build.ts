@@ -3541,6 +3541,20 @@ ${
       !clientNavigation?.signal.aborted;
   },
 
+  // A prefetch made while a navigation swaps the page (an intent timer after the click, the
+  // incoming page's links) would ask for it as the outgoing page shows it: its layouts, its React
+  // root. It waits for the navigation to settle, and then skips the page it landed on.
+  whenNavigationSettles: function() {
+    return new Promise((resolve) => {
+      const listener = (state) => {
+        if (state.state !== "idle") return;
+        this.navigationListeners.delete(listener);
+        resolve();
+      };
+      this.navigationListeners.add(listener);
+    });
+  },
+
   finishNavigation: function(navigation) {
     if (this.activeNavigation?.id !== navigation.id) return;
     this.activeNavigation = null;
@@ -4506,6 +4520,13 @@ ${generateUniversalRouterStateProperties()}
     const url = new URL(href, window.location.href);
     if (isFarmExternalNavigationURL(url, window.location.origin)) return;
     if (isFarmDocsPath(url.pathname)) return;
+    if (this.activeNavigation) {
+      return this.whenNavigationSettles().then(() => {
+        if (url.pathname + url.search !== window.location.pathname + window.location.search) {
+          return this.prefetch(href);
+        }
+      });
+    }
     
     const pathname = url.pathname + url.search;
     if (this.readFreshPrefetch(pathname) !== undefined) return;
@@ -6060,6 +6081,13 @@ ${
     const url = new URL(href, window.location.href);
     if (isFarmExternalNavigationURL(url, window.location.origin)) return;
     if (isFarmDocsPath(url.pathname)) return;
+    if (this.activeNavigation) {
+      return this.whenNavigationSettles().then(() => {
+        if (url.pathname + url.search !== window.location.pathname + window.location.search) {
+          return this.prefetch(href);
+        }
+      });
+    }
     prefetchFarmClientRouteTable();
     
     // A prefetch warms an ordinary future navigation, which reads the bare
