@@ -11025,13 +11025,9 @@ function getPPRHeaders(status, config) {
 
   if (status === "bypass") {
     headers["Cache-Control"] = "private, no-store";
-    return headers;
   }
-
-  if (typeof config.revalidate === "number" && config.revalidate > 0) {
-    headers["Cache-Control"] = \`s-maxage=\${config.revalidate}, stale-while-revalidate\`;
-  }
-
+  // A shareable shell answers with the route's shared policy (getRouteSharedCacheControl), the
+  // documented "public, s-maxage=<revalidate>, stale-while-revalidate=300", on a miss and a hit.
   return headers;
 }
 
@@ -11913,6 +11909,10 @@ ${
               "x-farm-preload-buffered": getFarmBufferedPreloadMarker(cachedPPRShell),
               ...(farmFontPreloadHeader ? { "Link": farmFontPreloadHeader } : {}),
               ...getPPRHeaders("hit", pprConfig),
+              // The policy the miss that stored this shell was sent with.
+              ...(getRouteSharedCacheControl(route, true)
+                ? { "Cache-Control": getRouteSharedCacheControl(route, true) }
+                : {}),
               // A segment is one navigation's answer, never a CDN entry: some CDNs ignore Vary.
               ...(farmKeptLayouts
                 ? { "Cache-Control": "private, no-store", "Vary": "F-Layouts" }

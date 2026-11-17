@@ -346,6 +346,11 @@ export async function POST(request: Request) {
 
 PPR works best when the stable page shell is outside Suspense and request-specific or slow data lives inside Suspense. As above, the route export only takes effect with `experimental.ppr` enabled in `farm.config.ts`.
 
+A shareable PPR page is sent with the same `Cache-Control` as any page with a shared policy,
+`public, s-maxage=<revalidate>, stale-while-revalidate=300` (`s-maxage=60` without `revalidate`),
+whether the response renders the shell (`X-Farm-PPR: miss`) or serves the stored one
+(`X-Farm-PPR: hit`).
+
 When a production render actually suspends, Farm currently buffers that response for late status
 errors and bypasses the shared PPR shell cache. This preserves fresh request-specific content
 instead of caching a completed response as though it were a reusable partial shell.
