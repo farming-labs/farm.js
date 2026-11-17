@@ -14381,6 +14381,26 @@ function toFarmNodeResponse(request, response) {
     }),
   );
 
+  // Nitro's static handler answers a prerendered page at both spellings (it strips the trailing
+  // slash and tries the file and its index.html) before the request reaches Farm, so the other
+  // spelling would get the page with 200 instead of Farm's 308 to the canonical URL. Redirect it
+  // with a route rule, as a dynamic page and development do. Platform presets serve their own
+  // static files and redirects.
+  const prerenderTrailingSlashRedirects =
+    isVercel || preset.startsWith("cloudflare") || preset.startsWith("netlify")
+      ? {}
+      : Object.fromEntries(
+          prerenderRoutes.flatMap((route) => {
+            const canonical = toPrerenderPublicPath(route);
+            const other = canonical.endsWith("/") ? canonical.slice(0, -1) : `${canonical}/`;
+            if (!other || other === "/" || canonical === "/") return [];
+            // A route rule key is a match pattern: only a path of plain URL characters names
+            // itself. Another path (a static param such as "a+b") keeps answering both spellings.
+            if (!/^[A-Za-z0-9._~/-]+$/.test(canonical)) return [];
+            return [[other, { redirect: { to: canonical, status: 308 } }]];
+          }),
+        );
+
   // Content-hashed client files never change, so they are cached for a year. Vercel gets the same
   // policy from the immutable route postProcessVercelOutput writes, which replaces Nitro's routes.
   const immutableAssets = isVercel
@@ -14494,6 +14514,7 @@ function toFarmNodeResponse(request, response) {
       // Exact user rules must retain their runtime settings without replacing
       // the headers and prerender marker generated for a safe physical page.
       ...prerenderNitroRouteRules,
+      ...prerenderTrailingSlashRedirects,
     },
     rollupConfig: {
       external: nitroRollupExternal,
