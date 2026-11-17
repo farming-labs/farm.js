@@ -1163,6 +1163,19 @@ export class ServerRenderer {
       0,
       Math.min(input.layoutStartIndex ?? 0, input.layouts.length),
     );
+    const createSlotContainer = (slot: FarmNavigationFragmentSlot): unknown => {
+      let slotElement = this.rendererRuntime.createElement(slot.module.default, slot.props);
+      if (slot.shouldHydrate !== false) slotElement = this.wrapClientGraph(slotElement);
+      return this.rendererRuntime.createElement(
+        "div",
+        {
+          id: slot.containerId,
+          "data-farm-route-slot": slot.name,
+          "data-farm-slot-owner": slot.ownerPattern,
+        },
+        slotElement,
+      );
+    };
     for (let index = input.layouts.length - 1; index >= layoutStartIndex; index--) {
       const layout = input.layouts[index]!;
       const LayoutComponent = layout.module.default;
@@ -1172,17 +1185,7 @@ export class ServerRenderer {
         if ((slot.ownerDirectory ?? slot.ownerPattern) !== layout.pattern || !slot.module.default) {
           continue;
         }
-        let slotElement = this.rendererRuntime.createElement(slot.module.default, slot.props);
-        if (slot.shouldHydrate !== false) slotElement = this.wrapClientGraph(slotElement);
-        slotProps[slot.name] = this.rendererRuntime.createElement(
-          "div",
-          {
-            id: slot.containerId,
-            "data-farm-route-slot": slot.name,
-            "data-farm-slot-owner": slot.ownerPattern,
-          },
-          slotElement,
-        );
+        slotProps[slot.name] = createSlotContainer(slot);
       }
       element = this.rendererRuntime.createElement(LayoutComponent, {
         children: element,
@@ -1196,9 +1199,31 @@ export class ServerRenderer {
       element = this.wrapClientGraph(element);
     }
 
-    return this.renderElementToCompleteHTML(await this.wrapWithIntegrationProviders(element), {
-      rejectLateRedirects: true,
-    });
+    const html = await this.renderElementToCompleteHTML(
+      await this.wrapWithIntegrationProviders(element),
+      { rejectLateRedirects: true },
+    );
+    // The layouts the browser keeps render their slots for this URL too, as a full load of it
+    // does (route-slot-client.ts). They travel in a hidden element after the route tree.
+    const keptLayoutPatterns = new Set(
+      input.layouts.slice(0, layoutStartIndex).map((layout) => layout.pattern),
+    );
+    const keptSlots = (input.slots || []).filter(
+      (slot) =>
+        keptLayoutPatterns.has(slot.ownerDirectory ?? slot.ownerPattern) && slot.module.default,
+    );
+    if (keptSlots.length === 0) return html;
+    const keptSlotsHtml = await this.renderElementToCompleteHTML(
+      await this.wrapWithIntegrationProviders(
+        this.rendererRuntime.createElement(
+          "div",
+          { hidden: true, "data-farm-kept-route-slots": "true" },
+          ...keptSlots.map(createSlotContainer),
+        ),
+      ),
+      { rejectLateRedirects: true },
+    );
+    return html + keptSlotsHtml;
   }
 
   /**

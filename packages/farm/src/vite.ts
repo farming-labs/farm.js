@@ -147,6 +147,7 @@ import {
   FARM_LAYOUT_ELEMENT_CLIENT_SOURCE,
   FARM_SERVER_TREE_LAYOUT_CLIENT_SOURCE,
 } from "./document-layout-client";
+import { FARM_KEPT_ROUTE_SLOTS_CLIENT_SOURCE } from "./route-slot-client";
 import { FARM_NAVIGATION_SCRIPT_SOURCE } from "./client/navigation-scripts";
 import { FARM_NAVIGATION_STREAM_READER_SOURCE } from "./client/navigation-stream-client";
 import { FARM_REFRESH_FIELDS_SOURCE } from "./client/refresh-fields";
@@ -7467,6 +7468,7 @@ const layoutComponentCache = new Map();
 let hasClientTakenOver = false;
 const routeSlotRoots = new Map();
 const routeSlotDefinitions = new Map();
+const routeSlotContainers = new Map();
 let activeRouteInterception = null;
 let pendingPageHydrationController = null;
 
@@ -7526,6 +7528,7 @@ async function renderRouteSlot(slot, mode = 'render') {
     root.render(element);
     routeSlotRoots.set(key, root);
   }
+  routeSlotContainers.set(key, container);
 
   routeSlotDefinitions.set(key, slot);
   return true;
@@ -7552,6 +7555,34 @@ async function hydrateInitialRouteSlots() {
   }
 
   return hydrated;
+}
+
+// After a navigation: a slot root whose container the navigation replaced is released, and the
+// client slots of the new URL hydrate in the server's containers.
+async function hydrateNavigationRouteSlots(slots) {
+  if (!Array.isArray(slots)) return;
+  const nextSlots = slots.filter((slot) => !slot.interception);
+  for (const [key, root] of Array.from(routeSlotRoots)) {
+    const container = routeSlotContainers.get(key);
+    const slot = nextSlots.find((candidate) => getRouteSlotKey(candidate) === key);
+    if (slot && container?.isConnected && document.getElementById(slot.containerId) === container) {
+      continue;
+    }
+    try { root.unmount(); } catch (error) {}
+    routeSlotRoots.delete(key);
+    routeSlotContainers.delete(key);
+  }
+  routeSlotDefinitions.clear();
+  window.__FARM_ROUTE_SLOTS__ = nextSlots;
+  for (const slot of nextSlots) {
+    routeSlotDefinitions.set(getRouteSlotKey(slot), slot);
+    if (!slot.isClientComponent && !slot.shouldHydrate) continue;
+    try {
+      await renderRouteSlot(slot, 'hydrate');
+    } catch (error) {
+      console.warn('[Farm.js] Could not hydrate route slot:', slot.name, error);
+    }
+  }
 }
 
 async function renderRouteInterception(pageData) {
@@ -7588,6 +7619,7 @@ async function clearRouteInterception(destination) {
     if (root) {
       try { root.unmount(); } catch (error) {}
       routeSlotRoots.delete(key);
+      routeSlotContainers.delete(key);
     }
 
     const previous = active.previous.get(key);
@@ -8097,6 +8129,7 @@ function getLayoutShell(root, patterns, index, find) {
   return shell.innerHTML;
 }
 
+${FARM_KEPT_ROUTE_SLOTS_CLIENT_SOURCE}
 ${islandValues ? FARM_REFRESH_FIELDS_SOURCE : ""}function replaceNavigationBoundary(
   container,
   fragment,
@@ -8105,6 +8138,9 @@ ${islandValues ? FARM_REFRESH_FIELDS_SOURCE : ""}function replaceNavigationBound
   refresh = false,
   find = findLayoutBoundary,
 ) {
+  // The kept layouts' slots, when the server rendered only the layouts below them.
+  const keptRouteSlots = fragment.querySelector('[data-farm-kept-route-slots]');
+  keptRouteSlots?.remove();
   // A refresh keeps the islands still on the page: the ones in streamed Suspense content too.
   if (refresh) revealFarmStreamedContent(fragment);
   let sharedCount = 0;
@@ -8153,6 +8189,22 @@ ${
             : ""
         }disposeFarmIsolatedClientBoundaries(currentTarget);`
       : ""
+  }
+  if (keptRouteSlots) fragment.append(...keptRouteSlots.childNodes);
+  for (const slot of replaceFarmKeptRouteSlots(
+    container,
+    currentTarget,
+    fragment,
+    ${isolatedHydrationEnabled ? "disposeFarmIsolatedClientBoundaries" : "null"},
+  )) {
+    activateFragmentScripts(slot);${
+      isolatedHydrationEnabled
+        ? `
+    hydrateFarmIsolatedClientBoundaries(slot).catch((error) => {
+      console.error("[Farm.js] Hydrating a route slot's islands failed:", error);
+    });`
+        : ""
+    }
   }
   currentTarget.replaceWith(nextTarget);${islandValues ? "\n  if (fields) restoreFarmServerFields(fields, nextTarget);" : ""}
   activateFragmentScripts(nextTarget);
@@ -8520,6 +8572,7 @@ async function renderPage(pageData, info) {
         ${isolatedHydrationEnabled ? "disposeFarmIsolatedClientBoundaries(container);" : ""}
         if (appRoot) { try { appRoot.unmount(); } catch (error) {} appRoot = null; }
         if (reactRoot) { try { reactRoot.unmount(); } catch (error) {} reactRoot = null; }
+        fragment.querySelector('[data-farm-kept-route-slots]')?.remove();
         container.replaceChildren(fragment);
         activateFragmentScripts(container);
       } else {
@@ -8594,6 +8647,7 @@ async function renderPage(pageData, info) {
       }
     }
 
+    await hydrateNavigationRouteSlots(pageData.routeSlots);
     activeLayoutPatterns = layoutPatterns;
     activeLayoutShouldHydrate = layoutShouldHydrate;
     window.__FARM_LOADING_MODULE__ = route.loadingModulePath || null;

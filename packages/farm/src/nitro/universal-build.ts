@@ -110,6 +110,7 @@ import {
   FARM_LAYOUT_ELEMENT_CLIENT_SOURCE,
   FARM_SERVER_TREE_LAYOUT_CLIENT_SOURCE,
 } from "../document-layout-client";
+import { FARM_KEPT_ROUTE_SLOTS_CLIENT_SOURCE } from "../route-slot-client";
 import { FARM_NAVIGATION_SCRIPT_SOURCE } from "../client/navigation-scripts";
 import { FARM_NAVIGATION_STREAM_READER_SOURCE } from "../client/navigation-stream-client";
 import { FARM_REFRESH_FIELDS_SOURCE } from "../client/refresh-fields";
@@ -5548,6 +5549,7 @@ function getLayoutShell(root, patterns, index) {
   return shell.innerHTML;
 }
 
+${FARM_KEPT_ROUTE_SLOTS_CLIENT_SOURCE}
 ${islandValues ? FARM_REFRESH_FIELDS_SOURCE : ""}function replaceSharedLayoutBoundary(currentRoot, nextRoot, refresh = false) {
   // A refresh keeps the islands still on the page: the ones in streamed Suspense content too.
   if (refresh) revealFarmStreamedContent(nextRoot);
@@ -5591,6 +5593,21 @@ ${islandValues ? FARM_REFRESH_FIELDS_SOURCE : ""}function replaceSharedLayoutBou
             : ""
         }disposeFarmIsolatedClientBoundaries(currentTarget);`
       : ""
+  }
+  for (const slot of replaceFarmKeptRouteSlots(
+    currentRoot,
+    currentTarget,
+    nextRoot,
+    ${isolatedHydrationEnabled ? "disposeFarmIsolatedClientBoundaries" : "null"},
+  )) {
+    activateNavigationScripts(slot);${
+      isolatedHydrationEnabled
+        ? `
+    hydrateFarmIsolatedClientBoundaries(slot).catch(function(error) {
+      console.error("[Farm.js] Hydrating a route slot's islands failed:", error);
+    });`
+        : ""
+    }
   }
   currentTarget.replaceWith(nextTarget);${islandValues ? "\n  if (fields) restoreFarmServerFields(fields, nextTarget);" : ""}
   activateNavigationScripts(nextTarget);
