@@ -9844,6 +9844,7 @@ function renderFarmI18nAlternateLinks(requestPath, snapshot, request, metadata) 
   return renderFarmLocaleAlternateLinks(routePathname, snapshot, {
     metadataBase: metadata ? metadata.metadataBase : undefined,
     origin: request ? resolveFarmI18nAlternateOrigin(request) : undefined,
+    languages: metadata && metadata.alternates ? metadata.alternates.languages : undefined,
   });
 }
 
