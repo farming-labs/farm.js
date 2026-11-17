@@ -1133,17 +1133,20 @@ export const metadata = {
 };
 ```
 
-Each entry renders `og:video`, plus `og:video:secure_url`, `og:video:type`, `og:video:width`, and `og:video:height` when set. `url` and `secureUrl` resolve against `metadataBase` like image URLs, and a plain string is shorthand for `{ url }`. Point `url` at the media file itself, such as an MP4 in `public/`, not at a player page. Discord plays the video only when `openGraph.type` is `"video"` or starts with `"video."`.
+Each entry renders `og:video`, plus `og:video:secure_url`, `og:video:type`, `og:video:width`, and `og:video:height` when set. `url` and `secureUrl` resolve against `metadataBase` like image URLs, and a plain string is shorthand for `{ url }`. Point `url` at the media file itself, such as an MP4 in `public/`, not at a player page. Files in `public/` answer `Range` requests with `206 Partial Content` in development and from a self-hosted server, which Safari and Messages need before they play a video. Discord plays the video only when `openGraph.type` is `"video"` or starts with `"video."`.
 
 Open Graph merges one level, so `videos` set in a layout applies to every page under it. Set it on the page that owns the video, or set `videos: []` in a page that should not inherit it.
 
-X ignores `og:video` and plays a link's video only in a Player Card, which loads a player page in an iframe. Farm adds one for you: a page with `openGraph.videos` also gets `twitter:card` set to `player` and a `twitter:player` that points at `/_farm/video-player.html`, a bare player page Farm ships in every build. With `metadataBase: "https://acme.test"`, the example above renders:
+X ignores `og:video` and plays a link's video only in a Player Card, which loads a player page in an iframe. Farm adds one for you: a page with `openGraph.videos` also gets `twitter:card` set to `player` and a `twitter:player` that points at `/_farm/video-player.html`, a bare player page Farm serves when a renderer is enabled. Backend-only apps with `renderer: false` do not serve or build this page. With `metadataBase: "https://acme.test"`, the example above renders:
 
 ```html
-<meta name="twitter:card" content="player">
-<meta name="twitter:player" content="https://acme.test/_farm/video-player.html?src=%2Fog%2Fhome.mp4">
-<meta name="twitter:player:width" content="2400">
-<meta name="twitter:player:height" content="1260">
+<meta name="twitter:card" content="player" />
+<meta
+  name="twitter:player"
+  content="https://acme.test/_farm/video-player.html?src=%2Fog%2Fhome.mp4"
+/>
+<meta name="twitter:player:width" content="2400" />
+<meta name="twitter:player:height" content="1260" />
 ```
 
 The player uses the first entry whose `type` is unset or starts with `video/`, and its `width` and `height`, or 1200 by 630 when they are unset. A first `openGraph.images` entry on the same origin becomes the player's poster. The player autoplays muted and loops videos up to 10 seconds long, as X's Player Card policy allows; longer videos wait for the play button. X also asks for `twitter:site` on a Player Card, so set it to your X handle.

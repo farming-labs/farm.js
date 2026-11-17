@@ -2859,6 +2859,7 @@ export function farmPlugin(
 
           // Production ships this page as a static file in the client output (see FARM_VIDEO_PLAYER_HTML).
           if (
+            !rendererDisabled &&
             (requestMethod === "GET" || requestMethod === "HEAD") &&
             requestPathname === FARM_VIDEO_PLAYER_PATH
           ) {

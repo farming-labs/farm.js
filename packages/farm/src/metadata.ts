@@ -678,7 +678,7 @@ function normalizeMetadataVideos(
 }
 
 /**
- * Path of the player page Farm ships with every build. Static files are served
+ * Path of the player page Farm ships when a renderer is enabled. Static files are served
  * from the origin root, so a `basePath` does not prefix it.
  */
 export const FARM_VIDEO_PLAYER_PATH = "/_farm/video-player.html";
