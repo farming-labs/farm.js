@@ -148,6 +148,31 @@ describe("server cache primitives", () => {
     );
   });
 
+  it("keeps a shell stale when its path is revalidated while it is produced", async () => {
+    // A PPR shell is rendered first and stored after. A revalidatePath() that lands during the
+    // render must not be older than the shell it should have cleared.
+    const shells = getFarmDataCache().pprShellCache;
+    const options = { paths: ["/pricing"], tags: ["ppr"] };
+    const key = createFarmCacheKey(["ppr", normalizeRevalidatePath("/pricing"), ""]);
+
+    const raced = await shells.startWriteAsync(options);
+    revalidatePath("/pricing");
+    await raced.commit(key, { html: "rendered before the change" });
+    expect(await shells.getEntryAsync(key)).toBeUndefined();
+
+    const fresh = await shells.startWriteAsync(options);
+    await fresh.commit(key, { html: "rendered after the change" });
+    expect((await shells.getEntryAsync<{ html: string }>(key))?.value.html).toBe(
+      "rendered after the change",
+    );
+
+    // A write that is released instead of committed stores nothing.
+    const abandoned = await shells.startWriteAsync(options);
+    abandoned.release();
+    await abandoned.commit(createFarmCacheKey(["ppr", "/other", ""]), { html: "x" });
+    expect(await shells.getEntryAsync(createFarmCacheKey(["ppr", "/other", ""]))).toBeUndefined();
+  });
+
   it("supports updateTag as immediate tag invalidation", async () => {
     let calls = 0;
     const getUser = unstable_cache(
