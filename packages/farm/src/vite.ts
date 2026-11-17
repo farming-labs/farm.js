@@ -7024,7 +7024,7 @@ ${isolatedHydrationImport}
 import { installChunkErrorRecovery, SPARouter } from '@farm.js/core/client'
 import { createClientPluginManager } from '@farm.js/core/plugin/client'
 import { isFarmRouteActive } from '@farm.js/core/router'
-import { installFarmLinkPrefetch, isFarmBlockedNavigationURL, readFarmLinkNavigateOptions, replayFarmQueuedInteraction, scheduleFarmIslandHydration, createFarmSearchParams, searchParamsToObject, setFarmBasePath, setFarmTrailingSlashPreference, stripFarmBasePath } from '@farm.js/core/internal/client-runtime'
+import { installFarmLinkPrefetch, isFarmBlockedNavigationURL, readFarmLinkNavigateOptions, rememberFarmLinkLocale, replayFarmQueuedInteraction, scheduleFarmIslandHydration, createFarmSearchParams, searchParamsToObject, setFarmBasePath, setFarmTrailingSlashPreference, stripFarmBasePath } from '@farm.js/core/internal/client-runtime'
 import { reviveDeferredData } from '@farm.js/core/deferred'
 import {
   createFarmDeploymentMismatchError,
@@ -9000,6 +9000,7 @@ document.addEventListener('click', function(event) {
   
   // Use SPA router
   event.preventDefault();
+  rememberFarmLinkLocale(target);
   spaRouter.navigate(href, readFarmLinkNavigateOptions(target));
 });
 

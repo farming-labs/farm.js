@@ -1,6 +1,7 @@
 import type IntlMessageFormat from "intl-messageformat";
 import { resolveFarmNavigationURL } from "../client/navigation-url";
 import { getActiveFarmI18nSnapshot } from "./bridge";
+import { createFarmLocaleCookie } from "./resolver";
 import { localizeFarmHref, resolveFarmLocalePath } from "./routing";
 import type { FarmI18nClientSnapshot, FarmI18nLocale } from "./types";
 
@@ -49,4 +50,18 @@ export function isFarmLocaleChangeHref(href: string): boolean {
   const match = resolveFarmLocalePath(target.pathname, snapshot);
   const targetLocale = match.locale || snapshot.defaultLocale;
   return targetLocale !== snapshot.locale;
+}
+
+/**
+ * Remember the locale a `<Link locale>` moves to, as setLocale() does: `Link` writes it into its
+ * anchor as `data-farm-locale`. The default locale's unprefixed URL names no locale, so without
+ * the cookie the visitor's earlier choice (or Accept-Language) sends them straight back to the
+ * locale they left. Other anchors are left to the locale the visitor already chose.
+ */
+export function rememberFarmLinkLocale(anchor: Element): void {
+  const locale = anchor.getAttribute("data-farm-locale");
+  const snapshot = getFarmI18nClientState();
+  if (!locale || !snapshot || typeof document === "undefined") return;
+  if (locale === snapshot.locale || !snapshot.locales.includes(locale)) return;
+  document.cookie = createFarmLocaleCookie(locale, { cookie: snapshot.cookie });
 }

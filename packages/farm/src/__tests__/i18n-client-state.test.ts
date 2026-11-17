@@ -43,6 +43,29 @@ describe("lightweight client locale state", () => {
     );
   });
 
+  it("remembers the locale a <Link locale> moves to, as setLocale() does", async () => {
+    // The default locale's unprefixed URL names no locale: without the cookie, the visitor's
+    // earlier "fr" choice redirected them back from "/about" to "/fr/about".
+    const state = await import("../i18n/client-state");
+    document.cookie = "farm_locale=fr; Path=/";
+    window.__FARM_I18N__ = snapshot("fr");
+    const anchor = (locale?: string) => {
+      const element = document.createElement("a");
+      element.href = "/about";
+      if (locale) element.setAttribute("data-farm-locale", locale);
+      return element;
+    };
+
+    // A plain link follows the locale the visitor chose; an unknown locale is ignored.
+    state.rememberFarmLinkLocale(anchor());
+    state.rememberFarmLinkLocale(anchor("de"));
+    expect(document.cookie).toContain("farm_locale=fr");
+
+    state.rememberFarmLinkLocale(anchor("en"));
+    expect(document.cookie).toContain("farm_locale=en");
+    document.cookie = "farm_locale=; Max-Age=0; Path=/";
+  });
+
   it("shares hydration with translation and clears the formatter cache before subscribers run", async () => {
     const state = await import("../i18n/client-state");
     // Register before loading translation: cache invalidation cannot depend on
