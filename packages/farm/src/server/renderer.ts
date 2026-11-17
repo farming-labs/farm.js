@@ -65,7 +65,13 @@ import {
 } from "./request";
 import { _peekCurrentRequest, _resolveCurrentCspNonce } from "./request-bridge";
 import { _setFarmSearchPreserveRoutes } from "../client/search-preserve-routes";
-import { createFarmCacheKey, getFarmDataCache, normalizeRevalidatePath } from "../cache";
+import {
+  createFarmCacheKey,
+  getFarmDataCache,
+  normalizeRevalidatePath,
+  type FarmCacheSetOptions,
+  type FarmCacheWrite,
+} from "../cache";
 import { resolveFarmNotFoundComponentPath } from "../not-found";
 import { getFarmAppDirectories } from "../layers";
 import { emitFarmEvent } from "../observability";
@@ -1287,26 +1293,32 @@ export class ServerRenderer {
     );
   }
 
-  private async cachePPRShell(options: PPRShellCacheOptions, html: string): Promise<void> {
+  private getPPRShellWriteOptions(options: PPRShellCacheOptions): FarmCacheSetOptions {
+    return {
+      // revalidatePath() takes the route path (`/pricing`), as the docs show, while the shell
+      // answers the public one (`/console/fr/pricing`): either clears it, as in production.
+      paths: [...new Set([options.pathname, this.routeManager.toRoutePathname(options.pathname)])],
+      tags: ["ppr"],
+      revalidate: options.revalidate ?? false,
+    };
+  }
+
+  private async cachePPRShell(
+    options: PPRShellCacheOptions,
+    html: string,
+    /** Started before the render, so an invalidation during it leaves the shell stale. */
+    write?: FarmCacheWrite,
+  ): Promise<void> {
     const key = this.getPPRCacheKey(
       options.pathname,
       options.search,
       options.locale,
       options.origin,
     );
-    await this.dataCache.pprShellCache.setAsync(
-      key,
-      { html },
-      {
-        // revalidatePath() takes the route path (`/pricing`), as the docs show, while the shell
-        // answers the public one (`/console/fr/pricing`): either clears it, as in production.
-        paths: [
-          ...new Set([options.pathname, this.routeManager.toRoutePathname(options.pathname)]),
-        ],
-        tags: ["ppr"],
-        revalidate: options.revalidate ?? false,
-      },
-    );
+    await (
+      write ??
+      (await this.dataCache.pprShellCache.startWriteAsync(this.getPPRShellWriteOptions(options)))
+    ).commit(key, { html });
     emitFarmEvent({
       type: "ppr.shell.cached",
       route: options.pathname,
@@ -1638,6 +1650,9 @@ export class ServerRenderer {
         durationMs: Date.now() - renderStartTime,
       });
     };
+    // A shell started before the page reads its data: revalidatePath() during the render leaves
+    // the stored shell stale (see FarmDataCache.startWriteAsync).
+    let pprShellWrite: FarmCacheWrite | undefined;
 
     try {
       const url = resolveFarmRequestURL(req, { trustProxy: this.config.server?.trustProxy });
@@ -1948,6 +1963,11 @@ export class ServerRenderer {
           route: pathname,
           key: pprCacheKey,
         });
+        if (req.method !== "HEAD") {
+          pprShellWrite = await this.dataCache.pprShellCache.startWriteAsync(
+            this.getPPRShellWriteOptions(pprShellOptions),
+          );
+        }
       }
 
       // Metadata runs in the outer request scope and the page in its own, so
@@ -2437,7 +2457,7 @@ export class ServerRenderer {
                           });
                           return;
                         }
-                        return this.cachePPRShell(pprShellOptions, html);
+                        return this.cachePPRShell(pprShellOptions, html, pprShellWrite);
                       }
                     : undefined,
               },
@@ -2547,6 +2567,8 @@ export class ServerRenderer {
       }
 
       await this.renderError(req, res, error, errorStatus);
+    } finally {
+      pprShellWrite?.release();
     }
   }
 

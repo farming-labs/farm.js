@@ -11846,7 +11846,10 @@ ${
         : "matchedRoute"
     };
     emitFarmEvent({ type: "route.matched", pathname, route: route.pattern, params });
-    
+    // A shell started before the page reads its data: revalidatePath() during the render
+    // leaves the stored shell stale (see FarmDataCache.startWriteAsync).
+    let pprShellWrite = null;
+
     try {
       ${
         farmIslandsMode
@@ -11918,6 +11921,15 @@ ${
           }), middlewareHeaders), cachedPPRShell);
         }
         emitFarmEvent({ type: "ppr.shell.miss", route: pathname, key: pprCacheKey });
+        if (request.method.toUpperCase() !== "HEAD") {
+          pprShellWrite = await pprShellCache.startWriteAsync({
+            // revalidatePath() takes the route path ("/pricing"), as the docs show, while the
+            // shell answers the public one ("/console/fr/pricing"): either clears it.
+            paths: [...new Set([pathname, getFarmRoutePathname(pathname)])],
+            tags: ["ppr"],
+            revalidate: pprConfig.revalidate ?? false,
+          });
+        }
       }
 
       // Reads from here on belong to the page render, not to middleware.
@@ -12762,17 +12774,7 @@ ${
           pprCacheKey &&
           request.method.toUpperCase() !== "HEAD"
         ) {
-          await pprShellCache.setAsync(
-            pprCacheKey,
-            { html: fullHtml },
-            {
-              // revalidatePath() takes the route path ("/pricing"), as the docs show, while the
-              // shell answers the public one ("/console/fr/pricing"): either clears it.
-              paths: [...new Set([pathname, getFarmRoutePathname(pathname)])],
-              tags: ["ppr"],
-              revalidate: pprConfig.revalidate ?? false,
-            }
-          );
+          await pprShellWrite?.commit(pprCacheKey, { html: fullHtml });
           emitFarmEvent({
             type: "ppr.shell.cached",
             route: pathname,
@@ -12846,6 +12848,8 @@ ${
       emitFarmEvent({ type: "render.error", route: pathname, error });
       console.error("SSR Error:", error);
       return renderFarmErrorResponse(error, routePathname, params);
+    } finally {
+      pprShellWrite?.release();
     }
   }
 

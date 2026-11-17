@@ -259,7 +259,10 @@ when calling outside a Farm action/endpoint request; Farm action requests automa
 registered distributed invalidations before completing.
 
 If a tag is invalidated while its value is still being generated, that caller can finish with the
-generated value, but Farm keeps the stored entry stale so the next read regenerates it.
+generated value, but Farm keeps the stored entry stale so the next read regenerates it. The same
+holds for PPR shells: a `revalidatePath()` that lands while a page is rendering still answers that
+request with the page it rendered, and the next request renders the page again rather than serving
+that shell.
 
 ## Adapter contract
 

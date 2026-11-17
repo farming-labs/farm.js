@@ -40,6 +40,12 @@ export interface FarmCacheOptions {
   revalidate?: number | false;
 }
 
+/** An entry started with `startWriteAsync`, stored by `commit` or abandoned by `release`. */
+export interface FarmCacheWrite {
+  commit<T>(key: string, value: T): Promise<FarmCacheEntry<T> | undefined>;
+  release(): void;
+}
+
 export interface FarmCacheSetOptions extends FarmCacheOptions {
   createdAt?: number;
 }
@@ -576,6 +582,51 @@ export class FarmDataCache {
     tagVersions?: Readonly<Record<string, number>>,
   ): Promise<FarmCacheEntry<T>> {
     return this.writeAsync(key, value, options, tagVersions);
+  }
+
+  /**
+   * Start an entry whose value is produced outside the cache, such as a rendered PPR shell.
+   * As for a `getOrSet` producer, an invalidation of its tags or paths between now and `commit`
+   * leaves the stored entry stale, so the next read regenerates it instead of serving a value
+   * read before the change. Call `release()` on every path that does not commit (it is safe to
+   * call after `commit`).
+   */
+  async startWriteAsync(options: FarmCacheSetOptions = {}): Promise<FarmCacheWrite> {
+    const tags = Array.from(normalizeCacheOptionsTags(options));
+    const generation = this.generation;
+    const activeGeneration = { tags: new Set(tags), createdVersion: this.version };
+    this.activeGenerations.add(activeGeneration);
+    let released = false;
+    const release = () => {
+      if (released) return;
+      released = true;
+      this.activeGenerations.delete(activeGeneration);
+      this.pruneInvalidatedTagVersions(activeGeneration.tags);
+    };
+    let tagVersions: Readonly<Record<string, number>> | undefined;
+    try {
+      tagVersions = await this.getAdapterTagVersions(tags);
+    } catch (error) {
+      release();
+      throw error;
+    }
+    return {
+      commit: async <T>(key: string, value: T) => {
+        try {
+          if (released || generation !== this.generation) return undefined;
+          return await this.writeAsync(
+            key,
+            value,
+            options,
+            tagVersions,
+            activeGeneration.createdVersion,
+          );
+        } finally {
+          release();
+        }
+      },
+      release,
+    };
   }
 
   private async writeAsync<T>(
