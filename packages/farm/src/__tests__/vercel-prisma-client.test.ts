@@ -133,4 +133,57 @@ describe("Vercel output copies the app's own Prisma client", () => {
       await exists(path.join(functionDir, "node_modules", ".prisma", "client", "index.js")),
     ).toBe(true);
   });
+
+  it("leaves out the engine bundles, source maps and types only `prisma generate` reads", async () => {
+    const root = await createTemporaryRoot();
+    const store = await createPrismaStore(root);
+    const runtimeDir = path.join(store.clientDir, "runtime");
+    // The shape of @prisma/client 6's runtime folder: one entry per client variant, and a
+    // query engine and compiler bundle for every database.
+    for (const file of [
+      "library.js",
+      "library.mjs",
+      "edge.js",
+      "client.js",
+      "wasm-engine-edge.mjs",
+      "library.js.map",
+      "library.d.ts",
+      "library.d.mts",
+      "query_engine_bg.postgresql.js",
+      "query_engine_bg.postgresql.mjs",
+      "query_engine_bg.postgresql.wasm-base64.js",
+      "query_compiler_bg.sqlite.wasm-base64.mjs",
+    ]) {
+      await writeFile(path.join(runtimeDir, file), "");
+    }
+    // `prisma generate` copies the engine a client needs into the generated client itself.
+    const generatedDir = path.join(store.nodeModules, ".prisma", "client");
+    await writeFile(path.join(generatedDir, "query_engine_bg.js"), "");
+    await writeFile(path.join(generatedDir, "query_engine_bg.wasm"), "");
+    await writeFile(path.join(generatedDir, "libquery_engine-rhel-openssl-3.0.x.so.node"), "");
+    const app = path.join(root, "app");
+    const functionDir = path.join(root, "function");
+    await writeFile(path.join(app, "package.json"), '{"private":true}');
+    await fs.mkdir(path.join(app, "node_modules", "@prisma"), { recursive: true });
+    await fs.symlink(
+      store.clientDir,
+      path.join(app, "node_modules", "@prisma", "client"),
+      "junction",
+    );
+    await fs.mkdir(functionDir, { recursive: true });
+
+    await copyPrismaClientForVercel(app, functionDir, fs);
+
+    const targetModules = path.join(functionDir, "node_modules");
+    expect(
+      (await fs.readdir(path.join(targetModules, "@prisma", "client", "runtime"))).sort(),
+    ).toEqual(["client.js", "edge.js", "library.js", "library.mjs", "wasm-engine-edge.mjs"]);
+    expect(await exists(path.join(targetModules, "@prisma", "client", "default.js"))).toBe(true);
+    expect((await fs.readdir(path.join(targetModules, ".prisma", "client"))).sort()).toEqual([
+      "index.js",
+      "libquery_engine-rhel-openssl-3.0.x.so.node",
+      "query_engine_bg.js",
+      "query_engine_bg.wasm",
+    ]);
+  });
 });
