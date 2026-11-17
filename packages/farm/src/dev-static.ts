@@ -160,7 +160,10 @@ export function isViteModuleRequest(
   url: URL,
   headers: Record<string, string | string[] | undefined>,
 ): boolean {
-  if (VITE_MODULE_QUERY_FLAGS.some((flag) => url.searchParams.has(flag))) return true;
+  // Vite's flags carry no value (`?url`, `?import=`). A `url` or `raw` with one, as in
+  // `/check?url=example.com`, is the app's own query, so the request is routed like any other.
+  if (VITE_MODULE_QUERY_FLAGS.some((flag) => url.searchParams.getAll(flag).includes("")))
+    return true;
   const destination = headers["sec-fetch-dest"];
   const value = Array.isArray(destination) ? destination[0] : destination;
   return value !== undefined && SCRIPT_FETCH_DESTINATIONS.has(value.toLowerCase());

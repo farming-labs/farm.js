@@ -220,6 +220,15 @@ const expectPagesApp: Run = async (origin) => {
   expect(redirected.response.headers.get("x-mw-path")).toBeNull();
   expect(redirected.body).toBe("Redirecting to /new/blocked?q=3");
 
+  // A query parameter named like a Vite import flag is an ordinary query once it has a value.
+  for (const pathname of ["/old/report?url=example.com", "/old/report?raw=1&import=csv"]) {
+    const queried = await get(origin, pathname);
+    expect(queried.response.status, pathname).toBe(307);
+    expect(queried.response.headers.get("location"), pathname).toBe(
+      pathname.replace("/old", "/new"),
+    );
+  }
+
   // A middleware short-circuit still carries configured headers.
   const blocked = await get(origin, "/elsewhere/blocked");
   expect(blocked.response.status, "/elsewhere/blocked").toBe(403);
