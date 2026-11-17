@@ -125,6 +125,12 @@ describe("Farm locale routing", () => {
     expect(localizeFarmHref("/account?tab=profile#name", "am", config)).toBe(
       "/am/account?tab=profile#name",
     );
+    // The href's trailing slash survives, as `trailingSlash` links and setLocale() need.
+    expect(localizeFarmHref("/account/?tab=profile", "am", config)).toBe(
+      "/am/account/?tab=profile",
+    );
+    expect(localizeFarmHref("/am/account/", "en", config)).toBe("/account/");
+    expect(localizeFarmHref("/", "am", config)).toBe("/am");
     expect(resolveFarmLocalePath("/AM/account", config)).toEqual({
       locale: "am",
       pathname: "/account",

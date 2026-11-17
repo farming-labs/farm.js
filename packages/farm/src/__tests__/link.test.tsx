@@ -307,6 +307,34 @@ describe("Link", () => {
       expect(el.getAttribute("href")).toBe("/about/?tab=team#people");
     });
 
+    it("keeps the trailing slash on a localized link", () => {
+      // Localizing used to strip it, so every navigation went through the 308 to the slash
+      // (a full page load in production).
+      setFarmTrailingSlashPreference(true);
+      window.__FARM_I18N__ = {
+        locale: "fr",
+        messages: {},
+        locales: ["en", "fr"],
+        defaultLocale: "en",
+        source: "explicit",
+        routing: "prefix-except-default",
+        direction: "ltr",
+        cookie: { name: "farm_locale", path: "/", maxAge: 3600, sameSite: "lax", secure: false },
+      } as any;
+      try {
+        const about = render(createElement(Link, { href: "/about?tab=1" }));
+        expect(about?.getAttribute("href")).toBe("/fr/about/?tab=1");
+        act(() => root.unmount());
+        const home = render(createElement(Link, { href: "/" }));
+        expect(home?.getAttribute("href")).toBe("/fr/");
+        act(() => root.unmount());
+        const english = render(createElement(Link, { href: "/about", locale: "en" }));
+        expect(english?.getAttribute("href")).toBe("/about/");
+      } finally {
+        delete (window as any).__FARM_I18N__;
+      }
+    });
+
     it("lets the link override the app trailing-slash preference", () => {
       setFarmTrailingSlashPreference(true);
       const el = render(

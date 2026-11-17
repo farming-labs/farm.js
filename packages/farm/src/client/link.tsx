@@ -360,12 +360,17 @@ function LinkInner<TRoute extends string = DefaultRouteHref, THref extends strin
 
   const prefetchModes = normalizePrefetch(prefetch);
   const { intent, viewport, render } = prefetchModes;
+  const linkTrailingSlash = trailingSlash ?? getFarmTrailingSlashPreference();
   const baseHref = resolveLinkHref(href, params, {
     query,
     hash,
-    trailingSlash: trailingSlash ?? getFarmTrailingSlashPreference(),
+    trailingSlash: linkTrailingSlash,
   });
-  const localizedHref = localizeActiveFarmHref(baseHref, locale);
+  // A locale home ("/" localized to "/fr") gets the slash the link asked for too.
+  const localizedHref = withLinkTrailingSlash(
+    localizeActiveFarmHref(baseHref, locale),
+    linkTrailingSlash,
+  );
   const resolvedHref = isExternalUrl(localizedHref)
     ? localizedHref
     : applyFarmBasePath(localizedHref, farm?.basePath ?? getFarmBasePath());
@@ -605,6 +610,14 @@ function resolveLinkHref(
   });
 
   return applyPreservedSearchParams(resolvedHref);
+}
+
+function withLinkTrailingSlash(href: string, trailingSlash: boolean): string {
+  if (!trailingSlash || !href.startsWith("/") || href.startsWith("//")) return href;
+  const end = href.search(/[?#]/);
+  const pathname = end === -1 ? href : href.slice(0, end);
+  if (pathname === "/" || pathname.endsWith("/")) return href;
+  return `${pathname}/${end === -1 ? "" : href.slice(end)}`;
 }
 
 function splitInternalHref(href: string) {

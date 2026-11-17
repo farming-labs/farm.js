@@ -89,7 +89,13 @@ export function localizeFarmHref(
 ): string {
   if (!href.startsWith("/") || href.startsWith("//")) return href;
   const url = new URL(href, "http://farm.local");
-  url.pathname = localizeFarmPathname(url.pathname, locale, config);
+  const localized = localizeFarmPathname(url.pathname, locale, config);
+  // Keep the href's URL shape: under `trailingSlash` a link names "/about/", and dropping the
+  // slash here sent every navigation through the 308 to it (a full page load in production).
+  url.pathname =
+    url.pathname !== "/" && url.pathname.endsWith("/") && !localized.endsWith("/")
+      ? `${localized}/`
+      : localized;
   return `${url.pathname}${url.search}${url.hash}`;
 }
 
