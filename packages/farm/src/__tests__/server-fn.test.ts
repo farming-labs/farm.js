@@ -87,6 +87,18 @@ describe("createServerFn", () => {
     });
   });
 
+  it("gives an array input field its single form value as a list", async () => {
+    const tag = createServerFn({
+      input: z.object({ tags: z.array(z.string()), name: z.string() }),
+      handler: ({ input }) => input,
+    });
+    const formData = new FormData();
+    formData.append("name", "Ada");
+    formData.append("tags", "rsc");
+
+    await expect(tag(formData)).resolves.toEqual({ name: "Ada", tags: ["rsc"] });
+  });
+
   it("does not call the handler when validation fails", async () => {
     const handler = vi.fn();
     const signup = createServerFn({
