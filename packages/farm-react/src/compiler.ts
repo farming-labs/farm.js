@@ -5226,6 +5226,90 @@ function isEmptyConditionalBranch(expression: t.Expression): boolean {
   return t.isNullLiteral(expression) || t.isBooleanLiteral(expression, { value: false });
 }
 
+/**
+ * The host elements a conditional branch renders, or undefined when it is not one host element, an
+ * empty branch, or a fragment of host elements. Fragment whitespace follows JSX: text that is only
+ * whitespace across a line break renders nothing, while a space on one line is a text node, so a
+ * fragment holding one keeps its own shape.
+ */
+function fragmentBranchElements(branch: t.Expression): t.JSXElement[] | undefined {
+  if (isEmptyConditionalBranch(branch)) return [];
+  if (t.isJSXElement(branch)) return [splitFragmentConditionals(branch)];
+  if (!t.isJSXFragment(branch)) return undefined;
+  const elements: t.JSXElement[] = [];
+  for (const child of branch.children) {
+    if (t.isJSXText(child) && !child.value.trim() && child.value.includes("\n")) continue;
+    if (!t.isJSXElement(child)) return undefined;
+    elements.push(splitFragmentConditionals(child));
+  }
+  return elements;
+}
+
+/**
+ * One conditional per host element for a conditional whose branch is a fragment of host elements:
+ * `test ? <><A /><B /></> : null` becomes `test ? <A /> : null` and `test ? <B /> : null`. A
+ * fragment renders no node of its own, so the parts render the same DOM in the same place, and each
+ * is a conditional the compiler already supports. For `test && <>…</>` the first part keeps `&&`, so
+ * a falsy test such as 0 still renders once, as React renders it. Undefined when nothing splits.
+ */
+function splitFragmentConditional(expression: t.Expression): t.Expression[] | undefined {
+  if (t.isLogicalExpression(expression, { operator: "&&" }) && t.isJSXFragment(expression.right)) {
+    const elements = fragmentBranchElements(expression.right);
+    if (!elements?.length || !t.isExpression(expression.left)) return undefined;
+    return elements.map((element, index) =>
+      index === 0
+        ? t.logicalExpression("&&", t.cloneNode(expression.left as t.Expression, true), element)
+        : t.conditionalExpression(
+            t.cloneNode(expression.left as t.Expression, true),
+            element,
+            t.nullLiteral(),
+          ),
+    );
+  }
+  if (
+    !t.isConditionalExpression(expression) ||
+    !(t.isJSXFragment(expression.consequent) || t.isJSXFragment(expression.alternate))
+  ) {
+    return undefined;
+  }
+  const truthy = fragmentBranchElements(expression.consequent);
+  const falsy = fragmentBranchElements(expression.alternate);
+  if (!truthy || !falsy || truthy.length + falsy.length === 0) return undefined;
+  return [
+    ...truthy.map((element) =>
+      t.conditionalExpression(t.cloneNode(expression.test, true), element, t.nullLiteral()),
+    ),
+    ...falsy.map((element) =>
+      t.conditionalExpression(t.cloneNode(expression.test, true), t.nullLiteral(), element),
+    ),
+  ];
+}
+
+/** The element with every fragment conditional among its descendants split into one per element. */
+function splitFragmentConditionals(element: t.JSXElement): t.JSXElement {
+  const children: t.JSXElement["children"] = [];
+  for (const child of element.children) {
+    if (t.isJSXElement(child)) {
+      children.push(splitFragmentConditionals(child));
+      continue;
+    }
+    if (t.isJSXExpressionContainer(child) && !t.isJSXEmptyExpression(child.expression)) {
+      const parts = splitFragmentConditional(child.expression);
+      if (parts) {
+        children.push(...parts.map((part) => t.jsxExpressionContainer(part)));
+        continue;
+      }
+    }
+    children.push(child);
+  }
+  return t.jsxElement(
+    element.openingElement,
+    element.closingElement,
+    children,
+    element.selfClosing,
+  );
+}
+
 function conditionalBlockShape(expression: t.Expression): ConditionalBlockShape | null {
   if (
     t.isLogicalExpression(expression, { operator: "&&" }) &&
@@ -10557,7 +10641,10 @@ function compileCandidate(
     }
     derivedByName.set(binding.name, expanded);
   }
-  const rootWithDerived = rewriteDerivedAccess(returned.argument, derivedByName) as t.JSXElement;
+  // A fragment branch splits into one conditional per element on a copy, so a component that still
+  // cannot compile keeps its source as written.
+  const splitRoot = splitFragmentConditionals(t.cloneNode(returned.argument, true));
+  const rootWithDerived = rewriteDerivedAccess(splitRoot, derivedByName) as t.JSXElement;
   const handlerRewrite = rewriteHandlerAccess(rootWithDerived, handlersByName);
   if (handlerRewrite.reason) return handlerRewrite.reason;
   if (!handlerRewrite.root) return "event handlers could not be prepared safely";

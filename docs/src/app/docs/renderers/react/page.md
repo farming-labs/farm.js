@@ -575,7 +575,7 @@ satisfy all of these rules:
 | Text bindings       | State-driven text in a leaf host element.                                                                                                                                        |
 | Attribute bindings  | Basic attributes, controlled form properties, and individual properties in one inline `style` object.                                                                            |
 | Events              | Inline handlers and `const` or function-declaration handlers, including async ones, plus inline synchronous events in eligible host-only keyed rows.                             |
-| Conditional blocks  | Logical/ternary host branches in dedicated containers or direct ranges among static host siblings, including the component root.                                                 |
+| Conditional blocks  | Logical/ternary host branches, or fragments of host elements, in dedicated containers or direct ranges among static host siblings, including the component root.                 |
 | Keyed lists         | Item-keyed maps and imported `List`, including safe collection pipelines; eligible rows use direct bindings and recursive host-only conditions.                                  |
 | Range siblings      | Stable host siblings beside ranges may patch leaf text, attributes, `className`, and individual inline style properties.                                                         |
 | Component islands   | Stable imported or module-level component identifiers with explicit compiler-safe props and no JSX children, spread, `ref`, or `key`.                                            |

@@ -183,8 +183,8 @@ describe("React AOT conditional block compiler", () => {
       reason: /host elements only/i,
     },
     {
-      name: "a fragment branch",
-      body: "{visible && <><p>One</p><p>Two</p></>}",
+      name: "a fragment branch with text",
+      body: "{visible && <>One<p>Two</p></>}",
       extra: "",
       reason: /dynamic child structures/i,
     },
@@ -234,6 +234,23 @@ describe("React AOT conditional block compiler", () => {
       result.diagnostics.find((diagnostic) => diagnostic.component === "Unsupported")?.reason,
     ).toMatch(reason);
     expect(result.code).not.toContain("compiler-runtime");
+  });
+
+  it("splits a fragment branch of host elements into one conditional per element", async () => {
+    const result = await compile(`
+      import { useState } from "react";
+      export function FragmentBranch() {
+        const [visible, setVisible] = useState(false);
+        return <section onClick={() => setVisible(!visible)}>{visible && <><p>One</p><p>Two</p></>}</section>;
+      }
+    `);
+
+    expect(result.diagnostics).toEqual([]);
+    expect(result.compiled).toEqual(["FragmentBranch"]);
+    // The first part keeps &&, so a falsy test renders once; the second renders null instead.
+    expect(result.code).toMatch(/&&\s*<p>One<\/p>/);
+    expect(result.code).toMatch(/\?\s*<p>Two<\/p>\s*:\s*null/);
+    expect(result.code).not.toContain("<>");
   });
 
   it("composes nested host conditionals and keyed lists inside a branch", async () => {
