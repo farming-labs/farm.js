@@ -10567,18 +10567,23 @@ function matchRouteSlots(pathname, interceptFrom) {
   }`
       : ""
   }
+  const normalizedFrom =
+    typeof interceptFrom === "string" && interceptFrom.startsWith("/")
+      ? new URL(interceptFrom, "http://farm.local").pathname
+      : null;
   for (const slot of routeSlots) {
-    if (!${sharedSlotOwners.size > 0 ? "matchesSlotOwner(slot.ownerPattern)" : "matchesRoutePrefix(pathname, slot.ownerPattern)"}) continue;
+    if (
+      !${sharedSlotOwners.size > 0 ? "matchesSlotOwner(slot.ownerPattern)" : "matchesRoutePrefix(pathname, slot.ownerPattern)"} &&
+      !(slot.interception && normalizedFrom && matchesRoutePrefix(normalizedFrom, slot.ownerPattern))
+    ) {
+      continue;
+    }
     const key = slot.ownerPattern + ":" + slot.name;
     const entries = groups.get(key) || [];
     entries.push(slot);
     groups.set(key, entries);
   }
 
-  const normalizedFrom =
-    typeof interceptFrom === "string" && interceptFrom.startsWith("/")
-      ? new URL(interceptFrom, "http://farm.local").pathname
-      : null;
   const matches = [];
   // Leave empty, fallback-only and ineligible requests unparsed.
   let pathnameSegments;

@@ -1753,19 +1753,30 @@ export class RouteManager {
     pathnameParts: readonly string[],
     interceptFrom?: string,
   ): MatchedRouteSlot[] {
+    const normalizedFrom = interceptFrom
+      ? this.toRoutePathname(new URL(interceptFrom, "http://farm.local").pathname)
+      : undefined;
+    const normalizedFromParts = normalizedFrom ? splitRoutePath(normalizedFrom) : undefined;
     const groups = new Map<string, RouteSlotEntry[]>();
     for (const entry of this.routeSlots.values()) {
-      if (!this.matchesRoutePrefix(pathname, entry.ownerPattern, pathnameParts)) continue;
+      // A `(..)` or `(...)` interception targets a URL outside its owner, whose layout stays on
+      // screen from the page the navigation started at.
+      if (
+        !this.matchesRoutePrefix(pathname, entry.ownerPattern, pathnameParts) &&
+        !(
+          entry.interception &&
+          normalizedFrom !== undefined &&
+          this.matchesRoutePrefix(normalizedFrom, entry.ownerPattern, normalizedFromParts)
+        )
+      ) {
+        continue;
+      }
       const key = `${entry.ownerPattern}:${entry.name}`;
       const entries = groups.get(key) ?? [];
       entries.push(entry);
       groups.set(key, entries);
     }
 
-    const normalizedFrom = interceptFrom
-      ? this.toRoutePathname(new URL(interceptFrom, "http://farm.local").pathname)
-      : undefined;
-    const normalizedFromParts = normalizedFrom ? splitRoutePath(normalizedFrom) : undefined;
     const matches: MatchedRouteSlot[] = [];
 
     for (const entries of groups.values()) {
