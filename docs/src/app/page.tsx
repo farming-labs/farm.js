@@ -1245,14 +1245,14 @@ function FileTreeVisual() {
       meta: "root",
       defaultOpen: true,
       children: [
-        { name: "layout.tsx", type: "file", extension: "tsx", meta: "shell" },
-        { name: "page.tsx", type: "file", extension: "tsx", meta: "/" },
+        { name: "layout.tsx", type: "file", meta: "shell" },
+        { name: "page.tsx", type: "file", meta: "/" },
         {
           name: "dashboard",
           type: "folder",
           meta: "/dashboard",
           defaultOpen: true,
-          children: [{ name: "page.tsx", type: "file", extension: "tsx", meta: "route" }],
+          children: [{ name: "page.tsx", type: "file", meta: "route" }],
         },
         {
           name: "api",
@@ -1264,14 +1264,7 @@ function FileTreeVisual() {
               name: "users",
               type: "folder",
               defaultOpen: true,
-              children: [
-                {
-                  name: "route.ts",
-                  type: "file",
-                  extension: "route",
-                  meta: "GET",
-                },
-              ],
+              children: [{ name: "route.ts", type: "file", meta: "GET" }],
             },
           ],
         },
