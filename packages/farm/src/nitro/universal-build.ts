@@ -3315,9 +3315,6 @@ ${
   navigationSequence: 0,
   activeNavigation: null,
   pendingPrefetches: new Map(),
-  // Navigations whose document is on its way, by cache key. A prefetch of the same page (an
-  // intent timer that fires after the click) waits for it instead of fetching the page again.
-  navigatingDocuments: new Map(),
   prefetchGeneration: 0,
   prefetchObserver: null,
   observedPrefetchLinks: new Map(),
@@ -3526,6 +3523,20 @@ ${
       !clientNavigation?.signal.aborted;
   },
 
+  // A prefetch made while a navigation swaps the page (an intent timer after the click, the
+  // incoming page's links) would ask for it as the outgoing page shows it: its layouts, its React
+  // root. It waits for the navigation to settle, and then skips the page it landed on.
+  whenNavigationSettles: function() {
+    return new Promise((resolve) => {
+      const listener = (state) => {
+        if (state.state !== "idle") return;
+        this.navigationListeners.delete(listener);
+        resolve();
+      };
+      this.navigationListeners.add(listener);
+    });
+  },
+
   finishNavigation: function(navigation) {
     if (this.activeNavigation?.id !== navigation.id) return;
     this.activeNavigation = null;
@@ -3560,9 +3571,6 @@ ${
         this.pendingPrefetches.delete(key);
       }
     }
-    for (const key of this.navigatingDocuments.keys()) {
-      if (matches(key)) this.navigatingDocuments.delete(key);
-    }
   },
 
   clearCache: function() {
@@ -3570,7 +3578,6 @@ ${
     this.prefetchCache.clear();
     for (const pending of this.pendingPrefetches.values()) pending.valid = false;
     this.pendingPrefetches.clear();
-    this.navigatingDocuments.clear();
   },
 
   // Islands mode: a partial response (layouts kept, or only the page's payload) suits the page
@@ -3607,8 +3614,6 @@ ${
         cancellation.dispose();
       }
     }
-    const navigating = recover || fresh ? undefined : this.navigatingDocuments.get(cacheKey);
-    if (navigating && navigating.deploymentId === deploymentId) return navigating.promise;
 
     const generation = this.prefetchGeneration;
     // Only speculative requests have shared ownership. Ordinary navigations
@@ -3661,13 +3666,7 @@ ${
       store(html);
       return html;
     };
-    if (!record) {
-      const navigation = { deploymentId, promise: request() };
-      this.navigatingDocuments.set(cacheKey, navigation);
-      return navigation.promise.finally(() => {
-        if (this.navigatingDocuments.get(cacheKey) === navigation) this.navigatingDocuments.delete(cacheKey);
-      });
-    }
+    if (!record) return request();
     record.promise = request().finally(() => {
       if (this.pendingPrefetches.get(cacheKey) === record) this.pendingPrefetches.delete(cacheKey);
     });
@@ -4503,8 +4502,10 @@ ${generateUniversalRouterStateProperties()}
     const url = new URL(href, window.location.href);
     if (isFarmExternalNavigationURL(url, window.location.origin)) return;
     if (isFarmDocsPath(url.pathname)) return;
+    if (this.activeNavigation) return this.whenNavigationSettles().then(() => this.prefetch(href));
     
     const pathname = url.pathname + url.search;
+    if (pathname === window.location.pathname + window.location.search) return;
     if (this.readFreshPrefetch(pathname) !== undefined) return;
     
     return this.fetchPage(pathname, false, false)
@@ -6056,6 +6057,7 @@ ${
     const url = new URL(href, window.location.href);
     if (isFarmExternalNavigationURL(url, window.location.origin)) return;
     if (isFarmDocsPath(url.pathname)) return;
+    if (this.activeNavigation) return this.whenNavigationSettles().then(() => this.prefetch(href));
     prefetchFarmClientRouteTable();
     
     // A prefetch warms an ordinary future navigation, which reads the bare
@@ -6063,6 +6065,7 @@ ${
     // navigation (double fetch per prefetched link) and sent
     // X-Farm-Intercept-From, which bypasses the shared cache server-side.
     const pathname = url.pathname + url.search;
+    if (pathname === window.location.pathname + window.location.search) return;
     if (this.readFreshPrefetch(this.prefetchRequest(pathname).cacheKey) !== undefined) return;
     
     return this.fetchPage(pathname, undefined, false, false)

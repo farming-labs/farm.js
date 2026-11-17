@@ -67,14 +67,20 @@ describe("navigation during prefetch", () => {
     expect((router as any).pendingPrefetches.size).toBe(0);
   });
 
-  it("lets a prefetch that starts during a navigation to the same URL wait for it", async () => {
+  it("waits for a navigation to settle, then skips the page it landed on", async () => {
     const navigation = await navigate();
-    const prefetched = router.prefetch("/destination");
+    // An intent timer for the link that was clicked, and a link on the incoming page.
+    const clicked = router.prefetch("/destination");
+    const next = router.prefetch("/next");
+    await Promise.resolve();
     expect(fetch).toHaveBeenCalledTimes(1);
     requests[0].resolve(pageResponse());
-    await Promise.all([prefetched, navigation.done]);
+    await Promise.all([clicked, navigation.done]);
+    await vi.waitFor(() => expect(fetch).toHaveBeenCalledTimes(2));
+    expect(String(vi.mocked(fetch).mock.calls[1][0])).toContain("next");
+    requests[1].resolve(pageResponse("Next"));
+    await next;
     expect(render).toHaveBeenCalledTimes(1);
-    expect((router as any).navigatingPages.size).toBe(0);
   });
 
   it("reuses an already-completed prefetch without another request", async () => {

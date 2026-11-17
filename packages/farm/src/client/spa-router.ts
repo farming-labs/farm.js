@@ -233,9 +233,6 @@ export class SPARouter {
   private cache: Map<string, CacheEntry> = new Map();
   private prefetchingUrls: Set<string> = new Set();
   private pendingPrefetches: Map<string, PendingPrefetch> = new Map();
-  // Navigations whose page is on its way. A prefetch of the same page (an intent timer that fires
-  // after the click) waits for it instead of fetching the page again.
-  private navigatingPages: Map<string, Promise<PageData>> = new Map();
   private cacheGeneration = 0;
   private prefetchObserver?: IntersectionObserver;
   private observedPrefetchLinks: Map<HTMLAnchorElement, string> = new Map();
@@ -579,12 +576,20 @@ export class SPARouter {
    */
   async prefetch(href: string): Promise<void> {
     if (this.destroyed) return;
+    // A prefetch made while a navigation swaps the page (an intent timer after the click, the
+    // incoming page's links) would ask for it as the outgoing page shows it. It waits, and then
+    // skips the page the navigation landed on.
+    if (this.activeNavigation) {
+      await this.whenNavigationSettles();
+      if (this.destroyed) return;
+    }
     if (isFarmLocaleChangeHref(href)) return;
     const url = resolveFarmNavigationURL(href, window.location.href);
     if (isFarmExternalNavigationURL(url, window.location.origin)) return;
     if (this.options.shouldUseDocumentNavigation(url.pathname)) return;
     const fullPath = url.pathname + url.search;
     const interceptFrom = window.location.pathname + window.location.search;
+    if (fullPath === interceptFrom) return;
 
     // Skip if already prefetching or cached
     if (this.prefetchingUrls.has(fullPath)) return;
@@ -867,37 +872,13 @@ export class SPARouter {
   /**
    * Fetch page data from cache or server
    */
-  private fetchPageData(
+  private async fetchPageData(
     path: string,
     recover = true,
     interceptFrom?: string,
     fresh = false,
     signal?: AbortSignal,
     readDocument = false,
-  ): Promise<PageData> {
-    const key = JSON.stringify([path, interceptFrom, getActiveLayoutChainHeader()]);
-    if (!recover) {
-      return (
-        (!fresh && this.navigatingPages.get(key)) ||
-        this.loadPageData(path, recover, interceptFrom, fresh, signal, readDocument)
-      );
-    }
-    const navigation = this.loadPageData(path, recover, interceptFrom, fresh, signal, readDocument);
-    this.navigatingPages.set(key, navigation);
-    const forget = () => {
-      if (this.navigatingPages.get(key) === navigation) this.navigatingPages.delete(key);
-    };
-    navigation.then(forget, forget);
-    return navigation;
-  }
-
-  private async loadPageData(
-    path: string,
-    recover: boolean,
-    interceptFrom: string | undefined,
-    fresh: boolean,
-    signal: AbortSignal | undefined,
-    readDocument: boolean,
   ): Promise<PageData> {
     const cacheKey = getPageDataCacheKey(path, interceptFrom);
     // Check cache first
@@ -1329,6 +1310,17 @@ export class SPARouter {
     );
   }
 
+  private whenNavigationSettles(): Promise<void> {
+    return new Promise((resolve) => {
+      const listener = (state: FarmNavigationState) => {
+        if (state.state !== "idle") return;
+        this.navigationListeners.delete(listener);
+        resolve();
+      };
+      this.navigationListeners.add(listener);
+    });
+  }
+
   private finishNavigation(navigation: { id: number; controller: AbortController }): void {
     if (this.activeNavigation?.id !== navigation.id) return;
     this.activeNavigation = undefined;
@@ -1476,7 +1468,6 @@ export class SPARouter {
       pending.resolve(undefined);
     }
     this.pendingPrefetches.clear();
-    this.navigatingPages.clear();
   }
 }
 

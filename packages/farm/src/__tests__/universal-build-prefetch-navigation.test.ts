@@ -17,6 +17,9 @@ const source = readFileSync(new URL("../nitro/universal-build.ts", import.meta.u
 const methods = [...source.matchAll(/  fetchPage: async function\([^]*?\n  },/g)].map(([method]) =>
   new Function(`return \`${method}\`;`)(),
 );
+const prefetchMethods = [...source.matchAll(/  prefetch: function\(href\) \{[^]*?\n  },/g)].map(
+  ([method]) => method,
+);
 
 afterEach(() => vi.unstubAllGlobals());
 
@@ -25,8 +28,9 @@ const html = (body: string) =>
 
 for (const [index, renderer] of ["html", "react"].entries()) {
   describe(`${renderer} production prefetch ownership`, () => {
-    function setup() {
+    function setup(withPrefetch = false) {
       expect(methods).toHaveLength(2);
+      expect(prefetchMethods).toHaveLength(2);
       const window = {
         location: { pathname: "/", search: "", assign: vi.fn() },
         __FARM_DEPLOYMENT_ID__: "one",
@@ -41,7 +45,10 @@ for (const [index, renderer] of ["html", "react"].entries()) {
         "getFarmIslandValueHeaders",
         `
         ${generateUniversalRouterStateRuntime()}
-        return ({${generateUniversalRouterStateProperties()} prefetchCache: new Map(), ${methods[index]}});
+        const isFarmExternalNavigationURL = () => false;
+        const isFarmDocsPath = () => false;
+        const prefetchFarmClientRouteTable = () => {};
+        return ({${generateUniversalRouterStateProperties()} prefetchCache: new Map(), ${methods[index]}${withPrefetch ? prefetchMethods[index] : ""}});
       `,
       )(
         window,
@@ -89,15 +96,24 @@ for (const [index, renderer] of ["html", "react"].entries()) {
       expect(fetch).toHaveBeenCalledTimes(1);
     });
 
-    it("lets a prefetch that starts during a navigation to the same URL wait for it", async () => {
-      const { page, requests, fetch, router } = setup();
-      const navigation = page();
-      const preload = page("/about", { prefetch: true });
-      expect(fetch).toHaveBeenCalledTimes(1);
-      requests[0].resolve(html("about"));
-      expect(await navigation).toBe("about");
-      expect(await preload).toBe("about");
-      expect(router.navigatingDocuments.size).toBe(0);
+    it("waits for a navigation to settle, then skips the page it landed on", async () => {
+      const { router, window, requests, fetch } = setup(true);
+      window.location.href = "http://farm.test/";
+      window.location.origin = "http://farm.test";
+      const navigation = router.startNavigation(null, new URL("http://farm.test/about"), "push");
+      // An intent timer for the link that was clicked, and a link on the incoming page.
+      const clicked = router.prefetch("/about");
+      const next = router.prefetch("/next");
+      await Promise.resolve();
+      expect(fetch).not.toHaveBeenCalled();
+      window.location.pathname = "/about";
+      router.finishNavigation(navigation);
+      await clicked;
+      await vi.waitFor(() => expect(fetch).toHaveBeenCalledTimes(1));
+      expect(requests).toHaveLength(1);
+      requests[0].resolve(html("next"));
+      await next;
+      expect(router.navigationListeners.size).toBe(0);
     });
 
     it("keys a partial prefetch by the layouts on screen when it was made", async () => {
