@@ -64,6 +64,7 @@ import {
   resolveFarmRequestURL,
 } from "./request";
 import { _peekCurrentRequest, _resolveCurrentCspNonce } from "./request-bridge";
+import { routeBoundaryCoversDirectory } from "../routing/route-groups";
 import { _setFarmSearchPreserveRoutes } from "../client/search-preserve-routes";
 import {
   createFarmCacheKey,
@@ -1638,7 +1639,7 @@ export class ServerRenderer {
     let middlewareMap = new Map<string, any>();
     let middlewareContext = new Map<string, any>();
     let pluginExposedContext = new Map<string, any>();
-    let errorBoundaryEntry: { modulePath: string } | null = null;
+    let errorBoundaryEntry: { modulePath: string; pattern: string } | null = null;
     let pprRefreshRoute: string | null = null;
 
     const completeRender = (status = res.statusCode || 200, route = pathname) => {
@@ -2559,6 +2560,7 @@ export class ServerRenderer {
           error,
           statusCode: errorStatus,
           errorModulePath: errorBoundaryEntry.modulePath,
+          errorPattern: errorBoundaryEntry.pattern,
         });
 
         if (rendered) {
@@ -3366,6 +3368,8 @@ export class ServerRenderer {
       error: unknown;
       statusCode: number;
       errorModulePath: string;
+      /** The boundary's directory pattern: it renders inside the layouts that cover it. */
+      errorPattern?: string;
     },
   ): Promise<boolean> {
     try {
@@ -3395,8 +3399,21 @@ export class ServerRenderer {
       });
 
       let wrapped: any = errorElement;
+      // The boundary renders inside its own segment's layouts and those above it, never inside a
+      // deeper layout: a layout below the boundary that throws would throw again inside it.
+      const boundaryLayouts =
+        options.errorPattern === undefined
+          ? options.layouts
+          : options.layouts.filter(
+              (layout) =>
+                !("pattern" in layout) ||
+                routeBoundaryCoversDirectory(
+                  (layout as { pattern: string }).pattern,
+                  options.errorPattern!,
+                ),
+            );
       const layoutModules = await Promise.all(
-        options.layouts.map((layout) => this.routeManager.loadLayoutModule(layout.modulePath)),
+        boundaryLayouts.map((layout) => this.routeManager.loadLayoutModule(layout.modulePath)),
       );
       for (let i = layoutModules.length - 1; i >= 0; i--) {
         const LayoutComponent = layoutModules[i].default;

@@ -8,7 +8,10 @@ export {
 } from "../middleware/may-handle";
 export { farmSecretsMatch } from "../secret-compare";
 export { createFarmLayoutSelector } from "../routing/layout-selector";
-export { isInRouteGroupScope as isInFarmRouteGroupScope } from "../routing/route-groups";
+export {
+  isInRouteGroupScope as isInFarmRouteGroupScope,
+  routeBoundaryCoversDirectory,
+} from "../routing/route-groups";
 export {
   mergeRouteRenderingDirectiveConfig,
   resolveRouteSharedCacheControl,
