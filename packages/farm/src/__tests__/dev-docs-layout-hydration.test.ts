@@ -309,3 +309,178 @@ export default function RootLayout({ children }) {
     }
   }, 120_000);
 });
+
+/**
+ * Islands mode: a server layout wraps docs pages as it wraps an app page, as production does.
+ * Around a client provider it renders as a server tree the browser rebuilds with the docs page at
+ * its outlet; with only leaf client components, those hydrate as islands.
+ */
+describe("a docs runtime page under an islands server layout in farm dev", () => {
+  const nav = `<nav>
+        <a href="/" data-nav="home">Home</a>
+        <a href="/about" data-nav="about">About</a>
+        <a href="/docs" data-nav="docs">Docs</a>
+      </nav>`;
+
+  async function expectIslandsDocsLayout(
+    files: Record<string, string>,
+    options: {
+      /** The docs page renders inside the layout's server tree, which the browser rebuilds. */
+      serverTree?: boolean;
+      expectWorks(page: Page): Promise<void>;
+      expectKept(page: Page): Promise<void>;
+    },
+  ) {
+    const executablePath = await resolveChromium();
+    if (!executablePath) return;
+    const { origin } = await startDocsApp(
+      {
+        ...files,
+        "src/app/page.tsx": "export default function Page() { return <main>home page</main>; }",
+        "src/app/about/page.tsx":
+          "export default function Page() { return <main>about page</main>; }",
+        "src/app/docs/page.md": "# Docs index\n\nThe docs index.",
+        "src/app/docs/guide/page.md": "# Docs guide\n\nA nested docs page.",
+      },
+      {
+        docs: { entry: "/docs", search: false },
+        experimental: { serverComponents: { mode: "islands" } },
+      },
+    );
+
+    // The layout's chrome wraps the docs runtime's page, which keeps its own document.
+    const html = await (await fetch(`${origin}/docs/guide`)).text();
+    expect(html).toContain('data-layout="root"');
+    expect(html.indexOf('data-layout="root"')).toBeLessThan(html.indexOf('id="nd-page"'));
+    expect(html.match(/<html[\s>]/gi)).toHaveLength(1);
+    expect(html.includes('<script type="f/tree"')).toBe(options.serverTree === true);
+
+    const browser = await chromium.launch({ executablePath });
+    try {
+      const page = await browser.newPage();
+      const hydrationErrors = collectHydrationErrors(page);
+      const documentRequests: string[] = [];
+      page.on("request", (request) => {
+        if (request.isNavigationRequest() && request.frame() === page.mainFrame()) {
+          documentRequests.push(new URL(request.url()).pathname);
+        }
+      });
+      try {
+        for (const pathname of ["/docs", "/docs/guide"]) {
+          await page.goto(`${origin}${pathname}`);
+          await options.expectWorks(page);
+          expect(await page.locator("#nd-page").count()).toBe(1);
+        }
+        expect(hydrationErrors).toEqual([]);
+
+        // The docs runtime owns its document's links: an app page loads as a document.
+        await page.locator('[data-nav="about"]').click();
+        await page.waitForURL(`${origin}/about`);
+        await expect.poll(() => page.locator("main").textContent()).toBe("about page");
+        await options.expectWorks(page);
+        // Between app pages, the layout and its state stay in one document.
+        documentRequests.length = 0;
+        await page.locator('[data-nav="home"]').click();
+        await page.waitForURL(`${origin}/`);
+        await expect.poll(() => page.locator("main").textContent()).toBe("home page");
+        await options.expectKept(page);
+        expect(documentRequests).toEqual([]);
+        expect(hydrationErrors).toEqual([]);
+      } catch (error) {
+        throw new Error(
+          `${String(error)}\nHydration errors:\n${hydrationErrors.join("\n")}\nDocument requests: ${documentRequests.join(", ")}`,
+        );
+      }
+    } finally {
+      await browser.close();
+    }
+  }
+
+  it("hydrates a docs page inside a server layout's provider tree", async () => {
+    const toggle = (page: Page) => page.locator("[data-theme-toggle]");
+    await expectIslandsDocsLayout(
+      {
+        "src/app/theme.tsx": `"use client";
+import { createContext, useContext, useEffect, useState } from "react";
+const ThemeContext = createContext(null);
+export function ThemeProvider({ children }) {
+  const [theme, setTheme] = useState("light");
+  return <ThemeContext.Provider value={{ theme, setTheme }}>{children}</ThemeContext.Provider>;
+}
+export function ThemeToggle() {
+  const context = useContext(ThemeContext);
+  const [hydrated, setHydrated] = useState(false);
+  useEffect(() => setHydrated(true), []);
+  if (!context) return <button data-theme-toggle data-hydrated="false">no provider</button>;
+  return (
+    <button
+      data-theme-toggle
+      data-hydrated={hydrated ? "true" : "false"}
+      onClick={() => context.setTheme(context.theme === "light" ? "dark" : "light")}
+    >
+      theme:{context.theme}
+    </button>
+  );
+}`,
+        // A server layout around a client provider, which hydrates as one server tree.
+        "src/app/layout.tsx": `import { ThemeProvider, ThemeToggle } from "./theme";
+export default function RootLayout({ children }) {
+  return (
+    <ThemeProvider>
+      <div data-layout="root">
+        ${nav}
+        <ThemeToggle />
+        {children}
+      </div>
+    </ThemeProvider>
+  );
+}`,
+      },
+      {
+        serverTree: true,
+        async expectWorks(page) {
+          await expect
+            .poll(() => toggle(page).getAttribute("data-hydrated"), { timeout: 15_000 })
+            .toBe("true");
+          await expect.poll(() => toggle(page).textContent()).toBe("theme:light");
+          await toggle(page).click();
+          await expect.poll(() => toggle(page).textContent()).toBe("theme:dark");
+        },
+        async expectKept(page) {
+          expect(await toggle(page).textContent()).toBe("theme:dark");
+        },
+      },
+    );
+  }, 120_000);
+
+  it("wraps docs pages in a server layout with a leaf island, and hydrates it", async () => {
+    const counter = (page: Page) => page.locator("[data-counter]");
+    await expectIslandsDocsLayout(
+      {
+        // A server layout whose only client component is a leaf island: it does not hydrate whole.
+        "src/app/layout.tsx": `import { Counter } from "./counter";
+export default function RootLayout({ children }) {
+  return (
+    <div data-layout="root">
+      ${nav}
+      <Counter />
+      {children}
+    </div>
+  );
+}`,
+      },
+      {
+        async expectWorks(page) {
+          await expect
+            .poll(() => counter(page).getAttribute("data-hydrated"), { timeout: 15_000 })
+            .toBe("true");
+          await counter(page).click();
+          await expect.poll(() => counter(page).textContent()).toBe("count:1");
+        },
+        async expectKept(page) {
+          expect(await counter(page).textContent()).toBe("count:1");
+        },
+      },
+    );
+  }, 120_000);
+});
