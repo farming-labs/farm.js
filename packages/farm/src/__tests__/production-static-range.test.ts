@@ -7,11 +7,13 @@ import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 import { build } from "../build";
 import { loadConfig, resolveConfig } from "../config";
+import { FARM_VIDEO_PLAYER_PATH } from "../metadata";
 import {
   FARM_NITRO_STATIC_HANDLER_SOURCE,
   createNitroStaticRangePlugin,
 } from "../nitro/static-range";
 import { startProductionServer } from "./production-server";
+import { FARM_VIDEO_PLAYER_HTML } from "../video-player";
 
 const hasBun = spawnSync("bun", ["--version"], { stdio: "ignore" }).status === 0;
 const packageRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
@@ -133,6 +135,10 @@ describe("production static files and byte ranges", () => {
         const page = await fetch(production.origin, { headers: { range: "bytes=0-1" } });
         expect(page.status).toBe(200);
         await expect(page.text()).resolves.toContain("static-range-home");
+
+        const player = await fetch(`${production.origin}${FARM_VIDEO_PLAYER_PATH}`);
+        expect(player.status).toBe(200);
+        await expect(player.text()).resolves.toBe(FARM_VIDEO_PLAYER_HTML);
       } finally {
         await production?.stop();
         await fs.rm(root, { recursive: true, force: true });

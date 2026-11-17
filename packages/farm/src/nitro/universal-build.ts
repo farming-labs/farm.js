@@ -1769,7 +1769,9 @@ export async function buildUniversal(
     const { bundle: ssrBundle, entryFile: ssrEntryFile, configuredHeaderRoutes } = ssrResult;
     assertServerReadSSRAssetsSupported(ssrBundle, preset, root);
     await writeSSRAssetsToClient(ssrBundle, clientOutputDir);
-    await writeFarmVideoPlayerToClient(clientOutputDir);
+    if (!rendererDisabled) {
+      await writeFarmVideoPlayerToClient(clientOutputDir);
+    }
     if (config.docs.enabled) {
       await copyFarmDocsFontAssetsToClient(root, clientOutputDir);
     }

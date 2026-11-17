@@ -1137,13 +1137,16 @@ Each entry renders `og:video`, plus `og:video:secure_url`, `og:video:type`, `og:
 
 Open Graph merges one level, so `videos` set in a layout applies to every page under it. Set it on the page that owns the video, or set `videos: []` in a page that should not inherit it.
 
-X ignores `og:video` and plays a link's video only in a Player Card, which loads a player page in an iframe. Farm adds one for you: a page with `openGraph.videos` also gets `twitter:card` set to `player` and a `twitter:player` that points at `/_farm/video-player.html`, a bare player page Farm ships in every build. With `metadataBase: "https://acme.test"`, the example above renders:
+X ignores `og:video` and plays a link's video only in a Player Card, which loads a player page in an iframe. Farm adds one for you: a page with `openGraph.videos` also gets `twitter:card` set to `player` and a `twitter:player` that points at `/_farm/video-player.html`, a bare player page Farm serves when a renderer is enabled. Backend-only apps with `renderer: false` do not serve or build this page. With `metadataBase: "https://acme.test"`, the example above renders:
 
 ```html
-<meta name="twitter:card" content="player">
-<meta name="twitter:player" content="https://acme.test/_farm/video-player.html?src=%2Fog%2Fhome.mp4">
-<meta name="twitter:player:width" content="2400">
-<meta name="twitter:player:height" content="1260">
+<meta name="twitter:card" content="player" />
+<meta
+  name="twitter:player"
+  content="https://acme.test/_farm/video-player.html?src=%2Fog%2Fhome.mp4"
+/>
+<meta name="twitter:player:width" content="2400" />
+<meta name="twitter:player:height" content="1260" />
 ```
 
 The player uses the first entry whose `type` is unset or starts with `video/`, and its `width` and `height`, or 1200 by 630 when they are unset. A first `openGraph.images` entry on the same origin becomes the player's poster. The player autoplays muted and loops videos up to 10 seconds long, as X's Player Card policy allows; longer videos wait for the play button. X also asks for `twitter:site` on a Player Card, so set it to your X handle.
