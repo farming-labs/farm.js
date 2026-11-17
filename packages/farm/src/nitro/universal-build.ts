@@ -45,6 +45,7 @@ import {
   FARM_DEFAULT_MCP_PATH,
 } from "../agent-mcp";
 import { FARM_VERSION } from "../version";
+import { canFarmSkipKeptLayoutRender } from "../islands-kept-layouts";
 import type { RedirectConfig, ResolvedFarmConfig, RewriteConfig } from "../config";
 import { hasCustomFarmRouteContext, resolveDeployOutputPath } from "../config";
 import {
@@ -7674,6 +7675,10 @@ function renderFarmServerTreeLayout(Layout, props, outlets) {
     shouldHydrate: ${JSON.stringify(clientMetadata.shouldHydrate)},
     islandStrategy: ${JSON.stringify(clientMetadata.islandStrategy)},${
       treeLayoutPatterns.has(layout.pattern) ? "\n    serverTree: true," : ""
+    }${
+      farmIslandsMode && canFarmSkipKeptLayoutRender(layout.modulePath, config.root)
+        ? "\n    skipKeptRender: true,"
+        : ""
     }
   }`);
   });
@@ -9014,6 +9019,13 @@ function createFarmFlushToken() {
 }
 
 async function farmKeptLayoutsRender(ReactDOMServer, layouts, keptCount, params) {
+  // RFC 0007: the build proved these layouts cannot throw or read the request, so rendering them
+  // again would only produce markup the browser already shows.
+  let skip = true;
+  for (let index = 0; index < keptCount; index++) {
+    if (layouts[index].skipKeptRender !== true) skip = false;
+  }
+  if (skip) return true;
   let element = null;
   for (let index = keptCount - 1; index >= 0; index--) {
     const Layout = layouts[index].module.default;
