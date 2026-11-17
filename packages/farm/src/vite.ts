@@ -7024,7 +7024,7 @@ ${isolatedHydrationImport}
 import { installChunkErrorRecovery, SPARouter } from '@farm.js/core/client'
 import { createClientPluginManager } from '@farm.js/core/plugin/client'
 import { isFarmRouteActive } from '@farm.js/core/router'
-import { installFarmLinkPrefetch, isFarmBlockedNavigationURL, replayFarmQueuedInteraction, scheduleFarmIslandHydration, createFarmSearchParams, searchParamsToObject, setFarmBasePath, setFarmTrailingSlashPreference, stripFarmBasePath } from '@farm.js/core/internal/client-runtime'
+import { installFarmLinkPrefetch, isFarmBlockedNavigationURL, readFarmLinkNavigateOptions, replayFarmQueuedInteraction, scheduleFarmIslandHydration, createFarmSearchParams, searchParamsToObject, setFarmBasePath, setFarmTrailingSlashPreference, stripFarmBasePath } from '@farm.js/core/internal/client-runtime'
 import { reviveDeferredData } from '@farm.js/core/deferred'
 import {
   createFarmDeploymentMismatchError,
@@ -9000,14 +9000,7 @@ document.addEventListener('click', function(event) {
   
   // Use SPA router
   event.preventDefault();
-  const replace = target.hasAttribute('data-replace');
-  const scroll = !target.hasAttribute('data-no-scroll');
-  const viewTransitionValue = target.getAttribute('data-view-transition');
-  const viewTransition = viewTransitionValue === 'auto'
-    ? 'auto'
-    : viewTransitionValue === 'true';
-  
-  spaRouter.navigate(href, { replace, scroll, viewTransition });
+  spaRouter.navigate(href, readFarmLinkNavigateOptions(target));
 });
 
 // Link anchors on a page that does not hydrate prefetch through the router as Link would.

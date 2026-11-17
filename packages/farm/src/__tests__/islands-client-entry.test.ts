@@ -136,17 +136,18 @@ describe("splitFarmClientRouter", () => {
   });
 });
 
+const clientPage = {
+  pattern: "/",
+  modulePath: "/app/src/app/page.tsx",
+  relativePath: "page.tsx",
+  pageShouldHydrate: true,
+  islandStrategy: "load" as const,
+  hasIsolatedClientBoundaries: false,
+  isolatedBoundaries: [],
+};
+
 describe("Link prefetch without hydration", () => {
   const install = "installFarmLinkPrefetch();";
-  const clientPage = {
-    pattern: "/",
-    modulePath: "/app/src/app/page.tsx",
-    relativePath: "page.tsx",
-    pageShouldHydrate: true,
-    islandStrategy: "load" as const,
-    hasIsolatedClientBoundaries: false,
-    isolatedBoundaries: [],
-  };
 
   it("is installed by the entry of an app without client components", () => {
     const entry = generate(false);
@@ -192,6 +193,54 @@ describe("Link prefetch without hydration", () => {
       expect(router).toMatch(
         /import \{ installFarmLinkPrefetch \} from "@farm.js\/core\/internal\/client-runtime";/,
       );
+    },
+  );
+});
+
+describe("Link navigation options without hydration", () => {
+  const navigate = "spaRouter.navigate(href, readFarmLinkNavigateOptions(anchor));";
+  const imported =
+    /import \{[^}]*\breadFarmLinkNavigateOptions\b[^}]*\} from "@farm.js\/core\/internal\/client-runtime"/;
+
+  it("are read by the click handler of an app without client components", () => {
+    const entry = generate(false);
+    expect(entry).toContain("Client Runtime (no client components)");
+    expect(entry).toContain(navigate);
+    expect(entry).toMatch(imported);
+  });
+
+  it.each([false, true])(
+    "are read by the click handler of an app with client pages (islands: %s)",
+    (islandValues) => {
+      const code = generateClientHydrationEntry(
+        [clientPage],
+        [],
+        [],
+        "/app",
+        "src",
+        false,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        [],
+        undefined,
+        undefined,
+        false,
+        [],
+        "/",
+        undefined,
+        undefined,
+        islandValues,
+      );
+      expect(code).toContain(navigate);
+      expect(code).not.toContain("spaRouter.navigate(href);");
+      if (!islandValues) return;
+      // Islands mode keeps the click handler in the entry, in front of the lazily loaded router.
+      const { entry, router } = splitFarmClientRouter(code);
+      expect(entry).toContain(navigate);
+      expect(entry).toMatch(imported);
+      expect(router).not.toContain(navigate);
     },
   );
 });
