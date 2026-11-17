@@ -834,10 +834,7 @@ function reactHookCall(
 }
 
 /** Whether an expression names a binding of the module, such as an imported or top-level context. */
-function isModuleReference(
-  expression: t.Node,
-  path: NodePath<t.FunctionDeclaration | t.FunctionExpression | t.ArrowFunctionExpression>,
-): boolean {
+function isModuleReference(expression: t.Node, path: NodePath): boolean {
   let root = expression;
   while (t.isMemberExpression(root) && !root.computed) root = root.object;
   if (!t.isIdentifier(root)) return false;
@@ -855,22 +852,123 @@ function isLiteralDefault(expression: t.Expression): boolean {
   );
 }
 
+/** Whether a call reads a context with useContext or use and one module-level argument. */
+function isContextRead(
+  expression: t.Node | null | undefined,
+  path: NodePath,
+  hookNames: ReadonlyMap<string, ReactHook>,
+  reactNames: ReadonlySet<string>,
+): expression is t.CallExpression {
+  const hook = reactHookCall(expression, hookNames, reactNames);
+  if (hook !== "useContext" && hook !== "use") return false;
+  const { arguments: args } = expression as t.CallExpression;
+  return args.length === 1 && isModuleReference(args[0]!, path);
+}
+
+/** Whether an expression evaluates without calls, writes, or functions, so it has no side effects. */
+function isSideEffectFree(expression: t.Node): boolean {
+  let pure = true;
+  t.traverseFast(expression, (node) => {
+    if (
+      t.isCallExpression(node) ||
+      t.isOptionalCallExpression(node) ||
+      t.isNewExpression(node) ||
+      t.isTaggedTemplateExpression(node) ||
+      t.isAssignmentExpression(node) ||
+      t.isUpdateExpression(node) ||
+      t.isAwaitExpression(node) ||
+      t.isYieldExpression(node) ||
+      t.isFunction(node) ||
+      t.isClass(node) ||
+      t.isJSX(node) ||
+      t.isUnaryExpression(node, { operator: "delete" })
+    ) {
+      pure = false;
+    }
+  });
+  return pure;
+}
+
 /**
- * The names a `const pattern = useContext(Context)` or `use(Context)` declaration binds, or why it
- * cannot compile. The compiled wrapper, which is the component's own function, runs the declaration
- * as written, so React reads the context (or, for `use`, a promise, suspending the same component)
- * and the names reach the compiled component as props. It can read module bindings but no local of
- * the component body, so the argument must be module-level and destructuring defaults literals.
+ * Why a call to a custom hook cannot stand in for a context read, or undefined when it can. The
+ * compiled wrapper calls it where the component did, and that keeps React's behavior only when
+ * the hook reads context and nothing else: a hook with state or effects would change their order
+ * against the component's own. So the hook must be defined in this module and never reassigned,
+ * take no parameters, and only read context with useContext or use, check the value (throwing
+ * when it is missing), and return it, without calls that could have side effects.
+ */
+function customContextHookReason(
+  call: t.CallExpression,
+  path: NodePath,
+  hookNames: ReadonlyMap<string, ReactHook>,
+  reactNames: ReadonlySet<string>,
+): string | undefined {
+  const name = (call.callee as t.Identifier).name;
+  const reason = `custom hook ${name} must be defined in this module, take no parameters, and only read context`;
+  if (call.arguments.length > 0) return reason;
+  const binding = path.scope.getBinding(name);
+  if (!binding?.constant || !binding.scope.path.isProgram()) return reason;
+  let hookPath: NodePath<t.Function> | undefined;
+  if (binding.path.isFunctionDeclaration()) hookPath = binding.path;
+  else if (binding.path.isVariableDeclarator()) {
+    const init = binding.path.get("init");
+    if (init.isArrowFunctionExpression() || init.isFunctionExpression()) hookPath = init;
+  }
+  if (!hookPath) return reason;
+  const hook = hookPath.node;
+  if (hook.params.length > 0 || hook.async || hook.generator) return reason;
+  if (!t.isBlockStatement(hook.body)) {
+    return isContextRead(hook.body, hookPath, hookNames, reactNames) ? undefined : reason;
+  }
+  const statements = hook.body.body;
+  for (const [index, statement] of statements.entries()) {
+    const last = index === statements.length - 1;
+    if (t.isReturnStatement(statement) && last) {
+      const value = statement.argument;
+      if (
+        !value ||
+        !(isContextRead(value, hookPath, hookNames, reactNames) || isSideEffectFree(value))
+      ) {
+        return reason;
+      }
+      continue;
+    }
+    if (
+      t.isVariableDeclaration(statement, { kind: "const" }) &&
+      statement.declarations.length === 1 &&
+      t.isIdentifier(statement.declarations[0]!.id) &&
+      isContextRead(statement.declarations[0]!.init, hookPath, hookNames, reactNames)
+    ) {
+      continue;
+    }
+    if (
+      t.isIfStatement(statement) &&
+      !statement.alternate &&
+      isSideEffectFree(statement.test) &&
+      (t.isThrowStatement(statement.consequent) ||
+        (t.isBlockStatement(statement.consequent) &&
+          statement.consequent.body.length === 1 &&
+          t.isThrowStatement(statement.consequent.body[0])))
+    ) {
+      continue;
+    }
+    return reason;
+  }
+  return t.isReturnStatement(statements.at(-1)) ? undefined : reason;
+}
+
+/**
+ * The names a context read binds, or why it cannot compile: `const pattern = useContext(Context)`,
+ * `use(Context)`, or a call to a custom hook that only reads context. The compiled wrapper, which
+ * is the component's own function, runs the declaration as written, so React reads the context
+ * (or, for `use`, a promise, suspending the same component) and the names reach the compiled
+ * component as props. Destructuring defaults must be literals, since the wrapper cannot read the
+ * component body's locals.
  */
 function contextDeclarationNames(
   declaration: t.VariableDeclarator,
-  hook: ContextHook,
-  path: NodePath<t.FunctionDeclaration | t.FunctionExpression | t.ArrowFunctionExpression>,
+  label: string,
 ): string[] | string {
-  const [context, ...rest] = (declaration.init as t.CallExpression).arguments;
-  if (!context || rest.length > 0 || !isModuleReference(context, path)) {
-    return `${hook} needs one context defined or imported at module level`;
-  }
   const names: string[] = [];
   const collect = (pattern: t.LVal | t.PatternLike): string | undefined => {
     if (t.isIdentifier(pattern)) {
@@ -879,7 +977,7 @@ function contextDeclarationNames(
     }
     if (t.isAssignmentPattern(pattern)) {
       if (!isLiteralDefault(pattern.right)) {
-        return `${hook} destructuring defaults must be literals`;
+        return `${label} destructuring defaults must be literals`;
       }
       return collect(pattern.left);
     }
@@ -894,7 +992,7 @@ function contextDeclarationNames(
     if (t.isObjectPattern(pattern)) {
       for (const property of pattern.properties) {
         if (t.isObjectProperty(property) && property.computed) {
-          return `computed ${hook} destructuring is not supported yet`;
+          return `computed ${label} destructuring is not supported yet`;
         }
         const reason = collect(
           t.isRestElement(property) ? property : (property.value as t.PatternLike),
@@ -903,7 +1001,7 @@ function contextDeclarationNames(
       }
       return undefined;
     }
-    return `${hook} values must be bound to names`;
+    return `${label} values must be bound to names`;
   };
   return collect(declaration.id) ?? names;
 }
@@ -10257,8 +10355,25 @@ function compileCandidate(
     }
     const declaration = statement.declarations[0];
     const contextHook = reactHookCall(declaration.init, hookNames, reactNames);
+    let contextLabel: string | undefined;
     if (contextHook === "useContext" || contextHook === "use") {
-      const names = contextDeclarationNames(declaration, contextHook, path);
+      if (!isContextRead(declaration.init, path, hookNames, reactNames)) {
+        return `${contextHook} needs one context defined or imported at module level`;
+      }
+      contextLabel = contextHook;
+    } else if (
+      t.isCallExpression(declaration.init) &&
+      t.isIdentifier(declaration.init.callee) &&
+      /^use[A-Z0-9]/.test(declaration.init.callee.name) &&
+      !hookNames.has(declaration.init.callee.name) &&
+      !useStateNames.has(declaration.init.callee.name)
+    ) {
+      const reason = customContextHookReason(declaration.init, path, hookNames, reactNames);
+      if (reason) return reason;
+      contextLabel = declaration.init.callee.name;
+    }
+    if (contextLabel) {
+      const names = contextDeclarationNames(declaration, contextLabel);
       if (typeof names === "string") return names;
       contextDeclarations.push(statement);
       contextNames.push(...names);
