@@ -1,7 +1,13 @@
 import type { ReactNode } from "react";
 import { BlogFigure } from "./figures";
 import { ReleaseArtwork } from "./release-artwork";
-import { agentNativePost, launchPost, nativeInternalsPost, nativePost } from "../../lib/blog";
+import {
+  agentNativePost,
+  agentScanPost,
+  launchPost,
+  nativeInternalsPost,
+  nativePost,
+} from "../../lib/blog";
 
 /**
  * A post's presentation: the heading markup, which breaks where its author wants it to, and the
@@ -17,6 +23,23 @@ export interface PostArt {
 }
 
 export const POST_ART: Record<string, PostArt> = {
+  [agentScanPost.href]: {
+    heading: (
+      <>
+        I asked 105 developer sites for Markdown. <span>A third answered with HTML.</span>
+      </>
+    ),
+    header: (
+      <div className="blog-post-artwork">
+        <BlogFigure fit kind="agent-scan" />
+      </div>
+    ),
+    card: (
+      <div className="blog-post-artwork">
+        <BlogFigure fit kind="agent-scan" />
+      </div>
+    ),
+  },
   [launchPost.href]: {
     heading: (
       <>
