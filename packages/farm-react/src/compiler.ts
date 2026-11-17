@@ -1655,14 +1655,15 @@ function isSafeCompilerCall(
   if (t.isIdentifier(expression.callee)) {
     return safeGlobals.has(expression.callee.name) && SAFE_GLOBAL_CALLS.has(expression.callee.name);
   }
-  return (
-    t.isMemberExpression(expression.callee) &&
-    !expression.callee.computed &&
-    t.isIdentifier(expression.callee.object, { name: "Math" }) &&
-    safeGlobals.has("Math") &&
-    t.isIdentifier(expression.callee.property) &&
-    SAFE_MATH_CALLS.has(expression.callee.property.name)
-  );
+  if (!t.isMemberExpression(expression.callee) || expression.callee.computed) return false;
+  const { object, property } = expression.callee;
+  if (!t.isIdentifier(object) || !t.isIdentifier(property) || !safeGlobals.has(object.name)) {
+    return false;
+  }
+  // JSON.stringify reads its value like String() does (calling toJSON where String calls
+  // toString); a replacer function or array argument is rejected with the other arguments.
+  if (object.name === "JSON") return property.name === "stringify";
+  return object.name === "Math" && SAFE_MATH_CALLS.has(property.name);
 }
 
 function validateDerivedExpression(
@@ -10276,7 +10277,7 @@ function compileCandidate(
   let propsPlan: PropsPlan = analyzedPropsPlan;
   if (!t.isBlockStatement(path.node.body)) return "components must use a block body";
   const safeGlobals = new Set(
-    [...SAFE_GLOBAL_CALLS, "Math"].filter((name) => !path.scope.getBinding(name)),
+    [...SAFE_GLOBAL_CALLS, "Math", "JSON"].filter((name) => !path.scope.getBinding(name)),
   );
   const globalCollections = new Set(["Set", "Map"].filter((name) => !path.scope.getBinding(name)));
 
@@ -11971,7 +11972,7 @@ export async function compileReactModule(
             candidate.path,
             programPath,
             new Set(
-              [...SAFE_GLOBAL_CALLS, "Math"].filter(
+              [...SAFE_GLOBAL_CALLS, "Math", "JSON"].filter(
                 (name) => !candidate.path.scope.getBinding(name),
               ),
             ),
