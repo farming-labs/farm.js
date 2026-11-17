@@ -14,7 +14,11 @@ import {
   resolveFarmNavigationURL,
 } from "./navigation-url";
 import type { FarmViewTransitionMode } from "./spa-router";
-import { isFarmLocaleChangeHref, localizeActiveFarmHref } from "../i18n/client-state";
+import {
+  isFarmLocaleChangeHref,
+  localizeActiveFarmHref,
+  rememberFarmLinkLocale,
+} from "../i18n/client-state";
 import type { FarmI18nLocale } from "../i18n/types";
 import { getFarmTrailingSlashPreference } from "../trailing-slash";
 import { applyFarmBasePath, getFarmBasePath } from "../base-path";
@@ -522,6 +526,7 @@ function LinkInner<TRoute extends string = DefaultRouteHref, THref extends strin
       if (typeof window !== "undefined") {
         event.preventDefault();
         if (isFarmLocaleChangeHref(localizedHref)) {
+          rememberFarmLinkLocale(event.currentTarget);
           window.location.assign(resolvedHref);
           return;
         }
@@ -569,6 +574,7 @@ function LinkInner<TRoute extends string = DefaultRouteHref, THref extends strin
       onTouchStart={handleTouchStart}
       {...props}
       data-farm-link=""
+      data-farm-locale={locale}
       data-farm-prefetch={prefetchAttribute(prefetchModes)}
       data-farm-prefetch-delay={
         intent && prefetchDelay !== FARM_LINK_PREFETCH_DELAY ? String(prefetchDelay) : undefined
