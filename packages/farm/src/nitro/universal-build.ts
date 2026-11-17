@@ -7867,6 +7867,7 @@ function renderFarmServerTreeLayout(Layout, props, outlets) {
       : ""
   }
   isInFarmRouteGroupScope,
+  routeBoundaryCoversDirectory,
   createFarmCacheKey,
   createFarmMetadataRouteResponse,
   createFarmAgentRobots,
@@ -12860,7 +12861,13 @@ ${
           ...(middlewareData?.size ? { middleware: { data: middlewareData } } : {}),
         });
 
-        const applicableLayouts = getApplicableLayouts(errorRoutePathname, errorDirectory);
+        // The boundary renders inside its own segment's layouts and those above it, never inside a
+        // deeper layout: a layout below the boundary that throws would throw again inside it.
+        const applicableLayouts = getApplicableLayouts(errorRoutePathname, errorDirectory).filter(
+          function(layout) {
+            return routeBoundaryCoversDirectory(layout.pattern, errorBoundaryMatch.route.pattern);
+          }
+        );
         for (let i = applicableLayouts.length - 1; i >= 0; i--) {
           const LayoutComponent = applicableLayouts[i].module.default;
           if (LayoutComponent) {
