@@ -556,6 +556,8 @@ function createFarmServerPrebundleConfig(bundledPackages: readonly FarmServerBun
 export function farmIslandContainersPlugin(config: {
   root?: string;
   experimental?: FarmVitePluginOptions["experimental"];
+  /** A production build's plan snapshot: the analysis then reuses what the plan read and resolved. */
+  sourceSnapshot?: FarmSourceSnapshotStore;
 }): Plugin {
   let root = config.root ?? process.cwd();
   return {
@@ -573,7 +575,10 @@ export function farmIslandContainersPlugin(config: {
       }
       if (hasUseClientDirective(code)) return null;
       const file = id.split("?", 1)[0]!;
-      const bindings = getFarmClientRenderingBindings(code, file, root);
+      const analyse = () => getFarmClientRenderingBindings(code, file, root);
+      const bindings = config.sourceSnapshot
+        ? withFarmSourceSnapshotOf(config.sourceSnapshot, analyse)
+        : analyse();
       if (bindings.length === 0) return null;
       const grown = wrapFarmIslandContainers({
         code,

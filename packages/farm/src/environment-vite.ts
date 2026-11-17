@@ -13,6 +13,7 @@ import {
 import { PROGRAMMATIC_ROUTE_FILE_NAMES, parseProgrammaticRouteModuleId } from "./routes-shared";
 import { resolveFarmServerComponentsMode } from "./server-components-mode";
 import { getFarmClientReachableModules, hasUseClientDirective } from "./utils/client-component";
+import { type FarmSourceSnapshotStore, withFarmSourceSnapshotOf } from "./utils/source-snapshot";
 
 type EnvironmentFunctionKind = "createServerOnlyFn" | "createClientOnlyFn" | "createIsomorphicFn";
 
@@ -109,6 +110,8 @@ export interface FarmEnvironmentFunctionsPluginOptions {
   srcDir?: string;
   layers?: readonly ResolvedFarmLayer[];
   experimental?: { serverComponents?: unknown };
+  /** A production build's plan snapshot: the islands check then reuses what the plan read and resolved. */
+  sourceSnapshot?: FarmSourceSnapshotStore;
 }
 
 export function farmEnvironmentFunctionsPlugin(
@@ -199,10 +202,15 @@ export function farmEnvironmentFunctionsPlugin(
         const root = realpathSync(options.root ?? projectRoot);
         // The whole app counts: a client module can live outside `srcDir`, and one a shared
         // workspace package holds is outside the root, so its own directive has to count too.
-        const clientCode =
-          getFarmClientReachableModules(root, root).has(path.resolve(file)) ||
-          (existsSync(file) && hasUseClientDirective(readFileSync(file, "utf8")));
-        const reached = clientCode ? null : findFarmClientOnlyImport(code, file);
+        const check = () => {
+          const clientCode =
+            getFarmClientReachableModules(root, root).has(path.resolve(file)) ||
+            (existsSync(file) && hasUseClientDirective(readFileSync(file, "utf8")));
+          return clientCode ? null : findFarmClientOnlyImport(code, file);
+        };
+        const reached = options.sourceSnapshot
+          ? withFarmSourceSnapshotOf(options.sourceSnapshot, check)
+          : check();
         if (reached) {
           const chain = reached.chain
             .map((step) => path.relative(root, step).replace(/\\/g, "/"))

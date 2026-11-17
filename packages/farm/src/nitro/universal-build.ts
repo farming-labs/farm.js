@@ -2734,12 +2734,12 @@ async function buildClient(
               },
             },
           },
-          farmIslandContainersPlugin(config),
+          farmIslandContainersPlugin({ ...config, sourceSnapshot }),
           farmPlugin(
             { ...config, isolatedClientBoundaryModules, programmaticClientRoutes, sourceSnapshot },
             pluginManager,
           ),
-          farmEnvironmentFunctionsPlugin(config),
+          farmEnvironmentFunctionsPlugin({ ...config, sourceSnapshot }),
         ],
         mode: "production",
         css: postcssSearchPath
@@ -6674,7 +6674,7 @@ async function buildSSRInMemory(
           : []),
         { ...createReactProductionModePlugin(), enforce: "pre" as const },
         farmServerOnlyEntriesPlugin(),
-        farmIslandContainersPlugin(config),
+        farmIslandContainersPlugin({ ...config, sourceSnapshot }),
         farmPlugin(
           {
             ...config,
@@ -6683,7 +6683,7 @@ async function buildSSRInMemory(
           },
           pluginManager,
         ),
-        farmEnvironmentFunctionsPlugin(config),
+        farmEnvironmentFunctionsPlugin({ ...config, sourceSnapshot }),
         ...(hasRuntimeConfigModule
           ? [
               farmStripPlatformConfigPlugin(
