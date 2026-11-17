@@ -228,6 +228,31 @@ export function resolveFarmDocsContentDir(
   return path.join(root, entryDir);
 }
 
+/** @internal The content directory of the main docs root and of each of `docs.roots`. */
+export function getFarmDocsContentDirs(
+  docs: FarmDocsResolvedConfig,
+  options: FarmDocsHandlerOptions,
+): string[] {
+  return [
+    ...new Set(getFarmDocsRoots(docs).map((root) => resolveFarmDocsContentDir(root, options))),
+  ];
+}
+
+/**
+ * @internal Whether `file` is a page source under `contentDir` as discovery lists one: a `.md`
+ * or `.mdx` file outside hidden directories and node_modules. It reads nothing from disk, so a
+ * removed page still matches. Paths may use either separator.
+ */
+export function isFarmDocsContentFile(contentDir: string, file: string): boolean {
+  const relative = path.relative(contentDir, file);
+  if (!relative || path.isAbsolute(relative)) return false;
+  // `..` starts with a dot, so a path leaving contentDir is no discoverable segment either.
+  return (
+    DOCS_FILE_EXTENSIONS.includes(path.extname(relative)) &&
+    relative.split(/[\\/]/).every(isDiscoverableDocsEntryName)
+  );
+}
+
 /** The main docs root, then each of `docs.roots`, each as a resolved config of its own. */
 export function getFarmDocsRoots(docs: FarmDocsResolvedConfig): FarmDocsResolvedConfig[] {
   return [

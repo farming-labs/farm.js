@@ -2706,6 +2706,37 @@ export function farmPlugin(
           });
         }
       }
+      // Docs content outside the app directories is neither a module nor a route file, so Vite
+      // matched no module for a change there and the open docs page kept its old content. Reload
+      // it with the runtime's page dates read again, as a docs page under src/app reloads.
+      if (farmDocsDevRuntime && !farmDocsDevRuntime.hasFarmDocsRuntimeAdapter(farmConfig.docs)) {
+        const docsContentDirs = farmDocsDevRuntime.getFarmDocsContentDirs(farmConfig.docs, {
+          root: farmConfig.root,
+          srcDir: farmConfig.srcDir,
+        });
+        // A content directory outside the project root is outside Vite's watch.
+        server.watcher.add(docsContentDirs);
+        for (const event of ["add", "change", "unlink"] as const) {
+          server.watcher.on(event, (file: string) => {
+            const normalizedFile = toPosixPath(file);
+            // Files under the app directories keep their own handling, which reloads for a docs
+            // `page.md` there as for any route module.
+            if (appDirSlugs.some((appDir) => normalizedFile.startsWith(`${appDir}/`))) return;
+            const contentDirs = docsContentDirs.filter((contentDir) =>
+              farmDocsDevRuntime.isFarmDocsContentFile(contentDir, file),
+            );
+            if (contentDirs.length === 0) return;
+            for (const contentDir of contentDirs) {
+              farmDocsDevRuntime.invalidateFarmDocsLastModified(contentDir);
+            }
+            logUpdate(
+              "PAGE",
+              `${event === "add" ? "added" : event === "unlink" ? "removed" : "updated"} ${toPosixPath(path.relative(farmConfig.root, file))}`,
+            );
+            server.ws.send({ type: "full-reload", path: "*" });
+          });
+        }
+      }
       // A docs page under layouts that hydrate renders in an app page's tree, with its client.
       const wrapFarmDocsResponseWithLayouts = (request: Request, response: Response) =>
         farmApp.getServerRenderer().wrapDocsResponseWithLayouts(request, response);

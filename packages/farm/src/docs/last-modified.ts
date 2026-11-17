@@ -220,6 +220,14 @@ function getLastModifiedManifest(contentDir: string): FarmDocsLastModifiedManife
 }
 
 /**
+ * @internal Drops the page dates read for `contentDir`, so the next read takes a changed page's
+ * new date. The dev server calls it when a page there is edited, added or removed.
+ */
+export function invalidateFarmDocsLastModified(contentDir: string): void {
+  manifestCache.delete(resolveExistingPath(contentDir));
+}
+
+/**
  * A page's last-modified date: its frontmatter date, else its last commit, else its file time.
  * `undefined` when the page was last changed before a shallow clone's history begins.
  */

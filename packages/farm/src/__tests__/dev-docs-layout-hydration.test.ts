@@ -101,7 +101,7 @@ async function startDocsApp(files: Record<string, string>, config: Record<string
   await server.listen(await getAvailablePort());
   const address = server.httpServer?.address();
   if (!address || typeof address === "string") throw new Error("Missing dev server address");
-  return { root, origin: `http://localhost:${address.port}` };
+  return { root, server, origin: `http://localhost:${address.port}` };
 }
 
 async function expectCounterHydrated(page: Page, clicks = 1) {
@@ -482,5 +482,141 @@ export default function RootLayout({ children }) {
         },
       },
     );
+  }, 120_000);
+});
+
+/**
+ * Docs content under a `docs.contentDir` outside src/app is no module and no route file, so no
+ * edit there reached the open page, which kept the old content until a manual reload. An edit,
+ * addition or removal there now reloads open pages with the new content, as one under src/app does.
+ */
+describe("docs content outside src/app in farm dev", () => {
+  it("reloads open docs pages on content edits, additions and removals, and not for other files", async () => {
+    const executablePath = await resolveChromium();
+    if (!executablePath) return;
+
+    const { root, server, origin } = await startDocsApp(
+      {
+        "src/app/layout.tsx": `import { Counter } from "./counter";
+export default function RootLayout({ children }) {
+  return (
+    <div data-layout="root">
+      <Counter />
+      {children}
+    </div>
+  );
+}`,
+        "src/app/page.tsx": "export default function Page() { return <main>home page</main>; }",
+        "content/docs/page.md": "# Docs index\n\nThe docs index.",
+        "content/docs/guide.md": "# Docs guide\n\nThe first guide.",
+        // Its path starts with the content directory's, but it is outside it.
+        "content/docs-drafts/draft.md": "# Draft\n\nA draft.",
+      },
+      {
+        basePath: "/workspace",
+        docs: { entry: "/docs", contentDir: "content/docs", search: false },
+      },
+    );
+    const guidePath = path.join(root, "content/docs/guide.md");
+    const addedPath = path.join(root, "content/docs/added.md");
+    const draftPath = path.join(root, "content/docs-drafts/draft.md");
+    // The reloads the dev server sends: two sent close together can reach the page as one.
+    const reloads: unknown[] = [];
+    const send = server.ws.send.bind(server.ws) as (payload: unknown) => void;
+    server.ws.send = ((payload: unknown) => {
+      if ((payload as { type?: string } | undefined)?.type === "full-reload") reloads.push(payload);
+      send(payload);
+    }) as typeof server.ws.send;
+
+    const browser = await chromium.launch({ executablePath });
+    try {
+      const page = await browser.newPage();
+      const hydrationErrors = collectHydrationErrors(page);
+      const documentRequests: string[] = [];
+      page.on("request", (request) => {
+        if (request.isNavigationRequest() && request.frame() === page.mainFrame()) {
+          documentRequests.push(new URL(request.url()).pathname);
+        }
+      });
+      const article = page.locator("#nd-page");
+      const addedLink = page.locator('#nd-sidebar a[href="/workspace/docs/added"]');
+      const markDocument = async () => {
+        documentRequests.length = 0;
+        await page.evaluate(
+          () => ((window as { __farmDocument?: string }).__farmDocument = "kept"),
+        );
+      };
+      const documentMark = () =>
+        page.evaluate(() => (window as { __farmDocument?: string }).__farmDocument);
+      const lastUpdated = () => article.locator("time").getAttribute("datetime");
+
+      try {
+        await page.goto(`${origin}/workspace/docs/guide`);
+        await expect.poll(() => article.textContent()).toContain("The first guide.");
+        await expectCounterHydrated(page);
+
+        // An edit reloads the page with the new content and the file's new date.
+        await markDocument();
+        await fs.writeFile(guidePath, "# Docs guide\n\nThe edited guide.");
+        await expect
+          .poll(() => article.textContent(), { timeout: 15_000 })
+          .toContain("The edited guide.");
+        expect(await documentMark()).toBeUndefined();
+        expect(documentRequests).toEqual(["/workspace/docs/guide"]);
+        expect(await lastUpdated()).toBe((await fs.stat(guidePath)).mtime.toISOString());
+        await expectCounterHydrated(page);
+
+        // A new page reloads the open page, whose sidebar lists it, and is routable.
+        await markDocument();
+        await fs.writeFile(addedPath, "# Added page\n\nA page added while the server runs.");
+        await expect.poll(() => addedLink.count(), { timeout: 15_000 }).toBe(1);
+        expect(await documentMark()).toBeUndefined();
+        await addedLink.click();
+        await page.waitForURL(`${origin}/workspace/docs/added`);
+        await expect
+          .poll(() => article.textContent())
+          .toContain("A page added while the server runs.");
+
+        // Removing it reloads the open page, and its path is no docs page any more.
+        await markDocument();
+        await fs.rm(addedPath);
+        await expect.poll(() => documentMark(), { timeout: 15_000 }).toBeUndefined();
+        expect((await fetch(`${origin}/workspace/docs/added`)).status).toBe(404);
+        await page.goto(`${origin}/workspace/docs/guide`);
+        await expect.poll(() => article.textContent()).toContain("The edited guide.");
+        expect(await addedLink.count()).toBe(0);
+
+        // A file outside the content directory reloads nothing: when the watcher has reported
+        // it, no reload went out, and a docs edit after it sends exactly one.
+        await markDocument();
+        reloads.length = 0;
+        const draftSeen = new Promise<void>((resolve) => {
+          const onChange = (file: string) => {
+            // The watcher reports the root's real path, which on Windows can differ from the
+            // temporary directory's short name, with either separator.
+            if (!file.replace(/\\/g, "/").endsWith("/content/docs-drafts/draft.md")) return;
+            server.watcher.off("change", onChange);
+            resolve();
+          };
+          server.watcher.on("change", onChange);
+        });
+        await fs.writeFile(draftPath, "# Draft\n\nAn edited draft.");
+        await draftSeen;
+        expect(reloads).toEqual([]);
+        await fs.writeFile(guidePath, "# Docs guide\n\nThe guide after the draft.");
+        await expect
+          .poll(() => article.textContent(), { timeout: 15_000 })
+          .toContain("The guide after the draft.");
+        expect(reloads).toHaveLength(1);
+        expect(documentRequests).toEqual(["/workspace/docs/guide"]);
+        expect(hydrationErrors).toEqual([]);
+      } catch (error) {
+        throw new Error(
+          `${String(error)}\nHydration errors:\n${hydrationErrors.join("\n")}\nDocument requests: ${documentRequests.join(", ")}`,
+        );
+      }
+    } finally {
+      await browser.close();
+    }
   }, 120_000);
 });
