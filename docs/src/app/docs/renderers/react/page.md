@@ -585,9 +585,11 @@ A compiled component reads context through React. The component's own function r
 it binds to the compiled component as props. When the provider changes, a string, number, boolean,
 bigint, `null`, or `undefined` value patches the bindings that read it without rendering the
 component again; an object or function value renders it through React, as a changed object prop
-does. Destructure the fields you read, as in `const { tone } = useContext(Theme)`, to keep them on
-the patch path. A root without React DOM cannot run hooks, so a root whose tree reads context
-renders with React DOM.
+does. A custom hook call such as `const theme = useTheme()` counts as a context read when the hook
+is defined in the same module, takes no parameters, and only reads context with `useContext` or
+`use`, optionally throwing when the value is missing, before returning it. Destructure the fields
+you read, as in `const { tone } = useContext(Theme)`, to keep them on the patch path. A root without
+React DOM cannot run hooks, so a root whose tree reads context renders with React DOM.
 
 This component is eligible:
 
