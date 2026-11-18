@@ -30,6 +30,13 @@ export type { AnalyzerLimitAction, AnalyzerLimits, AnalyzerMetric, AnalyzerOptio
  * With no options, the plugin writes `.farm/analyze.html` after each successful build.
  */
 export function analyzer(options: AnalyzerOptions = {}) {
+  if (
+    options.links !== undefined &&
+    typeof options.links !== "boolean" &&
+    options.links !== "strict"
+  ) {
+    throw new TypeError('Analyzer links must be true, false, or "strict".');
+  }
   const resolved = resolveAnalyzerOptions(options);
 
   return definePlugin({
@@ -49,6 +56,7 @@ export function analyzer(options: AnalyzerOptions = {}) {
           outputDir,
           preset: result.preset,
           metric: resolved.metric,
+          links: Boolean(options.links),
         });
         const violations = evaluateLimits(report, resolved.limits);
         let htmlPath: string | undefined;
@@ -89,6 +97,14 @@ export function analyzer(options: AnalyzerOptions = {}) {
           }
         }
 
+        if (report.brokenLinks?.length) {
+          const message = [
+            "[farm:analyzer] Broken internal links",
+            ...report.brokenLinks.map(({ page, href }) => `  ${page} -> ${href}`),
+          ].join("\n");
+          if (options.links === "strict") throw new Error(message);
+          console.warn(message);
+        }
         if (violations.length > 0) {
           const message = formatViolations(violations);
           if (resolved.onLimit === "warn") console.warn(message);

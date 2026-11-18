@@ -2561,6 +2561,9 @@ importers:
 
   packages/farm-analyzer:
     dependencies:
+      parse5:
+        specifier: 7.3.0
+        version: 7.3.0
       '@farm.js/core':
         specifier: workspace:*
         version: link:../farm

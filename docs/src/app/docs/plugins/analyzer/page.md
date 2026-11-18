@@ -136,3 +136,16 @@ This is exact for HTML that exists in the production output. A dynamic SSR route
 HTML file to inspect, and its server work can depend on the request. The analyzer therefore does not
 invent a route number for it. Its client chunks remain in the client total and its runtime code
 remains in the server total.
+
+## Check internal links
+
+Use `analyzer({ links: true })` to print broken internal links after a production
+build. Use `analyzer({ links: "strict", json: true })` to fail the build and write
+the source page and original href to the JSON report's `brokenLinks` array.
+
+The analyzer reads links from emitted HTML, resolves relative URLs, and checks
+destinations against public files and the Farm runtime route manifest. It checks
+fragments when the destination has emitted HTML. Dynamic route matches establish
+that a route exists; the analyzer cannot verify individual database records.
+External URLs, runtime-generated links, and redirects supplied by a hosting
+provider are outside this check.

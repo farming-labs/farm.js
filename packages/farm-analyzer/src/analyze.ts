@@ -27,6 +27,7 @@ export interface AnalyzerPage {
 }
 
 export interface AnalyzerBuildReport {
+  brokenLinks?: { page: string; href: string }[];
   schemaVersion: 1;
   generatedAt: string;
   preset: string;
@@ -58,6 +59,7 @@ export interface AnalyzerLimitViolation {
 }
 
 export interface AnalyzeBuildOptions {
+  links?: boolean;
   root: string;
   distDir: string;
   outputDir: string;
@@ -126,6 +128,17 @@ export async function analyzeBuild(options: AnalyzeBuildOptions): Promise<Analyz
   );
 
   return {
+    ...(options.links
+      ? {
+          brokenLinks: await (
+            await import("./links.js")
+          ).checkLinks(
+            path.resolve(options.root, options.distDir, "route-runtime-manifest.json"),
+            publicFiles,
+            routeFromHtml,
+          ),
+        }
+      : {}),
     schemaVersion: 1,
     generatedAt: new Date().toISOString(),
     preset: options.preset,
