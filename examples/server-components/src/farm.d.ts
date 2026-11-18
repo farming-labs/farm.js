@@ -66,6 +66,7 @@ export type RoutePath =
   | "/context"
   | `/context/${string}`
   | "/context/deferred"
+  | `/context/wait/${string}`
   | "/guarded"
   | "/hooks"
   | "/inline"
@@ -167,6 +168,7 @@ export type RoutePattern =
   | "/context"
   | "/context/[item]"
   | "/context/deferred"
+  | "/context/wait/[item]"
   | "/guarded"
   | "/hooks"
   | "/inline"
@@ -269,6 +271,7 @@ export type RouteModulePattern =
   | "/context"
   | "/context/[item]"
   | "/context/deferred"
+  | "/context/wait/[item]"
   | "/guarded"
   | "/hooks"
   | "/inline"

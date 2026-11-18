@@ -101,21 +101,22 @@ same or less everywhere else.** These are the numbers for one app built in both 
 
 | Measure                    | Docs page       | Shop page      | Blog post      |
 | -------------------------- | --------------- | -------------- | -------------- |
-| First-load JavaScript      | 70.6 to 1.7 KB  | 70.6 to 1.7 KB | 70.6 to 1.7 KB |
+| First-load JavaScript      | 70.9 to 1.7 KB  | 70.9 to 1.7 KB | 70.9 to 1.7 KB |
 | HTML document              | 16.3 to 16.0 KB | 5.5 to 5.8 KB  | 17.9 to 9.0 KB |
-| Data per navigation        | 12.0 to 2.6 KB  | 3.8 to 2.1 KB  | 10.8 to 9.1 KB |
+| Data per navigation        | 12.0 to 2.6 KB  | 3.8 to 1.9 KB  | 10.8 to 9.1 KB |
 | First-load main thread     | 154 to 86 ms    | 145 to 72 ms   | 211 to 96 ms   |
 | Navigation until painted   | 45 to 46 ms     | 45 to 45 ms    | 71 to 68 ms    |
 | Server requests per second | 441 to 470      | 628 to 628     | 56 to 426      |
 
 Sizes are brotli at quality 5. Times are medians with Chrome at 4x CPU throttling. Requests per
 second are the median of 8 rounds alternating between the modes, on one Node process. Measured
-2026-11-17 on an Apple M1 with other work running, at commit `cb949b16a` with the prefetch fix of
-[#2961](https://github.com/farming-labs/farm.js/pull/2961).
+2026-11-17 on an Apple M1 with other work running: times at commit `cb949b16a` with the prefetch fix
+of [#2961](https://github.com/farming-labs/farm.js/pull/2961), sizes at `310cdfe5e` with the first
+navigation of a layout that has not hydrated yet carrying only the next page's payload.
 
 - **First load.** 41 times less JavaScript and about half the main-thread work, because these pages'
   client components wait for a click.
-- **Navigation data.** A fifth of the data on docs pages, a little over half on shop pages, and
+- **Navigation data.** A fifth of the data on docs pages, half on shop pages, and
   slightly less on blog posts. A navigation carries the page as islx HTML (or its server tree,
   under a layout that hydrates) and leaves out the layouts and values the browser already holds.
 - **Navigation on the server.** A docs navigation renders in 0.58 ms against 0.66 to 0.69 ms for

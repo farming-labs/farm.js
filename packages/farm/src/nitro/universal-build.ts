@@ -5629,9 +5629,14 @@ ${
   partialNavigationHeaders: function() {
     const root = document.getElementById("root") || document.body;
     const layouts = getLayoutPatterns(root);
+    // The root React owns, or one whose layouts hydrate together but have not yet: the
+    // navigation creates it (swapContent).
+    const rendersTree = reactRoot
+      ? reactRootContainer === root
+      : root.id === "root" && hasHydratableLayout(window.location.pathname);
     return {
       ...(layouts.length ? { "F-Layouts": JSON.stringify(layouts) } : {}),
-      ...(reactRoot && reactRootContainer === root ? { "F-Render": "tree" } : {}),
+      ...(rendersTree ? { "F-Render": "tree" } : {}),
     };
   },
 `
@@ -5973,6 +5978,34 @@ ${
     const hydrateLayouts = hasHydratableLayout(newPathname);
     const nextPage = newRoot.querySelector("#__farm_page__");
 
+    ${
+      islandValues
+        ? `// A layout that hydrates as one root but has not yet (its client components wait for a
+    // click): its first navigation renders the page's payload in a new root, as later ones do.
+    if (
+      matched && hydrateLayouts && !reactRoot && currentRoot.id === "root" &&
+      nextPage?.querySelector('script[type="f/tree"][partial]')
+    ) {
+      const routeState = await createMatchedHydrationRoute(
+        matched,
+        newPathname,
+        searchParamsToObject(targetUrl.searchParams),
+        nextPage.innerHTML,
+        nextPageProps,
+        newRoot,
+      );
+      if (!isNavigationCurrent()) return false;
+      if (!routeState) return "segment-mismatch";
+      cancelPendingPageHydration();
+      resetRouteSlotRoots();
+      setFarmReactRoot(createRoot(currentRoot), currentRoot);
+      renderFarmRoute(reactRoot, routeState);
+      window.__FARM_ROUTE_SLOTS__ = nextRouteSlots;
+      setFarmHydrated();
+      return true;
+    }`
+        : ""
+    }
     // If React already owns the shared layout, update that root. React keeps
     // matching layout component instances and their state mounted.
     if (matched && hydrateLayouts && reactRoot && reactRootContainer === currentRoot) {
