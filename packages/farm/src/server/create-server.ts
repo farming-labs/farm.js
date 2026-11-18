@@ -28,6 +28,7 @@ import {
 import { farmEnvironmentFunctionsPlugin } from "../environment-vite";
 import fs from "fs";
 import path from "path";
+import { farmDevServerStylesheetsPlugin } from "./dev-styles";
 import {
   createRedirectsPlugin,
   createHeadersPlugin,
@@ -401,6 +402,7 @@ export async function createServer(
             ...(rendererVitePlugins as any[]),
             ...reactRefreshPlugins,
             createDevDependencyStubsPlugin(),
+            farmDevServerStylesheetsPlugin(),
             farmI18nClientBridgePlugin(),
             farmServerOnlyEntriesPlugin({
               prebundleServerPackages: true,

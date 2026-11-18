@@ -1,5 +1,6 @@
 import * as fs from "node:fs";
 import * as path from "node:path";
+import type { Plugin } from "vite";
 // Stylesheets the dev document must link beyond globals.css.
 //
 // The dev shell links `/src/app/globals.css` and nothing else, so CSS that
@@ -58,4 +59,31 @@ export function collectDevStylesheetUrls(
     seen.add(cssModule ? `${bare}?direct` : bare);
   }
   return [...seen].sort();
+}
+
+/** A stylesheet file Vite compiles. Requests with a query (`?inline`, `?raw`, `?url`, `?direct`,
+ * a framework's style block) are left out: those return the CSS. */
+const SERVER_STYLESHEET_FILE = /\.(?:css|less|sass|scss|styl|stylus|pcss|postcss|sss)$/;
+
+/**
+ * In development Vite keeps no CSS from a plain stylesheet in the server environment: the module
+ * is `export {}`, and the document links the stylesheet for the browser. Loading it empty there
+ * skips PostCSS and Tailwind for output nothing reads, which on a docs app was about 200 ms of
+ * Tailwind before the first page. CSS modules still compile for their class names, and the module
+ * keeps its id and URL, so the document still links a stylesheet imported from JS.
+ */
+export function farmDevServerStylesheetsPlugin(): Plugin {
+  return {
+    name: "farm:dev-server-stylesheets",
+    apply: "serve",
+    enforce: "pre",
+    applyToEnvironment: (environment) => environment.config.consumer === "server",
+    load: {
+      filter: { id: SERVER_STYLESHEET_FILE },
+      handler(id) {
+        if (id.startsWith("\0") || /\.module\.[^./]+$/.test(id)) return null;
+        return "";
+      },
+    },
+  };
 }
