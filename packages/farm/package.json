@@ -169,6 +169,9 @@
       "image/sharp": [
         "./dist/image/sharp.d.ts"
       ],
+      "safe-fetch": [
+        "./dist/safe-fetch.d.ts"
+      ],
       "og": [
         "./dist/og.d.ts"
       ],
@@ -642,6 +645,11 @@
       "types": "./dist/image/sharp.d.ts",
       "import": "./dist/image/sharp.mjs",
       "require": "./dist/image/sharp.cjs"
+    },
+    "./safe-fetch": {
+      "types": "./dist/safe-fetch.d.ts",
+      "import": "./dist/safe-fetch.mjs",
+      "require": "./dist/safe-fetch.cjs"
     },
     "./og": {
       "types": "./dist/og.d.ts",

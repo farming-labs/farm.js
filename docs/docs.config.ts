@@ -338,6 +338,7 @@ const sidebar = [
       { label: "Cache and PPR", slug: "cache-ppr", icon: "zap" },
       { label: "Route Runtime", slug: "route-runtime", icon: "server" },
       { label: "After Responses", slug: "after", icon: "timer" },
+      { label: "Safe Fetch", slug: "safe-fetch", icon: "shield" },
       { label: "Observability", slug: "observability", icon: "activity" },
       { label: "Farm Infra Analytics", slug: "infra-analytics", icon: "activity" },
       { label: "Built-in DevTools", slug: "devtools", icon: "monitor" },
