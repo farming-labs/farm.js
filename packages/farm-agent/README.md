@@ -78,7 +78,11 @@ After verifying the webhook provider's signature, send its event to the app's gu
 `POST /api/agent/events` endpoint:
 
 ```json
-{ "name": "payment.succeeded", "data": { "orderId": "o_1", "amount": 42 }, "id": "provider-event-1" }
+{
+  "name": "payment.succeeded",
+  "data": { "orderId": "o_1", "amount": 42 },
+  "id": "provider-event-1"
+}
 ```
 
 Matching runs resume with the event data. Reuse the provider event ID on retries to avoid
@@ -104,8 +108,8 @@ middleware and integration guards run first in development and in every deploy t
 | `POST /api/agent/runs/:id/resume`        | Answers the interrupt with `{ answer }`.                               |
 | `GET /api/agent/runs?status=interrupted` | Lists runs, for an approvals inbox.                                    |
 | `GET /api/agent/manifest.json`           | Lists the agents.                                                      |
-| `POST /api/agent/events` | Sends an event to matching waiting runs. |
-| `GET /api/agent/runs?status=waiting` | Lists runs waiting for an event. |
+| `POST /api/agent/events`                 | Sends an event to matching waiting runs.                               |
+| `GET /api/agent/runs?status=waiting`     | Lists runs waiting for an event.                                       |
 | `POST /api/agent/mcp`                    | The agents as MCP tools.                                               |
 
 ```ts
