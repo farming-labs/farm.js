@@ -402,7 +402,10 @@ export async function createServer(
             ...reactRefreshPlugins,
             createDevDependencyStubsPlugin(),
             farmI18nClientBridgePlugin(),
-            farmServerOnlyEntriesPlugin({ prebundleServerPackages: true }),
+            farmServerOnlyEntriesPlugin({
+              prebundleServerPackages: true,
+              distDir: resolvedConfig.distDir || ".farm",
+            }),
             farmIslandContainersPlugin(finalConfig),
             farmPlugin(finalConfig, pluginManager, deferredSetup),
             farmEnvironmentFunctionsPlugin(finalConfig),

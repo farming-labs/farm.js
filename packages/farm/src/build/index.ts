@@ -340,7 +340,10 @@ async function createProjectModuleServer(
         // resolves as it does in the server build. Module-entry packages load pre-bundled, as in
         // `farm dev`: unbundled, lucide-react alone is ~1,750 modules through the module runner,
         // which a docs build waited on after its bundles.
-        farmServerOnlyEntriesPlugin({ prebundleServerPackages: true }),
+        farmServerOnlyEntriesPlugin({
+          prebundleServerPackages: true,
+          distDir: config.distDir || ".farm",
+        }),
       ],
       server: {
         middlewareMode: true,
@@ -435,7 +438,7 @@ async function buildClient(
     },
     plugins: [
       farmI18nClientBridgePlugin(),
-      farmServerOnlyEntriesPlugin(),
+      farmServerOnlyEntriesPlugin({ distDir: config.distDir || ".farm" }),
       farmIslandContainersPlugin(config),
       farmPlugin(config, pluginManager),
       farmEnvironmentFunctionsPlugin(config),
