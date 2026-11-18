@@ -135,8 +135,19 @@ function parseRange(header, size) {
  * Serves {@link FARM_NITRO_STATIC_HANDLER_SOURCE} in place of Nitro's static handler, under the
  * same module id, so its `h3`, `ufo` and `#nitro/virtual/*` imports resolve as Nitro's own do.
  * Only presets that serve public files from the server (`serveStatic`) import that handler.
+ *
+ * With `canonicalPages`, the handler first answers each page's other slash spelling with a 308 to
+ * the canonical URL, keeping the query. It compares the exact request pathname, so the canonical
+ * URL itself is always served.
  */
-export function createNitroStaticRangePlugin(nitroPackageEntry: string): Rollup.Plugin {
+export function createNitroStaticRangePlugin(
+  nitroPackageEntry: string,
+  canonicalPages: readonly string[] = [],
+): Rollup.Plugin {
+  const redirects = canonicalPages
+    .filter((url) => url !== "/" && !url.startsWith("//"))
+    .map((url) => [url.endsWith("/") ? url.slice(0, -1) : url + "/", url]);
+  const original = "?farm-static-handler";
   const handlerFile = path.join(path.dirname(nitroPackageEntry), "internal", "static.mjs");
   const handlerIds = new Set([toPosix(handlerFile)]);
   try {
@@ -146,13 +157,30 @@ export function createNitroStaticRangePlugin(nitroPackageEntry: string): Rollup.
   }
   return {
     name: "farm:nitro-static-range",
+    resolveId(id) {
+      if (id.endsWith(original) && handlerIds.has(id.slice(0, -original.length))) return id;
+      return null;
+    },
     load: {
       filter: { id: /[\\/]internal[\\/]static\.mjs(?:\?.*)?$/ },
       handler(id) {
         const file = id.split("?", 1)[0];
         if (!handlerIds.has(toPosix(file))) return null;
+        if (redirects.length && !id.endsWith(original)) {
+          // Nitro matches route rules without the trailing slash. Match the actual URL before
+          // its file handler tries both the directory and its index.
+          return `import serve from ${JSON.stringify(toPosix(file) + original)};
+const redirects = new Map(${JSON.stringify(redirects)});
+export default function(event) {
+  const url = new URL(event.req.url);
+  const target = redirects.get(url.pathname);
+  if (target !== undefined) return new Response(null, { status: 308, headers: { Location: target + url.search } });
+  return serve(event);
+}`;
+        }
         // A Nitro that answers ranges itself keeps its own handler.
-        if (readFileSync(file, "utf8").includes("Accept-Ranges")) return null;
+        const source = readFileSync(file, "utf8");
+        if (source.includes("Accept-Ranges")) return id.endsWith(original) ? source : null;
         return FARM_NITRO_STATIC_HANDLER_SOURCE;
       },
     },
