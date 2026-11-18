@@ -49,7 +49,7 @@ export default function Home() { return <main>home</main>; }`,
     "src/app/about/page.tsx": `export const dynamic = "force-static";
 export default function About() { return <main>about</main>; }`,
     "src/app/blog/[slug]/page.tsx": `export const dynamic = "force-static";
-export function getStaticPaths() { return [{ slug: "one" }]; }
+export function getStaticPaths() { return [{ slug: "one" }, { slug: "a+b" }]; }
 export default function Post({ params }) { return <main>{"post " + params.slug}</main>; }`,
   };
   for (const [relativePath, source] of Object.entries(files)) {
@@ -88,6 +88,15 @@ describe("a prerendered page in a node-server build", () => {
         const postRedirect = await fetch(`${server.origin}${postOther}`, { redirect: "manual" });
         expect(postRedirect.status).toBe(308);
         expect(postRedirect.headers.get("location")).toBe(post);
+        const literal = post.replace("one", "a%2Bb");
+        const alternate = postOther.replace("one", "a%2Bb");
+        const literalPage = await fetch(`${server.origin}${literal}`, { redirect: "manual" });
+        expect(literalPage.status).toBe(200);
+        const literalRedirect = await fetch(`${server.origin}${alternate}?a=1&a=2`, {
+          redirect: "manual",
+        });
+        expect(literalRedirect.status, server.output()).toBe(308);
+        expect(literalRedirect.headers.get("location")).toBe(`${literal}?a=1&a=2`);
         expect((await fetch(`${server.origin}/`, { redirect: "manual" })).status).toBe(200);
       } finally {
         await server.stop();
