@@ -183,3 +183,87 @@ return createMatchedHydrationRoute(matched, "/check", searchParams, undefined, s
     expect(props.middleware).toBeUndefined();
   });
 });
+
+describe("client navigation page source", () => {
+  const production = readSource(path.join("nitro", "universal-build.ts"));
+  const development = readSource("vite.ts");
+
+  // A page element from a fetched document, as DOMParser leaves it.
+  function fetchedPage(innerHTML: string) {
+    return {
+      innerHTML,
+      querySelector: (selector: string) =>
+        selector === 'script[type="f/tree"][partial]' && innerHTML.includes("partial") ? {} : null,
+    };
+  }
+
+  async function layoutRoute(navigationPage: unknown, tree: unknown) {
+    const sources: unknown[] = [];
+    const boundaries: unknown[][] = [];
+    const documentPage = fetchedPage("<p>document</p>");
+    const run = new Function(
+      "React",
+      "document",
+      "hasHydratableLayout",
+      "prepareFarmTreeLayouts",
+      "createFarmServerTreePageElement",
+      "createLayoutPageBoundary",
+      "createFarmRouteState",
+      "navigationPage",
+      `${extractBlock(production, "async function createMatchedHydrationRoute(")}
+return createMatchedHydrationRoute({ route: { pageShouldHydrate: false }, params: {} }, "/guide/b1", {}, navigationPage);`,
+    );
+    const state = await run(
+      React,
+      { getElementById: (id: string) => (id === "__farm_page__" ? documentPage : null) },
+      () => true,
+      async () => true,
+      async (source: unknown) => {
+        sources.push(source);
+        return tree;
+      },
+      (...args: unknown[]) => {
+        boundaries.push(args);
+        return { boundary: args };
+      },
+      (page: unknown) => ({ page }),
+      navigationPage,
+    );
+    return { state, sources, boundaries, documentPage };
+  }
+
+  it("rebuilds a page's server tree from the fetched page element, not its HTML again", async () => {
+    const page = fetchedPage('<script type="f/tree" partial></script>');
+    const { state, sources } = await layoutRoute(page, "tree");
+
+    expect(sources).toEqual([page]);
+    expect(state).not.toBeNull();
+  });
+
+  it("fetches the whole document when a payload-only page has no tree to rebuild", async () => {
+    const { state } = await layoutRoute(
+      fetchedPage('<script type="f/tree" partial></script>'),
+      null,
+    );
+
+    expect(state).toBeNull();
+  });
+
+  it("keeps a fetched page's HTML when it has no tree", async () => {
+    const { boundaries } = await layoutRoute(fetchedPage("<p>next</p>"), null);
+
+    expect(boundaries).toEqual([[{ pageShouldHydrate: false }, null, "<p>next</p>"]]);
+  });
+
+  it("reads the page in this document when hydrating", async () => {
+    const { sources, documentPage } = await layoutRoute(undefined, "tree");
+
+    expect(sources).toEqual([documentPage]);
+  });
+
+  it("passes the fetched page element itself from both clients' navigations", () => {
+    expect(production).not.toMatch(/nextPage(?: \? nextPage)?\.innerHTML/);
+    expect(development).not.toMatch(/nextPage(?: \? nextPage)?\.innerHTML/);
+    expect(development).toContain("navigationPage: nextPage,");
+  });
+});

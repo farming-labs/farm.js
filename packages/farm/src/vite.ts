@@ -7957,10 +7957,12 @@ async function tryHydrateImportedPage(
     );
   } else if (layoutShouldHydrate) {
     currentPageProps = existingProps || { params };
+    // A navigation passes the page element of the document it fetched, read as it is rather
+    // than serialized and parsed again; hydration reads the page in this document.
     const serverPage = document.getElementById('__farm_page__');
-    const pageSource = typeof hydrationOptions.serverHtml === 'string'
-      ? hydrationOptions.serverHtml
-      : serverPage;
+    const pageSource = hydrationOptions.navigationPage === undefined
+      ? serverPage
+      : hydrationOptions.navigationPage;
     const serverTree = pageSource
       ? await createFarmServerTreePageElement(pageSource, window.location.pathname)
       : null;
@@ -7971,9 +7973,7 @@ async function tryHydrateImportedPage(
           false,
           islandStrategy,
           null,
-          typeof hydrationOptions.serverHtml === 'string'
-            ? hydrationOptions.serverHtml
-            : serverPage ? serverPage.innerHTML : '',
+          pageSource ? pageSource.innerHTML : '',
         );
   }
   if (signal?.aborted || !container?.isConnected || !pageElement) return false;
@@ -8538,7 +8538,7 @@ async function renderPage(pageData, info) {
           pageShouldHydrate,
           layoutShouldHydrate,
           islandStrategy: route.islandStrategy,
-          serverHtml: nextPage ? nextPage.innerHTML : '',
+          navigationPage: nextPage,
           layoutSource: fragment,
           loadingModulePath: route.loadingModulePath,
         },
