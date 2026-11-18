@@ -58,6 +58,20 @@ function injectBeforeStream(markerText, tagOrResolve) {
   };
   let buffer = new Uint8Array(0);
   let injected = false;
+  // The closing marker sits at the end of the document, so every chunk of the page is searched:
+  // Node's native Buffer.indexOf, with a byte loop only where there is no Buffer (Workers).
+  const findMarker =
+    typeof Buffer === 'function' && typeof Buffer.from === 'function'
+      ? (haystack) => Buffer.from(haystack.buffer, haystack.byteOffset, haystack.byteLength).indexOf(marker)
+      : (haystack) => {
+          outer: for (let i = 0; i <= haystack.length - marker.length; i++) {
+            for (let j = 0; j < marker.length; j++) {
+              if (haystack[i + j] !== marker[j]) continue outer;
+            }
+            return i;
+          }
+          return -1;
+        };
 
   return new TransformStream({
     transform(chunk, controller) {
@@ -70,14 +84,7 @@ function injectBeforeStream(markerText, tagOrResolve) {
       const pending = new Uint8Array(buffer.length + bytes.length);
       pending.set(buffer);
       pending.set(bytes, buffer.length);
-      let index = -1;
-      outer: for (let i = 0; i <= pending.length - marker.length; i++) {
-        for (let j = 0; j < marker.length; j++) {
-          if (pending[i + j] !== marker[j]) continue outer;
-        }
-        index = i;
-        break;
-      }
+      const index = findMarker(pending);
       if (index >= 0) {
         if (index) controller.enqueue(pending.subarray(0, index));
         if (resolveTag()) controller.enqueue(insertion);
