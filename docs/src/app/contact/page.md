@@ -25,7 +25,7 @@ Do not open a public issue for a vulnerability. Email [contact@farming-labs.dev]
 
 ## Elsewhere
 
-- X: [@KinfishT](https://x.com/KinfishT) for release news and quick questions.
+- X: [@farming_labs](https://x.com/farming_labs) for release news and quick questions.
 - GitHub: the [farming-labs](https://github.com/farming-labs) organization for Farm.js and the other Farming Labs projects.
 - npm: the [`@farm.js`](https://www.npmjs.com/org/farm.js) packages.
 - Website: [farming-labs.dev](https://farming-labs.dev).
