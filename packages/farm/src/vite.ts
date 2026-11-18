@@ -13,6 +13,7 @@ import {
 import { createBundledEnv } from "./env";
 import { createRunnableDevEnvironment, parseSync } from "vite";
 import { initSync as initModuleLexer, parse as lexModule } from "es-module-lexer";
+import { farmPackageImportsPlugin, resolveFarmOptimizedPackageImports } from "./package-imports";
 import type {
   AliasOptions,
   ConfigEnv,
@@ -9167,6 +9168,10 @@ export async function defineConfig(config: FarmVitePluginOptions = {}): Promise<
       viteBrowserExternalPlugin,
       farmI18nClientBridgePlugin(),
       farmServerOnlyEntriesPlugin(),
+      farmPackageImportsPlugin({
+        root: appRoot,
+        packages: resolveFarmOptimizedPackageImports(config.experimental?.optimizePackageImports),
+      }),
       farmIslandContainersPlugin(config),
       farmPlugin(config),
       farmEnvironmentFunctionsPlugin(config),

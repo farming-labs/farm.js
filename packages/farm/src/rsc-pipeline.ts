@@ -19,6 +19,7 @@ import { resolveFarmPlatform } from "./desktop/config";
 import { farmDesktopDevGuardPlugin } from "./desktop/dev-guard-plugin";
 import { loadFarmReactPlugin } from "./react-refresh";
 import { resolveDeployOutputPath } from "./config";
+import { farmPackageImportsPlugin, resolveFarmOptimizedPackageImports } from "./package-imports";
 import {
   FARM_RSC_INSTALL_HINT,
   findFarmAppPackageDir,
@@ -232,6 +233,12 @@ export async function createFarmRscViteConfig(
           ]
         : []),
       ...(tailwind ? [tailwind] : []),
+      // Before the RSC plugin reads an app module, so a client component's icon imports reach the
+      // browser as the deep modules too.
+      farmPackageImportsPlugin({
+        root,
+        packages: resolveFarmOptimizedPackageImports(config.experimental?.optimizePackageImports),
+      }),
       ...vitePlugins,
       viteRsc.default({ serverHandler: false, entries: FARM_RSC_ENTRIES }),
       ...(typeof createReactPlugin === "function" ? [createReactPlugin()] : []),

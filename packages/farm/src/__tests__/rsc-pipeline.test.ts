@@ -133,8 +133,14 @@ describe("experimental.serverComponents from farm.config", () => {
 
     const plugins = config.plugins.flat(Infinity) as Array<{ name: string }>;
     const names = plugins.map((plugin) => plugin.name);
-    // The app's own Tailwind plugin is not added twice.
-    expect(names).toEqual(["app-plugin", "@tailwindcss/vite:scan", "rsc", "nitro"]);
+    // The app's own Tailwind plugin is not added twice; the package-import rewrite runs first.
+    expect(names).toEqual([
+      "farm:package-imports",
+      "app-plugin",
+      "@tailwindcss/vite:scan",
+      "rsc",
+      "nitro",
+    ]);
     const byName = Object.fromEntries(plugins.map((plugin) => [plugin.name, plugin]));
     expect(byName.rsc.options).toEqual({
       serverHandler: false,

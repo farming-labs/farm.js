@@ -302,6 +302,14 @@ export interface FarmConfig {
      * @default false
      */
     optimizedBoundary?: boolean;
+    /**
+     * Packages whose named imports Farm rewrites to the modules their entry re-exports, on top of
+     * Farm's default list (lucide-react, date-fns, lodash-es, the icon sets, ...), so a page loads
+     * the icons it renders instead of the package's whole barrel. `false` turns the rewrite off.
+     *
+     * @default []
+     */
+    optimizePackageImports?: string[] | false;
   };
   vite?: any;
 }
