@@ -271,7 +271,10 @@ const sidebar = [
       {
         label: "Messaging",
         icon: "mail",
-        children: [{ label: "Resend", slug: "integrations/email", icon: "brand-resend" }],
+        children: [
+          { label: "Resend", slug: "integrations/email", icon: "brand-resend" },
+          { label: "Webhooks", slug: "integrations/webhooks", icon: "network" },
+        ],
       },
       {
         label: "Workflows",
