@@ -397,6 +397,7 @@ const sidebar = [
           { label: "StyleX", slug: "plugins/stylex", icon: "braces" },
           { label: "WebAssembly", slug: "plugins/wasm", icon: "box" },
           { label: "WebMCP", slug: "plugins/webmcp", icon: "sparkles" },
+          { label: "Web Vitals", slug: "plugins/web-vitals", icon: "activity" },
         ],
       },
       {
