@@ -240,6 +240,8 @@ export async function createFarmRscViteConfig(
         config: {
           preset: options.preset,
           outputDir: options.outputDir && resolveDeployOutputPath(root, options.outputDir),
+          // `compress: false` keeps responses as the app wrote them, as in Farm's other servers.
+          compress: config.compress !== false,
         },
       }),
     ],

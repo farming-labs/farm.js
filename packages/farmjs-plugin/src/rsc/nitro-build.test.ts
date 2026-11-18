@@ -150,7 +150,13 @@ export default {
       colors.green(ssr.render()) + ":" + fragment.html + ":" + (context?.clientAddress ?? "missing"),
     );
   },
-};`,
+};
+// What the real entry exports from core: the Nitro entry hands it the request and the response.
+export function farmCompressResponse(request, response) {
+  const headers = new Headers(response.headers);
+  headers.set("x-compressed-for", request.headers.get("accept-encoding") ?? "none");
+  return new Response(response.body, { status: response.status, headers });
+}`,
       );
       writeFileSync(
         path.join(ssrDir, "index.js"),
@@ -160,6 +166,8 @@ export function render() {
 }`,
       );
       writeFileSync(path.join(clientDir, "asset.txt"), "production-asset");
+      // Over Nitro's 1 KiB floor, so the build precompresses it for the Node server.
+      writeFileSync(path.join(clientDir, "large.txt"), "production-asset\n".repeat(200));
 
       const fixtureModules = path.join(fixtureRoot, "node_modules");
       mkdirSync(fixtureModules, { recursive: true });
@@ -189,6 +197,9 @@ export function render() {
         picocolors: expect.any(String),
         "rsc-html-stream": expect.any(String),
       });
+      // The Node server sends its static files itself, so the build precompresses them.
+      expect(existsSync(path.join(outputDir, "public", "large.txt.gz"))).toBe(true);
+      expect(existsSync(path.join(outputDir, "public", "asset.txt.gz"))).toBe(false);
 
       const isolatedOutput = path.join(isolatedRoot, ".output");
       cpSync(outputDir, isolatedOutput, { recursive: true });
@@ -232,6 +243,19 @@ export function render() {
       expect(body?.replace(/\u001b\[[0-9;]*m/g, "")).toMatch(
         /^standalone-rsc:<strong>native<\/strong>:(::ffff:)?127\.0\.0\.1$/,
       );
+      // The entry runs the renderer's compression export over the request and the response.
+      // Node's fetch asks for gzip (and deflate) by default.
+      expect(response?.headers.get("x-compressed-for")).toMatch(/gzip/);
+      const compressed = await fetch(`http://127.0.0.1:${port}/`, {
+        headers: { "accept-encoding": "br" },
+      });
+      expect(compressed.headers.get("x-compressed-for")).toBe("br");
+      // Nitro serves the precompressed file by Accept-Encoding.
+      const asset = await fetch(`http://127.0.0.1:${port}/large.txt`, {
+        headers: { "accept-encoding": "gzip" },
+      });
+      expect(asset.headers.get("content-encoding")).toBe("gzip");
+      expect(await asset.text()).toBe("production-asset\n".repeat(200));
     } finally {
       if (child) await stopProcess(child);
       rmSync(fixtureRoot, { recursive: true, force: true });
@@ -263,7 +287,8 @@ export function render() {
       });
     }
     if (url.pathname === "/about.rsc") {
-      return new Response("0:payload", { headers: { "content-type": "text/x-component" } });
+      // Over Nitro's 1 KiB floor, so the Node build precompresses the payload file.
+      return new Response("0:" + "payload".repeat(200), { headers: { "content-type": "text/x-component" } });
     }
     const headers = { "content-type": "text/html; charset=utf-8" };
     if (prerendering) headers["x-nitro-prerender"] = "%2Fabout.rsc";
@@ -287,7 +312,9 @@ export function render() {
       expect(readFileSync(path.join(publicDir, "about", "index.html"), "utf-8")).toBe(
         "<html>/about static</html>",
       );
-      expect(readFileSync(path.join(publicDir, "about.rsc"), "utf-8")).toBe("0:payload");
+      expect(readFileSync(path.join(publicDir, "about.rsc"), "utf-8")).toBe(
+        "0:" + "payload".repeat(200),
+      );
       // The seed route leaves nothing behind.
       expect(existsSync(path.join(publicDir, "__farm"))).toBe(false);
 
@@ -308,9 +335,18 @@ export function render() {
         }
       }
       expect(await about?.text()).toBe("<html>/about static</html>");
-      const payload = await fetch(`http://127.0.0.1:${port}/about.rsc`);
+      const payload = await fetch(`http://127.0.0.1:${port}/about.rsc`, {
+        headers: { "accept-encoding": "identity" },
+      });
       expect(payload.headers.get("content-type")).toContain("text/x-component");
-      expect(await payload.text()).toBe("0:payload");
+      expect(await payload.text()).toBe("0:" + "payload".repeat(200));
+      // The precompressed variant keeps the payload's type; Nitro alone would type it text/plain.
+      const compressedPayload = await fetch(`http://127.0.0.1:${port}/about.rsc`, {
+        headers: { "accept-encoding": "gzip" },
+      });
+      expect(compressedPayload.headers.get("content-encoding")).toBe("gzip");
+      expect(compressedPayload.headers.get("content-type")).toContain("text/x-component");
+      expect(await compressedPayload.text()).toBe("0:" + "payload".repeat(200));
       expect(await (await fetch(`http://127.0.0.1:${port}/other`)).text()).toBe(
         "<html>/other dynamic</html>",
       );

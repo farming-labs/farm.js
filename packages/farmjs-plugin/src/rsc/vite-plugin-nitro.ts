@@ -53,6 +53,8 @@ export interface NitroPluginOptions {
     preset?: string;
     /** Deployment output directory (default `.output`). */
     outputDir?: string;
+    /** Compress responses and precompress static files on Node runtimes (default true). */
+    compress?: boolean;
   };
   /** Base output dir when not using .nitro/vite/dist (fallback). */
   outDir?: string;
@@ -133,6 +135,7 @@ export default function nitro(options: NitroPluginOptions = {}): Plugin {
           serverEntryName,
           preset: options.config?.preset ?? process.env.NITRO_PRESET ?? "vercel",
           outputDir: options.config?.outputDir,
+          compress: options.config?.compress,
           clientAssetsDir,
         };
       }
@@ -152,6 +155,7 @@ export async function runNitroFromBuildApp(): Promise<void> {
         preset: string;
         clientAssetsDir?: string;
         outputDir?: string;
+        compress?: boolean;
       }
     | undefined;
   const bundle = (globalThis as any).__FARM_NITRO_SERVER_BUNDLE as Record<
@@ -188,6 +192,7 @@ async function runCapturedNitroBuild(
     preset: string;
     clientAssetsDir?: string;
     outputDir?: string;
+    compress?: boolean;
   },
   bundle: Record<
     string,
@@ -224,5 +229,6 @@ async function runCapturedNitroBuild(
     assetsDir: paths.clientAssetsDir ?? "assets",
     preset,
     outputDir: paths.outputDir,
+    compress: paths.compress,
   });
 }

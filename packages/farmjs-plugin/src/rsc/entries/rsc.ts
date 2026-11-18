@@ -383,7 +383,14 @@ ${mcpConfigImports}
 ${pluginsConfigImports}
 ${mcpSource ? `${mcpSource.importSource}\nimport { mergePluginAPIRoutes } from '@farm.js/core/api/runtime';` : ""}
 import { registerAPIRouteShape } from '@farm.js/core/api/runtime';
-import {
+${
+  ctx.workers
+    ? ""
+    : `// The Nitro entry compresses responses on Node runtimes with core's contract, bundled here so
+// the server output needs no core package of its own.
+export { compressFarmResponse as farmCompressResponse } from '@farm.js/core/internal/compression-runtime';
+`
+}import {
   renderToReadableStream,
 `;
   if (ctx.actionsEnabled) {

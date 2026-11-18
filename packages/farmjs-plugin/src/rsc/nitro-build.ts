@@ -291,7 +291,12 @@ export function waitForRscOutputs(
 }
 
 /** Write a physical entry file. Use relative imports so we can externalize and copy dist into output. */
-function writeRscEntryFile(buildDir: string, rendererPath: string, ssrPath?: string): string {
+function writeRscEntryFile(
+  buildDir: string,
+  rendererPath: string,
+  ssrPath?: string,
+  compress = false,
+): string {
   const resolvedRenderer = path.resolve(rendererPath);
   const resolvedSsr = ssrPath ? path.resolve(ssrPath) : null;
   // Relative to buildDir (.nitro) -> e.g. ../dist/rsc/index.js
@@ -319,6 +324,8 @@ function getFetchHandler(exports) {
 }
 
 const handler = getFetchHandler(entryExports);
+// Core's response compression, bundled into the RSC renderer on Node runtimes.
+const compressResponse = ${compress ? "entryExports.farmCompressResponse" : "undefined"};
 
 function createRscRequest(event) {
   const node = event.node;
@@ -361,10 +368,12 @@ function resolveClientAddress(event) {
 }
 
 export default defineEventHandler(async (event) => {
-  const response = await handler(createRscRequest(event), {
+  const request = createRscRequest(event);
+  let response = await handler(request, {
     waitUntil: (promise) => event.waitUntil(promise),
     clientAddress: resolveClientAddress(event),
   });
+  if (typeof compressResponse === "function") response = compressResponse(request, response);
   // H3's prepared headers override Response headers. Keep both the runtime's
   // fields (e.g. Accept-Encoding from static middleware) and the app's fields.
   const vary = [event.res.headers.get('vary'), response.headers.get('vary')]
@@ -390,6 +399,8 @@ export type BuildRscNitroOptions = {
   root: string;
   outputDir?: string;
   preset?: string;
+  /** Compress responses and precompress static files on Node runtimes (default true). */
+  compress?: boolean;
 };
 
 function listModuleFiles(dir: string): string[] {
@@ -627,6 +638,23 @@ function populateWorkerProcessEnv(serverDir: string): void {
   );
 }
 
+/**
+ * Nitro keeps a prerendered route's content type on its asset, but types the precompressed
+ * variant it writes next to it by file extension, which gives a `.rsc.gz` payload `text/plain`.
+ * Give each variant the route's type.
+ */
+function carryPrerenderTypesToCompressedAssets(nitro: unknown): void {
+  const meta = (nitro as { _prerenderMeta?: Record<string, { contentType?: string }> })
+    ._prerenderMeta;
+  if (!meta) return;
+  for (const [id, entry] of Object.entries(meta)) {
+    if (!entry?.contentType || /\.(?:gz|br|zst)$/.test(id)) continue;
+    for (const suffix of [".gz", ".br", ".zst"]) {
+      meta[id + suffix] ??= { contentType: entry.contentType };
+    }
+  }
+}
+
 export async function buildRscNitro(options: BuildRscNitroOptions): Promise<void> {
   const { rendererPath, publicDir, ssrPath, assetsDir, root, preset = "vercel" } = options;
   const outputDir = options.outputDir ?? path.join(root, ".output");
@@ -652,7 +680,10 @@ export async function buildRscNitro(options: BuildRscNitroOptions): Promise<void
     FARM_NODE_ENV_MODULE_SOURCE,
     "utf-8",
   );
-  const entryPath = writeRscEntryFile(buildDir, rendererPath, ssrPath);
+  // Responses are compressed on Node runtimes as in core's production server; a Workers build has
+  // no zlib and sits behind a platform that compresses.
+  const compress = options.compress !== false && !workers;
+  const entryPath = writeRscEntryFile(buildDir, rendererPath, ssrPath, compress);
   const registeredRuntimePackages = new Map(runtimePackagesByRoot.get(path.resolve(root)) ?? []);
   for (const [packageName, packageRoot] of detectBundledRscRuntimes(rendererPath)) {
     registeredRuntimePackages.set(packageName, packageRoot);
@@ -714,6 +745,10 @@ export async function buildRscNitro(options: BuildRscNitroOptions): Promise<void
     // only follows string-literal module specifiers. The entry is small, and the RSC and SSR
     // bundles aren't minified either way.
     minify: !workers,
+    // A self-hosted Node server sends its static files itself, so precompress them with gzip and
+    // let Nitro serve that by Accept-Encoding, as core's Nitro build does. Serverless and edge
+    // targets sit behind a CDN that compresses.
+    ...(compress && preset === "node-server" ? { compressPublicAssets: { gzip: true } } : {}),
   };
 
   if (ssrPath) {
@@ -737,6 +772,7 @@ export async function buildRscNitro(options: BuildRscNitroOptions): Promise<void
   } finally {
     unlinkRuntimePackages();
   }
+  if (config.compressPublicAssets) carryPrerenderTypesToCompressedAssets(nitro);
   await build(nitro);
   await nitro.close();
   // A Workers build includes its packages in the bundles, and Workers can't read node_modules.
