@@ -68,11 +68,14 @@ export interface FarmVercelRoute {
  * Farm keeps ISR routes server-handled, and the preset's catch-all targets a
  * function name Farm does not emit.
  *
- * Routing middleware (`runtime: "edge"` middleware in front of the pages it
- * guards) goes after the redirect and header routes and before `filesystem`,
- * so it decides a request before Vercel serves a static file. Routes that send
- * a prerendered page's other trailing-slash spelling to the server come next,
- * also ahead of the static files that would otherwise answer it.
+ * A matching route without `continue` ends Vercel's routing, and the preset
+ * gives each prerendered page a header route without it, so a later route for
+ * the same URL is never reached. Routing middleware (`runtime: "edge"`
+ * middleware in front of the pages it guards) therefore goes first, ahead of
+ * the page's header route and its static file, so it decides every request for
+ * the page. Routes that send a prerendered page's other trailing-slash spelling
+ * to the server follow the preset's routes, ahead of the static files that
+ * would otherwise answer it.
  */
 export function buildFarmVercelRoutes(options: {
   presetRoutes: FarmVercelRoute[];
@@ -90,8 +93,8 @@ export function buildFarmVercelRoutes(options: {
   const preservedSourceRoutes = sourceRoutes.filter((route) => route.continue !== true);
 
   return [
-    ...preservedSourceRoutes,
     ...middlewareRoutes,
+    ...preservedSourceRoutes,
     ...canonicalSlashRoutes,
     createFarmVercelImmutableAssetRoute(),
     { handle: "filesystem" },

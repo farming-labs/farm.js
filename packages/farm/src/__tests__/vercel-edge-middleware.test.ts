@@ -8,7 +8,7 @@ import { build } from "../build";
 import { loadConfig, resolveConfig } from "../config";
 import { resolveFarmI18nConfig } from "../i18n/config";
 import { createFarmVercelEdgeMiddleware } from "../middleware/vercel-edge";
-import { buildFarmVercelRoutes } from "../nitro/vercel-assets";
+import { buildFarmVercelRoutes, type FarmVercelRoute } from "../nitro/vercel-assets";
 import { createFarmVercelEdgeMiddlewareRoutes } from "../nitro/vercel-edge-middleware";
 
 const packageRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
@@ -194,23 +194,45 @@ describe("Vercel edge middleware route", () => {
     }
   });
 
-  it("runs before Vercel serves static files", () => {
+  it("runs before any route that would end routing for a page it guards", () => {
     const [middleware] = createFarmVercelEdgeMiddlewareRoutes(["/docs/guide"]);
     const routes = buildFarmVercelRoutes({
       presetRoutes: [
+        // Nitro gives each prerendered page a header route without `continue`.
+        { src: "/docs/guide", headers: { "cache-control": "private, no-store" } },
         { src: "/redirected", status: 307, headers: { Location: "/" } },
         { handle: "filesystem" },
       ],
       runtimeRoutes: [],
       middlewareRoutes: [middleware!],
     });
-    const middlewareIndex = routes.indexOf(middleware!);
-    expect(middlewareIndex).toBe(1);
-    expect(middlewareIndex).toBeLessThan(
-      routes.findIndex((route) => route.handle === "filesystem"),
-    );
+    for (const pathname of ["/docs/guide", "/docs/guide/", "/docs/guide/index.html"]) {
+      expect(vercelRunsMiddlewareFor(routes, pathname), pathname).toBe(true);
+    }
+    // The preset's routes are kept, in their order.
+    expect(routes.filter((route) => route.src === "/docs/guide" || route.status === 307)).toEqual([
+      { src: "/docs/guide", headers: { "cache-control": "private, no-store" } },
+      { src: "/redirected", status: 307, headers: { Location: "/" } },
+    ]);
   });
 });
+
+/**
+ * Whether Vercel runs routing middleware for a plain page request before its routing ends. Vercel
+ * stops at the first matching route without `continue`, even one that only sets headers, so every
+ * route after it is skipped. Routes with `has` conditions are skipped: the request sends no headers.
+ */
+function vercelRunsMiddlewareFor(routes: FarmVercelRoute[], pathname: string): boolean {
+  for (const route of routes) {
+    if (route.handle) return false;
+    if (!route.src || route.has) continue;
+    const src = `${route.src.startsWith("^") ? "" : "^"}${route.src}${route.src.endsWith("$") ? "" : "$"}`;
+    if (!new RegExp(src).test(pathname)) continue;
+    if (route.middlewarePath) return true;
+    if (!route.continue) return false;
+  }
+  return false;
+}
 
 async function createGuardedDocsFixture(): Promise<string> {
   const root = await fs.mkdtemp(path.join(packageRoot, ".tmp-vercel-edge-middleware-"));
@@ -311,6 +333,16 @@ describe('runtime: "edge" middleware in a Vercel build', () => {
       expect(middlewareSrc.test("/docs/guide")).toBe(true);
       expect(middlewareSrc.test("/docs/guide/index.html")).toBe(true);
       expect(middlewareSrc.test("/about")).toBe(false);
+      // Every URL that answers with the page reaches the guard before a route ends routing.
+      for (const pathname of [
+        "/docs/guide",
+        "/docs/guide/",
+        "/docs/guide/index.html",
+        "/docs/guide.html",
+      ]) {
+        expect(vercelRunsMiddlewareFor(routes, pathname), pathname).toBe(true);
+      }
+      expect(vercelRunsMiddlewareFor(routes, "/about")).toBe(false);
       // No shared cache keeps the guarded page for the next visitor.
       const guideHeaders = routes.find(
         (route: { src?: string; headers?: Record<string, string> }) =>
