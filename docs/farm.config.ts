@@ -24,6 +24,9 @@ export default defineConfig({
   docs: {
     enabled: true,
     adapter: farmDocsRuntimeAdapter,
+    // Docs content changes only with a deploy, so the pages are built once and served as
+    // static files. Markdown, search, llms.txt, and MCP stay on the server.
+    prerender: true,
   },
   // /openapi.json describes the public API. The reference page lives at /openapi: the
   // default /docs/reference is a docs page, and the docs engine keeps /api-reference
