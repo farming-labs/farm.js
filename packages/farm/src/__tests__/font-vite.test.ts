@@ -5,6 +5,7 @@ import fs from "node:fs/promises";
 import { createServer as createHttpServer } from "node:http";
 import os from "node:os";
 import path from "node:path";
+import { fileURLToPath } from "node:url";
 import { build, createServer, type Plugin, type Rollup } from "vite";
 import { describe, expect, it, vi } from "vitest";
 import {
@@ -593,5 +594,47 @@ describe("font call detection", () => {
     });
     expect(result).toBe(null);
     expect(parse).not.toHaveBeenCalled();
+  });
+
+  it("skips the modules of the running Farm build, which define the loaders", async () => {
+    const parse = vi.fn(() => {
+      throw new Error("parsed");
+    });
+    // Shaped like a chunk of @farm.js/core/dist that the development SSR runner transforms: it
+    // generates code that imports a loader, which only text-matching sees as an import.
+    const result = await transformFarmFontCalls({
+      code:
+        'import { overlay } from "@farm.js/core/internal/client-error-overlay";\n' +
+        "const runtime = 'export { localFont, remoteFont } from \"@farm.js/core/font\";';\n" +
+        "export function localFont(options) { return overlay(options); }\n" +
+        "export function remoteFont(options) { return overlay(options); }\n",
+      // A module beside the one under test, as a chunk of the running core build is.
+      id: fileURLToPath(new URL("../chunk-fonts.mjs", import.meta.url)),
+      root: "/app",
+      production: false,
+      parse,
+      register: vi.fn(),
+    });
+    expect(result).toBe(null);
+    expect(parse).not.toHaveBeenCalled();
+  });
+
+  it("parses every import form of a loader", async () => {
+    for (const code of [
+      'import {\n  localFont,\n} from "@farm.js/core/font";\nexport const a = localFont({});',
+      "import * as fonts from '@farm.js/core';\nexport const a = fonts.remoteFont({});",
+      'import{localFont as l}from"@farm.js/core";export const a=l({});',
+    ]) {
+      const parse = vi.fn(() => ({ type: "Program", body: [] }));
+      await transformFarmFontCalls({
+        code,
+        id: "/app/src/fonts.ts",
+        root: "/app",
+        production: false,
+        parse,
+        register: vi.fn(),
+      });
+      expect(parse, code).toHaveBeenCalledTimes(1);
+    }
   });
 });
