@@ -495,6 +495,47 @@ describe("incremental dev replans", () => {
     expect(reads).toContain(path.join(root, "src", "app", "about", "page.tsx"));
   });
 
+  it("replans after an edit to a linked workspace package, resolving each package link once", async () => {
+    const { root } = createProject();
+    const badge = path.join(root, "workspace", "linked-ui", "index.js");
+    writeFiles(root, {
+      "workspace/linked-ui/package.json": JSON.stringify({ name: "linked-ui", main: "./index.js" }),
+      "workspace/linked-ui/index.js": "export function Badge() { return null; }\n",
+      "src/app/linked/page.tsx":
+        'import { Badge } from "linked-ui";\nexport default function Linked() { return <Badge />; }\n',
+    });
+    fs.symlinkSync(path.dirname(badge), path.join(root, "node_modules", "linked-ui"), "junction");
+    const config = await resolveConfig({ root, srcDir: "src" }, "development");
+    const fresh = async () => {
+      const manager = new RouteManager(config);
+      await manager.discoverRoutes();
+      return manager.generateClientManifest(root);
+    };
+    const routeManager = new RouteManager(config);
+    await routeManager.discoverRoutes();
+    routeManager.trackSourceChanges();
+    const realpaths: string[] = [];
+    const realpathSync = fs.realpathSync;
+    vi.spyOn(fs, "realpathSync").mockImplementation(((file: fs.PathLike, ...rest: []) => {
+      realpaths.push(String(file));
+      return realpathSync.call(fs, file, ...rest);
+    }) as typeof fs.realpathSync);
+    const planned = routeManager.generateClientManifest(root);
+    vi.restoreAllMocks();
+    // The plan read every file of ui-kit's icon barrel, and resolved only the package directory.
+    const uiKit = path.join(root, "node_modules", "ui-kit");
+    expect(realpaths.filter((file) => file.startsWith(`${uiKit}${path.sep}`))).toEqual([]);
+
+    fs.writeFileSync(
+      badge,
+      '"use client";\nexport const island = "idle";\nexport function Badge() { return null; }\n',
+    );
+    routeManager.noteSourceChange(badge, "update");
+    const replanned = routeManager.regenerateClientManifest(root);
+    expect(replanned).not.toEqual(planned);
+    expect(replanned).toEqual(await fresh());
+  });
+
   it("replans every route module without tracking", async () => {
     const { root, routeManager } = await plannedProject();
     const config = await resolveConfig({ root, srcDir: "src" }, "development");
