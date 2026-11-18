@@ -4885,7 +4885,7 @@ function reviveServerPageProps(serverProps) {
     : serverProps;
 }
 
-async function createMatchedHydrationRoute(matched, pathname, searchParams, serverHtml, serverProps, layoutSource) {
+async function createMatchedHydrationRoute(matched, pathname, searchParams, navigationPage, serverProps, layoutSource) {
   const hydrateLayouts = hasHydratableLayout(pathname);
   const params = matched.params;
   let pageElement = null;
@@ -4922,20 +4922,23 @@ async function createMatchedHydrationRoute(matched, pathname, searchParams, serv
       pageElement = React.createElement(Component, props);
     }
   } else if (hydrateLayouts) {
+    // A navigation passes the page element of the document it fetched, read as it is rather
+    // than serialized and parsed again; hydration reads the page in this document.
     const serverPage = document.getElementById("__farm_page__");
-    const pageSource = typeof serverHtml === "string" ? serverHtml : serverPage;
+    const pageSource = navigationPage === undefined ? serverPage : navigationPage;
     const serverTree = pageSource ? await createFarmServerTreePageElement(pageSource, pathname) : null;
     // A payload-only page (islands mode) has no HTML to fall back to: fetch the whole document.
-    if (!serverTree && typeof serverHtml === "string" && serverHtml.includes('<script type="f/tree" partial')) {
+    if (
+      !serverTree &&
+      pageSource &&
+      pageSource !== serverPage &&
+      pageSource.querySelector('script[type="f/tree"][partial]')
+    ) {
       return null;
     }
     pageElement = serverTree
       ? createLayoutPageBoundary(matched.route, serverTree)
-      : createLayoutPageBoundary(
-          matched.route,
-          null,
-          typeof serverHtml === "string" ? serverHtml : serverPage ? serverPage.innerHTML : "",
-        );
+      : createLayoutPageBoundary(matched.route, null, pageSource ? pageSource.innerHTML : "");
   }
 
   if (!pageElement) return null;
@@ -5972,7 +5975,7 @@ ${
         matched,
         newPathname,
         searchParamsToObject(targetUrl.searchParams),
-        nextPage.innerHTML,
+        nextPage,
         nextPageProps,
         newRoot,
       );
@@ -5996,7 +5999,7 @@ ${
         matched,
         newPathname,
         searchParams,
-        nextPage ? nextPage.innerHTML : "",
+        nextPage,
         nextPageProps,
         newRoot,
       );
