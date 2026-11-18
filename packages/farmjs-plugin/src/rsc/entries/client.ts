@@ -66,6 +66,11 @@ export function generateClientEntry(ctx: EntryContext): string {
   query: '?url',
 });
 export const farmGlobalStylesheet = Object.values(farmGlobalStylesheets)[0];
+// An edit keeps the stylesheet's URL and Vite refreshes the <link> itself, so this module need
+// not re-run. Without the accept the edit propagates here, the entry, and reloads the page.
+if (import.meta.hot) {
+  import.meta.hot.accept(${JSON.stringify(`${ctx.globalCssPath}?url`)}, () => {});
+}
 `
     : "";
   let imports = `${globalStylesheetImport}
