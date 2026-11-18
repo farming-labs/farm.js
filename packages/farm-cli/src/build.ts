@@ -6,6 +6,7 @@ import {
   resolveDeployConfig,
   validateFarmDesktopConfig,
 } from "@farm.js/core/internal/config-runtime";
+import { writeFarmStartManifest } from "@farm.js/core/internal/start-manifest";
 import { withProductionNodeEnv } from "@farm.js/core/internal/production-node-env";
 import { ensureFarmRscPackages } from "./rsc-packages";
 
@@ -71,6 +72,7 @@ export async function buildFarm(options: BuildFarmOptions = {}) {
           preset: deploy.preset,
           outputDir: deploy.outputDir,
         });
+        await writeFarmStartManifest(root, deploy);
         return;
       }
 
@@ -94,6 +96,9 @@ export async function buildFarm(options: BuildFarmOptions = {}) {
         root,
         productionVite: productionViteResult.value,
       });
+      // Written here rather than in core's build, which `--desktop` and `--mobile` also call
+      // for output `farm start` must not serve.
+      await writeFarmStartManifest(root, config.deploy);
     });
   } catch (error: any) {
     logger.error(`❌ Build failed: ${error.message}`);

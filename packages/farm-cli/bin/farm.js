@@ -317,8 +317,8 @@ program
   .option("-H, --host <host>", "Host for the server to bind to")
   .action(async (options) => {
     try {
-      const { startFarm } = require("../dist/index.js");
-      await startFarm(options);
+      const { startFarmCli } = require("../dist/start.js");
+      await startFarmCli(options);
     } catch (error) {
       const code = error?.name === "FarmStartError" ? ` [${error.code}]` : "";
       const message = error instanceof Error ? error.message : String(error);

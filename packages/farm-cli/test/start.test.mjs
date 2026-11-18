@@ -132,3 +132,41 @@ test("reports missing build output and hints at farm build", async () => {
     });
   });
 });
+
+test("the CLI starts the built entry in its own process without evaluating config", async () => {
+  await withTempRoot("farm-start-built-", async (root) => {
+    await mkdir(path.join(root, ".farm"));
+    await mkdir(path.join(root, "out/server"), { recursive: true });
+    await writeFile(
+      path.join(root, ".farm/start.json"),
+      JSON.stringify({ version: 1, preset: "node-server", target: "node", outputDir: "out" }),
+    );
+    await writeFile(
+      path.join(root, "farm.config.mjs"),
+      'throw new Error("evaluated config at startup")',
+    );
+    await writeFile(
+      path.join(root, ".env.production"),
+      "FARM_TEST_BASE=build\nFARM_TEST_EXPANDED=${FARM_TEST_BASE}-env\n",
+    );
+    await writeFile(
+      path.join(root, "out/server/index.mjs"),
+      "console.log(JSON.stringify([process.pid, process.cwd(), process.argv.slice(1), process.env.NITRO_PORT, process.env.FARM_TEST_EXPANDED]));",
+    );
+    const { spawnSync } = await import("node:child_process");
+    const result = spawnSync(
+      process.execPath,
+      [require.resolve("../bin/farm.js"), "start", "--root", root, "--port", "4567"],
+      { encoding: "utf8", env: { ...process.env, FARM_TELEMETRY_DISABLED: "1" } },
+    );
+    assert.equal(result.status, 0, result.stderr);
+    const { realpathSync } = await import("node:fs");
+    assert.deepEqual(JSON.parse(result.stdout.trim().split("\n").at(-1)), [
+      result.pid,
+      realpathSync(root),
+      [path.join(root, "out/server/index.mjs")],
+      "4567",
+      "build-env",
+    ]);
+  });
+});

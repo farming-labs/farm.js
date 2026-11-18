@@ -220,6 +220,9 @@
       "internal/build-runtime": [
         "./dist/internal/build-runtime.d.ts"
       ],
+      "internal/start-manifest": [
+        "./dist/internal/start-manifest.d.ts"
+      ],
       "internal/config-runtime": [
         "./dist/internal/config-runtime.d.ts"
       ],
@@ -800,6 +803,11 @@
       "types": "./dist/internal/build-runtime.d.ts",
       "import": "./dist/internal/build-runtime.mjs",
       "require": "./dist/internal/build-runtime.cjs"
+    },
+    "./internal/start-manifest": {
+      "types": "./dist/internal/start-manifest.d.ts",
+      "import": "./dist/internal/start-manifest.mjs",
+      "require": "./dist/internal/start-manifest.cjs"
     },
     "./internal/config-runtime": {
       "types": "./dist/internal/config-runtime.d.ts",
