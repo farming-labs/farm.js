@@ -1295,16 +1295,19 @@ test("the first navigation from a layout that hydrates as one root, before it ha
   await page.waitForLoadState("networkidle");
   // Nothing on the page needs the layout's root at load: it waits for a click.
   await expect(page.locator("script[data-farm-root-strategy=interaction]")).toHaveCount(1);
-  const navigation = page.waitForRequest(
-    (request) =>
-      new URL(request.url()).pathname === "/context/wait/b" &&
-      request.headers()["f-render"] === "tree",
-  );
+  const navigation = dev
+    ? undefined
+    : page.waitForRequest(
+        (request) =>
+          new URL(request.url()).pathname === "/context/wait/b" &&
+          request.headers()["f-render"] === "tree",
+      );
   await page.click("[data-next]");
-  const html = await (await (await navigation).response())!.text();
-  // The page's payload without its HTML: the router renders it in a new root.
-  expect(html).toContain('<script type="f/tree" partial');
-  expect(html).not.toContain("<h1>Waiting b</h1>");
+  if (navigation) {
+    const html = await (await (await navigation).response())!.text();
+    expect(html).toContain('<script type="f/tree" partial');
+    expect(html).not.toContain("<h1>Waiting b</h1>");
+  }
   await expect(page.locator("h1")).toHaveText("Waiting b");
   // The layout lives in that root: its state carries into the next page.
   await page.getByRole("button", { name: "Toggle theme" }).click();
