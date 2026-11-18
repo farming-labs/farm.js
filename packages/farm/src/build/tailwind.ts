@@ -18,6 +18,20 @@ export const TAILWIND_VITE_INSTALL_HINT = formatOptionalPeerInstallHint(
 let warnedMissingTailwind = false;
 
 /**
+ * The browsers Tailwind CSS 4 supports (https://tailwindcss.com/docs/compatibility#browser-support).
+ * Its output relies on cascade layers, `@property` and `color-mix()`, so lowering it for older
+ * browsers only adds bytes, such as `-webkit-any` and `-moz-any` copies of every `:is()` rule.
+ */
+export const TAILWIND_CSS_BROWSER_TARGET = ["chrome111", "safari16.4", "firefox128"];
+
+/** Whether a Vite plugin option contains `@tailwindcss/vite`, which only Tailwind CSS 4 ships. */
+export function includesTailwindVitePlugin(option: unknown): boolean {
+  if (Array.isArray(option)) return option.some(includesTailwindVitePlugin);
+  const name = (option as { name?: unknown } | null | undefined)?.name;
+  return typeof name === "string" && name.startsWith("@tailwindcss/vite");
+}
+
+/**
  * Farm enables Tailwind out of the box when the app has no PostCSS config of
  * its own. `@tailwindcss/vite` is an optional peer: when it is not installed,
  * the app keeps building without Tailwind, and the first stylesheet that

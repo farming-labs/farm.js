@@ -410,6 +410,19 @@ them from there to your error tracker. RSC apps built with `@farm.js/plugin/rsc`
 `build.sourcemap` in `vite.config.ts`, writing the maps to `dist/client-sourcemaps/` beside
 `dist/client/`.
 
+Production client JavaScript targets Chrome 87, Edge 88, Firefox 78 and Safari 14. When Farm's
+client build includes `@tailwindcss/vite`, the stylesheet instead targets
+[Tailwind CSS 4's browsers](https://tailwindcss.com/docs/compatibility#browser-support) (Chrome
+111, Safari 16.4, Firefox 128), which its output already requires. Lowering it further only adds
+bytes, such as a `-webkit-any` and a `-moz-any` copy of every `:is()` rule. Set
+`vite.build.cssTarget`, or `vite.build.target` for both, to choose other browsers:
+
+```ts
+export default defineConfig({
+  vite: { build: { cssTarget: ["chrome87", "safari14"] } },
+});
+```
+
 During development, Farm loads server modules through Vite's `ssr` environment runner. With
 React Server Components enabled, RSC entries use a separate `rsc` runner and resolution conditions;
 the browser uses `client`. Vite owns runner caching, hot updates, and cleanup when the server closes.
