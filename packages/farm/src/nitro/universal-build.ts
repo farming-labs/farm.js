@@ -266,7 +266,11 @@ import {
   generateFarmIntegrationProviderServerModules,
 } from "../integration-provider-build";
 import { loadFarmProductionVite, type FarmProductionViteRuntime } from "../build/production-vite";
-import { loadTailwindVitePlugin } from "../build/tailwind";
+import {
+  includesTailwindVitePlugin,
+  loadTailwindVitePlugin,
+  TAILWIND_CSS_BROWSER_TARGET,
+} from "../build/tailwind";
 import {
   precompileFarmMarkdownPages,
   type FarmMarkdownPrecompile,
@@ -2570,6 +2574,14 @@ async function buildClient(
           // Preserve Farm's Vite 5 browser baseline when the production builder
           // uses Vite 8, whose default target only covers newer browsers.
           target: FARM_CLIENT_BUILD_TARGET,
+          // Tailwind CSS 4 already requires newer browsers than that baseline. An app's own
+          // `build.target` or `build.cssTarget` still decides, as Vite derives one from the other.
+          ...(config.vite?.build?.target === undefined &&
+          config.vite?.build?.cssTarget === undefined &&
+          (includesTailwindVitePlugin(tailwindVitePlugin) ||
+            includesTailwindVitePlugin(config.vite?.plugins))
+            ? { cssTarget: TAILWIND_CSS_BROWSER_TARGET }
+            : {}),
           outDir: outputDir,
           emptyOutDir: platform === "web",
           // Never public: see resolveFarmClientSourcemap.
