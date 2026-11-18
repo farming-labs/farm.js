@@ -161,7 +161,8 @@ Figures are plain SVG drawn from a small kit in `docs/src/components/iso/` (`sce
 
 - **Mark.** Three-tone stacked bars: `#0a0a0a`, `#666666`, `#a3a3a3` on light, and `#f5f5f4`, `#a3a3a3`, `#595959` on dark ([`farming-labs-mark.svg`](https://github.com/farming-labs/farm.js/blob/main/.github/assets/farming-labs-mark.svg)).
 - **Lockup.** The mark with a monospace `FARM` wordmark and `.JS` at 52% opacity ([`farmjs-lockup.svg`](https://github.com/farming-labs/farm.js/blob/main/.github/assets/farmjs-lockup.svg)).
-- **Avatar and favicon.** The dark mark centred on a 512px `#0A0A0A` square with 64px corners ([`farmjs-avatar.svg`](https://github.com/farming-labs/farm.js/blob/main/.github/assets/farmjs-avatar.svg)).
+- **Avatar.** The dark mark centred on a 512px `#0A0A0A` square with 64px corners ([`farmjs-avatar.svg`](https://github.com/farming-labs/farm.js/blob/main/.github/assets/farmjs-avatar.svg)).
+- **Favicon.** The three-tone dark mark on a light rounded square, shared with [docs.farming-labs.dev](https://docs.farming-labs.dev/favicon.ico). `/favicon.ico` contains 16px, 32px, and 48px variants for browser tabs.
 - **Name.** Write "Farm.js" in prose. "FARM.JS" appears only inside uppercase mono labels and the wordmark.
 
 ## Icons
