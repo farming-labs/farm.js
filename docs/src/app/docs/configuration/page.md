@@ -1005,6 +1005,35 @@ export default defineConfig({
 See [Cache and PPR](/docs/cache-ppr) for shell caching, Suspense holes, invalidation, and
 observability events.
 
+## Package import optimization
+
+Some packages export everything from one entry module: `lucide-react` re-exports about 4,800 icon
+modules, `date-fns` and `lodash-es` hundreds of functions. In the server environments, Farm rewrites named
+imports of such packages to the module each name comes from, so `import { Zap } from "lucide-react"`
+loads one icon module instead of the barrel. In a server components app every package that depends
+on React runs through Vite there, where the barrel otherwise costs seconds on the first request of
+`farm dev` and is parsed again by every build. The browser keeps the package as written: Vite
+pre-bundles and tree-shakes it there, and a deep import would bypass that.
+
+Farm optimizes the packages Next.js optimizes by default (`lucide-react`, `date-fns`, `lodash-es`,
+`ramda`, `@mui/material`, `@mui/icons-material`, `@headlessui/react`, `@heroicons/react/*`,
+`@tabler/icons-react`, `react-icons/*`, `recharts`, `rxjs`, `effect`, ...). Add your own with
+`experimental.optimizePackageImports`, or set it to `false` to keep every import as written:
+
+```ts
+export default defineConfig({
+  experimental: {
+    optimizePackageImports: ["@acme/icons"],
+  },
+});
+```
+
+A package qualifies when its entry is an ES module whose exports are all re-exports, or when it
+declares `sideEffects: false`, so skipping the entry changes nothing. Farm leaves a package alone
+when its entry resolves through a condition that differs between the browser and the server
+(`browser`, `node`, `react-server`, ...), and leaves an import alone when the barrel does not
+re-export that name, so the rewrite never changes which module a name resolves to.
+
 ## Images
 
 Farm optimizes local and allowlisted remote images through the same runtime on development and production deployments.
