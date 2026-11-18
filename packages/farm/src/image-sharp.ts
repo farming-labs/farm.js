@@ -1,10 +1,11 @@
 import type { ResolvedFarmImageConfig } from "./image-config";
 import {
   FarmImageRequestError,
-  isPrivateImageAddress,
   selectOutputFormat,
   type FarmImageTransformer,
 } from "./image-server";
+import { isConnectLookupSupported } from "./connect-lookup-support";
+import { createSafeFetch, isPrivateAddress, SafeFetchError } from "./safe-fetch";
 
 type NodeImageDnsLookup = (
   hostname: string,
@@ -84,7 +85,7 @@ export function createNodeImageUrlValidator(config: ResolvedFarmImageConfig) {
         "Could not safely resolve the image source",
       );
     }
-    if (addresses.length === 0 || addresses.some(({ address }) => isPrivateImageAddress(address))) {
+    if (addresses.length === 0 || addresses.some(({ address }) => isPrivateAddress(address))) {
       throw new FarmImageRequestError("PRIVATE_SOURCE", 400, "Private image source is not allowed");
     }
   };
@@ -93,111 +94,65 @@ export function createNodeImageUrlValidator(config: ResolvedFarmImageConfig) {
 /**
  * Create a remote image fetcher whose socket lookup rejects private addresses.
  * Validation and connection share this lookup, closing the DNS-rebinding gap
- * left by resolving a hostname before a separate global fetch.
+ * left by resolving a hostname before a separate global fetch. Built on
+ * `createSafeFetch`, with its refusals reported as image request errors.
  */
 export function createNodeImageFetcher(
   config: Pick<ResolvedFarmImageConfig, "dangerouslyAllowLocalIP">,
   lookup?: NodeImageDnsLookup,
 ): typeof globalThis.fetch {
   if (config.dangerouslyAllowLocalIP) return globalThis.fetch.bind(globalThis);
+  // Bun's `node:http` never calls `lookup`, so the check can't run at connect time there. The
+  // image handler still checks every hop's addresses first (`createNodeImageUrlValidator`),
+  // which is all that ran on Bun before.
+  if (!isConnectLookupSupported()) return globalThis.fetch.bind(globalThis);
 
-  return (async (input: RequestInfo | URL, init: RequestInit = {}) => {
-    const inputRequest = input instanceof Request ? input : undefined;
-    const url = input instanceof URL ? input : new URL(inputRequest?.url ?? String(input));
-    if (url.protocol !== "http:" && url.protocol !== "https:") {
-      throw new FarmImageRequestError("DISALLOWED_SOURCE", 400, "Unsupported image protocol");
-    }
-
-    const [{ request }, { Readable }, dns] = await Promise.all([
-      url.protocol === "https:" ? import("node:https") : import("node:http"),
-      import("node:stream"),
-      lookup ? Promise.resolve(null) : import("node:dns"),
-    ]);
-    const resolveHostname = lookup ?? (dns!.lookup as unknown as NodeImageDnsLookup);
-    const headers = new Headers(inputRequest?.headers);
-    new Headers(init.headers).forEach((value, name) => headers.set(name, value));
-    if (!headers.has("accept-encoding")) headers.set("accept-encoding", "identity");
-
-    return new Promise<Response>((resolve, reject) => {
-      const nodeRequest = request(
-        url,
-        {
-          method: init.method ?? inputRequest?.method ?? "GET",
-          headers: Object.fromEntries(headers.entries()),
-          signal: init.signal ?? inputRequest?.signal,
-          lookup(hostname, options, callback) {
-            resolveHostname(hostname, { all: true, verbatim: true }, (error, addresses) => {
-              if (error) {
-                callback(error, "", 4);
-                return;
-              }
-              if (
-                addresses.length === 0 ||
-                addresses.some(({ address }) => isPrivateImageAddress(address))
-              ) {
-                callback(
-                  new FarmImageRequestError(
-                    "PRIVATE_SOURCE",
-                    400,
-                    "Private image source is not allowed",
-                  ),
-                  "",
-                  4,
-                );
-                return;
-              }
-
-              if (options.all) {
-                (
-                  callback as unknown as (
-                    error: null,
-                    addresses: Array<{ address: string; family: number }>,
-                  ) => void
-                )(null, addresses);
-                return;
-              }
-              const address = addresses[0]!;
-              callback(null, address.address, address.family);
+  const fetchSafely = createSafeFetch({
+    lookup: lookup
+      ? (hostname) =>
+          new Promise((resolve, reject) => {
+            lookup(hostname, { all: true, verbatim: true }, (error, addresses) => {
+              if (error) reject(error);
+              else resolve(addresses);
             });
-          },
-        },
-        (nodeResponse) => {
-          const status = nodeResponse.statusCode ?? 500;
-          if (status < 200 || status > 599) {
-            nodeResponse.resume();
-            reject(
-              new FarmImageRequestError(
-                "UNSUPPORTED_IMAGE",
-                502,
-                "Image source returned an invalid HTTP status",
-              ),
-            );
-            return;
-          }
-          const responseHeaders = new Headers();
-          for (let index = 0; index < nodeResponse.rawHeaders.length; index += 2) {
-            responseHeaders.append(
-              nodeResponse.rawHeaders[index]!,
-              nodeResponse.rawHeaders[index + 1]!,
-            );
-          }
-          const body =
-            status === 204 || status === 205 || status === 304
-              ? null
-              : (Readable.toWeb(nodeResponse) as ReadableStream);
-          resolve(
-            new Response(body, {
-              status,
-              statusText: nodeResponse.statusMessage,
-              headers: responseHeaders,
-            }),
-          );
-        },
-      );
-      nodeRequest.once("error", reject);
-      nodeRequest.end();
-    });
+          })
+      : undefined,
+  });
+
+  return (async (input: RequestInfo | URL, init?: RequestInit) => {
+    try {
+      return await fetchSafely(input, init);
+    } catch (error) {
+      throw toImageRequestError(error);
+    }
   }) as typeof globalThis.fetch;
+}
+
+function toImageRequestError(error: unknown): unknown {
+  if (!(error instanceof SafeFetchError)) return error;
+  switch (error.code) {
+    case "ADDRESS_BLOCKED":
+      return new FarmImageRequestError(
+        "PRIVATE_SOURCE",
+        400,
+        "Private image source is not allowed",
+      );
+    case "INVALID_URL":
+    case "PROTOCOL_NOT_ALLOWED":
+    case "CREDENTIALS_IN_URL":
+    case "PORT_NOT_ALLOWED":
+      return new FarmImageRequestError("DISALLOWED_SOURCE", 400, "Unsupported image protocol");
+    case "INVALID_RESPONSE":
+      return new FarmImageRequestError(
+        "UNSUPPORTED_IMAGE",
+        502,
+        "Image source returned an invalid HTTP status",
+      );
+    default:
+      // A DNS failure or a missing runtime module is an operational error, reported through
+      // the handler's `onError` as it was before.
+      return error;
+  }
 }
 
 function throwIfAborted(signal: AbortSignal): void {

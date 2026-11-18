@@ -172,7 +172,7 @@ replace that response with a `500`.
 Formats explicitly rejected with `q=0` are never emitted. Farm uses the configured format order to
 break equal-quality ties and keeps the source format when the client only sends wildcard ranges.
 
-SVG optimization and private-network sources are disabled by default. Every optimized response carries `Content-Security-Policy: default-src 'none'; sandbox` and `X-Content-Type-Options: nosniff`, and a transformer's result (including Cloudflare's) is served only when it is a single PNG, JPEG, GIF, WebP, or AVIF type and its bytes match that type. `dangerouslyAllowSVG` lets SVG through under the same policy but should still be enabled only for trusted files. `dangerouslyAllowLocalIP` is intended for controlled private deployments and weakens SSRF protection.
+SVG optimization and private-network sources are disabled by default. Every optimized response carries `Content-Security-Policy: default-src 'none'; sandbox` and `X-Content-Type-Options: nosniff`, and a transformer's result (including Cloudflare's) is served only when it is a single PNG, JPEG, GIF, WebP, or AVIF type and its bytes match that type. `dangerouslyAllowSVG` lets SVG through under the same policy but should still be enabled only for trusted files. `dangerouslyAllowLocalIP` is intended for controlled private deployments and weakens SSRF protection. Remote sources are fetched with [`safeFetch`](/docs/safe-fetch), which checks each address when it connects and on every redirect; on Bun, where that check can't run, each hop's addresses are checked before the request instead.
 
 ## Deployment providers
 

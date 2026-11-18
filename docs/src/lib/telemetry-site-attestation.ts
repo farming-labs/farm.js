@@ -6,7 +6,7 @@ import {
   normalizeFarmProductionSiteOrigin,
   type FarmProductionSiteAttestation,
 } from "../../../packages/farm/src/product-telemetry";
-import { createNodeImageFetcher } from "../../../packages/farm/src/image-sharp";
+import { createSafeFetch } from "../../../packages/farm/src/safe-fetch";
 
 const MAX_ATTESTATION_BYTES = 4 * 1024;
 const ATTESTATION_TIMEOUT_MS = 2_000;
@@ -25,7 +25,7 @@ type VerifyFarmProductionSiteAttestationOptions = {
   timeoutMs?: number;
 };
 
-const fetchPublicOrigin = createNodeImageFetcher({ dangerouslyAllowLocalIP: false });
+const fetchPublicOrigin = createSafeFetch();
 
 export async function verifyFarmProductionSiteAttestation(
   siteUrl: string,
