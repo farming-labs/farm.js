@@ -262,8 +262,10 @@ import {
 import {
   invalidateFarmClientOnlyScan,
   farmRelativeImportFiles,
+  persistPackageScanCache,
   rewriteFarmReactServerClientModuleImports,
   rewriteFarmReactServerImports,
+  usePackageScanCacheFile,
 } from "./islands-react-server-exports";
 import {
   FARM_REACT_CACHE_MODULE,
@@ -603,6 +605,11 @@ export function farmServerOnlyEntriesPlugin(
      * and a build's own Vite server, which load the project's modules, set it; bundling does not.
      */
     prebundleServerPackages?: boolean;
+    /**
+     * The app's `distDir`. Package scans are saved under it and reused by later runs while the
+     * packages are unchanged; without it each process scans them again.
+     */
+    distDir?: string;
   } = {},
 ): Plugin {
   let root = process.cwd();
@@ -611,9 +618,17 @@ export function farmServerOnlyEntriesPlugin(
     name: "farm:server-only-entries",
     enforce: "pre",
     config(config) {
-      const bundledPackages = collectFarmServerBundledPackageInfo(
-        path.resolve(config.root ?? process.cwd()),
-      );
+      const appRoot = path.resolve(config.root ?? process.cwd());
+      if (options.distDir) {
+        usePackageScanCacheFile(
+          path.resolve(appRoot, options.distDir, "cache", "package-scans.json"),
+        );
+      }
+      const bundledPackages = collectFarmServerBundledPackageInfo(appRoot);
+      const prebundle = options.prebundleServerPackages
+        ? createFarmServerPrebundleConfig(bundledPackages)
+        : {};
+      persistPackageScanCache();
       return {
         optimizeDeps: { rolldownOptions: { plugins: [farmBrowserBuiltinsOptimizerPlugin()] } },
         ssr: {
@@ -623,9 +638,7 @@ export function farmServerOnlyEntriesPlugin(
             // Packages Node cannot load as a bundler does (stylesheet imports, `module`-only ESM).
             ...bundledPackages.map(({ name }) => name),
           ],
-          ...(options.prebundleServerPackages
-            ? createFarmServerPrebundleConfig(bundledPackages)
-            : {}),
+          ...prebundle,
         },
       };
     },
@@ -9166,7 +9179,7 @@ export async function defineConfig(config: FarmVitePluginOptions = {}): Promise<
       ...reactRefreshPlugins,
       viteBrowserExternalPlugin,
       farmI18nClientBridgePlugin(),
-      farmServerOnlyEntriesPlugin(),
+      farmServerOnlyEntriesPlugin({ distDir: config.distDir || ".farm" }),
       farmIslandContainersPlugin(config),
       farmPlugin(config),
       farmEnvironmentFunctionsPlugin(config),

@@ -15,6 +15,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { parseAst } from "rolldown/parseAst";
 import { parseSync } from "rolldown/utils";
+import { FARM_VERSION } from "./version";
 import {
   farmSourceSnapshotPathKey,
   memoizeInFarmSourceSnapshot,
@@ -886,16 +887,138 @@ interface PackageScan {
 
 const packageScans = new Map<string, PackageScan>();
 
+/** A path a scan read, relative to the package directory, with its size, mtimeMs and ctimeMs. */
+type PackageScanStamp = [path: string, size: number, mtimeMs: number, ctimeMs: number];
+
+interface StoredPackageScan {
+  imports: string[];
+  stylesheets: boolean;
+  /** Every directory the scan listed and file it read. */
+  paths: PackageScanStamp[];
+}
+
+/** Bump when the scan's semantics or the stored shape change. */
+const PACKAGE_SCAN_CACHE_SCHEMA = 1;
+const packageScanStamps = new Map<string, PackageScanStamp[]>();
+let packageScanCache:
+  | { file: string; stored: Map<string, StoredPackageScan>; dirty: boolean }
+  | undefined;
+
+function stampScannedPath(directory: string, target: string): PackageScanStamp | undefined {
+  try {
+    const stat = fs.statSync(target, { throwIfNoEntry: false });
+    if (!stat) return undefined;
+    return [path.relative(directory, target), stat.size, stat.mtimeMs, stat.ctimeMs];
+  } catch {
+    return undefined;
+  }
+}
+
+function isUnchangedScanStamp(directory: string, stamp: PackageScanStamp): boolean {
+  const current = stampScannedPath(directory, path.join(directory, stamp[0]));
+  return (
+    current !== undefined &&
+    current[1] === stamp[1] &&
+    current[2] === stamp[2] &&
+    current[3] === stamp[3]
+  );
+}
+
+/**
+ * @internal Reuse the package scans saved in `file`, and save new ones there with
+ * `persistPackageScanCache`. A saved scan applies again only while every directory it listed and
+ * file it read keeps its size, mtime and ctime, so a package installed or patched since is read
+ * again.
+ */
+export function usePackageScanCacheFile(file: string): void {
+  if (packageScanCache?.file === file) return;
+  const stored = new Map<string, StoredPackageScan>();
+  try {
+    const value = JSON.parse(fs.readFileSync(file, "utf8"));
+    if (
+      value?.schema === PACKAGE_SCAN_CACHE_SCHEMA &&
+      value.farm === FARM_VERSION &&
+      value.scans &&
+      typeof value.scans === "object"
+    ) {
+      for (const [directory, scan] of Object.entries(value.scans)) {
+        if (isStoredPackageScan(scan)) stored.set(directory, scan);
+      }
+    }
+  } catch {
+    // No saved scans yet, or a file this version cannot read: every package is scanned.
+  }
+  packageScanCache = { file, stored, dirty: false };
+}
+
+function isStoredPackageScan(value: unknown): value is StoredPackageScan {
+  const scan = value as StoredPackageScan | null;
+  return (
+    !!scan &&
+    Array.isArray(scan.imports) &&
+    scan.imports.every((item) => typeof item === "string") &&
+    typeof scan.stylesheets === "boolean" &&
+    Array.isArray(scan.paths) &&
+    scan.paths.every(
+      (stamp) =>
+        Array.isArray(stamp) &&
+        stamp.length === 4 &&
+        typeof stamp[0] === "string" &&
+        stamp.slice(1).every((part) => typeof part === "number"),
+    )
+  );
+}
+
+/** @internal Write the scans this process made to the file `usePackageScanCacheFile` named. */
+export function persistPackageScanCache(): void {
+  const cache = packageScanCache;
+  if (!cache?.dirty) return;
+  // Only the packages this process reached, so the file follows the app's current dependencies.
+  const scans: Record<string, StoredPackageScan> = {};
+  for (const [directory, paths] of packageScanStamps) {
+    const scan = packageScans.get(directory);
+    if (scan)
+      scans[directory] = { imports: [...scan.imports], stylesheets: scan.stylesheets, paths };
+  }
+  const temporary = `${cache.file}.${process.pid}.${Date.now()}.tmp`;
+  try {
+    fs.mkdirSync(path.dirname(cache.file), { recursive: true });
+    fs.writeFileSync(
+      temporary,
+      JSON.stringify({ schema: PACKAGE_SCAN_CACHE_SCHEMA, farm: FARM_VERSION, scans }),
+    );
+    fs.renameSync(temporary, cache.file);
+    cache.dirty = false;
+  } catch {
+    // The cache only saves work; a run that cannot write it is still correct.
+    try {
+      fs.rmSync(temporary, { force: true });
+    } catch {
+      // Nothing to clean up.
+    }
+  }
+}
+
 /** The script files under `directory`, read once, skipping nested packages. */
 function scanPackage(directory: string): PackageScan {
   const cached = packageScans.get(directory);
   if (cached) return cached;
+  const stored = packageScanCache?.stored.get(directory);
+  if (stored && stored.paths.every((stamp) => isUnchangedScanStamp(directory, stamp))) {
+    const scan: PackageScan = { imports: new Set(stored.imports), stylesheets: stored.stylesheets };
+    packageScans.set(directory, scan);
+    packageScanStamps.set(directory, stored.paths);
+    return scan;
+  }
   const scan: PackageScan = { imports: new Set(), stylesheets: false };
+  // Each path is stamped before it is read, so a write racing the read invalidates the scan.
+  const stamps: Array<PackageScanStamp | undefined> = [];
   const pending = [directory];
   let scanned = 0;
   while (pending.length > 0 && scanned < MAX_SCANNED_FILES) {
     const current = pending.pop()!;
     let entries: fs.Dirent[];
+    stamps.push(stampScannedPath(directory, current));
     try {
       entries = fs.readdirSync(current, { withFileTypes: true });
     } catch {
@@ -907,6 +1030,7 @@ function scanPackage(directory: string): PackageScan {
       if (entry.isDirectory()) pending.push(file);
       else if (/\.(?:[cm]?js|jsx)$/.test(entry.name) && scanned++ < MAX_SCANNED_FILES) {
         let code: string;
+        stamps.push(stampScannedPath(directory, file));
         try {
           code = fs.readFileSync(file, "utf8");
         } catch {
@@ -918,6 +1042,10 @@ function scanPackage(directory: string): PackageScan {
     }
   }
   packageScans.set(directory, scan);
+  if (stamps.every((stamp) => stamp !== undefined)) {
+    packageScanStamps.set(directory, stamps as PackageScanStamp[]);
+    if (packageScanCache) packageScanCache.dirty = true;
+  }
   return scan;
 }
 

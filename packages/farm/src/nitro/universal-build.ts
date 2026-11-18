@@ -2621,7 +2621,7 @@ async function buildClient(
           ...(tailwindVitePlugin ? [tailwindVitePlugin] : []),
           ...(rendererVitePlugins as any[]),
           ...(config.vite.plugins || []),
-          farmServerOnlyEntriesPlugin({ platform }),
+          farmServerOnlyEntriesPlugin({ platform, distDir: config.distDir || ".farm" }),
           farmDocsClientConfigPlugin(
             adapterOwnsDocsRuntime ? getFarmDocsAdapterConfigModule(config.docs) : undefined,
           ),
@@ -6688,7 +6688,7 @@ async function buildSSRInMemory(
             ]
           : []),
         { ...createReactProductionModePlugin(), enforce: "pre" as const },
-        farmServerOnlyEntriesPlugin(),
+        farmServerOnlyEntriesPlugin({ distDir: config.distDir || ".farm" }),
         farmIslandContainersPlugin(config),
         farmPlugin(
           {
