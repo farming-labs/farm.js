@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { execFile } from "node:child_process";
-import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { existsSync } from "node:fs";
+import { mkdir, mkdtemp, readFile, rm, symlink, writeFile } from "node:fs/promises";
 import { createRequire } from "node:module";
 import os from "node:os";
 import path from "node:path";
@@ -245,6 +246,47 @@ test("builds islands mode on Farm's own pipeline, without the RSC packages", asy
         return true;
       },
     );
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("records the built target, preset and output directory for farm start", async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "farm-cli-build-start-manifest-"));
+
+  try {
+    await mkdir(path.join(root, "src/app/api/ping"), { recursive: true });
+    // Nitro resolves through the app's own @farm.js/core, as in an installed project.
+    await mkdir(path.join(root, "node_modules/@farm.js"), { recursive: true });
+    await symlink(
+      path.resolve(testDir, "../../farm"),
+      path.join(root, "node_modules/@farm.js/core"),
+      "junction",
+    );
+    await writeFile(
+      path.join(root, "package.json"),
+      '{ "name": "start-manifest-app", "type": "module" }\n',
+    );
+    await writeFile(
+      path.join(root, "farm.config.mjs"),
+      'export default { renderer: false, telemetry: false, images: { provider: "none" }, deploy: { target: "node", outputDir: "out" } };\n',
+    );
+    await writeFile(
+      path.join(root, "src/app/api/ping/route.mjs"),
+      'export function GET() { return new Response("pong"); }\n',
+    );
+
+    await execFileAsync(process.execPath, [cliBin, "build", "--root", root], {
+      env: { ...process.env, FARM_TELEMETRY_DISABLED: "1" },
+    });
+
+    assert.deepEqual(JSON.parse(await readFile(path.join(root, ".farm/start.json"), "utf8")), {
+      version: 1,
+      target: "node",
+      preset: "node-server",
+      outputDir: "out",
+    });
+    assert.ok(existsSync(path.join(root, "out/server/index.mjs")));
   } finally {
     await rm(root, { recursive: true, force: true });
   }

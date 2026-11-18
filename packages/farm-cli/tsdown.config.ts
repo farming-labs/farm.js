@@ -4,6 +4,7 @@ export default defineConfig({
   entry: {
     index: "src/index.ts",
     dev: "src/dev.ts",
+    start: "src/start.ts",
     build: "src/build.ts",
     desktop: "src/desktop.ts",
     mobile: "src/mobile.ts",

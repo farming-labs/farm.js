@@ -101,6 +101,7 @@ const entry = {
   "internal/compression-runtime": "src/plugins/compression.ts",
   "internal/vercel-edge-middleware": "src/middleware/vercel-edge.ts",
   "internal/build-runtime": "src/nitro/build-runtime.ts",
+  "internal/start-manifest": "src/build/start-manifest.ts",
   "internal/config-runtime": "src/config-runtime.ts",
   "internal/production-node-env": "src/build/production-node-env.ts",
   "internal/cli-runtime": "src/cli-runtime.ts",

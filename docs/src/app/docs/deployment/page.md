@@ -238,7 +238,7 @@ pnpm build
 HOST=0.0.0.0 PORT=3000 pnpm start
 ```
 
-`farm start` is equivalent for the `node` target and adds `--port`/`--host` flags plus clear errors when the configured target has no local server. It runs through the `farm` CLI, which is a devDependency, so on hosts that remove devDependencies before starting the app, use the `node` command instead. New starters use it as their `start` script.
+`farm start` is equivalent for the `node` target and adds `--port`/`--host` flags plus clear errors when the configured target has no local server. After a build, `farm start` reads the target and output directory from `.farm/start.json` and runs the server in its own process. Keep that manifest with custom output directories when moving a build. Older builds use config-based output discovery. Production dotenv files and host environment variables still apply. It runs through the `farm` CLI, which is a devDependency, so on hosts that remove devDependencies before starting the app, use the `node` command instead. New starters use it as their `start` script.
 
 For a VPS, run the same start command behind nginx, Caddy, systemd, or a process manager such as PM2. Environment variables should be provided by the host at runtime, not committed into the bundle.
 
