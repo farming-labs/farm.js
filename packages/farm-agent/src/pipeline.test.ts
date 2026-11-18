@@ -87,6 +87,13 @@ export default defineConfig({
 `;
 
 const FILES: Record<string, string> = {
+  "src/agents/checkout.ts": `import { defineAgent } from "agent-unit";
+export default defineAgent(async (input: { orderId: string }, run) => {
+  const payment = await run.waitFor<{ amount: number }>("payment.succeeded", {
+    match: { orderId: input.orderId }, timeout: "1h",
+  });
+  return payment.amount;
+});`,
   "src/app/layout.tsx": `export default function Layout({ children }) { return <main>{children}</main>; }`,
   "src/app/page.tsx": `export default function Page() { return <h1>Home</h1>; }`,
   "src/agents/refund.ts": `import { defineAgent } from "agent-unit";
@@ -166,6 +173,7 @@ async function expectGuardedAgentAPI(origin: string) {
     ["start", "/api/agent/agents/refund/runs", { method: "POST", body: '{"input":{}}' }],
     ["resume", "/api/agent/runs/run_aaaaaaaaaaaa/resume", { method: "POST", body: "{}" }],
     ["manifest", "/api/agent/manifest.json"],
+    ["send event", "/api/agent/events", { method: "POST", body: '{"name":"payment.succeeded"}' }],
   ];
   // Each guard on its own: the others let the request through.
   for (const [guard, body] of [
@@ -189,7 +197,7 @@ async function expectGuardedAgentAPI(origin: string) {
 }
 
 // Statuses a run stays in until it is answered, woken or deleted.
-const SETTLED = new Set(["interrupted", "sleeping", "completed", "failed", "cancelled"]);
+const SETTLED = new Set(["interrupted", "sleeping", "waiting", "completed", "failed", "cancelled"]);
 
 async function readRun(origin: string, id: string, status: string) {
   // The run settles in the background; read it until it reaches `status`. A run that settles
@@ -207,6 +215,31 @@ async function readRun(origin: string, id: string, status: string) {
 }
 
 async function expectRunsThroughGuards(origin: string) {
+  const checkout = await fetch(`${origin}/api/agent/agents/checkout/runs`, {
+    method: "POST",
+    headers: { ...JSON_BODY, ...PASS },
+    body: JSON.stringify({ input: { orderId: "P1" } }),
+  });
+  expect(checkout.status).toBe(202);
+  const paymentRun = await checkout.json();
+  expect((await readRun(origin, paymentRun.id, "waiting")).wait.event).toBe("payment.succeeded");
+  const sendPayment = (orderId: string, id: string) =>
+    fetch(`${origin}/api/agent/events`, {
+      method: "POST",
+      headers: { ...JSON_BODY, ...PASS },
+      body: JSON.stringify({ name: "payment.succeeded", data: { orderId, amount: 42 }, id }),
+    });
+  expect((await (await sendPayment("other", "unmatched")).json()).runs).toEqual([]);
+  expect((await readRun(origin, paymentRun.id, "waiting")).status).toBe("waiting");
+  const paid = await sendPayment("P1", "payment-1");
+  expect(paid.status).toBe(202);
+  expect((await paid.json()).runs).toEqual([paymentRun.id]);
+  expect((await readRun(origin, paymentRun.id, "completed")).output).toBe(42);
+  expect(await (await sendPayment("P1", "payment-1")).json()).toMatchObject({
+    duplicate: true,
+    runs: [],
+  });
+
   const started = await fetch(`${origin}/api/agent/agents/refund/runs`, {
     method: "POST",
     headers: { ...JSON_BODY, ...PASS },

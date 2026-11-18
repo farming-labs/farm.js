@@ -165,8 +165,8 @@ importers:
         specifier: workspace:*
         version: link:../../packages/farm
       agent-unit:
-        specifier: ^0.5.0
-        version: 0.5.0
+        specifier: ^0.6.0
+        version: 0.6.0
       react:
         specifier: 19.2.8
         version: 19.2.8
@@ -2528,8 +2528,8 @@ importers:
   packages/farm-agent:
     dependencies:
       agent-unit:
-        specifier: ^0.5.0
-        version: 0.5.0
+        specifier: ^0.6.0
+        version: 0.6.0
     devDependencies:
       '@farm.js/core':
         specifier: workspace:*
@@ -3993,8 +3993,8 @@ importers:
 
 packages:
 
-  /@agent-unit/runtime@0.5.0:
-    resolution: {integrity: sha512-K/kd5fM3P4uBYQ6V0xxSzpEhrx43A21mb7BYu7sfiDK21kX7wHhvQUsEMdP4uSTuHzKYgvn7BXFtolZ2CtrCug==}
+  /@agent-unit/runtime@0.6.0:
+    resolution: {integrity: sha512-zpQvb2/Eow0GIdWrkZ9SxCw+yfN4OwPPKy1Lt2lSoR/NR5mxzz14TvcP5E550c7r92VxsVruDK/N37JSjED7FA==}
     engines: {node: ^20.19.0 || >=22.12.0}
     peerDependencies:
       '@langchain/core': '>=1'
@@ -15511,8 +15511,8 @@ packages:
     resolution: {integrity: sha512-MnA+YT8fwfJPgBx3m60MNqakm30XOkyIoH1y6huTQvC0PwZG7ki8NacLBcrPbNoo8vEZy7Jpuk7+jMO+CUovTQ==}
     engines: {node: '>= 14'}
 
-  /agent-unit@0.5.0:
-    resolution: {integrity: sha512-7GtXjxCbhI5bXq6OfzDHyRv1Sre8NNWc52OPUXGMGtAKkwOwJVrPXQIxuFO5feioW50/wg0FLPQXhvL6PZN7fg==}
+  /agent-unit@0.6.0:
+    resolution: {integrity: sha512-KmZpM+6hzxoMuUrCBBxh5ErlPRr+4pTuOAb1DWSsAws0cUe6KK9Sw36d8wa+d5zS0/xp3x2jqiB81IbUd22Wiw==}
     engines: {node: ^20.19.0 || >=22.12.0}
     hasBin: true
     peerDependencies:
@@ -15533,7 +15533,7 @@ packages:
       ai:
         optional: true
     dependencies:
-      '@agent-unit/runtime': 0.5.0
+      '@agent-unit/runtime': 0.6.0
       citty: 0.2.2
       consola: 3.4.2
       croner: 10.0.1
