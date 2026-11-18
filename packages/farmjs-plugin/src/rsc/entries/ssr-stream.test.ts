@@ -1,4 +1,4 @@
-import { expect, it, vi } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { generateSsrEntry } from "./ssr.js";
 
 const entry = generateSsrEntry({
@@ -13,42 +13,61 @@ const entry = generateSsrEntry({
 // Execute the emitted implementation, not a second copy of the algorithm.
 const start = entry.indexOf("function injectBeforeStream(");
 const end = entry.indexOf("/** Collect Node stream", start);
-const inject = new Function(`${entry.slice(start, end)}; return injectBeforeStream;`)() as (
-  marker: string,
-  tag: string,
-) => TransformStream<Uint8Array | string, Uint8Array>;
+type Inject = (marker: string, tag: string) => TransformStream<Uint8Array | string, Uint8Array>;
+// Node searches with Buffer.indexOf; a Workers runtime has no Buffer and uses the byte loop.
+const inject = new Function("Buffer", `${entry.slice(start, end)}; return injectBeforeStream;`)(
+  Buffer,
+) as Inject;
+const injectWithoutBuffer = new Function(
+  "Buffer",
+  `${entry.slice(start, end)}; return injectBeforeStream;`,
+)(undefined) as Inject;
 const encoder = new TextEncoder();
 
-async function run(chunks: Array<Uint8Array | string>, marker: string, tag: string) {
+async function run(
+  chunks: Array<Uint8Array | string>,
+  marker: string,
+  tag: string,
+  injector: Inject = inject,
+) {
   const source = new ReadableStream({
     start(controller) {
       for (const chunk of chunks) controller.enqueue(chunk);
       controller.close();
     },
   });
-  return new Uint8Array(await new Response(source.pipeThrough(inject(marker, tag))).arrayBuffer());
+  return new Uint8Array(
+    await new Response(source.pipeThrough(injector(marker, tag))).arrayBuffer(),
+  );
 }
 
-it.each(["</head>", "</body></html>"])("preserves every byte split around %s", async (marker) => {
-  const input = `🍀<html><head>café 漢字</head><body>🍀 café 漢字</body></html>🍀`;
-  const bytes = encoder.encode(input);
-  const expected = encoder.encode(input.replace(marker, `<insert>é🍀</insert>${marker}`));
-  for (let i = 0; i <= bytes.length; i++) {
+describe.each([
+  ["Buffer.indexOf", inject],
+  ["the byte loop", injectWithoutBuffer],
+])("searching with %s", (_name, injector) => {
+  it.each(["</head>", "</body></html>"])("preserves every byte split around %s", async (marker) => {
+    const input = `🍀<html><head>café 漢字</head><body>🍀 café 漢字</body></html>🍀`;
+    const bytes = encoder.encode(input);
+    const expected = encoder.encode(input.replace(marker, `<insert>é🍀</insert>${marker}`));
+    for (let i = 0; i <= bytes.length; i++) {
+      expect(
+        await run(
+          [bytes.slice(0, i), new Uint8Array(), bytes.slice(i)],
+          marker,
+          "<insert>é🍀</insert>",
+          injector,
+        ),
+      ).toEqual(expected);
+    }
     expect(
       await run(
-        [bytes.slice(0, i), new Uint8Array(), bytes.slice(i)],
+        Array.from(bytes, (byte) => new Uint8Array([byte])),
         marker,
         "<insert>é🍀</insert>",
+        injector,
       ),
     ).toEqual(expected);
-  }
-  expect(
-    await run(
-      Array.from(bytes, (byte) => new Uint8Array([byte])),
-      marker,
-      "<insert>é🍀</insert>",
-    ),
-  ).toEqual(expected);
+  });
 });
 
 it("preserves bytes when disabled or the marker is absent, including invalid UTF-8", async () => {
