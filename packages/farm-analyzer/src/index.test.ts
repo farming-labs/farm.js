@@ -97,3 +97,43 @@ async function createMinimalOutput(): Promise<string> {
   await writeFile(path.join(serverDirectory, "index.mjs"), "export default {};");
   return root;
 }
+
+it("writes broken links before failing strict builds and accepts dynamic destinations", async () => {
+  const root = await createMinimalOutput();
+  try {
+    const outputDir = path.join(root, ".farm/.output");
+    await writeFile(
+      path.join(root, ".farm/route-runtime-manifest.json"),
+      JSON.stringify({
+        version: 1,
+        routes: [{ kind: "page", pattern: "/docs/[slug]" }],
+      }),
+    );
+    await writeFile(
+      path.join(outputDir, "public/index.html"),
+      '<a href="/docs/install">valid</a><a href="/typo">missing</a><a href="#absent">fragment</a><a href="https://example.org/">external</a>',
+    );
+    const plugin = analyzer({ links: "strict", json: true, output: false });
+    await expect(
+      plugin.build?.after?.(
+        {
+          root,
+          distDir: ".farm",
+          outputDir,
+          preset: "node-server",
+          universal: true,
+          success: true,
+        },
+        {} as never,
+      ),
+    ).rejects.toThrow("/typo");
+    expect(
+      JSON.parse(await readFile(path.join(root, ".farm/analyze.json"), "utf8")).brokenLinks,
+    ).toEqual([
+      { page: "/", href: "/typo" },
+      { page: "/", href: "#absent" },
+    ]);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});

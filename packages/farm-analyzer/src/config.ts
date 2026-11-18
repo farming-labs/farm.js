@@ -16,6 +16,7 @@ export interface AnalyzerLimits {
 }
 
 export interface AnalyzerOptions {
+  links?: boolean | "strict";
   /** HTML report path relative to the project root. Set false to skip it. */
   output?: string | false;
   /** Also write JSON. True uses the HTML report name with a .json extension. */
