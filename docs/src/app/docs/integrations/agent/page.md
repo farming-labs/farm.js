@@ -61,6 +61,44 @@ agent({ framework: "mastra" });
 
 With `framework` set, the build fails with the install command when that framework is missing.
 
+## Wait for an external event
+
+With agent-unit 0.6.0, a run can wait for a webhook or another system:
+
+```ts
+// src/agents/checkout.ts
+import { defineAgent } from "agent-unit";
+
+export default defineAgent(async (input: { orderId: string }, run) => {
+  const payment = await run.waitFor<{ orderId: string; amount: number }>("payment.succeeded", {
+    match: { orderId: input.orderId },
+    timeout: "1h",
+  });
+  return { orderId: input.orderId, paid: payment.amount };
+});
+```
+
+After verifying the webhook provider's signature, send its event to the app's guarded
+`POST /api/agent/events` endpoint:
+
+```json
+{
+  "name": "payment.succeeded",
+  "data": { "orderId": "o_1", "amount": 42 },
+  "id": "provider-event-1"
+}
+```
+
+Matching runs resume with the event data. Reuse the provider event ID on retries to avoid
+redelivery. Events are retained for 24 hours by default, so one sent after the run starts but
+before it waits can still be consumed. A parked run has status `waiting` and emits `RUN_WAITING`.
+A timeout throws `EventTimeoutError` from `agent-unit/runtime`.
+
+Protect event sends with the same middleware and guards as the rest of the agent API. The
+`authorize` callback receives `action: "send"` and the event name. Farm.js Infra's existing store
+and clock support these waits; event sends go to the app, and event waits do not create human
+approval requests in Infra.
+
 ## Call the agents
 
 The API lives under `basePath`, `/api/agent` by default:
@@ -73,6 +111,8 @@ The API lives under `basePath`, `/api/agent` by default:
 | `POST /api/agent/runs/:id/resume`        | Answers the interrupt with `{ answer }`.                               |
 | `GET /api/agent/runs?status=interrupted` | Lists runs, for an approvals inbox.                                    |
 | `GET /api/agent/manifest.json`           | Lists the agents.                                                      |
+| `POST /api/agent/events`                 | Sends an event to matching waiting runs.                               |
+| `GET /api/agent/runs?status=waiting`     | Lists runs waiting for an event.                                       |
 | `POST /api/agent/mcp`                    | The agents as MCP tools.                                               |
 
 Events follow [AG-UI](https://docs.ag-ui.com). The typed client reconnects dropped streams:
