@@ -1,5 +1,5 @@
 import { decodeCookieName } from "../request-cookies";
-import { getCurrentRequestOrNull } from "../server/request";
+import { _countRequestCookieRead, getCurrentRequestOrNull } from "../server/request";
 import { _setFarmThemeServerSnapshotResolver } from "./bridge";
 import { resolveFarmThemeConfig } from "./config";
 import type {
@@ -62,6 +62,8 @@ export function readFarmThemePreference(
   config: ResolvedFarmThemeConfig,
 ): FarmThemePreference {
   if (!config.enabled) return config.default;
+  // The rendered theme follows the visitor's cookie, so a cached shell keeps to visitors without one.
+  _countRequestCookieRead(request);
   const stored = readCookie(request.headers.get("cookie"), config.storageKey);
   return isFarmThemePreference(stored) ? stored : config.default;
 }

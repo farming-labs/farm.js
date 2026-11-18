@@ -4,7 +4,7 @@
  * already holds them. See `island-value-protocol.ts` for
  * the wire format and `island-value-store.ts` for the browser side.
  */
-import { _resolveCurrentRequest, _resolveCurrentRequestForApp } from "../server/request-bridge";
+import { _peekCurrentRequest, _resolveCurrentRequestForApp } from "../server/request-bridge";
 import { decodeFarmTagged, encodeFarmLeaf } from "./island-codec";
 import {
   FARM_MAX_HELD_VALUES,
@@ -136,6 +136,9 @@ export function parseFarmHeldValues(header: string | null | undefined): Readonly
   return held;
 }
 
+// Island bookkeeping peeks at the request rather than resolving it as auth helpers do: a resolve
+// marks the render as one that may read cookies, which would keep every islands shell from
+// visitors with cookies. The one visitor-specific read, F-Values, counts as a request read below.
 const heldByRequest = new WeakMap<Request, ReadonlySet<string>>();
 const ignoredRequests = new WeakSet<Request>();
 
@@ -144,7 +147,7 @@ const ignoredRequests = new WeakSet<Request>();
  * be stored in a shared cache (a PPR shell, an ISR entry) and served to browsers that hold none.
  */
 export function ignoreFarmHeldValues(): void {
-  const request = _resolveCurrentRequest();
+  const request = _peekCurrentRequest();
   if (request) ignoredRequests.add(request);
 }
 
@@ -153,7 +156,7 @@ export function ignoreFarmHeldValues(): void {
  * when it holds none.
  */
 export function readFarmHeldValues(): ReadonlySet<string> | null {
-  const request = _resolveCurrentRequest();
+  const request = _peekCurrentRequest();
   if (!request || ignoredRequests.has(request)) return null;
   let held = heldByRequest.get(request);
   if (!held) {
@@ -191,7 +194,7 @@ export function resolveFarmIslandRenderState(): {
   held: ReadonlySet<string> | null;
   sent: Set<string>;
 } | null {
-  const request = _resolveCurrentRequest();
+  const request = _peekCurrentRequest();
   if (!request) return null;
   let sent = sentByRequest.get(request);
   if (!sent) sentByRequest.set(request, (sent = new Set()));

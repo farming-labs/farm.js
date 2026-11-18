@@ -71,6 +71,35 @@ function countRequestRead(request: Request): void {
   requestReads.set(request, (requestReads.get(request) ?? 0) + 1);
 }
 
+// How many times code that may read the visitor's cookies without counting a request read
+// (auth helpers, the server api client, integration clients, the theme) was handed each request.
+// A PPR shell whose render did is what a visitor without those cookies sees, so renderers serve
+// it only to requests without cookies.
+const REQUEST_COOKIE_READS_KEY = Symbol.for("@farm.js/core/request-cookie-reads");
+
+function getRequestCookieReads(): WeakMap<Request, number> {
+  const runtime = globalThis as typeof globalThis & Record<PropertyKey, unknown>;
+  return ((runtime[REQUEST_COOKIE_READS_KEY] as WeakMap<Request, number> | undefined) ??=
+    new WeakMap());
+}
+
+const requestCookieReads = getRequestCookieReads();
+
+/** @internal Records that code which may read the visitor's cookies read `request`. */
+export function _countRequestCookieRead(request: Request): void {
+  requestCookieReads.set(request, (requestCookieReads.get(request) ?? 0) + 1);
+}
+
+/**
+ * @internal How many times code that may read the visitor's cookies was handed `request`
+ * (default: the current request). Compare two readings to learn whether a render did.
+ */
+export function _getRequestCookieReadCount(
+  request: Request | undefined = requestStore.getStore(),
+): number {
+  return request ? (requestCookieReads.get(request) ?? 0) : 0;
+}
+
 // One view per request, so code keying on it (per-request dedupe) sees one value.
 const appRequestViews = new WeakMap<Request, Request>();
 
@@ -139,7 +168,9 @@ _setCurrentRequestResolver(
     _assertRequestReadAllowed(
       "A helper that reads the current request (such as auth.user() or the server api client)",
     );
-    return requestStore.getStore();
+    const request = requestStore.getStore();
+    if (request) _countRequestCookieRead(request);
+    return request;
   },
   () => requestStore.getStore(),
 );

@@ -7897,6 +7897,7 @@ function renderFarmServerTreeLayout(Layout, props, outlets) {
       ? `import { mergePluginAPIRoutes, getAllowedAPIRouteMethods, invokeAPIRouteEndpoint, createStaticAPIRouteMatcherAtBasePath, resolveAPIRouteEndpoint } from "@farm.js/core/api/runtime";`
       : "";
   const productionRuntimeImport = `import {
+  _getRequestCookieReadCount,
   _getRequestReadCount,
   _runWithAfterRequest,
   _resolveCurrentCspNonce,
@@ -11013,7 +11014,6 @@ function getPPRShellBypassReason(request, middlewareData, middlewareContext) {
   if (farmSecurityConfig.csp && farmSecurityConfig.csp.nonce) return "csp-nonce";
   const method = request.method.toUpperCase();
   if (method !== "GET" && method !== "HEAD") return "method";
-  if (withoutFarmDeploymentCookie(request.headers.get("cookie"))) return "cookie";
   if (request.headers.get("authorization")) return "authorization";
   if (request.headers.get("x-farm-intercept-from")) return "route-interception";
   if (request.headers.get("x-farm-ppr-refresh")) return "refresh";
@@ -11068,13 +11068,10 @@ function getRouteSharedCacheControl(route, pprCanCache) {
   return resolveRouteSharedCacheControl(resolveRouteRenderingView(route), pprCanCache);
 }
 
+// { html, cookieIndependent }: cookieIndependent marks a shell whose render read no cookies.
 async function getCachedPPRShell(cacheKey) {
   const entry = await pprShellCache.getEntryAsync(cacheKey);
-  if (!entry) {
-    return null;
-  }
-
-  return entry.value.html;
+  return entry ? entry.value : null;
 }
 
 /**
@@ -11895,7 +11892,7 @@ ${
         ? getPPRShellBypassReason(request, middlewareData, middlewareContext)
         : undefined;
       let pprCanCache = pprConfig.enabled && !pprBypassReason;
-      const pprCacheKey = pprCanCache
+      let pprCacheKey = pprCanCache
         ? getPPRShellCacheKey(
             url,
             farmLocaleResolution?.locale,
@@ -11911,8 +11908,18 @@ ${
           emitFarmEvent({ type: "ppr.refresh.start", route: pathname });
         }
       }
+      const cachedPPRShellEntry = pprCacheKey ? await getCachedPPRShell(pprCacheKey) : null;
+      const pprVisitorCookies = Boolean(withoutFarmDeploymentCookie(request.headers.get("cookie")));
+      if (cachedPPRShellEntry && pprVisitorCookies && !cachedPPRShellEntry.cookieIndependent) {
+        // The shell's render read cookies (the theme, an auth helper), so it is what a visitor
+        // without them sees: this visitor's page renders on its own and is not stored.
+        pprCanCache = false;
+        pprCacheKey = null;
+        emitFarmEvent({ type: "ppr.shell.bypass", route: pathname, reason: "cookie" });
+        emitFarmEvent({ type: "cache.bypass", route: pathname, reason: "cookie" });
+      }
       if (pprCacheKey) {
-        const cachedPPRShell = await getCachedPPRShell(pprCacheKey);
+        const cachedPPRShell = cachedPPRShellEntry?.html;
         if (cachedPPRShell) {
           emitFarmEvent({ type: "ppr.shell.hit", route: pathname, key: pprCacheKey });
           emitFarmEvent({
@@ -11932,6 +11939,11 @@ ${
               // The policy the miss that stored this shell was sent with.
               ...(getRouteSharedCacheControl(route, true)
                 ? { "Cache-Control": getRouteSharedCacheControl(route, true) }
+                : {}),
+              // A stored shell read no request state, so a visitor's cookies cannot change it, but
+              // the response to a request with credentials stays out of shared caches.
+              ...(hasPrivateFarmRequestHeaders(request, farmLocaleResolution)
+                ? { "Cache-Control": "private, no-store" }
                 : {}),
               // A segment is one navigation's answer, never a CDN entry: some CDNs ignore Vary.
               ...(farmKeptLayouts
@@ -11954,6 +11966,7 @@ ${
 
       // Reads from here on belong to the page render, not to middleware.
       const requestReadsBeforeRender = _getRequestReadCount();
+      const requestCookieReadsBeforeRender = _getRequestCookieReadCount();
       // A swr or cache route rule stores this page by URL for every visitor. Nitro hands Farm the
       // request without its cookies, Authorization, or any header the rule does not key on, so a
       // render that reads nothing of the request is that shared page, whatever its route config.
@@ -12446,6 +12459,16 @@ ${
           emitFarmEvent({ type: "ppr.shell.bypass", route: pathname, reason: "request-read" });
           emitFarmEvent({ type: "cache.bypass", route: pathname, reason: "request-read" });
         }
+        // An auth helper or integration client read this visitor's cookies: the shell a later
+        // visitor gets must come from one without them.
+        const renderReadCookies = () =>
+          _getRequestCookieReadCount() !== requestCookieReadsBeforeRender;
+        if (shouldCachePPRShell && pprVisitorCookies && renderReadCookies()) {
+          shouldCachePPRShell = false;
+          pprCanCache = false;
+          emitFarmEvent({ type: "ppr.shell.bypass", route: pathname, reason: "cookie" });
+          emitFarmEvent({ type: "cache.bypass", route: pathname, reason: "cookie" });
+        }
 
         const renderedMetadata = renderMetadataHead(mergedMetadata, { pathname, jsonLd: ${JSON.stringify(config.agent?.jsonLd ?? false)} });
         const title = renderedMetadata.title;
@@ -12795,13 +12818,24 @@ ${
           pprCacheKey &&
           request.method.toUpperCase() !== "HEAD"
         ) {
-          await pprShellWrite?.commit(pprCacheKey, { html: fullHtml });
-          emitFarmEvent({
-            type: "ppr.shell.cached",
-            route: pathname,
-            key: pprCacheKey,
-            revalidate: pprConfig.revalidate,
-          });
+          // The theme document above reads the theme cookie too. A render that read cookies
+          // stores what a visitor without them sees, and only from such a visitor.
+          const shellReadCookies = renderReadCookies();
+          if (shellReadCookies && pprVisitorCookies) {
+            emitFarmEvent({ type: "ppr.shell.bypass", route: pathname, reason: "cookie" });
+            emitFarmEvent({ type: "cache.bypass", route: pathname, reason: "cookie" });
+          } else {
+            await pprShellWrite?.commit(pprCacheKey, {
+              html: fullHtml,
+              ...(shellReadCookies ? {} : { cookieIndependent: true }),
+            });
+            emitFarmEvent({
+              type: "ppr.shell.cached",
+              route: pathname,
+              key: pprCacheKey,
+              revalidate: pprConfig.revalidate,
+            });
+          }
         }
 
         if (pprBypassReason === "refresh") {

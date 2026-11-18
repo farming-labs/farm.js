@@ -188,6 +188,64 @@ describe("file route loading.tsx and error.tsx", () => {
     );
   });
 
+  it("serves a PPR shell to visitors with cookies only when its render read none", async () => {
+    const visit = async (renderer: any, url: string, cookie?: string) => {
+      const response = createMockResponse();
+      const request = createMockRequest(url);
+      if (cookie) request.headers.cookie = cookie;
+      await renderer.renderPage(request, response);
+      await Promise.all(renderer.cachePPRShell.mock.results.map((result: any) => result.value));
+      return response;
+    };
+    // Reads the visitor's session the way @farm.js/auth does: through the current-request resolver.
+    const session = () => {
+      const resolve = (globalThis as any)[Symbol.for("farm.currentRequestResolver")];
+      return (
+        resolve?.()
+          ?.headers.get("cookie")
+          ?.match(/session=(\w+)/)?.[1] ?? "anon"
+      );
+    };
+    const createPPRRenderer = (readsSession: boolean) => {
+      const renderer = createRenderer({
+        [routeModulePath]: {
+          ppr: true,
+          default: function DashboardPage() {
+            return React.createElement(
+              "main",
+              null,
+              `session=${readsSession ? session() : "shared"}`,
+            );
+          },
+        },
+      }) as any;
+      renderer.config.experimental.ppr = true;
+      vi.spyOn(renderer, "cachePPRShell");
+      return renderer;
+    };
+
+    // The shell cache is process-wide, so each case uses its own search key.
+    const shared = createPPRRenderer(false);
+    const first = await visit(shared, "/dashboard?ppr=cookie-first", "consent=granted");
+    expect(first.headers.get("x-farm-ppr")).toBe("miss");
+    expect(first.headers.get("cache-control")).toBe("private, no-store");
+    const hit = await visit(shared, "/dashboard?ppr=cookie-first", "consent=denied");
+    expect(hit.body).toContain("session=shared");
+    expect(hit.headers.get("x-farm-ppr")).toBe("hit");
+    expect(hit.headers.get("cache-control")).toBe("private, no-store");
+
+    const reading = createPPRRenderer(true);
+    const alice = await visit(reading, "/dashboard?ppr=session", "session=alice");
+    expect(alice.body).toContain("session=alice");
+    expect(alice.headers.get("cache-control")).toBe("private, no-store");
+    expect(reading.cachePPRShell).not.toHaveBeenCalled();
+    expect((await visit(reading, "/dashboard?ppr=session")).body).toContain("session=anon");
+    expect((await visit(reading, "/dashboard?ppr=session")).headers.get("x-farm-ppr")).toBe("hit");
+    const bob = await visit(reading, "/dashboard?ppr=session", "session=bob");
+    expect(bob.body).toContain("session=bob");
+    expect(bob.headers.get("x-farm-ppr")).toBe("bypass");
+  });
+
   it("renders the nearest loading.tsx while a file route suspends", async () => {
     const release = createDeferred<void>();
     const response = createMockResponse();
