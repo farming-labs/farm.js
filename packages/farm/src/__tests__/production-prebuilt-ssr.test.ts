@@ -441,6 +441,11 @@ export default { plugins: [
           `export default function Layout({ children }) { return <section data-layout-order="${name}">{children}</section>; }`,
         );
       }
+      // Layout discovery uses this app's renderer extensions in both bundle graphs.
+      await fs.writeFile(
+        path.join(root, "src/app/reports/layout.vue"),
+        "<template><slot /></template>",
+      );
       const leaf = path.join(root, "src", "app", "reports", "[id]", "activity");
       await fs.mkdir(leaf, { recursive: true });
       await fs.writeFile(

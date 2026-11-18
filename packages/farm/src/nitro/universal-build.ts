@@ -1576,41 +1576,11 @@ export async function buildUniversal(
     );
     logger.info(`📋 Found ${pageRoutes.length} page routes`);
 
-    // Discover layout files early (needed for client CSS scanning)
     const fs = await import("fs/promises");
-    const layoutRoutes: Array<{ pattern: string; modulePath: string }> = [];
-    const appDir = path.join(root, srcDir, "app");
-
-    async function findLayoutsForClient(dir: string, routePrefix: string = "/"): Promise<void> {
-      try {
-        const entries = await fs.readdir(dir, { withFileTypes: true });
-        for (const entry of entries) {
-          if (entry.isFile() && entry.name.match(/^layout\.(tsx?|jsx?|vue|svelte)$/)) {
-            layoutRoutes.push({
-              pattern: routePrefix,
-              modulePath: path.join(dir, entry.name),
-            });
-          } else if (
-            entry.isDirectory() &&
-            !entry.name.startsWith(".") &&
-            !entry.name.startsWith("_")
-          ) {
-            const childPrefix =
-              routePrefix === "/" ? `/${entry.name}` : `${routePrefix}/${entry.name}`;
-            await findLayoutsForClient(path.join(dir, entry.name), childPrefix);
-          }
-        }
-      } catch {
-        // Directory doesn't exist or can't be read
-      }
-    }
-    await findLayoutsForClient(appDir);
-    const seenLayoutPatterns = new Set(layoutRoutes.map((layout) => layout.pattern));
-    for (const [pattern, entry] of routeManager.getLayouts()) {
-      if (seenLayoutPatterns.has(pattern)) continue;
-      seenLayoutPatterns.add(pattern);
-      layoutRoutes.push({ pattern, modulePath: entry.modulePath });
-    }
+    const layoutRoutes = Array.from(routeManager.getLayouts(), ([pattern, { modulePath }]) => ({
+      pattern,
+      modulePath,
+    }));
     logger.info(`📋 Found ${pageRoutes.length} page routes and ${layoutRoutes.length} layouts`);
 
     const isolatedClientBoundaryModules = routeManager.getIsolatedClientBoundaryModules(root);
