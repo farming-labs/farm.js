@@ -95,6 +95,9 @@ export default defineConfig({
 });
 ```
 
+`farmStorage({ managed: true })` is the explicit form of `farmStorage()`.
+Both use the mount name by default and accept an optional `namespace` to select an existing resource.
+
 Run `pnpm exec farm storage plan` to list the desired resources locally. Set
 `FARMJS_API_KEY` to a project- and environment-scoped Farm key with
 `databases:provision` in your shell or the app's `.env.local`, then run

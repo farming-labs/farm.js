@@ -437,14 +437,18 @@ export function memoryStorage(): FarmStorageClient {
 }
 
 /** A Farm-hosted SQL and key-value mount. The mount name is its default namespace. */
-export function farmStorage(options: { namespace?: string } = {}): ManagedSqliteMount {
+export function farmStorage(
+  options: { managed?: true; namespace?: string } = {},
+): ManagedSqliteMount {
   if (
     !options ||
     typeof options !== "object" ||
     Array.isArray(options) ||
-    Object.keys(options).some((key) => key !== "namespace")
+    Object.keys(options).some((key) => key !== "namespace" && key !== "managed")
   )
-    throw new TypeError("Use farmStorage() or pass { namespace } to select a hosted resource.");
+    throw new TypeError("Use farmStorage() or pass only the `managed` and `namespace` options.");
+  if (options.managed !== undefined && options.managed !== true)
+    throw new TypeError("Set `managed` to true or omit it when using farmStorage().");
   return sqliteStorage({
     managed: options.namespace === undefined ? true : { name: options.namespace },
   });

@@ -28,6 +28,15 @@ it("resolves Farm storage to the same hosted resources as existing managed mount
   expect(() => farmStorage({ path: "./drafts.sqlite" })).toThrow();
 });
 
+it("accepts an explicit managed flag with either an inferred or an explicit namespace", () => {
+  expect(farmStorage({ managed: true })).toEqual(farmStorage());
+  expect(farmStorage({ managed: true, namespace: "drafts" })).toEqual(
+    farmStorage({ namespace: "drafts" }),
+  );
+  // @ts-expect-error Farm-hosted storage only accepts true.
+  expect(() => farmStorage({ managed: false })).toThrow(/managed/);
+});
+
 it("plans a named mount without a credential or a remote request", async () => {
   vi.stubEnv("FARMJS_API_KEY", "");
   const fetch = vi.fn();
