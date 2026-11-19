@@ -469,7 +469,9 @@ const appStore = getStorage("app");
 await appStore.setItem("settings", { theme: "light" });
 ```
 
-Known helpers include memory, local, sqlite, postgres, mysql, redis, mongodb, s3, upstash, vercelKV, pglite, and libsql.
+Use `farmStorage()` for a Farm-hosted mount with key-value and SQL access. Use `farmStorage({ namespace: "drafts" })` to keep the hosted resource name when renaming the mount.
+
+Other helpers include memory, local, sqlite, postgres, mysql, redis, mongodb, s3, upstash, vercelKV, pglite, and libsql.
 
 ## Cron Spec
 

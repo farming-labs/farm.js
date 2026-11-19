@@ -436,6 +436,20 @@ export function memoryStorage(): FarmStorageClient {
   return createStorageClient({ driver: "memory" });
 }
 
+/** A Farm-hosted SQL and key-value mount. The mount name is its default namespace. */
+export function farmStorage(options: { namespace?: string } = {}): ManagedSqliteMount {
+  if (
+    !options ||
+    typeof options !== "object" ||
+    Array.isArray(options) ||
+    Object.keys(options).some((key) => key !== "namespace")
+  )
+    throw new TypeError("Use farmStorage() or pass { namespace } to select a hosted resource.");
+  return sqliteStorage({
+    managed: options.namespace === undefined ? true : { name: options.namespace },
+  });
+}
+
 export function localStorage(options: Omit<FarmStorageLocalDriverConfig, "driver"> = {}) {
   return createStorageClient({
     driver: "local",

@@ -2,7 +2,14 @@
 
 import { createClient } from "@libsql/client/http";
 import { afterEach, expect, it, vi } from "vitest";
-import { disposeStorage, getDatabase, initStorage, memoryStorage, sqliteStorage } from "../storage";
+import {
+  disposeStorage,
+  farmStorage,
+  getDatabase,
+  initStorage,
+  memoryStorage,
+  sqliteStorage,
+} from "../storage";
 import { databaseAccessor, managedSqliteDriver } from "../storage/managed-sqlite";
 
 afterEach(async () => {
@@ -11,12 +18,22 @@ afterEach(async () => {
   vi.unstubAllGlobals();
 });
 
+it("resolves Farm storage to the same hosted resources as existing managed mounts", () => {
+  expect(farmStorage()).toEqual(sqliteStorage({ managed: true }));
+  expect(farmStorage({ namespace: "drafts" })).toEqual(
+    sqliteStorage({ managed: { name: "drafts" } }),
+  );
+  expect(() => farmStorage({ namespace: "bad/name" })).toThrow();
+  // @ts-expect-error Hosted storage cannot point to a local file.
+  expect(() => farmStorage({ path: "./drafts.sqlite" })).toThrow();
+});
+
 it("plans a named mount without a credential or a remote request", async () => {
   vi.stubEnv("FARMJS_API_KEY", "");
   const fetch = vi.fn();
   vi.stubGlobal("fetch", fetch);
   await initStorage({
-    mounts: { drafts: sqliteStorage({ managed: true }), cache: memoryStorage() },
+    mounts: { drafts: farmStorage(), cache: memoryStorage() },
   });
   await expect(getDatabase("drafts")).rejects.toThrow("FARMJS_API_KEY");
   await expect(getDatabase("cache")).rejects.toThrow("managed SQLite mount");
