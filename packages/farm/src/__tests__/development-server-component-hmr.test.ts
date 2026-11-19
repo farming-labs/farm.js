@@ -4,7 +4,7 @@ import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import type { HmrContext, ViteDevServer } from "vite";
+import { normalizePath, type HmrContext, type ViteDevServer } from "vite";
 import { createServer } from "../server/create-server";
 import { getAvailablePort } from "./dev-server-port";
 
@@ -121,7 +121,9 @@ describe("development server component HMR", () => {
 
     // Rendering loads generated client references into the server graph before a browser
     // requests them. Farm's own write must not tell the browser to reload the document.
-    const reference = path.join(root, ".farm", "client-references", "ui", "Generated.tsx");
+    const reference = normalizePath(
+      path.join(root, ".farm", "client-references", "ui", "Generated.tsx"),
+    );
     expect(server.environments.ssr.moduleGraph.getModulesByFile(reference)?.size).toBeGreaterThan(
       0,
     );
@@ -129,7 +131,7 @@ describe("development server component HMR", () => {
     await hotUpdate(reference);
     expect(send).not.toHaveBeenCalledWith({ type: "full-reload", path: "*" });
 
-    const footer = path.join(root, "src", "components", "footer.tsx");
+    const footer = normalizePath(path.join(root, "src", "components", "footer.tsx"));
     // Islands mode keeps the server component out of the browser's module graph.
     expect(server.environments.client.moduleGraph.getModulesByFile(footer)?.size ?? 0).toBe(0);
     await fs.writeFile(footer, `export function Footer() { return <footer>footer v2</footer>; }`);
@@ -139,7 +141,7 @@ describe("development server component HMR", () => {
 
     // A module no page renders is left to Vite.
     send.mockClear();
-    const unused = path.join(root, "src", "lib", "unused.ts");
+    const unused = normalizePath(path.join(root, "src", "lib", "unused.ts"));
     await fs.writeFile(unused, `export const unused = 2;`);
     await hotUpdate(unused);
     expect(send).not.toHaveBeenCalledWith({ type: "full-reload", path: "*" });
