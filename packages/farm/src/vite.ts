@@ -4619,8 +4619,12 @@ export function farmPlugin(
                 );
                 const layoutHydrationMetadata = layouts.map(
                   (layout) =>
-                    navigationManifest.layouts.find((entry) => entry.pattern === layout.pattern) ??
-                    getClientModuleMetadata(layout.modulePath, server.config.root),
+                    navigationManifest.layouts.find(
+                      (entry) => entry.pattern === layout.pattern,
+                    ) ?? {
+                      ...getClientModuleMetadata(layout.modulePath, server.config.root),
+                      serverTree: false,
+                    },
                 );
                 const shouldHydrateLayout = layoutHydrationMetadata.some(
                   (metadata) => metadata.shouldHydrate,
@@ -4805,6 +4809,7 @@ export function farmPlugin(
                       layouts: layouts.map((layout, index) => ({
                         pattern: layout.pattern,
                         module: layoutModules[index] as any,
+                        serverTree: layoutHydrationMetadata[index]?.serverTree,
                       })),
                       layoutStartIndex,
                       slots: routeSlots.map((slot) => ({

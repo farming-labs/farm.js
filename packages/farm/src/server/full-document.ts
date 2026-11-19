@@ -40,6 +40,20 @@ function peelDocumentPrefix(markup: string): {
   return { inner, hoisted, layoutPatterns };
 }
 
+/** Keep the requested outlet and any resources React hoisted before the layout boundaries. */
+export function takeFarmNavigationOutlet(markup: string, tag: string): string {
+  const open = `<${tag}>`;
+  const close = `</${tag}>`;
+  const start = markup.indexOf(open);
+  if (start === -1) return markup;
+  const end = markup.indexOf(close, start + open.length);
+  // An ancestor can show the outlet twice. Keep its layout in that case.
+  if (end === -1 || markup.includes(open, end + close.length)) {
+    return markup.split(open).join("").split(close).join("");
+  }
+  return peelDocumentPrefix(markup).hoisted + markup.slice(start + open.length, end);
+}
+
 /**
  * Name, on its `<html>`, each layout whose boundary div wraps a rendered document. Such a layout
  * renders the document itself, so the page has no boundary element for it: development client

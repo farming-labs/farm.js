@@ -20,6 +20,9 @@ React Suspense reveal payloads in both development and production. When React hy
 full-document layout, components inside its body keep their server-rendered `useId()` values,
 including components in a nested server-tree layout.
 
+During client navigation, a nested layout or page can read React context from a shared layout.
+For example, a header in a new route group can read a provider in the root layout and keep its state.
+
 **src/app/layout.tsx**
 
 ```tsx

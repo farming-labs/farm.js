@@ -1,6 +1,7 @@
 // @vitest-environment node
 
 import React from "react";
+import { createIsland } from "@farm.js/islx/react";
 import { generateKeyPairSync, sign } from "node:crypto";
 import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import https from "node:https";
@@ -1406,6 +1407,96 @@ describe("file route loading.tsx and error.tsx", () => {
     expect(html).toContain("Settings fragment");
   });
 
+  it("renders a changed layout inside the shared layout's provider on navigation", async () => {
+    const Panel = React.createContext<string | null>(null);
+    function Header() {
+      const label = React.useContext(Panel);
+      if (label === null) throw new Error("Missing panel provider");
+      return <header>{label}</header>;
+    }
+
+    const HeaderIsland = createIsland(Header, "/header.tsx", "Header");
+    const renderer = createRenderer(
+      {},
+      {
+        serverComponents: { mode: "islands" },
+        isolatedClientBoundaryModules: ["/header.tsx"],
+      },
+    );
+    const html = await renderer.renderNavigationFragment({
+      PageComponent: () => <main>Pricing</main>,
+      pageProps: {},
+      params: {},
+      layouts: [
+        {
+          pattern: "/",
+          module: {
+            default: ({ children }: { children: React.ReactNode }) => (
+              <Panel.Provider value="Open assistant">
+                <aside>Shared controls</aside>
+                {children}
+              </Panel.Provider>
+            ),
+          },
+        },
+        {
+          pattern: "/(home)",
+          serverTree: true,
+          module: {
+            default: ({ children }: { children: React.ReactNode }) => (
+              <section>
+                <HeaderIsland />
+                {children}
+              </section>
+            ),
+          },
+        },
+      ],
+      layoutStartIndex: 1,
+      pageShouldHydrate: false,
+      layoutShouldHydrate: true,
+    });
+
+    const fragment = JSDOM.fragment(html);
+    expect(fragment.querySelector("header")?.textContent).toBe("Open assistant");
+    expect(fragment.querySelector("#__farm_page__ main")?.textContent).toBe("Pricing");
+    expect(fragment.querySelector('[data-farm-layout-pattern="/(home)"]')).toBeTruthy();
+    expect(fragment.querySelector("aside")).toBeNull();
+    const tree = fragment.querySelector('script[type="f/tree"][name="/(home)"]');
+    expect(tree?.textContent).toContain("/header.tsx");
+  });
+
+  it("sends a shared dynamic layout's tree for the destination params", async () => {
+    const renderer = createRenderer({}, { serverComponents: { mode: "islands" } });
+    const html = await renderer.renderNavigationFragment({
+      PageComponent: () => <main>Details</main>,
+      pageProps: {},
+      params: { id: "second" },
+      layouts: [
+        {
+          pattern: "/[id]",
+          serverTree: true,
+          module: {
+            default: ({
+              params,
+              children,
+            }: {
+              params: { id: string };
+              children: React.ReactNode;
+            }) => <section data-id={params.id}>{children}</section>,
+          },
+        },
+      ],
+      layoutStartIndex: 1,
+      pageShouldHydrate: false,
+      layoutShouldHydrate: true,
+    });
+
+    const fragment = JSDOM.fragment(html);
+    expect(fragment.querySelector("section")?.dataset.id).toBe("second");
+    expect(fragment.querySelector('script[type="f/tree"]')?.getAttribute("name")).toBe("/[id]");
+  });
+
   it("keeps a large route inline instead of behind its loading.tsx fallback", async () => {
     // React outlines a completed boundary bigger than its 12.8 KB progressive chunk
     // size: the fallback, then the content in a hidden segment revealed by $RC.
@@ -1681,6 +1772,7 @@ function createRenderer(
     basePath?: string;
     root?: string;
     security?: FarmConfig["security"];
+    serverComponents?: NonNullable<FarmConfig["experimental"]>["serverComponents"];
   } = {},
 ) {
   const metadataImageEntry = {
@@ -1873,6 +1965,9 @@ function createRenderer(
   return new ServerRenderer(
     {
       ...createConfig(options.root),
+      ...(options.serverComponents && {
+        experimental: { serverComponents: options.serverComponents },
+      }),
       integrations: options.integrations ?? {},
       basePath: options.basePath ?? "/",
       security: options.security,

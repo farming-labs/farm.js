@@ -1,3 +1,4 @@
+import type { ReactNode } from "react";
 import { loadFarmDevModule } from "../dev-module";
 import * as fs from "fs";
 import * as https from "https";
@@ -27,6 +28,7 @@ import {
   extractFarmFullDocument,
   markFarmDocumentLayouts,
   takeFarmHoistedHead,
+  takeFarmNavigationOutlet,
   appendFarmHead,
   openFarmStreamedDocument,
   removeFarmDocumentTitles,
@@ -361,6 +363,7 @@ interface PPRShellCacheOptions {
 
 export interface FarmNavigationFragmentLayout {
   pattern: string;
+  serverTree?: boolean;
   module: { default?: any };
 }
 
@@ -1166,11 +1169,21 @@ export class ServerRenderer {
       islandStrategy: input.islandStrategy,
     });
 
-    const layoutStartIndex = Math.max(
-      0,
-      Math.min(input.layoutStartIndex ?? 0, input.layouts.length),
+    const sharedCount = Math.max(0, Math.min(input.layoutStartIndex ?? 0, input.layouts.length));
+    // Page data names patterns, not parameter values. A dynamic layout tree may have a new key.
+    const dynamicTreeIndex = input.layouts.findIndex(
+      (layout, index) => index < sharedCount && layout.serverTree && layout.pattern.includes("["),
     );
-    for (let index = input.layouts.length - 1; index >= layoutStartIndex; index--) {
+    const layoutStartIndex = dynamicTreeIndex === -1 ? sharedCount : dynamicTreeIndex;
+    // Render the changed subtree under its actual providers, then keep only its markup.
+    // A per-render tag cannot collide with markup from a layout or the page.
+    const fragmentTag =
+      this.reactRenderer && layoutStartIndex > 0 ? "farm-fragment-" + createFarmFlushToken() : null;
+    const renderFrom = this.reactRenderer ? 0 : sharedCount;
+    for (let index = input.layouts.length - 1; index >= renderFrom; index--) {
+      if (fragmentTag && index === layoutStartIndex - 1) {
+        element = this.rendererRuntime.createElement(fragmentTag, null, element);
+      }
       const layout = input.layouts[index]!;
       const LayoutComponent = layout.module.default;
       if (!LayoutComponent) continue;
@@ -1191,11 +1204,23 @@ export class ServerRenderer {
           slotElement,
         );
       }
-      element = this.rendererRuntime.createElement(LayoutComponent, {
-        children: element,
-        params: input.params,
-        ...slotProps,
-      });
+      const outlets = { children: element, ...slotProps };
+      element =
+        index >= layoutStartIndex &&
+        input.layoutShouldHydrate &&
+        layout.serverTree &&
+        islands &&
+        this.islandValues()
+          ? await islands.renderFarmServerTreeLayout(
+              LayoutComponent,
+              { params: input.params },
+              outlets as Record<string, ReactNode>,
+              layout.pattern,
+            )
+          : this.rendererRuntime.createElement(LayoutComponent, {
+              params: input.params,
+              ...outlets,
+            });
       element = this.createLayoutBoundary(layout.pattern, element);
     }
 
@@ -1206,9 +1231,13 @@ export class ServerRenderer {
       element = this.wrapClientGraph(element);
     }
 
-    return this.renderElementToCompleteHTML(await this.wrapWithIntegrationProviders(element), {
-      rejectLateRedirects: true,
-    });
+    const html = await this.renderElementToCompleteHTML(
+      await this.wrapWithIntegrationProviders(element),
+      {
+        rejectLateRedirects: true,
+      },
+    );
+    return fragmentTag ? takeFarmNavigationOutlet(html, fragmentTag) : html;
   }
 
   /**

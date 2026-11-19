@@ -204,6 +204,7 @@ async function defaultHandler({
             shouldHydrate: false,
             islandStrategy: null,
             hasIsolatedClientBoundaries: false,
+            serverTree: false,
           },
       );
       const layoutShouldHydrate = layoutHydrationMetadata.some(
@@ -293,6 +294,7 @@ async function defaultHandler({
             layouts: layouts.map((layout, index) => ({
               pattern: layout.pattern,
               module: layoutModules[index] as any,
+              serverTree: layoutHydrationMetadata[index]?.serverTree,
             })),
             layoutStartIndex,
             pageShouldHydrate: shouldHydrate,
