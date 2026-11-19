@@ -17,7 +17,7 @@ Use it for caches, feature flags, application settings, idempotency records, che
 | Cache entries, flags, settings, counters, or JSON | Farm KV storage through `getStorage(name)`                  |
 | Rate limiting shared across production instances  | An atomic adapter such as `redisRateLimitStorage(...)`      |
 | Files or values addressed by one key              | An object-backed KV helper such as `s3Storage(...)`         |
-| Application models, relations, joins, and filters | A managed SQLite mount via `getDatabase(name, { schema })` or your own ORM     |
+| Application models, relations, joins, and filters | `getDatabase(name, { schema })` or your own ORM             |
 | Models owned by a schema-backed Farm integration  | Farm's integration ORM through `ctx.args.db`                |
 | Better Auth users, accounts, and sessions         | Better Auth's configured database adapter and instance APIs |
 | Provider-specific SQL or database operations      | The raw integration runtime client through `getClient()`    |
