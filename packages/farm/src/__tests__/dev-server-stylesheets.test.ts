@@ -5,7 +5,7 @@ import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterEach, describe, expect, it } from "vitest";
-import type { Plugin, ViteDevServer } from "vite";
+import { normalizePath, type Plugin, type ViteDevServer } from "vite";
 import { createServer } from "../server/create-server";
 import { getAvailablePort } from "./dev-server-port";
 
@@ -108,8 +108,11 @@ describe("development stylesheets in the server environment", () => {
     // Fonts reach the browser through the font registry's stylesheet.
     expect(html).toContain('<link rel="stylesheet" href="/@farm/fonts.css">');
 
+    // Vite ids use forward slashes on every platform.
     const serverCss = (file: string) =>
-      compiled.find(({ consumer, id }) => consumer === "server" && id === path.join(root, file));
+      compiled.find(
+        ({ consumer, id }) => consumer === "server" && id === normalizePath(path.join(root, file)),
+      );
     expect(serverCss("src/app/globals.css")?.code).toBe("");
     expect(serverCss("src/styles/vendor.css")?.code).toBe("");
     expect(serverCss("src/app/card.module.css")?.code).toContain("color: rgb(10, 11, 12)");
