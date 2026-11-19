@@ -21,11 +21,17 @@ test("storage plan is local and apply reconciles each named database once", asyn
   await writeFile(
     path.join(root, "farm.config.ts"),
     `
-    import { sqliteStorage, memoryStorage } from "@farm.js/core/storage";
+    import { farmStorage, sqliteStorage, redisStorage, postgresStorage, memoryStorage } from "@farm.js/core/storage";
     export default {storage: {mounts: {
       editor: sqliteStorage({managed:{name:"drafts"}}),
       drafts: sqliteStorage({managed:true}),
-      cache: memoryStorage()
+      copy: farmStorage({namespace:"drafts"}),
+      orders: postgresStorage({managed:true}),
+      cache: redisStorage({managed:true, namespace:"sessions"}),
+      sessions: {driver:"cloudflare-kv-binding", managed:true},
+      raw: {driver:"redis", managed:true, namespace:"raw-only"},
+      external: postgresStorage({}),
+      ephemeral: memoryStorage()
     }}};
   `,
   );
@@ -54,20 +60,26 @@ test("storage plan is local and apply reconciles each named database once", asyn
   };
   const command = (action) =>
     run(process.execPath, [cli, "storage", action, "--root", root], { env });
-  assert.match((await command("plan")).stdout, /Ensure SQLite: drafts/);
+  const names = ["drafts", "orders", "raw-only", "sessions"];
+  const plan = await command("plan");
+  assert.deepEqual(
+    [...plan.stdout.matchAll(/Ensure SQLite: ([a-z-]+)/g)].map((m) => m[1]),
+    names,
+  );
   assert.deepEqual(received, []);
   await assert.rejects(command("apply"), /FARMJS_API_KEY/);
   assert.deepEqual(received, []);
   delete env.FARMJS_API_KEY;
   await writeFile(path.join(root, ".env.local"), "FARMJS_API_KEY=fixture\n");
   assert.match((await command("apply")).stdout, /Ready: drafts/);
-  assert.deepEqual(received, [
-    {
+  assert.deepEqual(
+    received,
+    names.map((name) => ({
       method: "PUT",
       path: "/api/storage/sqlite/provision",
       authorization: "Bearer fixture",
       environment: "development",
-      body: { name: "drafts" },
-    },
-  ]);
+      body: { name },
+    })),
+  );
 });

@@ -14,10 +14,14 @@ import type { Driver, Storage, TransactionOptions } from "unstorage";
 import type { Database } from "db0";
 import memoryDriver from "unstorage/drivers/memory";
 import type {
+  FarmManagedDriverConfig,
+  FarmManagedStorageOptions,
+  FarmStorageNamedDriver,
   FarmStorageClient,
   FarmStorageClientConfig,
   FarmStorageConfigObject,
   FarmStorageLocalDriverConfig,
+  FarmStorageBuiltinDriverConfig,
   FarmStorageDatabaseConfig,
   FarmStorageDatabaseDriverMap,
   FarmStorageDatabaseDriverName,
@@ -29,6 +33,9 @@ import type {
 
 export type {
   FarmStorageBuiltinDriverConfig,
+  FarmManagedDriverConfig,
+  FarmManagedStorageOptions,
+  FarmStorageNamedDriver,
   FarmStorageClient,
   FarmStorageClientConfig,
   FarmStorageConfigObject,
@@ -219,6 +226,7 @@ function extractDriverOptions(config: FarmStorageClientConfig): Record<string, a
     client: _client,
     driver: _driver,
     mounts: _mounts,
+    managed: _managed,
     options,
     tableName: _tableName,
     ...inlineOptions
@@ -284,9 +292,10 @@ async function resolveDriver(config?: FarmStorageMountConfig, mount?: string): P
     return config.resolveDriver();
   }
 
-  if (config?.driver === "farm-managed-sqlite") {
+  const hosted = resolveManagedStorageMount(config);
+  if (hosted) {
     if (!mount) throw new TypeError("Register managed SQLite in storage.mounts.");
-    return managedSqliteDriver(managedSqliteName(mount, config.managed), () =>
+    return managedSqliteDriver(managedSqliteName(mount, hosted.managed), () =>
       loadModule("@libsql/client/http"),
     );
   }
@@ -305,7 +314,7 @@ async function resolveDriver(config?: FarmStorageMountConfig, mount?: string): P
   }
 
   if (driverInput === "local") {
-    return loadBuiltinDriver("fs-lite", extractDriverOptions(config as FarmStorageMountConfig));
+    return loadBuiltinDriver("fs-lite", extractDriverOptions(config as FarmStorageClientConfig));
   }
 
   return loadBuiltinDriver(
@@ -402,11 +411,19 @@ export function defineStorageClient(resolveDriver: DriverResolver): FarmStorageC
   return createStorageClientFromResolver(resolveDriver);
 }
 
-export function createStorageClient(config: FarmStorageClientConfig): FarmStorageClient {
+function configuredStorageClient(config: FarmStorageClientConfig | FarmManagedDriverConfig) {
+  const hosted = resolveManagedStorageMount(config);
+  if (hosted) return hosted;
   return createStorageClientFromResolver(
     () => resolveDriver(config),
     _collectFarmStorageModules(config as FarmStorageUserConfig),
   );
+}
+
+export function createStorageClient(config: FarmManagedDriverConfig): ManagedSqliteMount;
+export function createStorageClient(config: FarmStorageClientConfig): FarmStorageClient;
+export function createStorageClient(config: FarmManagedDriverConfig | FarmStorageClientConfig) {
+  return configuredStorageClient(config);
 }
 
 export function driverStorage(
@@ -432,10 +449,6 @@ export function databaseStorage(
   }, ["unstorage/drivers/db0"]);
 }
 
-export function memoryStorage(): FarmStorageClient {
-  return createStorageClient({ driver: "memory" });
-}
-
 /** A Farm-hosted SQL and key-value mount. The mount name is its default namespace. */
 export function farmStorage(
   options: { managed?: true; namespace?: string } = {},
@@ -449,142 +462,85 @@ export function farmStorage(
     throw new TypeError("Use farmStorage() or pass only the `managed` and `namespace` options.");
   if (options.managed !== undefined && options.managed !== true)
     throw new TypeError("Set `managed` to true or omit it when using farmStorage().");
-  return sqliteStorage({
-    managed: options.namespace === undefined ? true : { name: options.namespace },
-  });
+  const managed = options.namespace === undefined ? true : { name: options.namespace };
+  if (managed !== true) managedSqliteName("", managed);
+  return { driver: "farm-managed-sqlite", managed };
 }
 
-export function localStorage(options: Omit<FarmStorageLocalDriverConfig, "driver"> = {}) {
-  return createStorageClient({
-    driver: "local",
-    ...options,
-  });
-}
-
-export function sqliteStorage(options: ManagedSqliteOptions): ManagedSqliteMount;
-export function sqliteStorage(
-  options: Omit<FarmStorageDatabaseConfig, "driver"> & { managed?: never },
-): FarmStorageClient;
-export function sqliteStorage(
-  options: ManagedSqliteOptions | Omit<FarmStorageDatabaseConfig, "driver">,
-) {
-  if ("managed" in options) {
-    if (Object.keys(options).some((key) => key !== "managed"))
-      throw new TypeError("Supply only managed when Farm provisions SQLite.");
-    if (options.managed !== true) managedSqliteName("", options.managed);
-    return { driver: "farm-managed-sqlite" as const, managed: options.managed };
+/** @internal Resolve the same hosted descriptor for the CLI, the bundler, and the runtime. */
+export function resolveManagedStorageMount(config: unknown): ManagedSqliteMount | undefined {
+  if (!config || typeof config !== "object") return;
+  if (!("managed" in config)) {
+    if ("driver" in config && config.driver === "farm-managed-sqlite")
+      throw new TypeError("Set `managed` to true on a hosted storage mount.");
+    return;
   }
-  return createStorageClient({
-    driver: "sqlite",
-    ...options,
-  });
+  const { driver, managed, ...options } = config as Record<string, unknown>;
+  if ((managed === false || managed === undefined) && driver !== "farm-managed-sqlite") return;
+  if (
+    typeof driver !== "string" ||
+    !(
+      driver === "farm-managed-sqlite" ||
+      driver === "local" ||
+      driver === "vercel-kv" ||
+      Object.prototype.hasOwnProperty.call(DATABASE_CONNECTORS, driver) ||
+      (driver !== "db0" && Object.prototype.hasOwnProperty.call(builtinDrivers, driver))
+    )
+  )
+    throw new TypeError("Select a built-in storage driver to use `managed: true`.");
+  if (Object.keys(options).some((key) => key !== "namespace"))
+    throw new TypeError(
+      "Remove provider connection settings and driver options when using `managed: true`.",
+    );
+  if (managed === true) return farmStorage({ namespace: options.namespace as string | undefined });
+  // The original SQLite declaration names the resource inside the managed object.
+  if ((driver === "sqlite" || driver === "farm-managed-sqlite") && !("namespace" in options)) {
+    managedSqliteName("", managed);
+    return { driver: "farm-managed-sqlite", managed: managed as { name: string } };
+  }
+  throw new TypeError("Set `managed` to true and use `namespace` to select a hosted resource.");
 }
 
-export function mysqlStorage(options: Omit<FarmStorageDatabaseConfig, "driver">) {
-  return createStorageClient({
-    driver: "mysql",
-    ...options,
-  });
+type NativeOptions<D extends FarmStorageNamedDriver> = (D extends FarmStorageDatabaseDriverName
+  ? Omit<FarmStorageDatabaseConfig, "driver">
+  : D extends "local"
+    ? Omit<FarmStorageLocalDriverConfig, "driver">
+    : Omit<Extract<FarmStorageBuiltinDriverConfig, { driver: D }>, "driver">) & { managed?: false };
+
+function providerStorage<D extends FarmStorageNamedDriver>(driver: D) {
+  function storage(
+    options: FarmManagedStorageOptions | (D extends "sqlite" ? ManagedSqliteOptions : never),
+  ): ManagedSqliteMount;
+  function storage(
+    ...args: D extends "memory" | "local"
+      ? [options?: NativeOptions<D>]
+      : [options: NativeOptions<D>]
+  ): FarmStorageClient;
+  function storage(options?: object) {
+    return configuredStorageClient({ ...options, driver } as
+      | FarmManagedDriverConfig
+      | FarmStorageClientConfig);
+  }
+  return storage;
 }
 
-export function mysql2Storage(options: Omit<FarmStorageDatabaseConfig, "driver">) {
-  return mysqlStorage(options);
-}
-
-export function postgresStorage(options: Omit<FarmStorageDatabaseConfig, "driver">) {
-  return createStorageClient({
-    driver: "postgres",
-    ...options,
-  });
-}
-
-export function pgStorage(options: Omit<FarmStorageDatabaseConfig, "driver">) {
-  return postgresStorage(options);
-}
-
-export function pgliteStorage(options: Omit<FarmStorageDatabaseConfig, "driver">) {
-  return createStorageClient({
-    driver: "pglite",
-    ...options,
-  });
-}
-
-export function planetscaleStorage(options: Omit<FarmStorageDatabaseConfig, "driver">) {
-  return createStorageClient({
-    driver: "planetscale",
-    ...options,
-  });
-}
-
-export function libsqlStorage(options: Omit<FarmStorageDatabaseConfig, "driver">) {
-  return createStorageClient({
-    driver: "libsql",
-    ...options,
-  });
-}
-
-export function redisStorage(
-  options: Omit<Extract<FarmStorageClientConfig, { driver: "redis" }>, "driver">,
-) {
-  return createStorageClient({
-    driver: "redis",
-    ...options,
-  });
-}
-
-export function s3Storage(
-  options: Omit<Extract<FarmStorageClientConfig, { driver: "s3" }>, "driver">,
-) {
-  return createStorageClient({
-    driver: "s3",
-    ...options,
-  });
-}
-
-export function mongodbStorage(
-  options: Omit<Extract<FarmStorageClientConfig, { driver: "mongodb" }>, "driver">,
-) {
-  return createStorageClient({
-    driver: "mongodb",
-    ...options,
-  });
-}
-
-export function upstashStorage(
-  options: Omit<Extract<FarmStorageClientConfig, { driver: "upstash" }>, "driver">,
-) {
-  return createStorageClient({
-    driver: "upstash",
-    ...options,
-  });
-}
-
-export function netlifyBlobsStorage(
-  options: Omit<Extract<FarmStorageClientConfig, { driver: "netlify-blobs" }>, "driver">,
-) {
-  return createStorageClient({
-    driver: "netlify-blobs",
-    ...options,
-  });
-}
-
-export function vercelKVStorage(
-  options: Omit<Extract<FarmStorageClientConfig, { driver: "vercel-kv" }>, "driver">,
-) {
-  return createStorageClient({
-    driver: "vercel-kv",
-    ...options,
-  });
-}
-
-export function vercelBlobStorage(
-  options: Omit<Extract<FarmStorageClientConfig, { driver: "vercel-blob" }>, "driver">,
-) {
-  return createStorageClient({
-    driver: "vercel-blob",
-    ...options,
-  });
-}
+export const memoryStorage = providerStorage("memory");
+export const localStorage = providerStorage("local");
+export const sqliteStorage = providerStorage("sqlite");
+export const mysqlStorage = providerStorage("mysql");
+export const mysql2Storage = mysqlStorage;
+export const postgresStorage = providerStorage("postgres");
+export const pgStorage = postgresStorage;
+export const pgliteStorage = providerStorage("pglite");
+export const planetscaleStorage = providerStorage("planetscale");
+export const libsqlStorage = providerStorage("libsql");
+export const redisStorage = providerStorage("redis");
+export const s3Storage = providerStorage("s3");
+export const mongodbStorage = providerStorage("mongodb");
+export const upstashStorage = providerStorage("upstash");
+export const netlifyBlobsStorage = providerStorage("netlify-blobs");
+export const vercelKVStorage = providerStorage("vercel-kv");
+export const vercelBlobStorage = providerStorage("vercel-blob");
 
 function collectDriverModules(config: unknown, modules: Set<string>): void {
   if (!config || typeof config !== "object") return;
@@ -601,7 +557,7 @@ function collectDriverModules(config: unknown, modules: Set<string>): void {
   const source = config as Record<string, unknown>;
   const driver = source.driver;
   if (typeof driver === "string") {
-    if (driver === "farm-managed-sqlite") {
+    if (resolveManagedStorageMount(config)) {
       modules.add("@libsql/client/http");
     } else if (isDatabaseDriverName(driver)) {
       modules.add("db0");

@@ -471,7 +471,7 @@ await appStore.setItem("settings", { theme: "light" });
 
 Use `farmStorage()` for a Farm-hosted mount with key-value and SQL access. Use `farmStorage({ namespace: "drafts" })` to keep the hosted resource name when renaming the mount.
 
-Other helpers include memory, local, sqlite, postgres, mysql, redis, mongodb, s3, upstash, vercelKV, pglite, and libsql.
+Named provider helpers opt into the same Farm-hosted SQLite service with `managed: true`, for example `postgresStorage({ managed: true })` and `redisStorage({ managed: true })`. The hosted service provides SQLite SQL and Farm KV. Omit the flag to use the native driver and its connection options.
 
 ## Cron Spec
 

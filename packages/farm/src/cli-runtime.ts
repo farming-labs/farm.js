@@ -47,4 +47,5 @@ export {
   inspectFarmServerComponents,
 } from "./server-components-status";
 
+export { resolveManagedStorageMount } from "./storage";
 export { managedSqliteName, requestSqliteResource } from "./storage/managed-sqlite";

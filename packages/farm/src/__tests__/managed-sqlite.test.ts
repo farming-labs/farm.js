@@ -3,11 +3,29 @@
 import { createClient } from "@libsql/client/http";
 import { afterEach, expect, it, vi } from "vitest";
 import {
+  _collectFarmStorageModules,
+  createStorageClient,
   disposeStorage,
   farmStorage,
   getDatabase,
   initStorage,
   memoryStorage,
+  localStorage,
+  postgresStorage,
+  pgStorage,
+  redisStorage,
+  resolveManagedStorageMount,
+  mysqlStorage,
+  mysql2Storage,
+  pgliteStorage,
+  planetscaleStorage,
+  libsqlStorage,
+  s3Storage,
+  mongodbStorage,
+  upstashStorage,
+  netlifyBlobsStorage,
+  vercelKVStorage,
+  vercelBlobStorage,
   sqliteStorage,
 } from "../storage";
 import { databaseAccessor, managedSqliteDriver } from "../storage/managed-sqlite";
@@ -35,6 +53,71 @@ it("accepts an explicit managed flag with either an inferred or an explicit name
   );
   // @ts-expect-error Farm-hosted storage only accepts true.
   expect(() => farmStorage({ managed: false })).toThrow(/managed/);
+});
+
+it.each(
+  Object.entries({
+    sqliteStorage,
+    postgresStorage,
+    pgStorage,
+    mysqlStorage,
+    mysql2Storage,
+    pgliteStorage,
+    planetscaleStorage,
+    libsqlStorage,
+    redisStorage,
+    s3Storage,
+    mongodbStorage,
+    upstashStorage,
+    netlifyBlobsStorage,
+    vercelKVStorage,
+    vercelBlobStorage,
+    localStorage,
+    memoryStorage,
+  }),
+)("%s uses Farm hosting when managed storage is requested", (_name, helper) => {
+  expect(helper({ managed: true })).toEqual(farmStorage());
+  expect(helper({ managed: true, namespace: "drafts" })).toEqual(
+    farmStorage({ namespace: "drafts" }),
+  );
+});
+
+it("plans and loads only the hosted client for managed native and raw KV declarations", async () => {
+  vi.stubEnv("FARMJS_API_KEY", "");
+  const config = {
+    mounts: {
+      cache: redisStorage({ managed: true }),
+      drafts: { driver: "postgres", managed: true },
+      settings: createStorageClient({ driver: "cloudflare-kv-binding", managed: true }),
+    },
+  } as const;
+  expect(_collectFarmStorageModules(config)).toEqual(["@libsql/client/http"]);
+  await initStorage(config);
+  for (const name of Object.keys(config.mounts))
+    await expect(getDatabase(name)).rejects.toThrow("FARMJS_API_KEY");
+});
+
+it("keeps native drivers when management is off and rejects mixed hosted connection options", () => {
+  const client = redisStorage({ managed: false, url: "redis://localhost" });
+  expect(_collectFarmStorageModules({ mounts: { cache: client } })).toEqual([
+    "unstorage/drivers/redis",
+  ]);
+  // @ts-expect-error A managed mount cannot also use a provider URL.
+  expect(() => postgresStorage({ managed: true, url: "postgres://localhost" })).toThrow(/managed/);
+  // @ts-expect-error A managed mount cannot silently drop a provider option.
+  expect(() => redisStorage({ managed: true, ttl: 30 })).toThrow(/managed/);
+});
+
+it("rejects an unknown or injected driver and validates raw managed options before provisioning", () => {
+  for (const driver of ["unknown-provider", "db0", () => ({})]) {
+    expect(() => resolveManagedStorageMount({ driver, managed: true })).toThrow(/built-in/);
+  }
+  expect(() =>
+    resolveManagedStorageMount({ driver: "redis", managed: true, options: { ttl: 10 } }),
+  ).toThrow(/driver options/);
+  expect(() =>
+    resolveManagedStorageMount({ driver: "postgres", managed: true, namespace: "bad/name" }),
+  ).toThrow(/name/);
 });
 
 it("plans a named mount without a credential or a remote request", async () => {

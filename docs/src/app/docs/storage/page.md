@@ -82,21 +82,34 @@ Declare a mount in `farm.config.ts` and install the remote client in the app wit
 
 ```ts
 import { defineConfig } from "@farm.js/core";
-import { farmStorage, memoryStorage, sqliteStorage } from "@farm.js/core/storage";
+import { farmStorage, postgresStorage, redisStorage, sqliteStorage } from "@farm.js/core/storage";
 
 export default defineConfig({
   storage: {
     mounts: {
       drafts: farmStorage(),
+      orders: postgresStorage({ managed: true }),
+      cache: redisStorage({ managed: true }),
       scratch: sqliteStorage({ path: "./.farm/scratch.sqlite" }),
-      cache: memoryStorage(),
     },
   },
 });
 ```
 
 `farmStorage({ managed: true })` is the explicit form of `farmStorage()`.
-Both use the mount name by default and accept an optional `namespace` to select an existing resource.
+Set `managed: true` on a named storage helper or a built-in driver declaration such as
+`{ driver: "cloudflare-kv-binding", managed: true }` to provision Farm-hosted SQLite.
+Every managed mount supports both `getStorage(name)` and `getDatabase(name)`.
+SQL uses the SQLite dialect. Use an external connection for PostgreSQL-specific SQL,
+Redis commands, or provider-specific options such as Redis TTL.
+
+The mount name is the default resource name. Set `namespace` to reuse a resource,
+for example `redisStorage({ managed: true, namespace: "sessions" })`.
+Omit `managed` or set it to `false` on a provider helper to keep using its own driver.
+When switching an existing external store to Farm hosting, migrate its data separately.
+Pass native connection options only when using the native driver.
+For a custom driver instance or an existing database client, keep using
+`driverStorage(driver)` or `databaseStorage(db)`.
 
 Run `pnpm exec farm storage plan` to list the desired resources locally. Set
 `FARMJS_API_KEY` to a project- and environment-scoped Farm key with
@@ -144,7 +157,7 @@ To rename the mount and keep its data, declare
 digits, and hyphens, starting with a letter. Removing a mount from config
 keeps the database. Disconnecting its Farm project schedules deletion.
 
-### Managed SQLite
+### Existing SQLite mounts
 
 Existing `sqliteStorage({ managed: true })` mounts use the same hosted resources.
 Switch to `farmStorage()` with the same mount name to keep the data. For a mount
