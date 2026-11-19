@@ -6,7 +6,7 @@ section: "Data and APIs"
 
 # KV Storage
 
-Farm's `@farm.js/core/storage` module is a **key/value API**. Every value is stored under a string key and read with operations such as `getItem`, `setItem`, `getKeys`, and `removeItem`.
+Farm's `getStorage()` is a **key/value API**. It stores each value under a string key and exposes operations such as `getItem`, `setItem`, `getKeys`, and `removeItem`. Managed SQLite mounts also expose a SQL client through `getDatabase()`.
 
 Use it for caches, feature flags, application settings, idempotency records, checkpoints, and object-backed values. Do not use it as a relational ORM for users, accounts, products, or other records that need model fields, relations, joins, or typed filters. Request-rate enforcement uses a separate atomic counter contract described below.
 
@@ -17,7 +17,7 @@ Use it for caches, feature flags, application settings, idempotency records, che
 | Cache entries, flags, settings, counters, or JSON | Farm KV storage through `getStorage(name)`                  |
 | Rate limiting shared across production instances  | An atomic adapter such as `redisRateLimitStorage(...)`      |
 | Files or values addressed by one key              | An object-backed KV helper such as `s3Storage(...)`         |
-| Application models, relations, joins, and filters | An application-owned `@farming-labs/orm` or another ORM     |
+| Application models, relations, joins, and filters | `getDatabase(name, { schema })` or your own ORM             |
 | Models owned by a schema-backed Farm integration  | Farm's integration ORM through `ctx.args.db`                |
 | Better Auth users, accounts, and sessions         | Better Auth's configured database adapter and instance APIs |
 | Provider-specific SQL or database operations      | The raw integration runtime client through `getClient()`    |
@@ -42,7 +42,7 @@ export const appStorage = sqliteStorage({
 });
 ```
 
-KV helpers return ready-to-use clients, so application code can import and call them directly. Mounting the clients is useful when you want one central configuration and a stable name that any server-side module can retrieve later.
+Local SQLite and the other self-configured KV helpers return ready-to-use clients, so application code can import and call them directly. Mounting the clients is useful when you want one central configuration and a stable name that any server-side module can retrieve later.
 
 ## Register named mounts
 
@@ -73,6 +73,73 @@ A mount name is not a URL, route, database table, or filesystem directory. It is
 A name made only of separators or spaces, such as `" "`, `"/"`, or `"::"`, names no namespace, so `getStorage()` throws for it instead of returning the root store. Call `getStorage()` without an argument for the root store.
 
 The development server and a built app both apply `storage` from `farm.config` before they serve the first request. A production build bundles the drivers the config names (such as `local` or `sqlite`), and the server disposes the configured drivers when it shuts down.
+
+## Managed SQLite
+
+Managed SQLite requires a Farm Infra deployment with the database service configured.
+Declare a mount in `farm.config.ts` and install the remote client in the app with
+`pnpm add @libsql/client@^0.17.4`. Each named resource belongs to one project and environment.
+
+```ts
+import { defineConfig } from "@farm.js/core";
+import { memoryStorage, sqliteStorage } from "@farm.js/core/storage";
+
+export default defineConfig({
+  storage: {
+    mounts: {
+      drafts: sqliteStorage({ managed: true }),
+      scratch: sqliteStorage({ path: "./.farm/scratch.sqlite" }),
+      cache: memoryStorage(),
+    },
+  },
+});
+```
+
+Run `pnpm exec farm storage plan` to list the desired resources locally. Set
+`FARMJS_API_KEY` to a project- and environment-scoped Farm key with
+`databases:provision` in your shell or the app's `.env.local`, then run
+`pnpm exec farm storage apply`. Reapplying
+reuses the database. Configure the deployed server with a separate
+`databases:connect` key. A key covering several projects needs
+`FARMJS_PROJECT_ID`. A key covering several environments needs
+`FARMJS_ENVIRONMENT` (`development`, `staging`, or `production`).
+Set `FARMJS_API_URL` when using your own Infra instance. Infra returns the
+database's HTTPS address and a short-lived credential. The application sends
+SQL directly to that address.
+
+Use `getDatabase` from server-side code after Farm initializes storage.
+The raw client accepts parameterized SQL and migrations. The schema overload
+infers model names and selections from your Farming Labs ORM schema.
+
+```ts
+import { getDatabase, getStorage } from "@farm.js/core/storage";
+import { defineSchema, id, model, string } from "@farming-labs/orm";
+
+const schema = defineSchema({
+  draft: model({ table: "drafts", fields: { id: id(), title: string() } }),
+});
+
+// Run once as an application migration.
+const sql = await getDatabase("drafts");
+await sql.execute("CREATE TABLE IF NOT EXISTS drafts (id TEXT PRIMARY KEY, title TEXT NOT NULL)");
+
+// In a server handler.
+const db = await getDatabase("drafts", { schema });
+const drafts = await db.draft.findMany({ select: { id: true, title: true } });
+await getStorage("drafts").setItem("editor:settings", { autosave: true });
+```
+
+Install `@farming-labs/orm` in the app when importing its schema helpers.
+Farm opens the connection on first use and refreshes credentials. Farm owns
+the returned client's lifetime and closes it at shutdown. Use `db.transaction(async (tx) => …)`
+for ORM writes that must commit together. Nested ORM transactions are unsupported. KV uses the reserved
+table `_farm_kv` in this database. A typo in `getDatabase(name)` throws.
+
+To rename the mount and keep its data, declare
+`editor: sqliteStorage({ managed: { name: "drafts" } })` and call
+`getDatabase("editor")`. A resource name accepts 1–63 lowercase letters,
+digits, and hyphens, starting with a letter. Removing a mount from config
+keeps the database. Disconnecting its Farm project schedules deletion.
 
 ## Use a mounted store
 

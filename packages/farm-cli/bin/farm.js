@@ -722,6 +722,30 @@ program
     }
   });
 
+const storageCommand = program.command("storage").description("Manage Farm application databases");
+for (const operation of ["plan", "apply"]) {
+  storageCommand
+    .command(operation)
+    .description(
+      operation === "plan"
+        ? "List configured managed databases locally"
+        : "Provision or reuse configured managed databases",
+    )
+    .option("-r, --root <root>", "App directory", process.cwd())
+    .action(async ({ root }) => {
+      try {
+        const { reconcileFarmStorage } = require("../dist/index.js");
+        const names = await reconcileFarmStorage(root, operation === "apply");
+        for (const name of names)
+          console.log(operation === "apply" ? "Ready:" : "Ensure SQLite:", name);
+        if (!names.length) console.log("No managed databases configured.");
+      } catch (error) {
+        console.error(error instanceof Error ? error.message : String(error));
+        process.exitCode = 1;
+      }
+    });
+}
+
 const cronCommand = program
   .command("cron")
   .description("Inspect, invoke, and synchronize framework-native cron routes");

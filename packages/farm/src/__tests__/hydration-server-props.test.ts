@@ -4,6 +4,7 @@ import fs from "node:fs";
 import path from "node:path";
 import React from "react";
 import { describe, expect, it } from "vitest";
+import { generateClientHydrationEntry } from "../nitro/universal-build";
 import { createFarmSearchParams } from "../search-params";
 
 // Both client entries are emitted as template literals, so these tests run the
@@ -12,6 +13,28 @@ import { createFarmSearchParams } from "../search-params";
 function readSource(file: string): string {
   return fs.readFileSync(path.join(process.cwd(), "src", file), "utf8");
 }
+
+const production = generateClientHydrationEntry(
+  [
+    {
+      pattern: "/check",
+      modulePath: "/app/src/app/check/page.tsx",
+      relativePath: "check/page.tsx",
+      pageShouldHydrate: true,
+      islandStrategy: "load",
+      hasIsolatedClientBoundaries: false,
+      isolatedBoundaries: [],
+    },
+  ],
+  [],
+  [],
+  "/app",
+  "src",
+  false,
+  undefined,
+  undefined,
+  undefined,
+);
 
 function extractBlock(source: string, signature: string): string {
   const start = source.indexOf(signature);
@@ -115,8 +138,6 @@ return pageProps;`,
 });
 
 describe("production client page props", () => {
-  const source = readSource(path.join("nitro", "universal-build.ts"));
-
   async function hydrationProps(
     serverProps: unknown,
     params: Record<string, string>,
@@ -136,8 +157,8 @@ describe("production client page props", () => {
       "matched",
       "searchParams",
       "serverProps",
-      `${extractBlock(source, "function reviveServerPageProps(serverProps) {")}
-${extractBlock(source, "async function createMatchedHydrationRoute(")}
+      `${extractBlock(production, "function reviveServerPageProps(serverProps) {")}
+${extractBlock(production, "async function createMatchedHydrationRoute(")}
 return createMatchedHydrationRoute(matched, "/check", searchParams, undefined, serverProps);`,
     );
     const state = await run(
@@ -185,7 +206,6 @@ return createMatchedHydrationRoute(matched, "/check", searchParams, undefined, s
 });
 
 describe("client navigation page source", () => {
-  const production = readSource(path.join("nitro", "universal-build.ts"));
   const development = readSource("vite.ts");
 
   // A page element from a fetched document, as DOMParser leaves it.
