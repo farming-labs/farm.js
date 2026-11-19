@@ -19,6 +19,7 @@ import {
   isFarmFullDocument,
   opensFarmFullDocument,
   takeFarmHoistedHead,
+  takeFarmNavigationOutlet,
   appendFarmHead,
   removeFarmDocumentTitles,
 } from "../server/full-document";
@@ -392,6 +393,25 @@ describe.each([
     } finally {
       stream.abort();
     }
+  });
+});
+
+describe("navigation outlets", () => {
+  const tag = "farm-fragment-test";
+  const outlet = "<farm-fragment-test><main>Pricing</main></farm-fragment-test>";
+
+  it("retains hoisted resources while omitting shared layout markup", () => {
+    const preload = '<link rel="preload" as="image" href="/pricing.png"/>';
+    expect(takeFarmNavigationOutlet(preload + "<aside>shared</aside>" + outlet, tag)).toBe(
+      preload + "<main>Pricing</main>",
+    );
+  });
+
+  it("keeps what a layout renders when it omits or repeats its outlet", () => {
+    expect(takeFarmNavigationOutlet("<main>Closed</main>", tag)).toBe("<main>Closed</main>");
+    expect(takeFarmNavigationOutlet("<section>" + outlet + outlet + "</section>", tag)).toBe(
+      "<section><main>Pricing</main><main>Pricing</main></section>",
+    );
   });
 });
 
