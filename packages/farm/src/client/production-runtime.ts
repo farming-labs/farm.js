@@ -1,3 +1,4 @@
+export { restorePagePosition } from "../renderer/react/page-position";
 export { installChunkErrorRecovery } from "./chunk-recovery";
 export { replayFarmQueuedInteraction, scheduleFarmIslandHydration } from "./island-runtime";
 export { createClientPluginManager } from "./plugin";

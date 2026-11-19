@@ -36,6 +36,9 @@ export default function RootLayout({ children }: LayoutProps) {
 }
 ```
 
+A React page can use `useId()` under a server-only layout. For example, a label's
+`htmlFor` and its input's `id` keep the same value when the page becomes interactive.
+
 ## Nested layouts
 
 A layout file wraps every page below its folder. Use this for dashboards, docs, account settings, or any area with shared navigation and chrome.

@@ -745,6 +745,7 @@ export class ServerRenderer {
   private i18nRuntime?: FarmI18nRuntime;
   private viteServer?: ViteDevServer;
   private rendererRuntime!: FarmServerRendererRuntime;
+  private reactRenderer?: typeof import("../renderer/react/server");
   private appliedAppSetupModule: unknown;
   private security: ResolvedFarmSecurityConfig;
   private apiRouteExists?: (path: string) => boolean;
@@ -783,7 +784,7 @@ export class ServerRenderer {
     }
 
     const loaded = isReactRenderer(this.config.renderer)
-      ? await import("../renderer/react/server")
+      ? (this.reactRenderer = await import("../renderer/react/server"))
       : isFarmRendererDisabled(this.config.renderer)
         ? await import("../renderer/none/server")
         : this.viteServer
@@ -854,7 +855,7 @@ export class ServerRenderer {
       islandStrategy?: FarmIslandStrategy | null;
     },
   ): unknown {
-    return this.rendererRuntime.createElement(
+    const boundary = this.rendererRuntime.createElement(
       "div",
       {
         id: "__farm_page__",
@@ -866,6 +867,9 @@ export class ServerRenderer {
       },
       pageElement,
     );
+    return options.pageShouldHydrate && !options.layoutShouldHydrate && this.reactRenderer
+      ? this.reactRenderer.markPagePosition(boundary)
+      : boundary;
   }
 
   /// The app's `<srcDir>/app/globals.css`, linked only when it exists, as the
@@ -1195,6 +1199,9 @@ export class ServerRenderer {
       element = this.createLayoutBoundary(layout.pattern, element);
     }
 
+    if (input.pageShouldHydrate && !input.layoutShouldHydrate && this.reactRenderer) {
+      element = this.reactRenderer.markLayoutPosition(element);
+    }
     if (input.layoutShouldHydrate) {
       element = this.wrapClientGraph(element);
     }
@@ -1622,6 +1629,9 @@ window.__FARM_I18N__ = ${i18nSnapshot ? serializeInlineValue(i18nSnapshot) : "nu
             pageElement = this.createLayoutBoundary(layouts[i]!.pattern, pageElement);
           }
 
+          if (pageMetadata.shouldHydrate && !layoutShouldHydrate && this.reactRenderer) {
+            pageElement = this.reactRenderer.markLayoutPosition(pageElement);
+          }
           const html = await this.rendererRuntime.renderToString(
             await this.wrapWithIntegrationProviders(pageElement),
           );
@@ -2601,6 +2611,13 @@ window.__FARM_I18N__ = ${i18nSnapshot ? serializeInlineValue(i18nSnapshot) : "nu
               );
             }
 
+            if (
+              (isClientComponent || shouldHydrate) &&
+              !shouldHydrateLayout &&
+              this.reactRenderer
+            ) {
+              wrappedElement = this.reactRenderer.markLayoutPosition(wrappedElement);
+            }
             const integratedElement = await this.wrapWithIntegrationProviders(wrappedElement);
             const pprHeaders = renderingConfig.ppr
               ? this.getPPRHeaders(pprShellOptions ? "miss" : "bypass", renderingConfig.revalidate)

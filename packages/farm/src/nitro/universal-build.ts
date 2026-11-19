@@ -4145,7 +4145,7 @@ export function generateClientHydrationEntry(
   );
   const appSetupPath = resolveFarmRendererAppSetup(root, renderer);
   const rendererClientImports = isReactRenderer(renderer)
-    ? `import React from "react";\nimport { createRoot, hydrateRoot } from "react-dom/client";`
+    ? `import React from "react";\nimport { createRoot, hydrateRoot } from "react-dom/client";\nimport { restorePagePosition } from "@farm.js/core/internal/client-runtime";`
     : appSetupPath
       ? `import React, { createRoot, hydrateRoot, configureApp as __farmConfigureApp } from ${JSON.stringify(renderer.client)};\nimport __farmAppSetup from ${JSON.stringify(toPosixPath(appSetupPath))};\n__farmConfigureApp(__farmAppSetup);`
       : `import React, { createRoot, hydrateRoot } from ${JSON.stringify(renderer.client)};`;
@@ -4885,7 +4885,7 @@ function reviveServerPageProps(serverProps) {
     : serverProps;
 }
 
-async function createMatchedHydrationRoute(matched, pathname, searchParams, navigationPage, serverProps, layoutSource) {
+async function createMatchedHydrationRoute(matched, pathname, searchParams, navigationPage, serverProps, layoutSource, hydrationContainer) {
   const hydrateLayouts = hasHydratableLayout(pathname);
   const params = matched.params;
   let pageElement = null;
@@ -4942,7 +4942,10 @@ async function createMatchedHydrationRoute(matched, pathname, searchParams, navi
   }
 
   if (!pageElement) return null;
-  if (!hydrateLayouts) return createFarmRouteState(pageElement, pathname, params, false);
+  if (!hydrateLayouts) {
+    ${isReactRenderer(renderer) ? "if (hydrationContainer) pageElement = restorePagePosition(React, hydrationContainer, pageElement);" : ""}
+    return createFarmRouteState(pageElement, pathname, params, false);
+  }
   if (matched.route.pageShouldHydrate) {
     pageElement = createLayoutPageBoundary(matched.route, pageElement);
   }
@@ -5327,15 +5330,17 @@ async function hydrate() {
           return;
         }
         const searchParams = searchParamsToObject(new URLSearchParams(window.location.search));
+        const shouldHydrate = !isHydrated && Boolean(container.innerHTML.trim());
         const routeState = await createMatchedHydrationRoute(
           matched,
           pathname,
           searchParams,
           undefined,
           window.__FARM_PROPS__,
+          undefined,
+          shouldHydrate ? container : undefined,
         );
         if (!routeState) return;
-        const shouldHydrate = !isHydrated && Boolean(container.innerHTML.trim());
         const hydrationSession = await farmClientRuntime.beginHydration({
           container,
           mode: shouldHydrate ? "hydrate" : "render",
@@ -6048,6 +6053,8 @@ ${
         searchParams,
         undefined,
         nextPageProps,
+        undefined,
+        pageContainer,
       );
       if (!isNavigationCurrent()) return false;
       if (routeState) {
@@ -7438,7 +7445,7 @@ function generateVirtualEntryCode(
   // renderToString; see renderFarmElementSync.
   const hasReactSyncRender = isReactRenderer(config.renderer);
   const rendererServerImports = isReactRenderer(config.renderer)
-    ? `import * as React from "react";\nimport * as ReactDOMServer from "react-dom/server";${
+    ? `import * as React from "react";\nimport * as ReactDOMServer from "react-dom/server";\nimport { markPagePosition, markLayoutPosition } from "@farm.js/core/internal/production-runtime";${
         hasIsolatedClientGraphRuntime
           ? farmIslandsMode
             ? '\nimport { isolateFarmServerPageGraph, wrapFarmIsolatedClientGraph, renderFarmServerTreePage, renderFarmServerTreeLayout, withFarmIslandsRender } from "@farm.js/core/internal/islands-runtime";'
@@ -12295,6 +12302,7 @@ ${
               pageElement,
             );
 
+            ${isReactRenderer(config.renderer) ? "if (route.shouldHydrate && !shouldHydrateLayout) pageElement = markPagePosition(React, pageElement);" : ""}
             // Wrap with layouts (from innermost to outermost)
             // Layouts are sorted by depth (root first), so we process in reverse
             let wrappedElement = pageElement;
@@ -12366,6 +12374,7 @@ ${
             wrappedElement = wrapFarmRouteClientGraph(wrappedElement);
           }
 
+          ${isReactRenderer(config.renderer) ? "if (route.shouldHydrate && !shouldHydrateLayout) wrappedElement = markLayoutPosition(React, wrappedElement);" : ""}
           wrappedElement = wrapWithFarmIntegrationProviders(wrappedElement);
           return renderFarmElement(ReactDOMServer, wrappedElement, route.pattern, farmFlushToken);
         };

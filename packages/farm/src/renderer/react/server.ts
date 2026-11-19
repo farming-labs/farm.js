@@ -1,3 +1,7 @@
+import {
+  markPagePosition as markReactPagePosition,
+  markLayoutPosition as markReactLayoutPosition,
+} from "./page-position";
 import React from "react";
 import {
   renderToPipeableStream as reactRenderToPipeableStream,
@@ -40,6 +44,10 @@ export class ErrorBoundary extends React.Component<
 }
 
 export const name = "react";
+export const markPagePosition = (element: unknown) =>
+  markReactPagePosition(React, element as React.ReactElement);
+export const markLayoutPosition = (element: unknown) =>
+  markReactLayoutPosition(React, element as React.ReactNode);
 export const capabilities = {
   streaming: { node: true, web: false },
 } as const;
