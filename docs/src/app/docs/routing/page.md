@@ -14,6 +14,8 @@ uses `.vue`, and Svelte uses `.svelte`. The route tree and server contracts stay
 
 ## File routes
 
+When you add or remove a page in `farm dev`, Farm refreshes the route manifest before it reloads open pages.
+
 | File                            | URL           |
 | ------------------------------- | ------------- |
 | src/app/page.tsx                | /             |
