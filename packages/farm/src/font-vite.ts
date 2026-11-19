@@ -17,7 +17,8 @@ const FARM_CORE_DIRECTORY = `${path
   .dirname(typeof __filename === "string" ? __filename : fileURLToPath(import.meta.url))
   .replace(/\\/g, "/")}/`;
 const FONT_FUNCTIONS = new Set<FontLoaderKind>(["localFont", "remoteFont"]);
-const FONT_CSS_PREFIX = "\0farm:font-css:";
+/** The id prefix of the stylesheet each set of font calls imports in development. */
+export const FONT_CSS_PREFIX = "\0farm:font-css:";
 const FONT_RUNTIME_ID = "\0farm:font-runtime";
 const PUBLIC_FONT_RUNTIME_ID = "virtual:farm-font-runtime";
 const PRELOAD_HEADER_MARKER = "__FARM_FONT_PRELOAD_HEADER__";

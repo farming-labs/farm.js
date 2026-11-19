@@ -1,6 +1,7 @@
 import * as fs from "node:fs";
 import * as path from "node:path";
 import type { Plugin } from "vite";
+import { FONT_CSS_PREFIX } from "../font-vite";
 // Stylesheets the dev document must link beyond globals.css.
 //
 // The dev shell links `/src/app/globals.css` and nothing else, so CSS that
@@ -70,7 +71,8 @@ const SERVER_STYLESHEET_FILE = /\.(?:css|less|sass|scss|styl|stylus|pcss|postcss
  * is `export {}`, and the document links the stylesheet for the browser. Loading it empty there
  * skips PostCSS and Tailwind for output nothing reads, which on a docs app was about 200 ms of
  * Tailwind before the first page. CSS modules still compile for their class names, and the module
- * keeps its id and URL, so the document still links a stylesheet imported from JS.
+ * keeps its id and URL, so the document still links a stylesheet imported from JS. The stylesheets
+ * font calls import load empty too: the document links `/@farm/fonts.css` for those fonts.
  */
 export function farmDevServerStylesheetsPlugin(): Plugin {
   return {
@@ -81,7 +83,9 @@ export function farmDevServerStylesheetsPlugin(): Plugin {
     load: {
       filter: { id: SERVER_STYLESHEET_FILE },
       handler(id) {
-        if (id.startsWith("\0") || /\.module\.[^./]+$/.test(id)) return null;
+        // Other plugins' virtual stylesheets keep their own load.
+        if (id.startsWith("\0") && !id.startsWith(FONT_CSS_PREFIX)) return null;
+        if (/\.module\.[^./]+$/.test(id)) return null;
         return "";
       },
     },

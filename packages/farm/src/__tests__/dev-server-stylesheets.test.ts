@@ -53,12 +53,15 @@ async function createProject(): Promise<string> {
   await writeModule(root, "src/styles/vendor.css", ".vendor-marker { color: rgb(4, 5, 6); }\n");
   await writeModule(root, "src/styles/inline.css", ".inline-marker { color: rgb(7, 8, 9); }\n");
   await writeModule(root, "src/app/card.module.css", ".card { color: rgb(10, 11, 12); }\n");
+  await writeModule(root, "src/app/demo.woff2", "development-font");
   await writeModule(
     root,
     "src/app/layout.tsx",
-    `import "./globals.css";
+    `import { localFont } from "@farm.js/core/font";
+import "./globals.css";
 import "../styles/vendor.css";
-export default function Layout({ children }) { return <main>{children}</main>; }`,
+const demo = localFont({ src: "./demo.woff2", family: "Dev Demo" });
+export default function Layout({ children }) { return <main className={demo.className}>{children}</main>; }`,
   );
   await writeModule(
     root,
@@ -73,7 +76,7 @@ export default function Page() {
 }
 
 describe("development stylesheets in the server environment", () => {
-  it("skips compiling plain stylesheets the server drops, and keeps every stylesheet the page uses", async () => {
+  it("skips compiling plain and font stylesheets the server drops, and keeps every stylesheet the page uses", async () => {
     const root = await createProject();
     // Runs after Vite's CSS compile, before the CSS becomes a module.
     const compiled: Array<{ consumer: string; id: string; code: string }> = [];
@@ -102,14 +105,23 @@ describe("development stylesheets in the server environment", () => {
     // Plain stylesheets reach the browser as links, the one imported from JS included.
     expect(html).toContain('href="/src/app/globals.css"');
     expect(html).toContain('href="/src/styles/vendor.css"');
+    // Fonts reach the browser through the font registry's stylesheet.
+    expect(html).toContain('<link rel="stylesheet" href="/@farm/fonts.css">');
 
     const serverCss = (file: string) =>
       compiled.find(({ consumer, id }) => consumer === "server" && id === path.join(root, file));
     expect(serverCss("src/app/globals.css")?.code).toBe("");
     expect(serverCss("src/styles/vendor.css")?.code).toBe("");
     expect(serverCss("src/app/card.module.css")?.code).toContain("color: rgb(10, 11, 12)");
+    const serverFontCss = compiled.filter(
+      ({ consumer, id }) => consumer === "server" && id.startsWith("\0farm:font-css:"),
+    );
+    expect(serverFontCss).toHaveLength(1);
+    expect(serverFontCss[0]?.code).toBe("");
 
     const globals = await (await fetch(`${origin}/src/app/globals.css`)).text();
     expect(globals).toContain(".globals-marker");
+    const fonts = await (await fetch(`${origin}/@farm/fonts.css`)).text();
+    expect(fonts).toContain('font-family: "Dev Demo"');
   }, 60_000);
 });
