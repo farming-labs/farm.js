@@ -4,7 +4,7 @@ import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import type { HmrContext, ViteDevServer } from "vite";
+import { normalizePath, type HmrContext, type ViteDevServer } from "vite";
 import { createServer } from "../server/create-server";
 import { getAvailablePort } from "./dev-server-port";
 
@@ -58,9 +58,10 @@ async function createProject(): Promise<string> {
   await write(
     root,
     "src/app/page.tsx",
-    `import { Footer } from "../components/footer";
+    `import { Generated } from "../../.farm/client-references/ui/Generated";
+import { Footer } from "../components/footer";
 import { Counter } from "../components/counter";
-export default function Page() { return <article><Counter /><Footer /></article>; }`,
+export default function Page() { return <article><Counter /><Generated /><Footer /></article>; }`,
   );
   await write(
     root,
@@ -73,6 +74,11 @@ export default function Page() { return <article><Counter /><Footer /></article>
     `"use client";
 export function Counter() { return <button>count</button>; }`,
   );
+  await write(
+    root,
+    ".farm/client-references/ui/Generated.tsx",
+    `"use client"; export function Generated() { return <button>generated reference</button>; }`,
+  );
   await write(root, "src/lib/unused.ts", `export const unused = 1;`);
   return root;
 }
@@ -84,7 +90,8 @@ describe("development server component HMR", () => {
       root,
       images: { provider: "none" },
       experimental: { serverComponents: { mode: "islands" } },
-      vite: { optimizeDeps: { noDiscovery: true, include: [] } },
+      // Farm writes references under its project root even when Vite serves a different root.
+      vite: { root: path.join(root, "src"), optimizeDeps: { noDiscovery: true, include: [] } },
     } as never);
     servers.add(server);
     await server.listen(await getAvailablePort());
@@ -112,7 +119,19 @@ describe("development server component HMR", () => {
       } as HmrContext);
     const send = vi.spyOn(server.ws, "send");
 
-    const footer = path.join(root, "src", "components", "footer.tsx");
+    // Rendering loads generated client references into the server graph before a browser
+    // requests them. Farm's own write must not tell the browser to reload the document.
+    const reference = normalizePath(
+      path.join(root, ".farm", "client-references", "ui", "Generated.tsx"),
+    );
+    expect(server.environments.ssr.moduleGraph.getModulesByFile(reference)?.size).toBeGreaterThan(
+      0,
+    );
+    expect(server.environments.client.moduleGraph.getModulesByFile(reference)?.size ?? 0).toBe(0);
+    await hotUpdate(reference);
+    expect(send).not.toHaveBeenCalledWith({ type: "full-reload", path: "*" });
+
+    const footer = normalizePath(path.join(root, "src", "components", "footer.tsx"));
     // Islands mode keeps the server component out of the browser's module graph.
     expect(server.environments.client.moduleGraph.getModulesByFile(footer)?.size ?? 0).toBe(0);
     await fs.writeFile(footer, `export function Footer() { return <footer>footer v2</footer>; }`);
@@ -122,7 +141,7 @@ describe("development server component HMR", () => {
 
     // A module no page renders is left to Vite.
     send.mockClear();
-    const unused = path.join(root, "src", "lib", "unused.ts");
+    const unused = normalizePath(path.join(root, "src", "lib", "unused.ts"));
     await fs.writeFile(unused, `export const unused = 2;`);
     await hotUpdate(unused);
     expect(send).not.toHaveBeenCalledWith({ type: "full-reload", path: "*" });
