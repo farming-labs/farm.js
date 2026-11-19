@@ -90,7 +90,8 @@ describe("development server component HMR", () => {
       root,
       images: { provider: "none" },
       experimental: { serverComponents: { mode: "islands" } },
-      vite: { optimizeDeps: { noDiscovery: true, include: [] } },
+      // Farm writes references under its project root even when Vite serves a different root.
+      vite: { root: path.join(root, "src"), optimizeDeps: { noDiscovery: true, include: [] } },
     } as never);
     servers.add(server);
     await server.listen(await getAvailablePort());

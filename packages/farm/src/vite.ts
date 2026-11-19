@@ -5973,7 +5973,10 @@ if (import.meta.hot) {
       if (
         normalizedFile.includes(FARM_CLIENT_REFERENCE_DIRECTORY) &&
         normalizedFile.startsWith(
-          path.posix.join(toPosixPath(server.config.root), FARM_CLIENT_REFERENCE_DIRECTORY),
+          path.posix.join(
+            toPosixPath(currentFarmConfig?.root || options.root || server.config.root),
+            FARM_CLIENT_REFERENCE_DIRECTORY,
+          ),
         )
       )
         return modules;
