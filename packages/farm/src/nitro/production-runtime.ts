@@ -1,3 +1,4 @@
+export { markPagePosition, markLayoutPosition } from "../renderer/react/page-position";
 export { _runWithAfterRequest } from "../after";
 export { createFarmAppManifestResponse } from "../app-manifest";
 export {

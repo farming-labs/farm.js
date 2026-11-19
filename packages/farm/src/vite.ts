@@ -6888,7 +6888,7 @@ function generateClientCode(
   );
   const appSetupPath = resolveFarmRendererAppSetup(root, renderer);
   const rendererClientImports = isReactRenderer(renderer)
-    ? `import React from 'react'\nimport { hydrateRoot, createRoot } from 'react-dom/client'`
+    ? `import React from 'react'\nimport { hydrateRoot, createRoot } from 'react-dom/client'\nimport { restorePagePosition } from '@farm.js/core/internal/client-runtime'`
     : appSetupPath
       ? `import React, { hydrateRoot, createRoot, configureApp as __farmConfigureApp } from ${JSON.stringify(renderer.client)}\nimport __farmAppSetup from ${JSON.stringify(toViteModuleId(appSetupPath, root))}\n__farmConfigureApp(__farmAppSetup)`
       : `import React, { hydrateRoot, createRoot } from ${JSON.stringify(renderer.client)}`;
@@ -8007,7 +8007,7 @@ async function tryHydrateImportedPage(
       wrap: wrapFarmClientRouteGraph,
     };
   } else if (useHydrate && container?.id === '__farm_page__') {
-    wrappedElement = wrapFarmClientRouteGraph(pageElement);
+    wrappedElement = wrapFarmClientRouteGraph(${isReactRenderer(renderer) ? "restorePagePosition(React, container, pageElement)" : "pageElement"});
   } else {
     wrappedElement = await buildWrappedHydrationElement(
       currentPageComponent,

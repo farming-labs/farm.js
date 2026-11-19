@@ -45,14 +45,27 @@ function farmChildrenToArray(children) {
 
 function unwrapFarmDocumentElement(node) {
   if (!React.isValidElement(node) || node.type !== "html") return undefined;
-  const children = farmChildrenToArray(node.props.children);
-  const body = children.find(function (child) {
-    return React.isValidElement(child) && child.type === "body";
-  });
-  if (body) return body.props.children === undefined ? null : body.props.children;
-  return children.filter(function (child) {
-    return !(React.isValidElement(child) && child.type === "head");
-  });
+  let body;
+  function documentChild(child) {
+    if (React.isValidElement(child)) {
+      if (child.type === "body" && !body) body = child;
+      return child.type === "head" ? null : child;
+    }
+    if (child && typeof child === "object" && typeof child[Symbol.iterator] === "function") {
+      return Array.from(child, documentChild);
+    }
+    return child;
+  }
+  const children = documentChild(node.props.children);
+  if (!body) return farmChildrenToArray(children);
+
+  // React derives useId from the size and index of each sibling array. Keep
+  // the body's original slot, including empty siblings and nested arrays.
+  function bodySlot(child) {
+    if (Array.isArray(child)) return child.map(bodySlot);
+    return child === body ? (body.props.children ?? null) : null;
+  }
+  return bodySlot(children);
 }
 
 function farmLayoutBoundaryElement(pattern, content) {
