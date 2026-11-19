@@ -5968,6 +5968,16 @@ if (import.meta.hot) {
 
       const currentFarmConfig = farmApp?.getConfig();
       const normalizedFile = file.replace(/\\/g, "/");
+      // Rendering can write a package's client reference before the browser has requested it.
+      // Leave that generated module to Vite. The source edit has its own hot update.
+      if (
+        normalizedFile.includes(FARM_CLIENT_REFERENCE_DIRECTORY) &&
+        normalizedFile.startsWith(
+          path.posix.join(toPosixPath(server.config.root), FARM_CLIENT_REFERENCE_DIRECTORY),
+        )
+      )
+        return modules;
+
       if (
         currentFarmConfig &&
         /\/route\.(?:ts|tsx|js|jsx)$/.test(normalizedFile) &&

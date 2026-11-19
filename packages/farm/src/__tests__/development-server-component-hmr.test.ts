@@ -58,9 +58,10 @@ async function createProject(): Promise<string> {
   await write(
     root,
     "src/app/page.tsx",
-    `import { Footer } from "../components/footer";
+    `import { Generated } from "../../.farm/client-references/ui/Generated";
+import { Footer } from "../components/footer";
 import { Counter } from "../components/counter";
-export default function Page() { return <article><Counter /><Footer /></article>; }`,
+export default function Page() { return <article><Counter /><Generated /><Footer /></article>; }`,
   );
   await write(
     root,
@@ -72,6 +73,11 @@ export default function Page() { return <article><Counter /><Footer /></article>
     "src/components/counter.tsx",
     `"use client";
 export function Counter() { return <button>count</button>; }`,
+  );
+  await write(
+    root,
+    ".farm/client-references/ui/Generated.tsx",
+    `"use client"; export function Generated() { return <button>generated reference</button>; }`,
   );
   await write(root, "src/lib/unused.ts", `export const unused = 1;`);
   return root;
@@ -111,6 +117,16 @@ describe("development server component HMR", () => {
         server,
       } as HmrContext);
     const send = vi.spyOn(server.ws, "send");
+
+    // Rendering loads generated client references into the server graph before a browser
+    // requests them. Farm's own write must not tell the browser to reload the document.
+    const reference = path.join(root, ".farm", "client-references", "ui", "Generated.tsx");
+    expect(server.environments.ssr.moduleGraph.getModulesByFile(reference)?.size).toBeGreaterThan(
+      0,
+    );
+    expect(server.environments.client.moduleGraph.getModulesByFile(reference)?.size ?? 0).toBe(0);
+    await hotUpdate(reference);
+    expect(send).not.toHaveBeenCalledWith({ type: "full-reload", path: "*" });
 
     const footer = path.join(root, "src", "components", "footer.tsx");
     // Islands mode keeps the server component out of the browser's module graph.
