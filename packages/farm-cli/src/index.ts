@@ -184,3 +184,5 @@ export {
   type FarmTelemetryTemplate,
 } from "./telemetry";
 export { ensureFarmRscPackages } from "./rsc-packages";
+
+export { reconcileFarmStorage } from "./storage";

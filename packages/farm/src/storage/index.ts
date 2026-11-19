@@ -1,3 +1,14 @@
+import type { Client } from "@libsql/core/api";
+import type { SchemaDefinition } from "@farming-labs/orm";
+import {
+  databaseAccessor,
+  managedOrm,
+  managedSqliteName,
+  managedSqliteDriver,
+  type ManagedSqliteOptions,
+  type ManagedSqliteMount,
+} from "./managed-sqlite";
+export type { ManagedSqliteOptions, ManagedSqliteMount } from "./managed-sqlite";
 import { createStorage, prefixStorage, builtinDrivers, type BuiltinDriverName } from "unstorage";
 import type { Driver, Storage, TransactionOptions } from "unstorage";
 import type { Database } from "db0";
@@ -268,11 +279,17 @@ async function loadDatabaseDriver(config: FarmStorageDatabaseConfig): Promise<Dr
   };
 }
 
-async function resolveDriver(config?: FarmStorageMountConfig): Promise<Driver> {
+async function resolveDriver(config?: FarmStorageMountConfig, mount?: string): Promise<Driver> {
   if (config && isStorageClient(config)) {
     return config.resolveDriver();
   }
 
+  if (config?.driver === "farm-managed-sqlite") {
+    if (!mount) throw new TypeError("Register managed SQLite in storage.mounts.");
+    return managedSqliteDriver(managedSqliteName(mount, config.managed), () =>
+      loadModule("@libsql/client/http"),
+    );
+  }
   const driverInput = config?.driver ?? "memory";
 
   if (typeof driverInput === "function") {
@@ -426,7 +443,19 @@ export function localStorage(options: Omit<FarmStorageLocalDriverConfig, "driver
   });
 }
 
-export function sqliteStorage(options: Omit<FarmStorageDatabaseConfig, "driver">) {
+export function sqliteStorage(options: ManagedSqliteOptions): ManagedSqliteMount;
+export function sqliteStorage(
+  options: Omit<FarmStorageDatabaseConfig, "driver"> & { managed?: never },
+): FarmStorageClient;
+export function sqliteStorage(
+  options: ManagedSqliteOptions | Omit<FarmStorageDatabaseConfig, "driver">,
+) {
+  if ("managed" in options) {
+    if (Object.keys(options).some((key) => key !== "managed"))
+      throw new TypeError("Supply only managed when Farm provisions SQLite.");
+    if (options.managed !== true) managedSqliteName("", options.managed);
+    return { driver: "farm-managed-sqlite" as const, managed: options.managed };
+  }
   return createStorageClient({
     driver: "sqlite",
     ...options,
@@ -554,7 +583,9 @@ function collectDriverModules(config: unknown, modules: Set<string>): void {
   const source = config as Record<string, unknown>;
   const driver = source.driver;
   if (typeof driver === "string") {
-    if (isDatabaseDriverName(driver)) {
+    if (driver === "farm-managed-sqlite") {
+      modules.add("@libsql/client/http");
+    } else if (isDatabaseDriverName(driver)) {
       modules.add("db0");
       modules.add(DATABASE_CONNECTORS[driver].module);
       modules.add("unstorage/drivers/db0");
@@ -585,7 +616,7 @@ async function mountNamespaces(storage: Storage, mounts?: FarmStorageMounts): Pr
   }
 
   for (const [base, config] of Object.entries(mounts)) {
-    storage.mount(normalizeMountKey(base), await resolveDriver(config));
+    storage.mount(normalizeMountKey(base), await resolveDriver(config, base));
   }
 }
 
@@ -638,6 +669,28 @@ export async function initStorage(config: FarmStorageUserConfig = {}): Promise<S
   }
 
   return globalStorage;
+}
+
+export function getDatabase(name: string): Promise<Client>;
+export function getDatabase<S extends SchemaDefinition<any>>(
+  name: string,
+  options: { schema: S },
+): ReturnType<typeof managedOrm<S>>;
+export async function getDatabase<S extends SchemaDefinition<any>>(
+  name: string,
+  options?: { schema: S },
+) {
+  const key = normalizeMountKey(name);
+  const mount = getActiveGlobalStorage().getMount(key);
+  const driver = mount.driver as Partial<ReturnType<typeof managedSqliteDriver>>;
+  if (!key || normalizeMountKey(mount.base) !== key || !driver[databaseAccessor])
+    throw new TypeError(
+      "Configure a managed SQLite mount named " +
+        JSON.stringify(name) +
+        " before calling getDatabase().",
+    );
+  const client = await driver[databaseAccessor]();
+  return options ? managedOrm(client, options.schema) : client;
 }
 
 export function getStorage(namespace?: string): Storage {
