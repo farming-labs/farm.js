@@ -82,7 +82,10 @@ export type FarmStorageClientConfig =
   | FarmStorageDatabaseConfig
   | FarmStorageCustomDriverConfig;
 
-export type FarmStorageMountConfig = FarmStorageClientConfig | FarmStorageClient;
+export type FarmStorageMountConfig =
+  | FarmStorageClientConfig
+  | FarmStorageClient
+  | import("./managed-sqlite").ManagedSqliteMount;
 
 export type FarmStorageMounts = Record<string, FarmStorageMountConfig>;
 

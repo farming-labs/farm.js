@@ -46,3 +46,5 @@ export {
   formatFarmRscFallbackMessage,
   inspectFarmServerComponents,
 } from "./server-components-status";
+
+export { managedSqliteName, requestSqliteResource } from "./storage/managed-sqlite";
