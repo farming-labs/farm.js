@@ -16,7 +16,9 @@ with a `children` snippet. See [Renderers](/docs/renderers) for renderer-specifi
 
 Farm owns the document shell; return application UI or a fragment from a root layout.
 The compatibility path for existing full-document layouts preserves Unicode content and
-React Suspense reveal payloads in both development and production.
+React Suspense reveal payloads in both development and production. When React hydrates a
+full-document layout, components inside its body keep their server-rendered `useId()` values,
+including components in a nested server-tree layout.
 
 **src/app/layout.tsx**
 
