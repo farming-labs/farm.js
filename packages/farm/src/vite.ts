@@ -2012,6 +2012,7 @@ export function farmPlugin(
   let openAPIManager: OpenAPIManager | null = null;
   let middlewareManager: MiddlewareManager;
   let refreshRouteDiscovery: ((reason: string) => Promise<void>) | null = null;
+  const pendingRouteReloads = new Set<Set<string>>();
   let workflowHandler: ((request: Request) => Promise<Response | null>) | null = null;
   let isBuild = false;
   // Whether this dev server turned Vite's `server.cors` off (see the `config` hook).
@@ -2376,8 +2377,7 @@ export function farmPlugin(
       let typeArtifactGenScheduled: ReturnType<typeof setTimeout> | null = null;
       let pendingTypeArtifacts = createEmptyTypeArtifactSelection();
       let pendingTypeArtifactReason = "";
-      let routeRefreshScheduled: ReturnType<typeof setTimeout> | null = null;
-      let pendingRouteRefreshIncludesMiddleware = false;
+      let queuedRouteFiles: Set<string> | undefined;
       const scheduleTypeArtifactGen = (
         file: string,
         event: string,
@@ -2438,22 +2438,31 @@ export function farmPlugin(
               (isProgrammaticRouteSourceFile(file) &&
                 (ev === "unlink" || fileContainsProgrammaticPageRoute(file))));
           if (isRouteRefreshEvent) {
-            if (file.includes("middleware.")) {
-              pendingRouteRefreshIncludesMiddleware = true;
-            }
-            if (!routeRefreshScheduled) {
-              routeRefreshScheduled = setTimeout(() => {
-                routeRefreshScheduled = null;
-                const reloadsMiddleware = pendingRouteRefreshIncludesMiddleware;
-                pendingRouteRefreshIncludesMiddleware = false;
-                Promise.all([
-                  refreshRouteDiscovery?.(`${ev} ${file}`),
-                  reloadsMiddleware ? middlewareManager?.reload() : undefined,
-                ])
-                  .then(() => server.ws.send({ type: "full-reload", path: "*" }))
-                  .catch((error) => logger.warn(`Route refresh failed: ${error.message}`));
+            if (!queuedRouteFiles) {
+              const files = new Set<string>();
+              queuedRouteFiles = files;
+              pendingRouteReloads.add(files);
+              setTimeout(async () => {
+                queuedRouteFiles = undefined;
+                try {
+                  await Promise.all([
+                    refreshRouteDiscovery?.(`${ev} ${file}`),
+                    [...files].some((path) => path.includes("middleware."))
+                      ? middlewareManager?.reload()
+                      : undefined,
+                  ]);
+                  if (pendingRouteReloads.size === 1)
+                    server.ws.send({ type: "full-reload", path: "*" });
+                } catch (error) {
+                  logger.warn(
+                    `Route refresh failed: ${error instanceof Error ? error.message : String(error)}`,
+                  );
+                } finally {
+                  pendingRouteReloads.delete(files);
+                }
               }, 50);
             }
+            queuedRouteFiles.add(normalizedFile);
           }
         });
       });
@@ -5968,6 +5977,14 @@ if (import.meta.hot) {
 
       const currentFarmConfig = farmApp?.getConfig();
       const normalizedFile = file.replace(/\\/g, "/");
+      const reloadAfterEdit = () => {
+        // A save can report both add and change. Discovery owns the reload until the new
+        // manifest is available, while the change still invalidates the edited modules.
+        for (const files of pendingRouteReloads) {
+          if (files.has(normalizedFile)) return;
+        }
+        server.ws.send({ type: "full-reload", path: "*" });
+      };
       // Rendering can write a package's client reference before the browser has requested it.
       // Leave that generated module to Vite. The source edit has its own hot update.
       if (
@@ -5992,7 +6009,7 @@ if (import.meta.hot) {
         // types leaves both HTTP and direct server calls bound to old handlers.
         for (const mod of modules) server.moduleGraph.invalidateModule(mod);
         await refreshRouteDiscovery?.(`updated ${file}`);
-        server.ws.send({ type: "full-reload", path: "*" });
+        reloadAfterEdit();
         return [];
       }
       const currentSrcRoot = currentFarmConfig
@@ -6013,10 +6030,7 @@ if (import.meta.hot) {
 
         await refreshRouteDiscovery?.(`updated ${file}`);
 
-        server.ws.send({
-          type: "full-reload",
-          path: "*",
-        });
+        reloadAfterEdit();
 
         return [];
       }
@@ -6035,10 +6049,7 @@ if (import.meta.hot) {
 
         await refreshRouteDiscovery?.(`updated ${file}`);
 
-        server.ws.send({
-          type: "full-reload",
-          path: "*",
-        });
+        reloadAfterEdit();
 
         return [];
       }
@@ -6115,7 +6126,7 @@ if (import.meta.hot) {
                 const clientModule = server.moduleGraph.getModuleById(clientId);
                 if (clientModule) server.moduleGraph.invalidateModule(clientModule);
               }
-              server.ws.send({ type: "full-reload", path: "*" });
+              reloadAfterEdit();
               return [];
             }
             clientPlanCurrent = true;
@@ -6167,10 +6178,7 @@ if (import.meta.hot) {
             server.moduleGraph.invalidateModule(mod);
           }
 
-          server.ws.send({
-            type: "full-reload",
-            path: "*",
-          });
+          reloadAfterEdit();
 
           return [];
         }
@@ -6186,7 +6194,7 @@ if (import.meta.hot) {
         invalidateFarmDevDependents(server, file, getFarmRenderedServerModules()).length > 0
       ) {
         logUpdate("PAGE", `updated ${path.basename(file)}`);
-        server.ws.send({ type: "full-reload", path: "*" });
+        reloadAfterEdit();
         return [];
       }
 
