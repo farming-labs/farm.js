@@ -109,3 +109,18 @@ node benchmarks/preload-scanning/run.mjs <baseline>
 
 `verify.mjs` now includes raw-text fragments whose element closes well past the last
 token, for every raw-text category, so the on-demand folding path is compared too.
+
+## Warm PPR shell hits
+
+Start the baseline and candidate production Node servers on separate ports with the same app,
+deployment ID and content. From the framework checkout, run:
+
+```sh
+node benchmarks/preload-scanning/ppr-hits.mjs http://127.0.0.1:3000 http://127.0.0.1:3001 /docs/installation
+```
+
+The script times HTTP dispatch to response headers on keep-alive connections. It rotates the
+candidate and two baseline arms through all six orders, warms each six times, and records 30
+samples per arm per route. Each request carries a consent cookie. After priming, it checks for
+a private PPR hit, identical headings and preload hints across arms, and a stable body hash
+within each server. JSON output includes medians, p95s and raw timings.

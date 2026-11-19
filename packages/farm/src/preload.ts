@@ -75,22 +75,7 @@ export function manageFarmHtmlPreloads(
   html: string,
   config: ResolvedFarmPreloadConfig,
 ): FarmManagedPreloads {
-  const elements = findHtmlLinkElements(html);
-  const candidates = elements.flatMap((element, index) => {
-    const kind = getHtmlPreloadKind(element.value);
-    return kind
-      ? [
-          {
-            index,
-            kind,
-            href: readHtmlAttribute(element.value, "href"),
-            highPriority:
-              readHtmlAttribute(element.value, "fetchpriority")?.toLowerCase() === "high",
-          },
-        ]
-      : [];
-  });
-
+  const { elements, candidates } = scanHtmlPreloads(html);
   const budget = selectPreloadsWithinBudget(candidates, config);
   if (config.mode === "warn" || budget.removed.size === 0) {
     return { value: html, warnings: budget.warnings };
@@ -134,17 +119,9 @@ export function manageFarmLinkHeaderPreloads(
   };
 }
 
-/** Apply a single document budget across HTML and HTTP Link header hints. */
-export function manageFarmDocumentPreloads(
-  html: string,
-  linkHeader: string,
-  config: ResolvedFarmPreloadConfig,
-): FarmManagedDocumentPreloads {
+function scanHtmlPreloads(html: string) {
   const elements = findHtmlLinkElements(html);
-  const links = linkHeader ? splitLinkHeader(linkHeader) : [];
-  const headerOffset = elements.length;
   const candidates: PreloadCandidate[] = [];
-
   for (const [index, element] of elements.entries()) {
     const kind = getHtmlPreloadKind(element.value);
     if (!kind) continue;
@@ -155,6 +132,33 @@ export function manageFarmDocumentPreloads(
       highPriority: readHtmlAttribute(element.value, "fetchpriority")?.toLowerCase() === "high",
     });
   }
+  return { html, elements, candidates };
+}
+
+// A new shell after revalidation gets its own scan. Eviction also releases the scan.
+const shellPreloads = new WeakMap<object, ReturnType<typeof scanHtmlPreloads>>();
+
+function getShellPreloads(html: string, shell: object) {
+  const cached = shellPreloads.get(shell);
+  if (cached?.html === html) return cached;
+  const scan = scanHtmlPreloads(html);
+  shellPreloads.set(shell, scan);
+  return scan;
+}
+
+/** Apply a single document budget across HTML and HTTP Link header hints. */
+export function manageFarmDocumentPreloads(
+  html: string,
+  linkHeader: string,
+  config: ResolvedFarmPreloadConfig,
+  shell?: object,
+): FarmManagedDocumentPreloads {
+  const scan = shell ? getShellPreloads(html, shell) : scanHtmlPreloads(html);
+  const elements = scan.elements;
+  const links = linkHeader ? splitLinkHeader(linkHeader) : [];
+  const headerOffset = elements.length;
+  // Header candidates belong only to this response.
+  const candidates = shell && links.length ? scan.candidates.slice() : scan.candidates;
   for (const [index, link] of links.entries()) {
     const kind = getLinkHeaderPreloadKind(link);
     if (!kind) continue;

@@ -351,6 +351,10 @@ A shareable PPR page is sent with the same `Cache-Control` as any page with a sh
 whether the response renders the shell (`X-Farm-PPR: miss`) or serves the stored one
 (`X-Farm-PPR: hit`).
 
+On a production shell hit, Farm can reuse the image and font preload hints it parsed from that
+shell. It still applies the preload budget to the HTML and the current response's `Link` header
+together. A revalidated shell gets a fresh scan.
+
 When a production render actually suspends, Farm currently buffers that response for late status
 errors and bypasses the shared PPR shell cache. This preserves fresh request-specific content
 instead of caching a completed response as though it were a reusable partial shell.
