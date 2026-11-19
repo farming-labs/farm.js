@@ -7181,6 +7181,10 @@ function useFarmNodePageResponse(ResponseClass) {
 // Web body the way reading response.body would.
 const farmLazyBufferedHtml = new WeakMap();
 
+// Bind the stored shell to the response Farm built from it. A body replacement
+// gets a new response and takes the ordinary scan path.
+const farmPreloadShells = new WeakMap();
+
 function hasFarmContentType(headers) {
   if (!headers) return false;
   if (typeof headers.has === "function") return headers.has("content-type");
@@ -7288,7 +7292,8 @@ async function applyFarmPreloadBudget(response, pathname, request) {
   // formatting), but do not consume and re-encode a proven preload-free body.
   const ownedHtml = hasNoHtmlPreloads ? undefined : getFarmOwnedBufferedHtml(response);
   const html = hasNoHtmlPreloads ? "" : (ownedHtml ?? await response.text());
-  const managed = manageFarmDocumentPreloads(html, linkHeader, farmPreloadConfig);
+  const managed = manageFarmDocumentPreloads(html, linkHeader, farmPreloadConfig,
+    ownedHtml === undefined ? undefined : farmPreloadShells.get(response));
   // A remembered document the budget left unchanged keeps its unread body.
   const reusesBody = hasNoHtmlPreloads || (ownedHtml !== undefined && managed.html === html);
   if (ownedHtml !== undefined && !reusesBody && !isLazyPage) {
@@ -11929,11 +11934,11 @@ ${
             status: 200,
             durationMs: Date.now() - requestStartTime,
           });
-          return rememberFarmBufferedHtml(applyProductionMiddlewareHeaders(farmOwnedHtmlResponse(cachedPPRShell, {
+          const response = rememberFarmBufferedHtml(applyProductionMiddlewareHeaders(farmOwnedHtmlResponse(cachedPPRShell, {
             status: 200,
             headers: {
               "Content-Type": "text/html; charset=utf-8",
-              "x-farm-preload-buffered": getFarmBufferedPreloadMarker(cachedPPRShell),
+              "x-farm-preload-buffered": "1",
               ...(farmFontPreloadHeader ? { "Link": farmFontPreloadHeader } : {}),
               ...getPPRHeaders("hit", pprConfig),
               // The policy the miss that stored this shell was sent with.
@@ -11951,6 +11956,8 @@ ${
                 : {}),
             },
           }), middlewareHeaders), cachedPPRShell);
+          farmPreloadShells.set(response, cachedPPRShellEntry);
+          return response;
         }
         emitFarmEvent({ type: "ppr.shell.miss", route: pathname, key: pprCacheKey });
         if (request.method.toUpperCase() !== "HEAD") {

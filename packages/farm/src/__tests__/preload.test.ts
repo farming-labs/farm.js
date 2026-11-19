@@ -78,6 +78,32 @@ describe("smart preload manager", () => {
     expect(lowercase.mock.contexts).not.toContain(html);
   });
 
+  it("scans a cached shell once while budgeting each response's Link header", () => {
+    const config = resolveFarmPerformanceConfig({ preload: { maxImages: 1 } }).preload;
+    const hint = '<link rel="preload" as="image" href="/cover.webp">';
+    const shell = { html: hint + "<main>first</main>" };
+    const header = "</hero.webp>; rel=preload; as=image; fetchpriority=high";
+    const indexOf = vi.spyOn(String.prototype, "indexOf");
+    const scans = (html: string) =>
+      indexOf.mock.calls.filter(
+        (args, index) => indexOf.mock.contexts[index] === html && args[0] === "<" && args[1] === 0,
+      ).length;
+
+    expect(manageFarmDocumentPreloads(shell.html, "", config, shell).html).toBe(shell.html);
+    const withHeader = manageFarmDocumentPreloads(shell.html, header, config, shell);
+    expect(withHeader.html).toBe("<main>first</main>");
+    expect(withHeader.linkHeader).toBe(header);
+    expect(withHeader.warnings).toEqual([{ kind: "image", count: 2, budget: 1, removed: 1 }]);
+    expect(manageFarmDocumentPreloads(shell.html, "", config, shell).html).toBe(shell.html);
+    expect(scans(shell.html)).toBe(1);
+
+    const replacement = { html: "<main>replacement</main>" + hint };
+    expect(manageFarmDocumentPreloads(replacement.html, header, config, replacement).html).toBe(
+      "<main>replacement</main>",
+    );
+    expect(scans(replacement.html)).toBe(1);
+  });
+
   it("stops scanning after the last preload token when hints sit in the head", () => {
     // Farm fonts emit font preloads in <head>. No link after the last `preload`
     // token can be a candidate, so the body is neither case-folded nor walked.
