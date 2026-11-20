@@ -11,87 +11,67 @@ the homepage comparison: Next.js, SvelteKit, Nuxt, and TanStack Start.
 
 ## What you gain with Farm.js
 
-**Farm.js is agent native at the core: one application serves people and agents.**
-`@farm.js/core` connects page rendering, metadata, discovery, and read-only agent access to the
-same route tree. Public pages can be read and discovered without installing an agent integration
-or writing a separate MCP server.
+**One framework for UI, server data, deployment, and agents.** Farm combines its own compiler,
+rendering, and data features with typed routes and integrations. Start with the capabilities your
+app needs; the compiler and experimental rendering modes are opt-in.
 
-Keep the component model you know and bring routing, validated APIs, typed callers, service
-integrations, and deployment into the same framework contract. The benefit is less application
-code connecting those pieces, with tools to inspect what the framework actually resolved.
+### Core features
 
-Each source guide explains the reasons to move before the migration steps. Read its performance
-evidence and compatibility limits together: a faster fixture build is useful evidence, but it
-does not guarantee a faster application after migration.
+- **Farm's React compiler.** The [experimental compiler](/docs/renderers/react#aot-compiler)
+  in `@farm.js/react` prepares eligible components at build time so supported updates touch only
+  the affected DOM bindings. Opt in with `react({ compiler: true })`; unsupported components
+  keep React's normal rendering path.
+- **Islands and islx.** Farm's [experimental islands mode](/docs/server-rendering/islands)
+  sends server HTML and hydrates client components, using Farm's islx format instead of a React
+  Flight payload. It keeps static content out of the client component tree.
+- **Rendering and caching per route.** Choose [server rendering or static output](/docs/server-rendering),
+  timed revalidation, and [shared cache invalidation](/docs/cache-ppr). Experimental partial
+  prerendering caches a page shell while dynamic sections load.
+- **Typed server data.** [Validated endpoints](/docs/api-routes) generate
+  [typed callers](/docs/api-client). [Server queries](/docs/server-queries) add deduplication,
+  prefetching, and shared invalidation; calling them from the browser requires the server-function
+  transform described in that guide.
+- **Development through production.** Vite powers development; Nitro packages production output
+  for [Node, Vercel, Cloudflare, and Netlify](/docs/deployment), with additional Nitro presets.
+  `farm deploy --plan` shows the deployment plan before it runs.
 
 ### Developer experience
 
-Developer experience (DX) includes the work between writing a component and running it in
-production:
-
-- **Types across the application.** Farm generates route, API, environment, and i18n declarations.
-  A validated endpoint can supply the browser caller's input and result types; you do not need to
-  maintain a second handwritten request contract. See [API Routes](/docs/api-routes),
-  [API Client](/docs/api-client), and [Internationalization](/docs/internationalization).
-- **A shorter diagnosis loop.** `farm doctor` checks the resolved app, `farm explain /products/42`
-  explains one URL, and `farm generate --check` catches stale generated declarations in CI.
-  [DevTools](/docs/plugins/devtools) shows routes, APIs, integrations, plugin order, and source
-  alongside the JavaScript Vite served. [Hints](/docs/plugins/hints) checks the live page for
-  accessibility, performance, and HTML problems.
-- **Product services with owned wiring.** An [integration](/docs/integrations) can register its
-  endpoints, typed callers, validation, middleware, and startup/shutdown behavior together.
-  `farm add integration` adds supported adapters and optional UI. Keep an existing SDK client
-  where the adapter supports `instance`.
-- **Shared foundations.** [Layers](/docs/layers) reuse routes, layouts, config, plugins, and
-  integrations across applications. [Themes](/docs/themes), typed i18n, [storage](/docs/storage),
-  [cron](/docs/cron), and [jobs](/docs/integrations/jobs) cover recurring application work.
-- **Deployment and previews from the same project.** Use the first-class Node, Vercel, Cloudflare,
-  and Netlify [targets](/docs/deployment), or a supported Nitro preset. `farm deploy --plan`
-  makes the deployment plan inspectable. [Preview tunnels](/docs/cli#instant-preview) give a
-  running local app a public URL for a teammate, webhook, or device.
-
-[Desktop apps](/docs/desktop) and the [mobile preview](/docs/mobile) extend the project further.
-Read their platform limits before planning a native application; they are not a promise that
-every web component becomes a native screen.
+- **Generated types.** Routes, APIs, environment values, and
+  [i18n messages](/docs/internationalization) get declarations from the application itself.
+  `farm generate --check` catches stale output in CI.
+- **Inspect the running app.** `farm doctor`, `farm explain /products/42`,
+  [DevTools](/docs/plugins/devtools), and [Hints](/docs/plugins/hints) explain configuration,
+  routes, served code, and page problems.
+- **Reuse application foundations.** [Layers](/docs/layers), [themes](/docs/themes),
+  [storage](/docs/storage), and [cron](/docs/cron) share conventions across projects.
+  `farm add integration` wires supported services into their routes, types, and lifecycle.
+- **Share and extend.** [Preview tunnels](/docs/cli#instant-preview) expose a local app to a
+  teammate or device. [Desktop](/docs/desktop) and the [mobile preview](/docs/mobile) extend
+  the project with their documented platform limits.
 
 ### Agent native at the core
 
-Agent experience (AX) means making the application understandable and usable by software agents,
-as well as giving a coding agent enough information to work on it accurately.
+**Agent readability and discovery are built into `@farm.js/core`.** On the normal page-serving
+pipeline, these defaults work without an agent integration or a separate MCP server:
 
-**The core provides the reading and discovery surface by default.** On Farm's normal page-serving
-pipeline, pages have Markdown mirrors; eligible static pages feed `llms.txt` and the sitemap;
-metadata supplies JSON-LD; and `/mcp` provides `list_pages`, `search_pages`, and `read_page`.
-The app manifest and AI catalog describe the capabilities and MCP servers the app already serves.
-These are core features configured through `md` and `agent` in `farm.config.ts`.
+- [Markdown mirrors](/docs/markdown), [`llms.txt`, sitemap, and JSON-LD](/docs/configuration#agent-readiness)
+  make eligible public content readable and discoverable.
+- [Read-only MCP](/docs/configuration#default-mcp-server) lists, searches, and reads eligible
+  public static pages through `/mcp`.
+- The [app manifest](/docs/configuration#app-manifest) describes installed capabilities;
+  the [AI catalog](/docs/configuration#ai-catalog) advertises available MCP servers.
+  The [API catalog](/docs/configuration#api-catalog) is a separate opt-in.
 
-The docs engine supplies its own page indexes and MCP server, and an application's own MCP server
-takes precedence. API-only apps do not enable the page-derived defaults, and the experimental
-React RSC pipeline does not yet serve the default read-only MCP endpoint. Individual core
-features can be configured or disabled; discovery never grants permission to act.
+Configure or disable these through `md` and `agent` in `farm.config.ts`. The docs engine supplies
+its own indexes and MCP server; an application's own MCP server takes precedence. API-only apps
+have no page-derived defaults. The experimental React RSC pipeline does not yet serve the default
+read-only MCP endpoint.
 
-| Capability                                              | What it gives you                                                                             | Boundary                                                                                         |
-| ------------------------------------------------------- | --------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------ |
-| [Markdown mirrors](/docs/markdown)                      | A readable representation of pages through a `.md` URL or Markdown content negotiation.       | Configure what may be exposed; authentication still applies.                                     |
-| [Discovery](/docs/configuration#agent-readiness)        | Generated `llms.txt`, sitemap, and metadata-derived JSON-LD.                                  | Generated indexes cover eligible pages, not every possible dynamic URL.                          |
-| [Read-only MCP](/docs/configuration#default-mcp-server) | List, search, and read public static pages through `/mcp`.                                    | It steps aside for your own MCP server; it grants no write access.                               |
-| [App manifest](/docs/configuration#app-manifest)        | A machine-readable description of installed capabilities at `/.well-known/farmjs.json`.       | Disclosure can be reduced or disabled; it is not a credential.                                   |
-| [AI catalog](/docs/configuration#ai-catalog)            | Core publishes MCP discovery at `/.well-known/ai-catalog.json` and server cards.              | On by default when an MCP server is present; listing a server does not bypass its authorization. |
-| [API catalog](/docs/configuration#api-catalog)          | Core can advertise enabled OpenAPI and top-level MCP endpoints at `/.well-known/api-catalog`. | Opt in with `agent.apiCatalog`; OpenAPI and callable tools have their own configuration.         |
-| [API MCP](/docs/plugins/mcp)                            | Explicitly selected endpoints and tools share validation and an authorization policy.         | Install and configure it; ordinary API routes do not become tools automatically.                 |
-| [WebMCP](/docs/plugins/webmcp)                          | Named browser actions while the page is open, using its session.                              | Experimental browser API; requires support, explicit registration, and server authorization.     |
-| [Agent runtimes](/docs/integrations/agent)              | Agent files, durable steps, pauses, and external-event waits beside the app.                  | Opt-in integration with storage and authorization; provider/runtime requirements still apply.    |
-
-**Callable tools and agent execution are explicit extensions.** API MCP uses `@farm.js/mcp` and
-selected tools; WebMCP uses `@farm.js/webmcp` and browser registration; durable execution uses an
-agent integration. They build on the core's route, validation, and lifecycle contracts. Installing
-Farm does not automatically expose mutations or run an agent on your behalf.
-
-Use `farm agent check` to inspect the running application's agent surface. For a coding agent,
-the expanded migration guides below supply feature mappings and verification gates. For an agent
-running inside your product, keep model keys and privileged tools in server modules. The
-[agent-framework guide](/docs/integrations/agent-frameworks) shows how existing frameworks fit
-behind Web `Request`/`Response` routes.
+To let agents act, explicitly configure [API tools](/docs/plugins/mcp), experimental
+[browser tools](/docs/plugins/webmcp), or [durable agent execution](/docs/integrations/agent).
+Discovery does not grant write access. Use `farm agent check` to inspect the running app, and the
+[agent-framework guide](/docs/integrations/agent-frameworks) to connect an existing agent runtime.
 
 ### Integrations for the product, plugins for the framework
 
