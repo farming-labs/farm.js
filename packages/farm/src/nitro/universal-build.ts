@@ -7191,9 +7191,9 @@ function useFarmNodePageResponse(ResponseClass) {
 // Web body the way reading response.body would.
 const farmLazyBufferedHtml = new WeakMap();
 
-// Bind the stored shell to the response Farm built from it. A body replacement
-// gets a new response and takes the ordinary scan path.
-const farmPreloadShells = new WeakMap();
+// Only the response built from a stored shell can reuse its preload scan and
+// compressed bytes. Replacing the body creates a new response.
+const farmResponseShells = new WeakMap();
 
 function hasFarmContentType(headers) {
   if (!headers) return false;
@@ -7303,7 +7303,7 @@ async function applyFarmPreloadBudget(response, pathname, request) {
   const ownedHtml = hasNoHtmlPreloads ? undefined : getFarmOwnedBufferedHtml(response);
   const html = hasNoHtmlPreloads ? "" : (ownedHtml ?? await response.text());
   const managed = manageFarmDocumentPreloads(html, linkHeader, farmPreloadConfig,
-    ownedHtml === undefined ? undefined : farmPreloadShells.get(response));
+    ownedHtml === undefined ? undefined : farmResponseShells.get(response));
   // A remembered document the budget left unchanged keeps its unread body.
   const reusesBody = hasNoHtmlPreloads || (ownedHtml !== undefined && managed.html === html);
   if (ownedHtml !== undefined && !reusesBody && !isLazyPage) {
@@ -11966,7 +11966,7 @@ ${
                 : {}),
             },
           }), middlewareHeaders), cachedPPRShell);
-          farmPreloadShells.set(response, cachedPPRShellEntry);
+          farmResponseShells.set(response, cachedPPRShellEntry);
           return response;
         }
         emitFarmEvent({ type: "ppr.shell.miss", route: pathname, key: pprCacheKey });
@@ -13483,7 +13483,7 @@ async function handleFarmFetch(request, context) {${
         );
         // A Nitro cache rule stores the response and strips its Content-Encoding, so a
         // response it caches is sent as it is, with no Vary on an encoding it never saw.
-        return ${hasCompressionRuntime && !hasPluginRuntime ? "context?.routeRuleCache ? response : compressFarmResponse(request, response, getFarmOwnedBufferedHtml(response), farmLazyBufferedHtml.has(response))" : "response"};
+        return ${hasCompressionRuntime && !hasPluginRuntime ? "context?.routeRuleCache ? response : compressFarmResponse(request, response, getFarmOwnedBufferedHtml(response), farmLazyBufferedHtml.has(response), farmResponseShells.get(response))" : "response"};
       }),
     {
       onResponseFinished: typeof context?.onResponseFinished === "function"

@@ -1,8 +1,9 @@
 // @vitest-environment node
 
-import { mkdtempSync, mkdirSync, realpathSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtempSync, mkdirSync, realpathSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
+import { fileURLToPath } from "node:url";
 import { afterEach, describe, expect, it } from "vitest";
 import { APIRouteManager } from "../api/route-manager";
 import { loadConfig, resolveConfig } from "../config";
@@ -29,6 +30,27 @@ afterEach(() => {
 });
 
 describe("Farm layers", () => {
+  it("replaces a schema-bound mount without merging its models into the new driver", async () => {
+    const root = createProject();
+    createLayer(root, "base", {
+      config: `const bound = { driver: "sqlite", managed: true, schema: { _tag: "schema", models: { legacy: {} } } };
+        export default { storage: { mounts: { keep: bound, raw: bound, replace: bound } } };`,
+    });
+    const next = {
+      driver: "redis",
+      managed: true,
+      schema: { _tag: "schema", models: { draft: {} } },
+    };
+    const raw = { driver: "memory" };
+    const { config } = await resolveFarmLayers(
+      { extends: ["./layers/base"], storage: { mounts: { replace: next, raw } } },
+      { root, mode: "development" },
+    );
+    expect(config.storage.mounts.replace).toBe(next);
+    expect(config.storage.mounts.raw).toEqual(raw);
+    expect(config.storage.mounts).toHaveProperty("keep.schema.models.legacy");
+  });
+
   it("lets the RSC check see the protections a layer adds", async () => {
     const root = createProject();
     createLayer(root, "admin", {
@@ -57,6 +79,13 @@ describe("Farm layers", () => {
 
   it("consumes layers directly from an application's farm.config.ts", async () => {
     const root = createProject();
+    const scope = path.join(root, "node_modules", "@farm.js");
+    mkdirSync(scope, { recursive: true });
+    symlinkSync(
+      fileURLToPath(new URL("../../", import.meta.url)),
+      path.join(scope, "core"),
+      "junction",
+    );
     createLayer(root, "commerce", {
       config: `export default { routeRules: { "/shop/**": { swr: 120 } } };`,
     });

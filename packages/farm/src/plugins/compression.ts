@@ -2,6 +2,7 @@ import { _withFarmResponseHeaders } from "../owned-response";
 import type { FarmPlugin, FarmPluginContext } from "../plugin";
 import type { FarmRequest, FarmResponse } from "../types";
 import { pipeline, Readable } from "node:stream";
+import { promisify } from "node:util";
 import { brotliCompress, constants, createBrotliCompress, createGzip, gzip } from "node:zlib";
 
 type SupportedEncoding = "br" | "gzip";
@@ -147,6 +148,33 @@ function compressedHeaders(response: Response, encoding: SupportedEncoding): Hea
   return headers;
 }
 
+type StoredShell = { readonly html: string };
+type ShellEncodings = { html: string } & Partial<Record<SupportedEncoding, Promise<Buffer>>>;
+
+const compressedShells = new WeakMap<StoredShell, ShellEncodings>();
+const brotli = promisify(brotliCompress);
+const gzipBuffer = promisify(gzip);
+
+function encodeText(text: string, encoding: SupportedEncoding): Promise<Buffer> {
+  const input = Buffer.from(text);
+  return encoding === "br"
+    ? brotli(input, { params: { [constants.BROTLI_PARAM_QUALITY]: BROTLI_QUALITY } })
+    : gzipBuffer(input);
+}
+
+function getEncodedShell(shell: StoredShell, encoding: SupportedEncoding): Promise<Buffer> {
+  let entry = compressedShells.get(shell);
+  if (entry?.html !== shell.html) {
+    entry = { html: shell.html };
+    compressedShells.set(shell, entry);
+  }
+  const variants = entry;
+  return (variants[encoding] ??= encodeText(shell.html, encoding).catch((error) => {
+    delete variants[encoding];
+    throw error;
+  }));
+}
+
 // The caller proved the body is exactly this complete string (Farm built it and
 // nothing replaced the stream since), so there is nothing to flush early.
 // Compressing it in one call skips the web/Node stream bridge and per-chunk
@@ -156,31 +184,24 @@ function compressBufferedResponse(
   text: string,
   encoding: SupportedEncoding,
   lazyBody: boolean,
+  shell?: StoredShell,
 ): Response {
   const headers = compressedHeaders(response, encoding);
   if (!lazyBody) response.body?.cancel().catch(() => {});
-  const input = Buffer.from(text);
+  const reuse = shell && shell.html === text;
+  const bytes = reuse ? getEncodedShell(shell, encoding) : encodeText(text, encoding);
   let cancelled = false;
   const body = new ReadableStream<Uint8Array>({
-    start(controller) {
-      const done = (error: Error | null, output: Buffer) => {
-        if (cancelled) return;
-        if (error) {
-          controller.error(error);
-          return;
-        }
-        controller.enqueue(new Uint8Array(output.buffer, output.byteOffset, output.byteLength));
-        controller.close();
-      };
-      if (encoding === "br") {
-        brotliCompress(
-          input,
-          { params: { [constants.BROTLI_PARAM_QUALITY]: BROTLI_QUALITY } },
-          done,
-        );
-      } else {
-        gzip(input, done);
-      }
+    async start(controller) {
+      const output = await bytes;
+      if (cancelled) return;
+      // A response reader can mutate its chunk. Keep the cached bytes private.
+      controller.enqueue(
+        reuse
+          ? new Uint8Array(output)
+          : new Uint8Array(output.buffer, output.byteOffset, output.byteLength),
+      );
+      controller.close();
     },
     cancel() {
       cancelled = true;
@@ -238,6 +259,7 @@ export function compressFarmResponse(
   response: Response,
   bufferedText?: string,
   lazyBody = false,
+  shell?: StoredShell,
 ): Response {
   if (!isCompressionEligible(request, response, bufferedText)) return response;
   if (request.method === "HEAD") return varyIdentityResponse(response);
@@ -246,7 +268,7 @@ export function compressFarmResponse(
   if (!encoding) return varyIdentityResponse(response);
   return bufferedText === undefined
     ? compressResponse(response, encoding)
-    : compressBufferedResponse(response, bufferedText, encoding, lazyBody);
+    : compressBufferedResponse(response, bufferedText, encoding, lazyBody, shell);
 }
 
 export function createCompressionPlugin({

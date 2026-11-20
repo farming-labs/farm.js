@@ -3,7 +3,7 @@
 import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
-import { fileURLToPath } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { build } from "../build";
 import { resolveConfig } from "../config";
@@ -34,6 +34,23 @@ export function session() {
   "src/app/shared/page.tsx": `
 export const experimental_ppr = true;
 export default function Page() { return <p>shared shell</p>; }
+`,
+  "src/app/encoded/page.tsx": `
+export const experimental_ppr = true;
+export default function Page() { return <p>ppr-compression-probe</p>; }
+`,
+  "count-compressions.mjs": `
+import fs from "node:fs";
+import zlib from "node:zlib";
+import { syncBuiltinESMExports } from "node:module";
+const compress = zlib.brotliCompress;
+zlib.brotliCompress = function(input, ...args) {
+  if (Buffer.isBuffer(input) && input.includes("ppr-compression-probe")) {
+    fs.appendFileSync(new URL("./compressions.txt", import.meta.url), "br\\n");
+  }
+  return compress.call(this, input, ...args);
+};
+syncBuiltinESMExports();
 `,
   "src/app/shared-cold/page.tsx": `
 export const experimental_ppr = true;
@@ -92,7 +109,12 @@ describe("production PPR shells and visitors with cookies", () => {
     );
     await build(config, { root, preset: "node-server" });
 
-    server = await startProductionServer(path.join(root, ".farm", ".output", "server"));
+    const probe = pathToFileURL(path.join(root, "count-compressions.mjs")).href;
+    server = await startProductionServer(path.join(root, ".farm", ".output", "server"), {
+      env: {
+        NODE_OPTIONS: [process.env.NODE_OPTIONS, `--import=${probe}`].filter(Boolean).join(" "),
+      },
+    });
     base = server.origin;
   }, 180_000);
 
@@ -114,6 +136,23 @@ describe("production PPR shells and visitors with cookies", () => {
     const anonymous = await visit("/shared");
     expect(anonymous.headers.get("x-farm-ppr")).toBe("hit");
     expect(anonymous.headers.get("cache-control")).not.toBe("private, no-store");
+  });
+
+  it("reuses compressed shell bytes across hits while keeping each visitor's cache policy", async () => {
+    const first = await visit("/encoded");
+    expect(first.headers.get("x-farm-ppr")).toBe("miss");
+    const [anonymous, consent] = await Promise.all([
+      visit("/encoded", { "accept-encoding": "br" }),
+      visit("/encoded", { "accept-encoding": "br", cookie: "consent=granted" }),
+    ]);
+    for (const result of [anonymous, consent]) {
+      expect(result.headers.get("content-encoding")).toBe("br");
+      expect(result.headers.get("x-farm-ppr")).toBe("hit");
+      expect(result.html).toBe(first.html);
+    }
+    expect(anonymous.headers.get("cache-control")).not.toBe("private, no-store");
+    expect(consent.headers.get("cache-control")).toBe("private, no-store");
+    expect(await fs.readFile(path.join(root, "compressions.txt"), "utf8")).toBe("br\n");
   });
 
   it("stores the shell from a visitor with cookies when the render read none", async () => {

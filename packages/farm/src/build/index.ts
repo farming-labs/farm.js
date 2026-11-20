@@ -192,6 +192,7 @@ async function buildWithProductionNodeEnv(inputConfig: ResolvedFarmConfig, optio
       root,
       srcDir,
       layers: config.layers,
+      storage: config.storage,
       plugins: config.plugins,
       extraRoutes: [
         ...(config.openapi?.enabled && config.openapi.route ? [config.openapi.route] : []),

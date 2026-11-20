@@ -5,6 +5,7 @@ import type { Driver } from "unstorage";
 
 export interface ManagedSqliteOptions {
   managed: true | { name: string };
+  schema?: SchemaDefinition;
   path?: never;
   url?: never;
 }
@@ -12,6 +13,7 @@ export interface ManagedSqliteOptions {
 export interface ManagedSqliteMount {
   driver: "farm-managed-sqlite";
   managed: ManagedSqliteOptions["managed"];
+  schema?: SchemaDefinition;
 }
 
 export function managedSqliteName(mount: string, managed: unknown) {
@@ -122,10 +124,13 @@ async function connect(name: string, loadClient: LoadClient) {
 
 export const databaseAccessor = Symbol.for("farmjs.storage.managedDatabase");
 
+export const mountSchema = Symbol.for("farmjs.storage.managedSchema");
+
 export function managedSqliteDriver(
   name: string,
   loadClient: LoadClient,
-): Driver & { [databaseAccessor]: () => Promise<Client> } {
+  schema?: SchemaDefinition,
+): Driver & { [databaseAccessor]: () => Promise<Client>; [mountSchema]?: SchemaDefinition } {
   let pending: Promise<Client> | undefined;
   let initialized: Promise<Client> | undefined;
   let closed = false;
@@ -152,6 +157,7 @@ export function managedSqliteDriver(
   return {
     name: "farm-managed-sqlite",
     [databaseAccessor]: client,
+    [mountSchema]: schema,
     async hasItem(key) {
       return (
         (await (await kv()).execute({ sql: "SELECT 1 FROM _farm_kv WHERE key=?", args: [key] }))
