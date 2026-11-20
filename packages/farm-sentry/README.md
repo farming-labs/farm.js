@@ -15,6 +15,12 @@ pnpm add @farm.js/sentry @sentry/node
 the plugin logs a clear error and continues without reporting rather than preventing the
 application from starting.
 
+For browser reporting, also install the browser SDK:
+
+```bash
+pnpm add @sentry/browser
+```
+
 ## Configure
 
 ```ts
@@ -50,6 +56,40 @@ export const register = registerSentry({
 Without this the plugin still reports errors, but the SDK's automatic database and HTTP
 instrumentation will not attach.
 
+## Browser errors
+
+Window errors, unhandled rejections, and hydration failures reach the client `error` hook, which
+has no consumer until a browser DSN is configured:
+
+```ts
+sentryPlugin({
+  dsn: process.env.SENTRY_DSN,
+  browserDsn: process.env.PUBLIC_SENTRY_DSN,
+});
+```
+
+`browserDsn` must be a separate browser DSN, provided explicitly — never reuse the server DSN. A
+browser DSN is public by design (it ships in the browser bundle); a server DSN is a secret. Only
+the browser DSN and scalar options cross into the browser bundle. Without `browserDsn` no browser
+code is registered and `@sentry/browser` stays out of the browser bundle.
+
+Browser errors are tagged with the Farm error phase (`farm.phase`) and the page they happened on,
+with the route pattern when the error happened during a navigation.
+
+To pass an SDK the application already initialized instead, register the reporter from the app
+client entry:
+
+```ts
+// src/client.ts
+import { defineClient } from "@farm.js/core/client";
+import { sentryClient } from "@farm.js/sentry/client";
+import * as Sentry from "@sentry/browser";
+
+export default defineClient(
+  sentryClient({ sdk: Sentry, browserDsn: import.meta.env.PUBLIC_SENTRY_DSN }),
+);
+```
+
 ## What it does
 
 | Hook              | Behavior                                                                 |
@@ -59,6 +99,7 @@ instrumentation will not attach.
 | `runtime.after`   | sets the span status from the response                                   |
 | `runtime.error`   | captures the exception with route, kind and request context              |
 | `runtime.close`   | flushes pending events on shutdown                                       |
+| `client.error`    | captures browser errors with the Farm phase and page context             |
 | `build.configure` | enables source maps when `sourceMaps` is set                             |
 
 Spans are named by route pattern rather than pathname, so `/users/[id]` stays one span name
@@ -87,6 +128,7 @@ The flush is handed to `waitUntil`, so the host keeps the invocation alive until
 | Option             | Default              | Description                                                                    |
 | ------------------ | -------------------- | ------------------------------------------------------------------------------ |
 | `dsn`              |                      | Sentry project DSN.                                                            |
+| `browserDsn`       |                      | Browser project DSN, provided explicitly. Never reuse the server DSN.          |
 | `environment`      | instrumentation mode | Environment name.                                                              |
 | `release`          |                      | Release identifier for the deploy.                                             |
 | `tracesSampleRate` |                      | Fraction of requests traced. Errors are always sent.                           |
@@ -119,7 +161,8 @@ Without it the production build fails with `Cannot find module '@rollup/plugin-t
 
 Node presets. `@sentry/node` does not run on Cloudflare Workers, which need `@sentry/cloudflare`
 instead, so `registerSentry` is a no-op on `edge` and `bun` runtimes. Edge support is tracked
-separately.
+separately. Browser reporting runs in the browser through `@sentry/browser` and is unaffected by
+the server runtime; it only needs `browserDsn`.
 
 ## Bring your own SDK
 

@@ -61,14 +61,15 @@ The plugin still captures Farm errors without this file, but automatic HTTP and 
 
 ## What it captures
 
-| Farm lifecycle            | Sentry behavior                                                              |
-| ------------------------- | ---------------------------------------------------------------------------- |
-| Runtime start             | Resolves and initializes the SDK once.                                       |
-| Request context           | Names the request span by route pattern, such as `GET /users/[id]`.          |
-| Response                  | Records the response status and finishes plugin-owned spans.                 |
-| Runtime and render errors | Captures the exception with the Farm event, request kind, and route context. |
-| Runtime shutdown          | Flushes pending events without allowing a flush failure to stop shutdown.    |
-| Production build          | Generates source maps when `sourceMaps` is enabled.                          |
+| Farm lifecycle            | Sentry behavior                                                                                                                      |
+| ------------------------- | ------------------------------------------------------------------------------------------------------------------------------------ |
+| Runtime start             | Resolves and initializes the SDK once.                                                                                               |
+| Request context           | Names the request span by route pattern, such as `GET /users/[id]`.                                                                  |
+| Response                  | Records the response status and finishes plugin-owned spans.                                                                         |
+| Runtime and render errors | Captures the exception with the Farm event, request kind, and route context.                                                         |
+| Browser errors            | Captures window errors, unhandled rejections, and hydration failures with the Farm phase and page context, when `browserDsn` is set. |
+| Runtime shutdown          | Flushes pending events without allowing a flush failure to stop shutdown.                                                            |
+| Production build          | Generates source maps when `sourceMaps` is enabled.                                                                                  |
 
 When the Sentry SDK already created an HTTP span, Farm renames that span instead of creating a competing request span. Automatic HTTP and database spans therefore remain correctly nested.
 
@@ -106,6 +107,7 @@ The `sdk` option accepts the module's structural API, not a separately construct
 | Option             | Default              | Description                                                                   |
 | ------------------ | -------------------- | ----------------------------------------------------------------------------- |
 | `dsn`              |                      | Sentry project DSN.                                                           |
+| `browserDsn`       |                      | Browser project DSN, provided explicitly. Never reuse the server DSN.         |
 | `environment`      | Instrumentation mode | Environment name.                                                             |
 | `release`          |                      | Release identifier for the deployment.                                        |
 | `tracesSampleRate` |                      | Fraction of requests traced. Errors are always reported.                      |
@@ -129,6 +131,38 @@ pnpm add -D @rollup/plugin-terser
 
 ## Runtime support
 
-The default SDK integration currently supports Node presets. Cloudflare Workers require `@sentry/cloudflare`, so early `registerSentry` initialization is a no-op for `edge` and `bun` runtimes. Browser error reporting also requires a separate browser SDK setup.
+The default SDK integration currently supports Node presets. Cloudflare Workers require `@sentry/cloudflare`, so early `registerSentry` initialization is a no-op for `edge` and `bun` runtimes.
 
-If a DSN is configured but no SDK resolves, Farm logs a clear error and continues without reporting. Monitoring failures must not prevent the application from starting, responding, or shutting down.
+## Browser errors
+
+Window errors, unhandled rejections, and hydration failures reach the client `error` hook, which has no consumer until a browser DSN is configured:
+
+```ts
+sentryPlugin({
+  dsn: process.env.SENTRY_DSN,
+  browserDsn: process.env.PUBLIC_SENTRY_DSN,
+});
+```
+
+`browserDsn` must be a separate browser DSN, provided explicitly — never reuse the server DSN. A browser DSN is public by design (it ships in the browser bundle); a server DSN is a secret. Only the browser DSN and scalar options cross into the browser bundle. Without `browserDsn` no browser code is registered and `@sentry/browser` stays out of the browser bundle.
+
+Browser errors are tagged with the Farm error phase (`farm.phase`) and the page they happened on, with the route pattern when the error happened during a navigation. Install the browser SDK for this:
+
+```bash
+pnpm add @sentry/browser
+```
+
+To pass an SDK the application already initialized instead, register the reporter from the app client entry:
+
+```ts
+// src/client.ts
+import { defineClient } from "@farm.js/core/client";
+import { sentryClient } from "@farm.js/sentry/client";
+import * as Sentry from "@sentry/browser";
+
+export default defineClient(
+  sentryClient({ sdk: Sentry, browserDsn: import.meta.env.PUBLIC_SENTRY_DSN }),
+);
+```
+
+If a browser DSN is configured but no SDK resolves, Farm logs a clear error and continues without reporting. Monitoring failures must not prevent the application from starting, responding, or shutting down.
