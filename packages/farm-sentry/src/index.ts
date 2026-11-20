@@ -3,7 +3,12 @@ import type {
   FarmInstrumentationContext,
 } from "@farm.js/core/instrumentation";
 import { onFarmEvent, type FarmEvent } from "@farm.js/core/observability";
-import { definePlugin } from "@farm.js/core/plugin";
+import { definePlugin, type FarmPluginClientConfig } from "@farm.js/core/plugin";
+import {
+  resolveSentryBrowserPublicConfig,
+  type SentryBrowserClientPublic,
+  type SentryBrowserClientState,
+} from "./client.js";
 
 /** Minimal span surface used by the plugin, satisfied by `@sentry/node`. */
 export interface SentrySpanLike {
@@ -45,6 +50,14 @@ export interface SentrySdkLike {
 
 export interface SentryPluginOptions {
   dsn?: string;
+  /**
+   * Browser project DSN. Reported through the client `error` hook (window
+   * errors, unhandled rejections, hydration failures). Must be provided
+   * explicitly — never reuse the server DSN: a browser DSN is public by
+   * design, a server DSN is a secret. Without it no browser code is
+   * registered and `@sentry/browser` stays out of the browser bundle.
+   */
+  browserDsn?: string;
   environment?: string;
   release?: string;
   tracesSampleRate?: number;
@@ -289,6 +302,35 @@ export function sentryPlugin(options: SentryPluginOptions = {}) {
   const enabled = options.enabled !== false;
   const flushTimeoutMs = options.flushTimeoutMs ?? DEFAULT_FLUSH_TIMEOUT_MS;
 
+  /**
+   * Browser reporting, registered only when the application opts in with a
+   * browser DSN. The hooks are serialized into the generated client entry, so
+   * they must be self-contained: they only touch their own parameters and
+   * dynamically import the client module with a literal specifier.
+   */
+  const browserClient:
+    | FarmPluginClientConfig<SentryBrowserClientState, SentryBrowserClientPublic>
+    | undefined =
+    options.browserDsn && enabled
+      ? {
+          public: resolveSentryBrowserPublicConfig(options),
+          async setup({ public: config }) {
+            const runtime = await import("@farm.js/sentry/client");
+            return runtime.createSentryBrowserReporter({
+              browserDsn: config.browserDsn,
+              environment: config.environment,
+              release: config.release,
+              sendDefaultPii: config.sendDefaultPii,
+            });
+          },
+          async error({ state, error, phase, location, navigation }) {
+            if (!state.enabled) return;
+            const runtime = await import("@farm.js/sentry/client");
+            runtime.reportSentryBrowserError(state, { error, phase, location, navigation });
+          },
+        }
+      : undefined;
+
   return definePlugin({
     name: "farm:sentry",
     // Wrap as much of the request as possible.
@@ -452,6 +494,8 @@ export function sentryPlugin(options: SentryPluginOptions = {}) {
         return { ...buildConfig, sourceMap: true };
       },
     },
+
+    client: browserClient,
   });
 }
 
