@@ -38,10 +38,11 @@ afterEach(async () => {
 });
 
 it("resolves Farm storage to the same hosted resources as existing managed mounts", () => {
-  expect(farmStorage()).toEqual(sqliteStorage({ managed: true }));
-  expect(farmStorage({ namespace: "drafts" })).toEqual(
-    sqliteStorage({ managed: { name: "drafts" } }),
-  );
+  expect(sqliteStorage({ managed: true })).toEqual({ ...farmStorage(), declaredDriver: "sqlite" });
+  expect(sqliteStorage({ managed: { name: "drafts" } })).toEqual({
+    ...farmStorage({ namespace: "drafts" }),
+    declaredDriver: "sqlite",
+  });
   expect(() => farmStorage({ namespace: "bad/name" })).toThrow();
   // @ts-expect-error Hosted storage cannot point to a local file.
   expect(() => farmStorage({ path: "./drafts.sqlite" })).toThrow();
@@ -56,31 +57,36 @@ it("accepts an explicit managed flag with either an inferred or an explicit name
   expect(() => farmStorage({ managed: false })).toThrow(/managed/);
 });
 
-it.each(
-  Object.entries({
-    sqliteStorage,
-    postgresStorage,
-    pgStorage,
-    mysqlStorage,
-    mysql2Storage,
-    pgliteStorage,
-    planetscaleStorage,
-    libsqlStorage,
-    redisStorage,
-    s3Storage,
-    mongodbStorage,
-    upstashStorage,
-    netlifyBlobsStorage,
-    vercelKVStorage,
-    vercelBlobStorage,
-    localStorage,
-    memoryStorage,
-  }),
-)("%s uses Farm hosting when managed storage is requested", (_name, helper) => {
-  expect(helper({ managed: true })).toEqual(farmStorage());
-  expect(helper({ managed: true, namespace: "drafts" })).toEqual(
-    farmStorage({ namespace: "drafts" }),
-  );
+it.each([
+  ["sqlite", sqliteStorage],
+  ["postgres", postgresStorage],
+  ["postgres", pgStorage],
+  ["mysql", mysqlStorage],
+  ["mysql", mysql2Storage],
+  ["pglite", pgliteStorage],
+  ["planetscale", planetscaleStorage],
+  ["libsql", libsqlStorage],
+  ["redis", redisStorage],
+  ["s3", s3Storage],
+  ["mongodb", mongodbStorage],
+  ["upstash", upstashStorage],
+  ["netlify-blobs", netlifyBlobsStorage],
+  ["vercel-kv", vercelKVStorage],
+  ["vercel-blob", vercelBlobStorage],
+  ["local", localStorage],
+  ["memory", memoryStorage],
+] as const)("%s preserves its declared driver when managed", (driver, helper) => {
+  expect(helper({ managed: true })).toEqual({ ...farmStorage(), declaredDriver: driver });
+  expect(helper({ managed: true, namespace: "drafts" })).toEqual({
+    ...farmStorage({ namespace: "drafts" }),
+    declaredDriver: driver,
+  });
+});
+
+it("retains unknown driver identity for a descriptor from an older config", () => {
+  const legacy = { driver: "farm-managed-sqlite", managed: true };
+  expect(resolveManagedStorageMount(legacy)).toEqual(legacy);
+  expect(resolveManagedStorageMount(farmStorage())?.declaredDriver).toBe("farm");
 });
 
 it("plans and loads only the hosted client for managed native and raw KV declarations", async () => {
@@ -144,7 +150,10 @@ it("binds the ORM schema to the mount and leaves raw access available", async ()
   const schema = defineSchema({ draft: model({ table: "drafts", fields: { id: id() } }) });
   const bare = farmStorage({ namespace: "drafts" });
   const bound = postgresStorage({ managed: true, namespace: "drafts", schema });
-  expect(farmStorage({ namespace: "drafts", schema })).toEqual(bound);
+  expect(bound).toEqual({
+    ...farmStorage({ namespace: "drafts", schema }),
+    declaredDriver: "postgres",
+  });
   expect(bound.schema).toBe(schema);
   expect(() => resolveManagedStorageMount({ driver: "redis", schema })).toThrow(/managed: true/);
   expect(() => resolveManagedStorageMount({ driver: "redis", managed: true, schema: {} })).toThrow(
