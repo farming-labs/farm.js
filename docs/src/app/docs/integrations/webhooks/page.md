@@ -130,7 +130,7 @@ the Infra dashboard, open **Webhooks**, choose the project and environment, and 
 Copy the receiver URL and send key to the sending backend. It can reuse one sender instance:
 
 ```ts
-import { createWebhook } from "@farmjs/webhook/sender";
+import { createWebhook } from "@farm.js/webhook/sender";
 
 const stock = createWebhook({ url: env.FARM_RECEIVER_URL, sendKey: env.FARM_WEBHOOK_SEND_KEY });
 await stock.send({ sku: "blue-shirt", quantity: 12 }, { idempotencyKey: change.id });
@@ -140,7 +140,7 @@ Copy the delivery signing secret to the receiving app. Mount this integration in
 app's `integrations` configuration:
 
 ```ts
-import { webhooks } from "@farmjs/webhook";
+import { webhooks } from "@farm.js/webhook";
 
 export const appIntegrations = {
   webhooks: webhooks({

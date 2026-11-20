@@ -1009,7 +1009,7 @@ export const { api, apiClient } = createIntegrations({
 
 ### Receive durable webhooks from Farm Infra
 
-`@farmjs/webhook` mounts verified POST routes through the normal Farm integration registry.
+`@farm.js/webhook` mounts verified POST routes through the normal Farm integration registry.
 Provision a receiver from the Infra Webhooks dashboard or with `registerWebhook` on a trusted
 server. See [Managed receivers](/docs/integrations/webhooks#managed-receivers) for the sender
 and receiver code and the development and production setup.

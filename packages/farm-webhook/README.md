@@ -1,4 +1,4 @@
-# @farmjs/webhook
+# @farm.js/webhook
 
 **Receive Farm Infra deliveries in a Farm integration and send JSON events to a project receiver.**
 
@@ -7,7 +7,7 @@ environment, and destination. Give the signing secret to the receiving applicati
 bearer receiver, give the receiver URL and write-only send key to the sending service.
 
 ```ts
-import { createWebhook } from "@farmjs/webhook/sender";
+import { createWebhook } from "@farm.js/webhook/sender";
 
 const warehouse = createWebhook({
   url: env.FARM_RECEIVER_URL,
@@ -45,7 +45,7 @@ when retrying a send whose response was lost.
 
 ```ts
 // src/lib/integrations.ts
-import { webhooks } from "@farmjs/webhook";
+import { webhooks } from "@farm.js/webhook";
 
 export const appIntegrations = {
   webhooks: webhooks({
