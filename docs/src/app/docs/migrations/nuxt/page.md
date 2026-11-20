@@ -33,8 +33,9 @@ Farm's particular APIs and tools, rather than gaining those shared foundations f
   callers, and lifecycle. Vue consumes their server APIs without adopting React providers.
 - **Reuse a framework contract across projects.** If your team maintains both Vue and React apps,
   Farm gives their server routes, storage, deployment, plugins, and diagnostics a common vocabulary.
-- **Make content and approved actions accessible to agents.** Farm includes discovery and reading
-  surfaces, with opt-in tools and agent runtimes when the product needs them.
+- **Agent native at the core, including Vue apps.** Markdown, discovery, capability manifests,
+  and read-only MCP come from `@farm.js/core`. Opt-in tools and agent runtimes extend that surface
+  when the product needs them.
 
 ### Performance evidence
 
@@ -83,6 +84,12 @@ served Vue modules; [Hints](/docs/plugins/hints) checks the live page and
 browser boundaries easier to inspect.
 
 ### Agent experience after the move
+
+**The agent surface belongs to `@farm.js/core`, so you keep it when you choose Vue.** Core supplies
+the public-page reading and discovery defaults without an agent integration or a separate MCP
+server. Its [AI catalog](/docs/configuration#ai-catalog) advertises MCP servers already present;
+the [core defaults and limits](/docs/migrations#agent-native-at-the-core) explain ownership,
+overrides, and opt-ins.
 
 Farm's [Markdown mirrors](/docs/markdown), [discovery metadata](/docs/configuration#agent-readiness),
 and [read-only MCP server](/docs/configuration#default-mcp-server) work at the framework level.

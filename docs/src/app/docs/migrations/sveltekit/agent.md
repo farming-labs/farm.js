@@ -26,6 +26,12 @@ WebMCP, and durable server agents have separate configuration and authorization 
 The procedure below records its original validation versions; consult the current
 [Svelte renderer guide](/docs/renderers/svelte) before applying version-specific instructions.
 
+Core agent readiness is part of `@farm.js/core`: Markdown mirrors, page discovery, capability
+manifests, and the default read-only MCP server. Check the
+[core defaults and limits](/docs/migrations#agent-native-at-the-core) for the selected rendering
+mode. Callable API tools, experimental WebMCP, and durable agent execution remain explicit,
+separately configured extensions.
+
 ## Task contract
 
 - Keep the SvelteKit app runnable until Farm passes dev, build, start, and type-check. Work on a

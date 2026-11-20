@@ -30,6 +30,12 @@ exposure explicit and authorized. Add optional features only when required. The 
 below records older validation versions; check its version-specific instructions against the
 current [Vue renderer guide](/docs/renderers/vue) and installed packages.
 
+Core agent readiness is part of `@farm.js/core`: Markdown mirrors, page discovery, capability
+manifests, and the default read-only MCP server. Check the
+[core defaults and limits](/docs/migrations#agent-native-at-the-core) for the selected rendering
+mode. Callable API tools, experimental WebMCP, and durable agent execution remain explicit,
+separately configured extensions.
+
 ## Task contract
 
 **Goal.** The same URLs, API contracts, status codes, cookies, metadata, and interactive behavior,

@@ -32,8 +32,9 @@ operational tools, and agent access across projects using different renderers.
   billing, email, jobs, and storage without changing the UI renderer.
 - **Inspect the whole app.** Route explanations, generated declarations, diagnostics, and plugin
   inspection cover more than the component currently on screen.
-- **Serve agents from the same application.** Readable pages, explicit tools, and durable agent
-  execution can reuse your server APIs and authorization.
+- **Agent native at the core, including Svelte apps.** `@farm.js/core` supplies Markdown,
+  discovery, capability manifests, and read-only MCP. Explicit tools and durable agent execution
+  can then reuse your server APIs and authorization.
 
 ### Performance evidence
 
@@ -79,6 +80,12 @@ source and served modules, while [Hints](/docs/plugins/hints) checks the live pa
 [Analyzer](/docs/plugins/analyzer) explains the built output.
 
 ### Agent experience after the move
+
+**The agent surface belongs to `@farm.js/core`, so you keep it when you choose Svelte.** Core
+provides public-page reading and discovery without an agent integration or a separate MCP server.
+Its [AI catalog](/docs/configuration#ai-catalog) advertises MCP servers already present; see the
+[core defaults and limits](/docs/migrations#agent-native-at-the-core) for ownership, overrides,
+and opt-ins.
 
 [Markdown mirrors](/docs/markdown), [discovery metadata](/docs/configuration#agent-readiness),
 and the [read-only MCP server](/docs/configuration#default-mcp-server) let agents read eligible

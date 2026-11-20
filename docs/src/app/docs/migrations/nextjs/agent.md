@@ -21,6 +21,12 @@ against the current linked guides, especially [server-component modes](/docs/ser
 before applying version-specific setup. Do not claim a measured speedup for the migrated app until
 you have measured it with equivalent content, rendering, caching, and deployment.
 
+Core agent readiness is part of `@farm.js/core`: Markdown mirrors, page discovery, capability
+manifests, and the default read-only MCP server. Check the
+[core defaults and limits](/docs/migrations#agent-native-at-the-core) for the selected rendering
+mode. Callable API tools, experimental WebMCP, and durable agent execution remain explicit,
+separately configured extensions.
+
 ## Ground rules
 
 - Farm's app directory is `src/app`. `@/` resolves to `src/`. `public/` stays at the project root.

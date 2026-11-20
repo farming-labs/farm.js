@@ -11,10 +11,14 @@ the homepage comparison: Next.js, SvelteKit, Nuxt, and TanStack Start.
 
 ## What you gain with Farm.js
 
-**Keep the component model you know and bring the rest of your application into one framework
-contract.** Farm connects routing, validated APIs, typed callers, service integrations, deployment,
-and agent access. The benefit is less application code connecting those pieces, with tools to
-inspect what the framework actually resolved.
+**Farm.js is agent native at the core: one application serves people and agents.**
+`@farm.js/core` connects page rendering, metadata, discovery, and read-only agent access to the
+same route tree. Public pages can be read and discovered without installing an agent integration
+or writing a separate MCP server.
+
+Keep the component model you know and bring routing, validated APIs, typed callers, service
+integrations, and deployment into the same framework contract. The benefit is less application
+code connecting those pieces, with tools to inspect what the framework actually resolved.
 
 Each source guide explains the reasons to move before the migration steps. Read its performance
 evidence and compatibility limits together: a faster fixture build is useful evidence, but it
@@ -50,20 +54,38 @@ production:
 Read their platform limits before planning a native application; they are not a promise that
 every web component becomes a native screen.
 
-### Agent experience
+### Agent native at the core
 
 Agent experience (AX) means making the application understandable and usable by software agents,
 as well as giving a coding agent enough information to work on it accurately.
 
-| Capability                                              | What it gives you                                                                       | Boundary                                                                                      |
-| ------------------------------------------------------- | --------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------- |
-| [Markdown mirrors](/docs/markdown)                      | A readable representation of pages through a `.md` URL or Markdown content negotiation. | Configure what may be exposed; authentication still applies.                                  |
-| [Discovery](/docs/configuration#agent-readiness)        | Generated `llms.txt`, sitemap, and metadata-derived JSON-LD.                            | Generated indexes cover eligible pages, not every possible dynamic URL.                       |
-| [Read-only MCP](/docs/configuration#default-mcp-server) | List, search, and read public static pages through `/mcp`.                              | It steps aside for your own MCP server; it grants no write access.                            |
-| [App manifest](/docs/configuration#app-manifest)        | A machine-readable description of installed capabilities at `/.well-known/farmjs.json`. | Disclosure can be reduced or disabled; it is not a credential.                                |
-| [API MCP](/docs/plugins/mcp)                            | Explicitly selected endpoints and tools share validation and an authorization policy.   | Install and configure it; ordinary API routes do not become tools automatically.              |
-| [WebMCP](/docs/plugins/webmcp)                          | Named browser actions while the page is open, using its session.                        | Experimental browser API; requires support, explicit registration, and server authorization.  |
-| [Agent runtimes](/docs/integrations/agent)              | Agent files, durable steps, pauses, and external-event waits beside the app.            | Opt-in integration with storage and authorization; provider/runtime requirements still apply. |
+**The core provides the reading and discovery surface by default.** On Farm's normal page-serving
+pipeline, pages have Markdown mirrors; eligible static pages feed `llms.txt` and the sitemap;
+metadata supplies JSON-LD; and `/mcp` provides `list_pages`, `search_pages`, and `read_page`.
+The app manifest and AI catalog describe the capabilities and MCP servers the app already serves.
+These are core features configured through `md` and `agent` in `farm.config.ts`.
+
+The docs engine supplies its own page indexes and MCP server, and an application's own MCP server
+takes precedence. API-only apps do not enable the page-derived defaults, and the experimental
+React RSC pipeline does not yet serve the default read-only MCP endpoint. Individual core
+features can be configured or disabled; discovery never grants permission to act.
+
+| Capability                                              | What it gives you                                                                             | Boundary                                                                                         |
+| ------------------------------------------------------- | --------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------ |
+| [Markdown mirrors](/docs/markdown)                      | A readable representation of pages through a `.md` URL or Markdown content negotiation.       | Configure what may be exposed; authentication still applies.                                     |
+| [Discovery](/docs/configuration#agent-readiness)        | Generated `llms.txt`, sitemap, and metadata-derived JSON-LD.                                  | Generated indexes cover eligible pages, not every possible dynamic URL.                          |
+| [Read-only MCP](/docs/configuration#default-mcp-server) | List, search, and read public static pages through `/mcp`.                                    | It steps aside for your own MCP server; it grants no write access.                               |
+| [App manifest](/docs/configuration#app-manifest)        | A machine-readable description of installed capabilities at `/.well-known/farmjs.json`.       | Disclosure can be reduced or disabled; it is not a credential.                                   |
+| [AI catalog](/docs/configuration#ai-catalog)            | Core publishes MCP discovery at `/.well-known/ai-catalog.json` and server cards.              | On by default when an MCP server is present; listing a server does not bypass its authorization. |
+| [API catalog](/docs/configuration#api-catalog)          | Core can advertise enabled OpenAPI and top-level MCP endpoints at `/.well-known/api-catalog`. | Opt in with `agent.apiCatalog`; OpenAPI and callable tools have their own configuration.         |
+| [API MCP](/docs/plugins/mcp)                            | Explicitly selected endpoints and tools share validation and an authorization policy.         | Install and configure it; ordinary API routes do not become tools automatically.                 |
+| [WebMCP](/docs/plugins/webmcp)                          | Named browser actions while the page is open, using its session.                              | Experimental browser API; requires support, explicit registration, and server authorization.     |
+| [Agent runtimes](/docs/integrations/agent)              | Agent files, durable steps, pauses, and external-event waits beside the app.                  | Opt-in integration with storage and authorization; provider/runtime requirements still apply.    |
+
+**Callable tools and agent execution are explicit extensions.** API MCP uses `@farm.js/mcp` and
+selected tools; WebMCP uses `@farm.js/webmcp` and browser registration; durable execution uses an
+agent integration. They build on the core's route, validation, and lifecycle contracts. Installing
+Farm does not automatically expose mutations or run an agent on your behalf.
 
 Use `farm agent check` to inspect the running application's agent surface. For a coding agent,
 the expanded migration guides below supply feature mappings and verification gates. For an agent

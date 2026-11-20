@@ -24,6 +24,12 @@ The procedure below records its original validation version. Check installed pac
 the current [rendering guide](/docs/server-rendering#react-server-components) before applying
 experimental server-function setup. A shared function name is not a compatibility guarantee.
 
+Core agent readiness is part of `@farm.js/core`: Markdown mirrors, page discovery, capability
+manifests, and the default read-only MCP server. Check the
+[core defaults and limits](/docs/migrations#agent-native-at-the-core) for the selected rendering
+mode. Callable API tools, experimental WebMCP, and durable agent execution remain explicit,
+separately configured extensions.
+
 ## Task contract
 
 - Keep the TanStack app runnable until Farm passes dev, build, start, and type-check. Work on a

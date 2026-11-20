@@ -32,8 +32,9 @@ authentication, billing, data, and agent access.
 - **Give APIs one typed contract.** Endpoint validation and generated callers connect server and
   browser code. Integrations extend that contract to services instead of leaving every feature
   with its own route wrapper and request helper.
-- **Make the application readable and callable by agents.** Markdown, discovery, read-only MCP,
-  explicit API tools, and browser tools have framework-level homes.
+- **Agent native at the core.** `@farm.js/core` supplies Markdown, page discovery, capability
+  manifests, and read-only MCP. Add explicitly authorized API or browser tools when agents need
+  to act, using the same application boundaries.
 - **Keep a deployment choice.** Farm supports Node, Vercel, Cloudflare, and Netlify targets through
   its [deployment configuration](/docs/deployment). Test your SDKs and middleware on the chosen
   target; changing the framework does not make every dependency portable.
@@ -163,11 +164,19 @@ to find which routes and imports contribute to build size.
 
 ### Agent experience after the move
 
-Farm serves [Markdown mirrors](/docs/markdown) and generates
+**Agent readiness starts in `@farm.js/core`.** Its normal page-serving pipeline supplies the
+reading and discovery defaults without an agent integration. Core serves
+[Markdown mirrors](/docs/markdown) and generates
 [discovery metadata](/docs/configuration#agent-readiness). The default
 [read-only MCP server](/docs/configuration#default-mcp-server) lists, searches, and reads eligible
 public static pages. A shared docs configuration provides `llms.txt`, Markdown routes, and MCP
 across multiple documentation sets.
+
+The core's [app manifest](/docs/configuration#app-manifest) and
+[AI catalog](/docs/configuration#ai-catalog) describe the capabilities and MCP servers already
+present. Read the [core defaults and limits](/docs/migrations#agent-native-at-the-core) when
+choosing a rendering mode; the experimental React RSC pipeline does not yet serve the default
+read-only MCP endpoint.
 
 For actions, choose explicit [API MCP tools](/docs/plugins/mcp) that reuse endpoint validation and
 authorization, or [WebMCP](/docs/plugins/webmcp) for named actions in a supporting browser.

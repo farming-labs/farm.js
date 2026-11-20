@@ -33,8 +33,9 @@ application concerns with integrations, generated API callers, operational tools
   response sooner on Farm. The build difference is smaller; the numbers below show both.
 - **Inspection before guesswork.** The same app exposes route explanations, diagnostics,
   generated-type checks, and a browser DevTools view.
-- **Agents alongside the web app.** Readable pages, explicit tools, and optional durable agent
-  execution share the application's routes and authorization boundaries.
+- **Agent native at the core.** Markdown, page discovery, capability manifests, and read-only
+  MCP are built into `@farm.js/core`. Explicit tools and optional durable agent execution extend
+  the same application's routes and authorization boundaries.
 
 ### Performance evidence
 
@@ -84,11 +85,18 @@ explicit mappings in this guide.
 
 ### Agent experience after the move
 
+**The core makes the app readable and discoverable by default.** You do not need an agent
+integration or a separate MCP server for its public-page reading surface. On Farm's normal
+page-serving pipeline,
 [Markdown mirrors](/docs/markdown), [discovery metadata](/docs/configuration#agent-readiness),
 and a [read-only MCP catalog](/docs/configuration#default-mcp-server) let agents read eligible
 public pages. The [app manifest](/docs/configuration#app-manifest) describes installed capabilities.
 These are useful for product documentation and support agents, not only for the agent doing the
 migration.
+
+Core also publishes an [AI catalog](/docs/configuration#ai-catalog) for MCP servers the app already
+serves. See [core defaults and limits](/docs/migrations#agent-native-at-the-core), including the
+docs engine's ownership of its indexes and the experimental RSC pipeline's default-MCP limitation.
 
 For actions, expose selected endpoints through [API MCP](/docs/plugins/mcp), retaining validation
 and authorization. [WebMCP](/docs/plugins/webmcp) registers explicit actions in an open, supporting
