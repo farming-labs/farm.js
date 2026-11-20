@@ -123,8 +123,14 @@ await safeFetch(endpoint.url, {
 
 ## Managed receivers
 
-Farm Infra can store incoming JSON events and retry delivery while your app is offline. In
-the Infra dashboard, open **Webhooks**, choose the project and environment, and create a
+Farm Infra can store incoming JSON events and retry delivery while your app is offline.
+Install the managed webhook SDK in the sending and receiving apps.
+
+```bash
+pnpm add @farm.js/webhook@beta
+```
+
+In the Infra dashboard, open **Webhooks**, choose the project and environment, and create a
 **Send key** receiver pointing to your app's HTTPS route.
 
 Copy the receiver URL and send key to the sending backend. It can reuse one sender instance:

@@ -2,6 +2,10 @@
 
 **Receive Farm Infra deliveries in a Farm integration and send JSON events to a project receiver.**
 
+```sh
+pnpm add @farm.js/webhook@beta
+```
+
 Create a receiver from **Webhooks** in the Farm Infra dashboard. Choose its project,
 environment, and destination. Give the signing secret to the receiving application. For a
 bearer receiver, give the receiver URL and write-only send key to the sending service.
