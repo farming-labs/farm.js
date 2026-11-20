@@ -115,7 +115,13 @@ Run `pnpm exec farm storage plan` to list the desired resources locally. Set
 `FARMJS_API_KEY` to a project- and environment-scoped Farm key with
 `databases:provision` in your shell or the app's `.env.local`, then run
 `pnpm exec farm storage apply`. Reapplying
-reuses the database. Configure the deployed server with a separate
+reuses the database and records the mount names and drivers for each namespace.
+Open **Storage** in the project dashboard, choose the environment and select a resource.
+For example, a shared namespace declared with `postgresStorage` and `redisStorage`
+lists both PostgreSQL and Redis KV. Its detail page shows each mount and the hosted
+SQLite (libSQL) engine. Owners and admins can browse its tables and key-value entries.
+
+Configure the deployed server with a separate
 `databases:connect` key. A key covering several projects needs
 `FARMJS_PROJECT_ID`. A key covering several environments needs
 `FARMJS_ENVIRONMENT` (`development`, `staging`, or `production`).

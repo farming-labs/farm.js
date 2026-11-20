@@ -27,6 +27,7 @@ test("storage plan is local and apply reconciles each named database once", asyn
       drafts: sqliteStorage({managed:true}),
       copy: farmStorage({namespace:"drafts"}),
       orders: postgresStorage({managed:true}),
+      legacy: {driver:"farm-managed-sqlite", managed:true},
       cache: redisStorage({managed:true, namespace:"sessions"}),
       sessions: {driver:"cloudflare-kv-binding", managed:true},
       raw: {driver:"redis", managed:true, namespace:"raw-only"},
@@ -60,7 +61,7 @@ test("storage plan is local and apply reconciles each named database once", asyn
   };
   const command = (action) =>
     run(process.execPath, [cli, "storage", action, "--root", root], { env });
-  const names = ["drafts", "orders", "raw-only", "sessions"];
+  const names = ["drafts", "legacy", "orders", "raw-only", "sessions"];
   const plan = await command("plan");
   assert.deepEqual(
     [...plan.stdout.matchAll(/Ensure SQLite: ([a-z-]+)/g)].map((m) => m[1]),
@@ -72,6 +73,19 @@ test("storage plan is local and apply reconciles each named database once", asyn
   delete env.FARMJS_API_KEY;
   await writeFile(path.join(root, ".env.local"), "FARMJS_API_KEY=fixture\n");
   assert.match((await command("apply")).stdout, /Ready: drafts/);
+  const declarations = {
+    drafts: [
+      { mount: "copy", driver: "farm" },
+      { mount: "drafts", driver: "sqlite" },
+      { mount: "editor", driver: "sqlite" },
+    ],
+    orders: [{ mount: "orders", driver: "postgres" }],
+    "raw-only": [{ mount: "raw", driver: "redis" }],
+    sessions: [
+      { mount: "cache", driver: "redis" },
+      { mount: "sessions", driver: "cloudflare-kv-binding" },
+    ],
+  };
   assert.deepEqual(
     received,
     names.map((name) => ({
@@ -79,7 +93,7 @@ test("storage plan is local and apply reconciles each named database once", asyn
       path: "/api/storage/sqlite/provision",
       authorization: "Bearer fixture",
       environment: "development",
-      body: { name },
+      body: name === "legacy" ? { name } : { name, declarations: declarations[name] },
     })),
   );
 });

@@ -494,13 +494,22 @@ export function farmStorage(options: FarmStorageOptions = {}): ManagedSqliteMoun
     );
   if (options.managed !== undefined && options.managed !== true)
     throw new TypeError("Set `managed` to true or omit it when using farmStorage().");
-  const managed = options.namespace === undefined ? true : { name: options.namespace };
-  if (managed !== true) managedSqliteName("", managed);
   assertMountSchema(options.schema);
+  return createManagedMount(options.namespace, options.schema, "farm");
+}
+
+function createManagedMount(
+  namespace: string | undefined,
+  schema: SchemaDefinition | undefined,
+  declaredDriver?: string,
+): ManagedSqliteMount {
+  const managed = namespace === undefined ? true : { name: namespace };
+  if (managed !== true) managedSqliteName("", managed);
   return {
     driver: "farm-managed-sqlite",
     managed,
-    ...(options.schema && { schema: options.schema }),
+    ...(declaredDriver && { declaredDriver }),
+    ...(schema && { schema }),
   };
 }
 
@@ -523,32 +532,44 @@ export function resolveManagedStorageMount(config: unknown): ManagedSqliteMount 
   }
   const { driver, managed, ...options } = config as Record<string, unknown>;
   if ((managed === false || managed === undefined) && driver !== "farm-managed-sqlite") return;
-  if (
-    typeof driver !== "string" ||
-    !(
-      driver === "farm-managed-sqlite" ||
-      driver === "local" ||
-      driver === "vercel-kv" ||
-      Object.prototype.hasOwnProperty.call(DATABASE_CONNECTORS, driver) ||
-      (driver !== "db0" && Object.prototype.hasOwnProperty.call(builtinDrivers, driver))
-    )
-  )
+  if (driver !== "farm-managed-sqlite" && !isHostedDriver(driver))
     throw new TypeError("Select a built-in storage driver to use `managed: true`.");
+  const declaredDriver = driver === "farm-managed-sqlite" ? options.declaredDriver : driver;
+  if (driver === "farm-managed-sqlite") {
+    delete options.declaredDriver;
+    if (
+      declaredDriver !== undefined &&
+      declaredDriver !== "farm" &&
+      !isHostedDriver(declaredDriver)
+    )
+      throw new TypeError("Use a known storage driver in the managed mount descriptor.");
+  }
   if (Object.keys(options).some((key) => key !== "namespace" && key !== "schema"))
     throw new TypeError(
       "Remove provider connection settings and driver options when using `managed: true`.",
     );
   assertMountSchema(options.schema);
-  if (managed === true)
-    return farmStorage({
-      namespace: options.namespace as string | undefined,
-      schema: options.schema,
-    });
-  // The original SQLite declaration names the resource inside the managed object.
-  if ((driver === "sqlite" || driver === "farm-managed-sqlite") && !("namespace" in options)) {
-    return farmStorage({ namespace: managedSqliteName("", managed), schema: options.schema });
-  }
-  throw new TypeError("Set `managed` to true and use `namespace` to select a hosted resource.");
+  let namespace: string | undefined;
+  if (managed === true) namespace = options.namespace as string | undefined;
+  else if ((driver === "sqlite" || driver === "farm-managed-sqlite") && !("namespace" in options))
+    namespace = managedSqliteName("", managed);
+  else
+    throw new TypeError("Set `managed` to true and use `namespace` to select a hosted resource.");
+  return createManagedMount(
+    namespace,
+    options.schema,
+    typeof declaredDriver === "string" ? declaredDriver : undefined,
+  );
+}
+
+function isHostedDriver(driver: unknown): driver is string {
+  return (
+    typeof driver === "string" &&
+    (driver === "local" ||
+      driver === "vercel-kv" ||
+      Object.prototype.hasOwnProperty.call(DATABASE_CONNECTORS, driver) ||
+      (driver !== "db0" && Object.prototype.hasOwnProperty.call(builtinDrivers, driver)))
+  );
 }
 
 type NativeOptions<D extends FarmStorageNamedDriver> = (D extends FarmStorageDatabaseDriverName

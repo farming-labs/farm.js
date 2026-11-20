@@ -12,6 +12,8 @@ export interface ManagedSqliteOptions {
 
 export interface ManagedSqliteMount {
   driver: "farm-managed-sqlite";
+  /** Driver selected in the app config, when reported by the declaring framework. */
+  declaredDriver?: string;
   managed: ManagedSqliteOptions["managed"];
   schema?: SchemaDefinition;
 }
@@ -48,7 +50,11 @@ function secureUrl(value: string) {
   return url;
 }
 
-export async function requestSqliteResource(name: string, operation: "provision" | "token") {
+export async function requestSqliteResource(
+  name: string,
+  operation: "provision" | "token",
+  declarations?: { mount: string; driver: string }[],
+) {
   const key = process.env.FARMJS_API_KEY;
   if (!key) throw new Error("Set FARMJS_API_KEY on the server to access managed SQLite.");
   const base = secureUrl(process.env.FARMJS_API_URL || "https://app.farmjs.dev");
@@ -63,7 +69,7 @@ export async function requestSqliteResource(name: string, operation: "provision"
   const response = await fetch(new URL("/api/storage/sqlite/" + operation, base), {
     method: operation === "token" ? "POST" : "PUT",
     headers,
-    body: JSON.stringify({ name }),
+    body: JSON.stringify(operation === "provision" ? { name, declarations } : { name }),
     redirect: "error",
     signal: AbortSignal.timeout(15000),
   });
