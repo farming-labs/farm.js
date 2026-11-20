@@ -1055,6 +1055,45 @@ export default function Layout({ children }) { return <><One /><Two /><Three />{
     });
   });
 
+  describe("interceptions that target a URL outside their owner", () => {
+    beforeEach(async () => {
+      const { globFiles } = await import("../utils");
+      vi.mocked(globFiles).mockImplementation(async (pattern: string) => {
+        if (pattern.includes("page")) {
+          return [
+            "feed/page.tsx",
+            "login/page.tsx",
+            "help/page.tsx",
+            "feed/@modal/(..)login/page.tsx",
+            "feed/@modal/(...)help/page.tsx",
+          ];
+        }
+        if (pattern.includes("default")) return ["feed/@modal/default.tsx"];
+        if (pattern.includes("layout")) return ["layout.tsx", "feed/layout.tsx"];
+        return [];
+      });
+
+      await routeManager.discoverRoutes();
+    });
+
+    it.each(["/login", "/help"])(
+      "select %s in the owner's slot when navigation starts under the owner",
+      (pathname) => {
+        // The feed layout, and with it the modal slot, stays on screen from /feed.
+        expect(routeManager.matchRoute(pathname, { interceptFrom: "/feed" }).slots).toEqual([
+          expect.objectContaining({
+            name: "modal",
+            ownerPattern: "/feed",
+            interception: true,
+            fallback: false,
+          }),
+        ]);
+        expect(routeManager.matchRoute(pathname).slots).toEqual([]);
+        expect(routeManager.matchRoute(pathname, { interceptFrom: "/outside" }).slots).toEqual([]);
+      },
+    );
+  });
+
   describe("route-level boundaries", () => {
     beforeEach(async () => {
       const { globFiles } = await import("../utils");

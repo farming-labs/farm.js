@@ -1,19 +1,26 @@
 // Shared by the correctness tests and selector-only diagnostic. The baseline is
 // the selector from 72cdabb6; both arms use the current complete path matcher.
+// Both reference selectors include interceptions whose owner holds the page the
+// navigation started at, though the target is outside it (`(..)` and `(...)`).
 export const baselineSelector = `function matchRouteSlots(pathname, interceptFrom) {
   const groups = new Map();
+  const normalizedFrom =
+    typeof interceptFrom === "string" && interceptFrom.startsWith("/")
+      ? new URL(interceptFrom, "http://farm.local").pathname
+      : null;
   for (const slot of routeSlots) {
-    if (!matchesRoutePrefix(pathname, slot.ownerPattern)) continue;
+    if (
+      !matchesRoutePrefix(pathname, slot.ownerPattern) &&
+      !(slot.interception && normalizedFrom && matchesRoutePrefix(normalizedFrom, slot.ownerPattern))
+    ) {
+      continue;
+    }
     const key = slot.ownerPattern + ":" + slot.name;
     const entries = groups.get(key) || [];
     entries.push(slot);
     groups.set(key, entries);
   }
 
-  const normalizedFrom =
-    typeof interceptFrom === "string" && interceptFrom.startsWith("/")
-      ? new URL(interceptFrom, "http://farm.local").pathname
-      : null;
   const matches = [];
 
   for (const entries of groups.values()) {
@@ -57,18 +64,23 @@ export const baselineSelector = `function matchRouteSlots(pathname, interceptFro
 // The prepared selector from b85aee16, retained independently of the candidate.
 export const preparedSelector = `function matchRouteSlots(pathname, interceptFrom) {
   const groups = new Map();
+  const normalizedFrom =
+    typeof interceptFrom === "string" && interceptFrom.startsWith("/")
+      ? new URL(interceptFrom, "http://farm.local").pathname
+      : null;
   for (const slot of routeSlots) {
-    if (!matchesRoutePrefix(pathname, slot.ownerPattern)) continue;
+    if (
+      !matchesRoutePrefix(pathname, slot.ownerPattern) &&
+      !(slot.interception && normalizedFrom && matchesRoutePrefix(normalizedFrom, slot.ownerPattern))
+    ) {
+      continue;
+    }
     const key = slot.ownerPattern + ":" + slot.name;
     const entries = groups.get(key) || [];
     entries.push(slot);
     groups.set(key, entries);
   }
 
-  const normalizedFrom =
-    typeof interceptFrom === "string" && interceptFrom.startsWith("/")
-      ? new URL(interceptFrom, "http://farm.local").pathname
-      : null;
   const matches = [];
   // Leave empty, fallback-only and ineligible requests unparsed.
   let pathnameSegments;
