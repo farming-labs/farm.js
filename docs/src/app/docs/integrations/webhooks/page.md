@@ -121,7 +121,51 @@ await safeFetch(endpoint.url, {
 - Reuse the message `id` when you retry, so the receiver can drop the repeat.
 - Send to user-supplied URLs with [`safeFetch`](/docs/safe-fetch), so an endpoint can't point at your private network.
 
-This package doesn't store endpoints, queue deliveries or retry them yet.
+## Managed receivers
+
+Farm Infra can store incoming JSON events and retry delivery while your app is offline. In
+the Infra dashboard, open **Webhooks**, choose the project and environment, and create a
+**Send key** receiver pointing to your app's HTTPS route.
+
+Copy the receiver URL and send key to the sending backend. It can reuse one sender instance:
+
+```ts
+import { createWebhook } from "@farmjs/webhook/sender";
+
+const stock = createWebhook({ url: env.FARM_RECEIVER_URL, sendKey: env.FARM_WEBHOOK_SEND_KEY });
+await stock.send({ sku: "blue-shirt", quantity: 12 }, { idempotencyKey: change.id });
+```
+
+Copy the delivery signing secret to the receiving app. Mount this integration in the
+app's `integrations` configuration:
+
+```ts
+import { webhooks } from "@farmjs/webhook";
+
+export const appIntegrations = {
+  webhooks: webhooks({
+    stock: {
+      path: "/api/hooks/stock",
+      secret: process.env.STOCK_SIGNING_SECRET,
+      async onEvent({ id, data }) {
+        await applyStockUpdateOnce(id, data);
+      },
+    },
+  }),
+};
+```
+
+The sender gets a receipt after Infra commits the event. The receiving app verifies the
+signature before running `onEvent`. In `applyStockUpdateOnce`, validate the payload and
+commit its delivery ID with the inventory update so a retry can safely repeat the call.
+For development, start the receiving app and run `farm preview --name stock`. Use the
+HTTPS URL printed by the CLI plus `/api/hooks/stock` for a separate development receiver.
+For production, use the app's stable HTTPS URL.
+
+For a provider that already signs its events, select **Preserve provider signature** and
+keep its existing verification route. For a Standard Webhooks sender with expiring
+signatures, **Verify on arrival** checks the source signature before queuing and signs
+each attempt for the receiving app.
 
 ## Secrets and rotation
 

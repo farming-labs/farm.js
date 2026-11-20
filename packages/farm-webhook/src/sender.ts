@@ -1,3 +1,5 @@
+import { isSigningSecret } from "./signing-secret.js";
+
 type Verification =
   | { mode: "bearer"; deliverySecret: string }
   | { mode: "preserve"; signatureHeaders: string[] }
@@ -48,6 +50,24 @@ type NamedSender = Omit<Registration, "verification"> & {
 type Access = { url: URL; token: string; expiresAt: number };
 
 function registrationUrl(config: Registration) {
+  if (!config.apiKey?.trim()) throw new TypeError("Set apiKey to a project API key.");
+  if (!config.project?.trim()) throw new TypeError("Set project to the receiving project ID.");
+  if (!["development", "staging", "production"].includes(config.environment))
+    throw new TypeError("Set environment to development, staging or production.");
+  if (typeof config.name !== "string" || !/^[a-z][a-z0-9-]{0,62}$/.test(config.name))
+    throw new TypeError("Set name to a lowercase receiver name of 1 to 63 characters.");
+  secureUrl(config.destination);
+  const verification = config.verification;
+  if (verification.mode !== "preserve" && !isSigningSecret(verification.deliverySecret))
+    throw new TypeError("Set deliverySecret to the receiver's Standard Webhooks signing secret.");
+  if (
+    verification.mode === "standard" &&
+    (!isSigningSecret(verification.sourceSecret) ||
+      verification.sourceSecret === verification.deliverySecret)
+  )
+    throw new TypeError(
+      "Set sourceSecret to the sender's separate Standard Webhooks signing secret.",
+    );
   return new URL("/api/inbox/receivers", secureUrl(config.infraOrigin ?? "https://app.farmjs.dev"));
 }
 function register(config: Registration, url: URL) {

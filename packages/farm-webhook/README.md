@@ -60,9 +60,10 @@ export const appIntegrations = {
 };
 ```
 
-Pass `appIntegrations` to `defineConfig({ integrations: appIntegrations })`. Generate a
-separate Standard Webhooks signing secret for each receiver (`whsec_` followed by 32 random
-bytes in base64). Supply it to Infra and to the server integration. The application callback
+Pass `appIntegrations` to `defineConfig({ integrations: appIntegrations })`. For a dashboard
+receiver, put its one-time signing secret in the receiving server's `STOCK_SIGNING_SECRET`.
+For programmatic registration, generate one secret per receiver (`whsec_` followed by 32
+random bytes in base64) and configure it in Infra and on the receiving server. The application callback
 validates its payload and commits the delivery ID with its own write. Handler failures cause a
 retry. An HTTP 202 from intake confirms durable receipt; a later 2xx from the integration
 acknowledges processing.

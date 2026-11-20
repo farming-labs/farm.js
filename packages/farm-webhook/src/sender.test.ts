@@ -79,7 +79,7 @@ it("resolves a named receiver on first send and shares its short-lived credentia
     infraOrigin: "https://app.example",
     name: "stock",
     destination: "https://shop.example/api/stock",
-    verification: { mode: "bearer", deliverySecret: "fixture-secret" },
+    verification: { mode: "bearer", deliverySecret: "whsec_" + "A".repeat(43) + "=" },
   });
   expect(fetcher).not.toHaveBeenCalled();
   await Promise.all([sender.send({ n: 1 }), sender.send({ n: 2 })]);
@@ -88,4 +88,27 @@ it("resolves a named receiver on first send and shares its short-lived credentia
     { path: "/api/inbox/fixture", key: "Bearer test-receiver-token" },
     { path: "/api/inbox/fixture", key: "Bearer test-receiver-token" },
   ]);
+});
+
+it("rejects an incomplete named receiver when constructing the instance", () => {
+  const fetcher = vi.fn();
+  vi.stubGlobal("fetch", fetcher);
+  const config = {
+    apiKey: "test-project-key",
+    project: "proj_demo",
+    environment: "development",
+    name: "stock",
+    destination: "https://shop.example/api/stock",
+    verification: { mode: "bearer", deliverySecret: "whsec_" + "A".repeat(43) + "=" },
+  } as const;
+  expect(() => createWebhook({ ...config, apiKey: "" })).toThrow("apiKey");
+  expect(() => createWebhook({ ...config, project: "" })).toThrow("project");
+  expect(() => createWebhook({ ...config, name: "two words" })).toThrow("name");
+  expect(() => createWebhook({ ...config, destination: "http://shop.example/hook" })).toThrow(
+    "HTTPS",
+  );
+  expect(() =>
+    createWebhook({ ...config, verification: { mode: "bearer", deliverySecret: "" } }),
+  ).toThrow("deliverySecret");
+  expect(fetcher).not.toHaveBeenCalled();
 });

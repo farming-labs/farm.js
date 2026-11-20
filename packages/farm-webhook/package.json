@@ -41,7 +41,7 @@
   },
   "dependencies": {
     "@farm.js/core": "workspace:*",
-    "standardwebhooks": "1.0.0"
+    "@farm.js/webhooks": "workspace:*"
   },
   "devDependencies": {
     "@types/node": "^22.20.5",
