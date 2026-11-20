@@ -1,3 +1,5 @@
+import type { SchemaDefinition } from "@farming-labs/orm";
+import type { ManagedSqliteOptions } from "./managed-sqlite";
 import type { ConnectorOptions } from "db0";
 import type { BuiltinDriverName, BuiltinDriverOptions, Driver, Storage } from "unstorage";
 
@@ -77,13 +79,33 @@ export interface FarmStorageCustomDriverConfig {
 
 export type FarmStorageDatabaseConfig = FarmStorageDatabaseConfigMap[FarmStorageDatabaseDriverName];
 
-export type FarmStorageClientConfig =
+export type FarmStorageClientConfig = (
   | FarmStorageBuiltinDriverConfig
   | FarmStorageDatabaseConfig
-  | FarmStorageCustomDriverConfig;
+  | FarmStorageCustomDriverConfig
+) & { managed?: false };
+
+export type FarmStorageNamedDriver =
+  | Exclude<BuiltinDriverName, "db0">
+  | FarmStorageDatabaseDriverName
+  | "local"
+  | "vercel-kv";
+
+export type FarmManagedStorageOptions = {
+  managed: true;
+  schema?: SchemaDefinition;
+  namespace?: string;
+  url?: never;
+  path?: never;
+};
+
+export type FarmManagedDriverConfig =
+  | ({ driver: FarmStorageNamedDriver } & FarmManagedStorageOptions)
+  | ({ driver: "sqlite" } & ManagedSqliteOptions);
 
 export type FarmStorageMountConfig =
   | FarmStorageClientConfig
+  | FarmManagedDriverConfig
   | FarmStorageClient
   | import("./managed-sqlite").ManagedSqliteMount;
 

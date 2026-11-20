@@ -469,7 +469,9 @@ const appStore = getStorage("app");
 await appStore.setItem("settings", { theme: "light" });
 ```
 
-Known helpers include memory, local, sqlite, postgres, mysql, redis, mongodb, s3, upstash, vercelKV, pglite, and libsql.
+Use `farmStorage()` for a Farm-hosted mount with key-value and SQL access. Use `farmStorage({ namespace: "drafts" })` to keep the hosted resource name when renaming the mount.
+
+Named provider helpers opt into the same Farm-hosted SQLite service with `managed: true`, for example `postgresStorage({ managed: true })` and `redisStorage({ managed: true })`. Pass a Farming Labs ORM schema once, e.g. `farmStorage({ schema })`. In a server handler, `await getDatabase(name)` returns its typed models and `await getDatabase(name, { raw: true })` returns its SQL client. The hosted service provides SQLite SQL and Farm KV. Omit the flag to use the native driver and its connection options.
 
 ## Cron Spec
 

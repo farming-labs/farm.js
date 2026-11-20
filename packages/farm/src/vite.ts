@@ -2280,6 +2280,7 @@ export function farmPlugin(
             root: farmConfig.root,
             srcDir: farmConfig.srcDir,
             layers: farmConfig.layers,
+            storage: farmConfig.storage,
             plugins: farmConfig.plugins,
             extraRoutes: getExtraRouteTypes(),
             suppressLintOnLink: farmConfig.suppressLintOnLink,

@@ -1,3 +1,4 @@
+import { hasManagedMountSchema } from "./storage/mount-schema";
 import { existsSync, readFileSync, realpathSync, statSync } from "node:fs";
 import { mkdir, unlink } from "node:fs/promises";
 import { createRequire, isBuiltin } from "node:module";
@@ -550,7 +551,20 @@ function mergeFarmLayerConfig(
     }
 
     if (isPlainObject(output[key]) && isPlainObject(value)) {
-      output[key] = mergePlainObjects(output[key], value);
+      const merged = mergePlainObjects(output[key], value);
+      if (key === "storage" && isPlainObject(value.mounts) && isPlainObject(output[key].mounts)) {
+        for (const [name, mount] of Object.entries(value.mounts)) {
+          const previous = output[key].mounts[name];
+          // A mount owns its ORM schema. Replacing it must not inherit another driver's models.
+          if (
+            mount !== undefined &&
+            (hasManagedMountSchema(previous) || hasManagedMountSchema(mount))
+          ) {
+            merged.mounts[name] = mount;
+          }
+        }
+      }
+      output[key] = merged;
       continue;
     }
 

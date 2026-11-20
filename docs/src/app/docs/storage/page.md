@@ -6,7 +6,7 @@ section: "Data and APIs"
 
 # KV Storage
 
-Farm's `getStorage()` is a **key/value API**. It stores each value under a string key and exposes operations such as `getItem`, `setItem`, `getKeys`, and `removeItem`. Managed SQLite mounts also expose a SQL client through `getDatabase()`.
+Farm's `getStorage()` is a **key/value API**. It stores each value under a string key and exposes operations such as `getItem`, `setItem`, `getKeys`, and `removeItem`. Farm-managed mounts also expose a SQL client through `getDatabase()`.
 
 Use it for caches, feature flags, application settings, idempotency records, checkpoints, and object-backed values. Do not use it as a relational ORM for users, accounts, products, or other records that need model fields, relations, joins, or typed filters. Request-rate enforcement uses a separate atomic counter contract described below.
 
@@ -74,26 +74,42 @@ A name made only of separators or spaces, such as `" "`, `"/"`, or `"::"`, names
 
 The development server and a built app both apply `storage` from `farm.config` before they serve the first request. A production build bundles the drivers the config names (such as `local` or `sqlite`), and the server disposes the configured drivers when it shuts down.
 
-## Managed SQLite
+## Farm-managed storage
 
-Managed SQLite requires a Farm Infra deployment with the database service configured.
+A Farm-managed mount gives your app durable key-value storage and SQL access to the same hosted database. Farm Infra provisions it using SQLite (libSQL).
 Declare a mount in `farm.config.ts` and install the remote client in the app with
 `pnpm add @libsql/client@^0.17.4`. Each named resource belongs to one project and environment.
 
 ```ts
 import { defineConfig } from "@farm.js/core";
-import { memoryStorage, sqliteStorage } from "@farm.js/core/storage";
+import { farmStorage, postgresStorage, redisStorage, sqliteStorage } from "@farm.js/core/storage";
 
 export default defineConfig({
   storage: {
     mounts: {
-      drafts: sqliteStorage({ managed: true }),
+      drafts: farmStorage(),
+      orders: postgresStorage({ managed: true }),
+      cache: redisStorage({ managed: true }),
       scratch: sqliteStorage({ path: "./.farm/scratch.sqlite" }),
-      cache: memoryStorage(),
     },
   },
 });
 ```
+
+`farmStorage({ managed: true })` is the explicit form of `farmStorage()`.
+Set `managed: true` on a named storage helper or a built-in driver declaration such as
+`{ driver: "cloudflare-kv-binding", managed: true }` to provision Farm-hosted SQLite.
+Every managed mount supports both `getStorage(name)` and `getDatabase(name)`.
+SQL uses the SQLite dialect. Use an external connection for PostgreSQL-specific SQL,
+Redis commands, or provider-specific options such as Redis TTL.
+
+The mount name is the default resource name. Set `namespace` to reuse a resource,
+for example `redisStorage({ managed: true, namespace: "sessions" })`.
+Omit `managed` or set it to `false` on a provider helper to keep using its own driver.
+When switching an existing external store to Farm hosting, migrate its data separately.
+Pass native connection options only when using the native driver.
+For a custom driver instance or an existing database client, keep using
+`driverStorage(driver)` or `databaseStorage(db)`.
 
 Run `pnpm exec farm storage plan` to list the desired resources locally. Set
 `FARMJS_API_KEY` to a project- and environment-scoped Farm key with
@@ -108,38 +124,58 @@ database's HTTPS address and a short-lived credential. The application sends
 SQL directly to that address.
 
 Use `getDatabase` from server-side code after Farm initializes storage.
-The raw client accepts parameterized SQL and migrations. The schema overload
-infers model names and selections from your Farming Labs ORM schema.
+The mount owns its optional Farming Labs ORM schema. With a schema on the
+mount, `getDatabase(name)` returns its typed models. Without a schema it returns
+the raw SQL client. Use `getDatabase(name, { raw: true })` for migrations on
+either mount. Provisioning and migrations are separate operations.
 
 ```ts
-import { getDatabase, getStorage } from "@farm.js/core/storage";
+// farm.config.ts
+import { defineConfig } from "@farm.js/core";
+import { farmStorage } from "@farm.js/core/storage";
 import { defineSchema, id, model, string } from "@farming-labs/orm";
 
 const schema = defineSchema({
   draft: model({ table: "drafts", fields: { id: id(), title: string() } }),
 });
 
-// Run once as an application migration.
-const sql = await getDatabase("drafts");
-await sql.execute("CREATE TABLE IF NOT EXISTS drafts (id TEXT PRIMARY KEY, title TEXT NOT NULL)");
-
-// In a server handler.
-const db = await getDatabase("drafts", { schema });
-const drafts = await db.draft.findMany({ select: { id: true, title: true } });
-await getStorage("drafts").setItem("editor:settings", { autosave: true });
+export default defineConfig({
+  storage: { mounts: { drafts: farmStorage({ schema }) } },
+});
 ```
 
-Install `@farming-labs/orm` in the app when importing its schema helpers.
+```ts
+// In a server handler, after migrating the drafts table.
+import { getDatabase } from "@farm.js/core/storage";
+
+export async function listDrafts() {
+  const db = await getDatabase("drafts");
+  return db.draft.findMany({ select: { id: true, title: true } });
+}
+```
+
+Install `@farming-labs/orm` in the app for the schema helpers. Dev, build, and
+`pnpm exec farm generate` infer model types from the config into `src/farm.d.ts`.
+Managed driver helpers also accept the schema, e.g. `postgresStorage({ managed: true, schema })`.
+Each mount owns its model view, even when two mounts share a hosted namespace.
+Existing calls to `getDatabase(name, { schema })` can still select a schema for one call.
+
 Farm opens the connection on first use and refreshes credentials. Farm owns
 the returned client's lifetime and closes it at shutdown. Use `db.transaction(async (tx) => …)`
 for ORM writes that must commit together. Nested ORM transactions are unsupported. KV uses the reserved
 table `_farm_kv` in this database. A typo in `getDatabase(name)` throws.
 
 To rename the mount and keep its data, declare
-`editor: sqliteStorage({ managed: { name: "drafts" } })` and call
+`editor: farmStorage({ namespace: "drafts" })` and call
 `getDatabase("editor")`. A resource name accepts 1–63 lowercase letters,
 digits, and hyphens, starting with a letter. Removing a mount from config
 keeps the database. Disconnecting its Farm project schedules deletion.
+
+### Existing SQLite mounts
+
+Existing `sqliteStorage({ managed: true })` mounts use the same hosted resources.
+Switch to `farmStorage()` with the same mount name to keep the data. For a mount
+with `managed: { name: "drafts" }`, use `farmStorage({ namespace: "drafts" })`.
 
 ## Use a mounted store
 

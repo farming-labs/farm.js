@@ -181,6 +181,7 @@ export async function generateFarmArtifacts(options: GenerateFarmOptions = {}) {
     srcDir: resolvedConfig.srcDir,
     configPath: options.configPath,
     layers: resolvedConfig.layers,
+    storage: resolvedConfig.storage,
     plugins: resolvedConfig.plugins,
     extraRoutes,
     suppressLintOnLink: resolvedConfig.suppressLintOnLink,
