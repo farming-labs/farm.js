@@ -383,6 +383,11 @@ visitor without those cookies sees. Farm serves that shell only to requests with
 other requests on their own with `X-Farm-PPR: bypass`, and never stores a shell from a request with
 cookies. A request with an `Authorization` header always renders on its own.
 
+On the built-in Node compression path, hits on the same in-memory shell can reuse its Brotli
+and gzip bytes. Each visitor gets fresh response headers. Revalidating or evicting the shell
+also releases its compressed variants. A shared adapter that returns a new shell object on
+each read still serves the correct representation and compresses it on demand.
+
 ```tsx
 import { Suspense } from "react";
 
