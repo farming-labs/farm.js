@@ -40,7 +40,7 @@
  * ```
  */
 
-export const version = "0.1.76";
+export const version = "0.1.77";
 
 // Note: Import plugins from their respective subpaths:
 // - @farm.js/plugin/rsc
