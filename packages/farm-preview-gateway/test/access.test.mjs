@@ -92,3 +92,27 @@ test("access authority failure fails closed and hides provider details", async (
   assert.equal(response.status, 503);
   assert.ok(!(await response.text()).includes("private authority detail"));
 });
+
+test("a conditional delivery only reaches its selected polling connection", async () => {
+  const f = fixture(async () => true);
+  const grant = await (await f.call("/api/tunnel/grants", "key", { name: "store" })).json();
+  const session = await (await f.call("/api/sessions", grant.token, { name: "store" })).json();
+  const deliveredHeaders = [];
+  f.store.enqueueRequest = async (id, request, ttl) => {
+    deliveredHeaders.push(request.headers);
+    await f.store.saveResponse(id, request.id, { status: 204 }, ttl);
+  };
+  const send = (id) =>
+    f.handler(
+      new Request(session.publicUrl, {
+        method: "POST",
+        body: "event",
+        headers: { "x-farm-preview-connection": id },
+      }),
+    );
+  assert.equal((await send("previous-connection")).status, 412);
+  assert.equal(deliveredHeaders.length, 0);
+  assert.equal((await send(session.id)).status, 204);
+  assert.equal(deliveredHeaders.length, 1);
+  assert.equal(deliveredHeaders[0]["x-farm-preview-connection"], undefined);
+});

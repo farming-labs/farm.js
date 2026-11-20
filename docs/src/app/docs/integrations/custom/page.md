@@ -1006,3 +1006,13 @@ export const { api, apiClient } = createIntegrations({
 - Add database tests with real data when `schema` is present.
 - Log enough request metadata to debug failures without logging secrets.
 - Document env vars, route paths, API callers, and database models for app teams.
+
+### Receive durable webhooks from Farm Infra
+
+`@farmjs/webhook` mounts verified POST routes through the normal Farm integration registry.
+Use its server-side `registerWebhook` helper to provision a receiver separately for development
+and production. Its sender supports direct receiver credentials and short-lived token exchange.
+See the [webhook integration example](https://github.com/farming-labs/farm.js/tree/main/packages/farm-webhook#readme)
+for receiver registration, provider signature forwarding, and idempotent application handlers.
+
+Use `createWebhook({ url, sendKey })` on the sending server to build an instance synchronously. Call `await sender.send(data)` to deliver an event through its receiver. The Webhooks dashboard generates the receiving application’s signing secret and displays it once.

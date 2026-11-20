@@ -394,6 +394,14 @@ export function createPersistentPreviewRelay(options: PersistentPreviewRelayOpti
         );
       }
 
+      const expectedConnection = request.headers["x-farm-preview-connection"];
+      if (
+        expectedConnection !== undefined &&
+        expectedConnection !== (activeLocalSession ?? coordinatedSession)?.id
+      ) {
+        return sendText(response, 412, "The selected preview connection has changed.");
+      }
+
       if (activeLocalSession && !(await checkAccess(activeLocalSession))) {
         return sendText(response, 403, "This preview is no longer authorized.");
       }
@@ -1145,6 +1153,7 @@ function normalizeIncomingHeaders(
       hopByHopHeaders.has(lowerName) ||
       lowerName === "forwarded" ||
       lowerName.startsWith("x-forwarded-") ||
+      lowerName === "x-farm-preview-connection" ||
       lowerName === PREVIEW_REQUEST_HEADER
     ) {
       continue;
