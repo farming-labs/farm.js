@@ -1,3 +1,4 @@
+import type { SchemaDefinition } from "@farming-labs/orm";
 import type { ManagedSqliteOptions } from "./managed-sqlite";
 import type { ConnectorOptions } from "db0";
 import type { BuiltinDriverName, BuiltinDriverOptions, Driver, Storage } from "unstorage";
@@ -92,6 +93,7 @@ export type FarmStorageNamedDriver =
 
 export type FarmManagedStorageOptions = {
   managed: true;
+  schema?: SchemaDefinition;
   namespace?: string;
   url?: never;
   path?: never;

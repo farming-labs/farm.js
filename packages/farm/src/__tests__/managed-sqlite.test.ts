@@ -1,5 +1,6 @@
 // @vitest-environment node
 
+import { defineSchema, id, model } from "@farming-labs/orm";
 import { createClient } from "@libsql/client/http";
 import { afterEach, expect, it, vi } from "vitest";
 import {
@@ -137,6 +138,34 @@ it("rejects conflicting connection settings and invalid resource names", () => {
   // @ts-expect-error A managed resource cannot also point to a local file.
   expect(() => sqliteStorage({ managed: true, path: "./drafts.sqlite" })).toThrow("managed");
   expect(() => sqliteStorage({ managed: { name: "bad/name" } })).toThrow("name");
+});
+
+it("binds the ORM schema to the mount and leaves raw access available", async () => {
+  const schema = defineSchema({ draft: model({ table: "drafts", fields: { id: id() } }) });
+  const bare = farmStorage({ namespace: "drafts" });
+  const bound = postgresStorage({ managed: true, namespace: "drafts", schema });
+  expect(farmStorage({ namespace: "drafts", schema })).toEqual(bound);
+  expect(bound.schema).toBe(schema);
+  expect(() => resolveManagedStorageMount({ driver: "redis", schema })).toThrow(/managed: true/);
+  expect(() => resolveManagedStorageMount({ driver: "redis", managed: true, schema: {} })).toThrow(
+    /defineSchema/,
+  );
+  vi.stubEnv("FARMJS_API_KEY", "test-key");
+  vi.stubGlobal(
+    "fetch",
+    vi.fn(async () =>
+      Response.json({
+        url: "https://drafts.example.test",
+        token: "fixture",
+        expiresAt: new Date(Date.now() + 300000).toISOString(),
+      }),
+    ),
+  );
+  await initStorage({ mounts: { drafts: bound, archive: bare } });
+  expect(await getDatabase("drafts")).toHaveProperty("draft.findMany");
+  expect(await getDatabase("drafts", { raw: true })).toHaveProperty("execute");
+  expect(await getDatabase("archive")).toHaveProperty("execute");
+  expect(await getDatabase("archive", { schema })).toHaveProperty("draft.create");
 });
 
 it("refreshes once for concurrent requests and refuses a changed database endpoint on every attempt", async () => {

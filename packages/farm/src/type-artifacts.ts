@@ -1,5 +1,6 @@
+import { isManagedMount } from "./storage/mount-schema";
 import { existsSync, mkdirSync, readFileSync, unlinkSync } from "fs";
-import { dirname, isAbsolute, join, resolve } from "path";
+import { dirname, isAbsolute, join, relative, resolve } from "path";
 import { APITypeGenerator, type APIRouteInfo } from "./type-generator";
 import {
   createRouteTypeDeclarations,
@@ -12,7 +13,13 @@ import { createContentTypeDeclarations } from "./content-types";
 import { generateFarmI18nTypes, renderFarmI18nTypes } from "./i18n/type-generator";
 import { readFarmI18nCatalogs } from "./i18n/catalog";
 import type { ResolvedFarmI18nConfig } from "./i18n/types";
-import { getFarmAppDirectories, getFarmSourceRoots, type ResolvedFarmLayer } from "./layers";
+import type { FarmStorageUserConfig } from "./storage/types";
+import {
+  findFarmConfigFile,
+  getFarmAppDirectories,
+  getFarmSourceRoots,
+  type ResolvedFarmLayer,
+} from "./layers";
 import { isGeneratedFileCurrent, writeFileIfChanged } from "./write-file-if-changed";
 import type { FarmPlugin } from "./plugin";
 import { resolvePluginRoutes } from "./api/route";
@@ -26,6 +33,7 @@ export interface GenerateFarmTypeArtifactsOptions {
   srcDir?: string;
   configPath?: string;
   plugins?: readonly FarmPlugin[];
+  storage?: FarmStorageUserConfig;
   extraRoutes?: string[];
   layers?: readonly ResolvedFarmLayer[];
   suppressLintOnLink?: boolean;
@@ -242,6 +250,8 @@ export async function generateFarmTypeArtifacts(
   }
 
   if (shouldRefreshUnifiedTypes) {
+    const storageTypes = createStorageMountDeclarations(options, unifiedTypesPath);
+    if (storageTypes) unifiedSections.push(storageTypes);
     const syncModelTypes = createSyncModelTypeDeclarations(options.plugins);
     if (syncModelTypes) unifiedSections.push(syncModelTypes);
   }
@@ -296,6 +306,47 @@ ${unifiedSections.map(normalizeUnifiedTypeSection).join("\n\n")}
   }
 
   return result;
+}
+
+function createStorageMountDeclarations(
+  options: GenerateFarmTypeArtifactsOptions,
+  outPath: string,
+) {
+  const storage = options.storage;
+  if (
+    !storage ||
+    !("mounts" in storage) ||
+    !Object.values(storage.mounts ?? {}).some(isManagedMount)
+  )
+    return;
+
+  const project = findFarmConfigFile(
+    options.root,
+    options.configPath && resolve(options.root, options.configPath),
+  );
+  const configs = [...(options.layers ?? []).map((layer) => layer.configFile), project].filter(
+    (file): file is string => Boolean(file),
+  );
+  if (!configs.length) return;
+  const lines = ["type FarmMountsOf<C> = C extends { storage: { mounts: infer M } } ? M : {};"];
+  let mounts = "{}";
+  for (const [index, file] of configs.entries()) {
+    const path = relative(dirname(outPath), file)
+      .replace(/\\/g, "/")
+      .replace(/\.([cm]?)tsx?$/, ".$1js");
+    const specifier = JSON.stringify(path.startsWith(".") ? path : "./" + path);
+    const next = `FarmStorageMounts${index}`;
+    lines.push(`type ${next} = FarmMountsOf<typeof import(${specifier}).default>;`);
+    mounts = index === 0 ? next : `Omit<${mounts}, keyof ${next}> & ${next}`;
+  }
+  lines.push(`declare global {
+  namespace FarmJS {
+    interface StorageRegistry {
+      mounts: ${mounts};
+    }
+  }
+}`);
+  return lines.join("\n");
 }
 
 function normalizeUnifiedTypeSection(section: string): string {

@@ -124,28 +124,42 @@ database's HTTPS address and a short-lived credential. The application sends
 SQL directly to that address.
 
 Use `getDatabase` from server-side code after Farm initializes storage.
-The raw client accepts parameterized SQL and migrations. The schema overload
-infers model names and selections from your Farming Labs ORM schema.
+The mount owns its optional Farming Labs ORM schema. With a schema on the
+mount, `getDatabase(name)` returns its typed models. Without a schema it returns
+the raw SQL client. Use `getDatabase(name, { raw: true })` for migrations on
+either mount. Provisioning and migrations are separate operations.
 
 ```ts
-import { getDatabase, getStorage } from "@farm.js/core/storage";
+// farm.config.ts
+import { defineConfig } from "@farm.js/core";
+import { farmStorage } from "@farm.js/core/storage";
 import { defineSchema, id, model, string } from "@farming-labs/orm";
 
 const schema = defineSchema({
   draft: model({ table: "drafts", fields: { id: id(), title: string() } }),
 });
 
-// Run once as an application migration.
-const sql = await getDatabase("drafts");
-await sql.execute("CREATE TABLE IF NOT EXISTS drafts (id TEXT PRIMARY KEY, title TEXT NOT NULL)");
-
-// In a server handler.
-const db = await getDatabase("drafts", { schema });
-const drafts = await db.draft.findMany({ select: { id: true, title: true } });
-await getStorage("drafts").setItem("editor:settings", { autosave: true });
+export default defineConfig({
+  storage: { mounts: { drafts: farmStorage({ schema }) } },
+});
 ```
 
-Install `@farming-labs/orm` in the app when importing its schema helpers.
+```ts
+// In a server handler, after migrating the drafts table.
+import { getDatabase } from "@farm.js/core/storage";
+
+export async function listDrafts() {
+  const db = await getDatabase("drafts");
+  return db.draft.findMany({ select: { id: true, title: true } });
+}
+```
+
+Install `@farming-labs/orm` in the app for the schema helpers. Dev, build, and
+`pnpm exec farm generate` infer model types from the config into `src/farm.d.ts`.
+Managed driver helpers also accept the schema, e.g. `postgresStorage({ managed: true, schema })`.
+Each mount owns its model view, even when two mounts share a hosted namespace.
+Existing calls to `getDatabase(name, { schema })` can still select a schema for one call.
+
 Farm opens the connection on first use and refreshes credentials. Farm owns
 the returned client's lifetime and closes it at shutdown. Use `db.transaction(async (tx) => …)`
 for ORM writes that must commit together. Nested ORM transactions are unsupported. KV uses the reserved

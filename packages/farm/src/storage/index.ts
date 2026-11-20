@@ -1,7 +1,9 @@
+import { isMountSchema } from "./mount-schema";
 import type { Client } from "@libsql/core/api";
 import type { SchemaDefinition } from "@farming-labs/orm";
 import {
   databaseAccessor,
+  mountSchema,
   managedOrm,
   managedSqliteName,
   managedSqliteDriver,
@@ -295,8 +297,10 @@ async function resolveDriver(config?: FarmStorageMountConfig, mount?: string): P
   const hosted = resolveManagedStorageMount(config);
   if (hosted) {
     if (!mount) throw new TypeError("Register managed SQLite in storage.mounts.");
-    return managedSqliteDriver(managedSqliteName(mount, hosted.managed), () =>
-      loadModule("@libsql/client/http"),
+    return managedSqliteDriver(
+      managedSqliteName(mount, hosted.managed),
+      () => loadModule("@libsql/client/http"),
+      hosted.schema,
     );
   }
   const driverInput = config?.driver ?? "memory";
@@ -420,7 +424,20 @@ function configuredStorageClient(config: FarmStorageClientConfig | FarmManagedDr
   );
 }
 
-export function createStorageClient(config: FarmManagedDriverConfig): ManagedSqliteMount;
+type BareMount = Omit<ManagedSqliteMount, "schema">;
+type MountWithSchema<S extends SchemaDefinition> = BareMount & {
+  schema: S;
+};
+
+export function createStorageClient<S extends SchemaDefinition>(
+  config: FarmManagedDriverConfig & { schema: S },
+): MountWithSchema<S>;
+export function createStorageClient(
+  config: FarmManagedDriverConfig & { schema?: undefined },
+): BareMount;
+export function createStorageClient<S extends SchemaDefinition>(
+  config: FarmManagedDriverConfig & { schema?: S },
+): BareMount | MountWithSchema<S>;
 export function createStorageClient(config: FarmStorageClientConfig): FarmStorageClient;
 export function createStorageClient(config: FarmManagedDriverConfig | FarmStorageClientConfig) {
   return configuredStorageClient(config);
@@ -449,27 +466,56 @@ export function databaseStorage(
   }, ["unstorage/drivers/db0"]);
 }
 
+type FarmStorageOptions = { managed?: true; namespace?: string; schema?: SchemaDefinition };
+
+function assertMountSchema(schema: unknown): asserts schema is SchemaDefinition | undefined {
+  if (schema !== undefined && !isMountSchema(schema)) {
+    throw new TypeError("Pass a schema created with defineSchema() from @farming-labs/orm.");
+  }
+}
+
 /** A Farm-hosted SQL and key-value mount. The mount name is its default namespace. */
-export function farmStorage(
-  options: { managed?: true; namespace?: string } = {},
-): ManagedSqliteMount {
+export function farmStorage<S extends SchemaDefinition>(
+  options: FarmStorageOptions & { schema: S },
+): MountWithSchema<S>;
+export function farmStorage(options?: FarmStorageOptions & { schema?: undefined }): BareMount;
+export function farmStorage<S extends SchemaDefinition>(
+  options: FarmStorageOptions & { schema?: S },
+): BareMount | MountWithSchema<S>;
+export function farmStorage(options: FarmStorageOptions = {}): ManagedSqliteMount {
   if (
     !options ||
     typeof options !== "object" ||
     Array.isArray(options) ||
-    Object.keys(options).some((key) => key !== "namespace" && key !== "managed")
+    Object.keys(options).some((key) => key !== "namespace" && key !== "managed" && key !== "schema")
   )
-    throw new TypeError("Use farmStorage() or pass only the `managed` and `namespace` options.");
+    throw new TypeError(
+      "Use farmStorage() or pass only the `managed`, `namespace`, and `schema` options.",
+    );
   if (options.managed !== undefined && options.managed !== true)
     throw new TypeError("Set `managed` to true or omit it when using farmStorage().");
   const managed = options.namespace === undefined ? true : { name: options.namespace };
   if (managed !== true) managedSqliteName("", managed);
-  return { driver: "farm-managed-sqlite", managed };
+  assertMountSchema(options.schema);
+  return {
+    driver: "farm-managed-sqlite",
+    managed,
+    ...(options.schema && { schema: options.schema }),
+  };
 }
 
 /** @internal Resolve the same hosted descriptor for the CLI, the bundler, and the runtime. */
 export function resolveManagedStorageMount(config: unknown): ManagedSqliteMount | undefined {
   if (!config || typeof config !== "object") return;
+  if (
+    "schema" in config &&
+    isMountSchema(config.schema) &&
+    (!("managed" in config) || !config.managed)
+  ) {
+    throw new TypeError(
+      "Set `managed: true` or use farmStorage({ schema }) to bind an ORM schema.",
+    );
+  }
   if (!("managed" in config)) {
     if ("driver" in config && config.driver === "farm-managed-sqlite")
       throw new TypeError("Set `managed` to true on a hosted storage mount.");
@@ -488,15 +534,19 @@ export function resolveManagedStorageMount(config: unknown): ManagedSqliteMount 
     )
   )
     throw new TypeError("Select a built-in storage driver to use `managed: true`.");
-  if (Object.keys(options).some((key) => key !== "namespace"))
+  if (Object.keys(options).some((key) => key !== "namespace" && key !== "schema"))
     throw new TypeError(
       "Remove provider connection settings and driver options when using `managed: true`.",
     );
-  if (managed === true) return farmStorage({ namespace: options.namespace as string | undefined });
+  assertMountSchema(options.schema);
+  if (managed === true)
+    return farmStorage({
+      namespace: options.namespace as string | undefined,
+      schema: options.schema,
+    });
   // The original SQLite declaration names the resource inside the managed object.
   if ((driver === "sqlite" || driver === "farm-managed-sqlite") && !("namespace" in options)) {
-    managedSqliteName("", managed);
-    return { driver: "farm-managed-sqlite", managed: managed as { name: string } };
+    return farmStorage({ namespace: managedSqliteName("", managed), schema: options.schema });
   }
   throw new TypeError("Set `managed` to true and use `namespace` to select a hosted resource.");
 }
@@ -508,9 +558,16 @@ type NativeOptions<D extends FarmStorageNamedDriver> = (D extends FarmStorageDat
     : Omit<Extract<FarmStorageBuiltinDriverConfig, { driver: D }>, "driver">) & { managed?: false };
 
 function providerStorage<D extends FarmStorageNamedDriver>(driver: D) {
-  function storage(
-    options: FarmManagedStorageOptions | (D extends "sqlite" ? ManagedSqliteOptions : never),
-  ): ManagedSqliteMount;
+  type HostedOptions =
+    | FarmManagedStorageOptions
+    | (D extends "sqlite" ? ManagedSqliteOptions : never);
+  function storage<S extends SchemaDefinition>(
+    options: HostedOptions & { schema: S },
+  ): MountWithSchema<S>;
+  function storage(options: HostedOptions & { schema?: undefined }): BareMount;
+  function storage<S extends SchemaDefinition>(
+    options: HostedOptions & { schema?: S },
+  ): BareMount | MountWithSchema<S>;
   function storage(
     ...args: D extends "memory" | "local"
       ? [options?: NativeOptions<D>]
@@ -645,14 +702,30 @@ export async function initStorage(config: FarmStorageUserConfig = {}): Promise<S
   return globalStorage;
 }
 
-export function getDatabase(name: string): Promise<Client>;
+declare global {
+  namespace FarmJS {
+    /** @internal Mount declarations registered by the application's generated farm.d.ts. */
+    interface StorageRegistry {}
+  }
+}
+
+type AppMounts = FarmJS.StorageRegistry extends { mounts: infer M } ? M : {};
+type DatabaseForMount<M> = M extends { schema: infer S extends SchemaDefinition }
+  ? Awaited<ReturnType<typeof managedOrm<S>>>
+  : Client;
+type DatabaseForName<N extends string> = N extends keyof AppMounts
+  ? DatabaseForMount<AppMounts[N]>
+  : Client | DatabaseForMount<AppMounts[keyof AppMounts]>;
+
+export function getDatabase<N extends string>(name: N): Promise<DatabaseForName<N>>;
+export function getDatabase(name: string, options: { raw: true }): Promise<Client>;
 export function getDatabase<S extends SchemaDefinition<any>>(
   name: string,
   options: { schema: S },
 ): ReturnType<typeof managedOrm<S>>;
 export async function getDatabase<S extends SchemaDefinition<any>>(
   name: string,
-  options?: { schema: S },
+  options?: { schema: S } | { raw: true },
 ) {
   const key = normalizeMountKey(name);
   const mount = getActiveGlobalStorage().getMount(key);
@@ -664,7 +737,9 @@ export async function getDatabase<S extends SchemaDefinition<any>>(
         " before calling getDatabase().",
     );
   const client = await driver[databaseAccessor]();
-  return options ? managedOrm(client, options.schema) : client;
+  if (options && "raw" in options) return client;
+  const schema = options?.schema ?? driver[mountSchema];
+  return schema ? managedOrm(client, schema) : client;
 }
 
 export function getStorage(namespace?: string): Storage {
