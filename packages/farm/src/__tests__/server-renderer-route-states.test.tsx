@@ -1,6 +1,7 @@
 // @vitest-environment node
 
 import React from "react";
+import { createIsland } from "@farm.js/islx/react";
 import { generateKeyPairSync, sign } from "node:crypto";
 import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import https from "node:https";
@@ -186,6 +187,64 @@ describe("file route loading.tsx and error.tsx", () => {
     expect((await visit(shared, "bob", "/dashboard?ppr=shared")).headers.get("x-farm-ppr")).toBe(
       "hit",
     );
+  });
+
+  it("serves a PPR shell to visitors with cookies only when its render read none", async () => {
+    const visit = async (renderer: any, url: string, cookie?: string) => {
+      const response = createMockResponse();
+      const request = createMockRequest(url);
+      if (cookie) request.headers.cookie = cookie;
+      await renderer.renderPage(request, response);
+      await Promise.all(renderer.cachePPRShell.mock.results.map((result: any) => result.value));
+      return response;
+    };
+    // Reads the visitor's session the way @farm.js/auth does: through the current-request resolver.
+    const session = () => {
+      const resolve = (globalThis as any)[Symbol.for("farm.currentRequestResolver")];
+      return (
+        resolve?.()
+          ?.headers.get("cookie")
+          ?.match(/session=(\w+)/)?.[1] ?? "anon"
+      );
+    };
+    const createPPRRenderer = (readsSession: boolean) => {
+      const renderer = createRenderer({
+        [routeModulePath]: {
+          ppr: true,
+          default: function DashboardPage() {
+            return React.createElement(
+              "main",
+              null,
+              `session=${readsSession ? session() : "shared"}`,
+            );
+          },
+        },
+      }) as any;
+      renderer.config.experimental.ppr = true;
+      vi.spyOn(renderer, "cachePPRShell");
+      return renderer;
+    };
+
+    // The shell cache is process-wide, so each case uses its own search key.
+    const shared = createPPRRenderer(false);
+    const first = await visit(shared, "/dashboard?ppr=cookie-first", "consent=granted");
+    expect(first.headers.get("x-farm-ppr")).toBe("miss");
+    expect(first.headers.get("cache-control")).toBe("private, no-store");
+    const hit = await visit(shared, "/dashboard?ppr=cookie-first", "consent=denied");
+    expect(hit.body).toContain("session=shared");
+    expect(hit.headers.get("x-farm-ppr")).toBe("hit");
+    expect(hit.headers.get("cache-control")).toBe("private, no-store");
+
+    const reading = createPPRRenderer(true);
+    const alice = await visit(reading, "/dashboard?ppr=session", "session=alice");
+    expect(alice.body).toContain("session=alice");
+    expect(alice.headers.get("cache-control")).toBe("private, no-store");
+    expect(reading.cachePPRShell).not.toHaveBeenCalled();
+    expect((await visit(reading, "/dashboard?ppr=session")).body).toContain("session=anon");
+    expect((await visit(reading, "/dashboard?ppr=session")).headers.get("x-farm-ppr")).toBe("hit");
+    const bob = await visit(reading, "/dashboard?ppr=session", "session=bob");
+    expect(bob.body).toContain("session=bob");
+    expect(bob.headers.get("x-farm-ppr")).toBe("bypass");
   });
 
   it("renders the nearest loading.tsx while a file route suspends", async () => {
@@ -1348,6 +1407,96 @@ describe("file route loading.tsx and error.tsx", () => {
     expect(html).toContain("Settings fragment");
   });
 
+  it("renders a changed layout inside the shared layout's provider on navigation", async () => {
+    const Panel = React.createContext<string | null>(null);
+    function Header() {
+      const label = React.useContext(Panel);
+      if (label === null) throw new Error("Missing panel provider");
+      return <header>{label}</header>;
+    }
+
+    const HeaderIsland = createIsland(Header, "/header.tsx", "Header");
+    const renderer = createRenderer(
+      {},
+      {
+        serverComponents: { mode: "islands" },
+        isolatedClientBoundaryModules: ["/header.tsx"],
+      },
+    );
+    const html = await renderer.renderNavigationFragment({
+      PageComponent: () => <main>Pricing</main>,
+      pageProps: {},
+      params: {},
+      layouts: [
+        {
+          pattern: "/",
+          module: {
+            default: ({ children }: { children: React.ReactNode }) => (
+              <Panel.Provider value="Open assistant">
+                <aside>Shared controls</aside>
+                {children}
+              </Panel.Provider>
+            ),
+          },
+        },
+        {
+          pattern: "/(home)",
+          serverTree: true,
+          module: {
+            default: ({ children }: { children: React.ReactNode }) => (
+              <section>
+                <HeaderIsland />
+                {children}
+              </section>
+            ),
+          },
+        },
+      ],
+      layoutStartIndex: 1,
+      pageShouldHydrate: false,
+      layoutShouldHydrate: true,
+    });
+
+    const fragment = JSDOM.fragment(html);
+    expect(fragment.querySelector("header")?.textContent).toBe("Open assistant");
+    expect(fragment.querySelector("#__farm_page__ main")?.textContent).toBe("Pricing");
+    expect(fragment.querySelector('[data-farm-layout-pattern="/(home)"]')).toBeTruthy();
+    expect(fragment.querySelector("aside")).toBeNull();
+    const tree = fragment.querySelector('script[type="f/tree"][name="/(home)"]');
+    expect(tree?.textContent).toContain("/header.tsx");
+  });
+
+  it("sends a shared dynamic layout's tree for the destination params", async () => {
+    const renderer = createRenderer({}, { serverComponents: { mode: "islands" } });
+    const html = await renderer.renderNavigationFragment({
+      PageComponent: () => <main>Details</main>,
+      pageProps: {},
+      params: { id: "second" },
+      layouts: [
+        {
+          pattern: "/[id]",
+          serverTree: true,
+          module: {
+            default: ({
+              params,
+              children,
+            }: {
+              params: { id: string };
+              children: React.ReactNode;
+            }) => <section data-id={params.id}>{children}</section>,
+          },
+        },
+      ],
+      layoutStartIndex: 1,
+      pageShouldHydrate: false,
+      layoutShouldHydrate: true,
+    });
+
+    const fragment = JSDOM.fragment(html);
+    expect(fragment.querySelector("section")?.dataset.id).toBe("second");
+    expect(fragment.querySelector('script[type="f/tree"]')?.getAttribute("name")).toBe("/[id]");
+  });
+
   it("keeps a large route inline instead of behind its loading.tsx fallback", async () => {
     // React outlines a completed boundary bigger than its 12.8 KB progressive chunk
     // size: the fallback, then the content in a hidden segment revealed by $RC.
@@ -1623,6 +1772,7 @@ function createRenderer(
     basePath?: string;
     root?: string;
     security?: FarmConfig["security"];
+    serverComponents?: NonNullable<FarmConfig["experimental"]>["serverComponents"];
   } = {},
 ) {
   const metadataImageEntry = {
@@ -1815,6 +1965,9 @@ function createRenderer(
   return new ServerRenderer(
     {
       ...createConfig(options.root),
+      ...(options.serverComponents && {
+        experimental: { serverComponents: options.serverComponents },
+      }),
       integrations: options.integrations ?? {},
       basePath: options.basePath ?? "/",
       security: options.security,

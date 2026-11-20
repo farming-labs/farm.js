@@ -16,7 +16,12 @@ with a `children` snippet. See [Renderers](/docs/renderers) for renderer-specifi
 
 Farm owns the document shell; return application UI or a fragment from a root layout.
 The compatibility path for existing full-document layouts preserves Unicode content and
-React Suspense reveal payloads in both development and production.
+React Suspense reveal payloads in both development and production. When React hydrates a
+full-document layout, components inside its body keep their server-rendered `useId()` values,
+including components in a nested server-tree layout.
+
+During client navigation, a nested layout or page can read React context from a shared layout.
+For example, a header in a new route group can read a provider in the root layout and keep its state.
 
 **src/app/layout.tsx**
 
@@ -33,6 +38,9 @@ export default function RootLayout({ children }: LayoutProps) {
   );
 }
 ```
+
+A React page can use `useId()` under a server-only layout. For example, a label's
+`htmlFor` and its input's `id` keep the same value when the page becomes interactive.
 
 ## Nested layouts
 

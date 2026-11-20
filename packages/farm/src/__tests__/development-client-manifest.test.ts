@@ -5,8 +5,8 @@ import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import type { ViteDevServer } from "vite";
-import type { FarmClientRouteManifest } from "../routing/route-manager";
+import type { HmrContext, ViteDevServer } from "vite";
+import { type FarmClientRouteManifest, RouteManager } from "../routing/route-manager";
 import {
   createFarmDevClientManifest,
   FARM_DEV_CLIENT_MANIFEST_MODULE,
@@ -194,11 +194,39 @@ describe("development client manifest", () => {
     // A page added while the server runs: the route refresh reloads open pages, whose client
     // reads the new route from the module.
     const send = vi.spyOn(server.ws, "send");
-    await writeModule(
+    const discovering = Promise.withResolvers<void>();
+    const resume = Promise.withResolvers<void>();
+    const discover = RouteManager.prototype.discoverRoutes;
+    vi.spyOn(RouteManager.prototype, "discoverRoutes").mockImplementationOnce(
+      async function (this: RouteManager) {
+        discovering.resolve();
+        await resume.promise;
+        return discover.call(this);
+      },
+    );
+    const addedFile = await writeModule(
       root,
       "src/app/docs/added/page.tsx",
       `export default function Page() { return <h1>Added</h1>; }`,
     );
+    try {
+      await discovering.promise;
+      // A save can deliver a change for the same file while its add is still being discovered.
+      const hotUpdate = server.config.plugins.find(
+        (plugin) => plugin.name === "farm",
+      )?.handleHotUpdate;
+      if (typeof hotUpdate !== "function") throw new Error("Missing Farm HMR handler");
+      await hotUpdate({
+        server,
+        file: addedFile,
+        modules: [],
+        timestamp: Date.now(),
+        read: () => fs.readFile(addedFile, "utf8"),
+      } as HmrContext);
+      expect(send).not.toHaveBeenCalledWith({ type: "full-reload", path: "*" });
+    } finally {
+      resume.resolve();
+    }
     await vi.waitFor(() => expect(send).toHaveBeenCalledWith({ type: "full-reload", path: "*" }), {
       timeout: 20_000,
       interval: 50,
@@ -209,5 +237,11 @@ describe("development client manifest", () => {
     expect(
       Object.keys(JSON.parse(addedHtml.match(/window\.__FARM_MANIFEST__ = (.*);\n/)![1]!).routes),
     ).toEqual(["/docs/added"]);
+    send.mockClear();
+    await fs.unlink(addedFile);
+    await vi.waitFor(() => expect(send).toHaveBeenCalledWith({ type: "full-reload", path: "*" }), {
+      timeout: 20_000,
+    });
+    expect(Object.keys((await readModule()).routes)).not.toContain("/docs/added");
   }, 60_000);
 });

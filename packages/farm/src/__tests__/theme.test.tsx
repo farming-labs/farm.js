@@ -3,7 +3,7 @@ import { createRoot } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { pluginHook } from "./plugin-hook";
 import { resolveConfig } from "../config";
-import { _runWithCurrentRequest } from "../server/request";
+import { _getRequestCookieReadCount, _runWithCurrentRequest } from "../server/request";
 import { getTheme as getClientTheme, setTheme, useTheme } from "../theme/client";
 import { resolveFarmThemeConfig } from "../theme/config";
 import { _setDefaultFarmThemeConfig, getTheme } from "../theme/server";
@@ -61,6 +61,18 @@ describe("FARMJS theme configuration", () => {
     });
 
     await expect(_runWithCurrentRequest(request, () => getTheme())).resolves.toBe("dark");
+    // The rendered theme follows the cookie, so a PPR shell keeps to visitors without one.
+    expect(_getRequestCookieReadCount(request)).toBe(1);
+  });
+
+  it("reads no cookie while the theme is off", async () => {
+    _setDefaultFarmThemeConfig(false);
+    const request = new Request("https://farmjs.dev/dashboard", {
+      headers: { cookie: "site-theme=dark" },
+    });
+
+    await _runWithCurrentRequest(request, () => getTheme());
+    expect(_getRequestCookieReadCount(request)).toBe(0);
   });
 
   it("falls back to the configured default when no request context exists", () => {

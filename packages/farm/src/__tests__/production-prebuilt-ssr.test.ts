@@ -441,6 +441,11 @@ export default { plugins: [
           `export default function Layout({ children }) { return <section data-layout-order="${name}">{children}</section>; }`,
         );
       }
+      // Layout discovery uses this app's renderer extensions in both bundle graphs.
+      await fs.writeFile(
+        path.join(root, "src/app/reports/layout.vue"),
+        "<template><slot /></template>",
+      );
       const leaf = path.join(root, "src", "app", "reports", "[id]", "activity");
       await fs.mkdir(leaf, { recursive: true });
       await fs.writeFile(
@@ -1555,6 +1560,44 @@ export default function Page() {
       await fs.rm(root, { recursive: true, force: true });
     }
   }, 120_000);
+
+  it("keeps a Tailwind CSS 4 app's stylesheet at Tailwind's browser floor unless the app sets a target", async () => {
+    const roots: string[] = [];
+    const buildStylesheet = async (vite?: Record<string, unknown>) => {
+      const root = await createProductionFixture();
+      roots.push(root);
+      await fs.writeFile(
+        path.join(root, "src", "app", "globals.css"),
+        ".card :is(.title, .label) { color: rgb(1, 2, 3); }\n",
+      );
+      const config = await resolveConfig(
+        {
+          root,
+          srcDir: "src",
+          images: { provider: "none" },
+          telemetry: false,
+          generateBuildId: () => "production-tailwind-css-target-test",
+          ...(vite ? { vite } : {}),
+        },
+        "production",
+      );
+      await build(config, { root, preset: "node-server" });
+      return fs.readFile(path.join(root, ".farm", "client", "farm-client.css"), "utf8");
+    };
+
+    try {
+      // The fixture has no PostCSS config, so Farm enables the installed @tailwindcss/vite.
+      const tailwindFloor = await buildStylesheet();
+      expect(tailwindFloor).toContain(":is(.title,.label)");
+      expect(tailwindFloor).not.toContain("-webkit-any");
+
+      for (const legacy of [{ cssTarget: ["chrome87"] }, { target: ["es2020", "chrome87"] }]) {
+        expect(await buildStylesheet({ build: legacy })).toContain("-webkit-any");
+      }
+    } finally {
+      await Promise.all(roots.map((root) => fs.rm(root, { recursive: true, force: true })));
+    }
+  }, 180_000);
 
   it("serves OpenAPI routes and Markdown alternates beneath the configured basePath", async () => {
     const root = await createProductionFixture();

@@ -1,6 +1,6 @@
 {
   "name": "@farm.js/core",
-  "version": "0.1.75",
+  "version": "0.1.76",
   "description": "The core of Farm.js, the framework for the web and agents",
   "keywords": [
     "@farm.js/core",
@@ -169,6 +169,9 @@
       "image/sharp": [
         "./dist/image/sharp.d.ts"
       ],
+      "safe-fetch": [
+        "./dist/safe-fetch.d.ts"
+      ],
       "og": [
         "./dist/og.d.ts"
       ],
@@ -217,6 +220,9 @@
       "internal/build-runtime": [
         "./dist/internal/build-runtime.d.ts"
       ],
+      "internal/start-manifest": [
+        "./dist/internal/start-manifest.d.ts"
+      ],
       "internal/config-runtime": [
         "./dist/internal/config-runtime.d.ts"
       ],
@@ -224,7 +230,7 @@
         "./dist/internal/production-node-env.d.ts"
       ],
       "internal/cli-runtime": [
-        "./dist/index.d.ts"
+        "./dist/internal/cli-runtime.d.ts"
       ],
       "internal/request-cookies": [
         "./dist/internal/request-cookies.d.ts"
@@ -643,6 +649,11 @@
       "import": "./dist/image/sharp.mjs",
       "require": "./dist/image/sharp.cjs"
     },
+    "./safe-fetch": {
+      "types": "./dist/safe-fetch.d.ts",
+      "import": "./dist/safe-fetch.mjs",
+      "require": "./dist/safe-fetch.cjs"
+    },
     "./og": {
       "types": "./dist/og.d.ts",
       "import": "./dist/og.mjs",
@@ -793,6 +804,11 @@
       "import": "./dist/internal/build-runtime.mjs",
       "require": "./dist/internal/build-runtime.cjs"
     },
+    "./internal/start-manifest": {
+      "types": "./dist/internal/start-manifest.d.ts",
+      "import": "./dist/internal/start-manifest.mjs",
+      "require": "./dist/internal/start-manifest.cjs"
+    },
     "./internal/config-runtime": {
       "types": "./dist/internal/config-runtime.d.ts",
       "import": "./dist/internal/config-runtime.mjs",
@@ -804,7 +820,7 @@
       "require": "./dist/internal/production-node-env.cjs"
     },
     "./internal/cli-runtime": {
-      "types": "./dist/index.d.ts",
+      "types": "./dist/internal/cli-runtime.d.ts",
       "import": "./dist/internal/cli-runtime.mjs",
       "require": "./dist/internal/cli-runtime.cjs"
     },
@@ -833,8 +849,10 @@
     "@farm.js/islx": "0.0.23",
     "@farming-labs/orm": "0.0.66",
     "@farming-labs/orm-runtime": "0.0.66",
+    "@farming-labs/orm-sql": "0.0.66",
     "@formatjs/icu-messageformat-parser": "3.5.15",
     "@jridgewell/trace-mapping": "0.3.31",
+    "@libsql/core": "0.17.4",
     "@mdx-js/mdx": "^3.1.1",
     "@opentelemetry/api": "1.9.1",
     "@vitejs/plugin-react": "6.1.2",
@@ -861,6 +879,7 @@
     "@clerk/react": "^6.4.3",
     "@farm.js/renderer-tests": "workspace:*",
     "@farming-labs/docs": "^0.2.143",
+    "@libsql/client": "0.17.4",
     "@nestjs/common": "11.2.8",
     "@nestjs/core": "11.2.8",
     "@nestjs/platform-express": "11.2.8",
@@ -877,6 +896,7 @@
     "esbuild": "^0.28.0",
     "express": "5.3.0",
     "fastify": "5.12.7",
+    "h3-nitro-floor": "npm:h3@2.0.1-rc.31",
     "hono": "4.13.14",
     "jsdom": "^25.0.0",
     "koa": "3.2.1",
@@ -892,6 +912,7 @@
   },
   "peerDependencies": {
     "@farming-labs/docs": "^0.2.118",
+    "@libsql/client": "^0.17.4",
     "@tailwindcss/vite": "^4.3.3",
     "@vercel/og": "^1.0.1",
     "react": "^18.2.0 || ^19.0.0",
@@ -900,6 +921,9 @@
   },
   "peerDependenciesMeta": {
     "@farming-labs/docs": {
+      "optional": true
+    },
+    "@libsql/client": {
       "optional": true
     },
     "@tailwindcss/vite": {

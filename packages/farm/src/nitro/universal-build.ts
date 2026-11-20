@@ -266,7 +266,11 @@ import {
   generateFarmIntegrationProviderServerModules,
 } from "../integration-provider-build";
 import { loadFarmProductionVite, type FarmProductionViteRuntime } from "../build/production-vite";
-import { loadTailwindVitePlugin } from "../build/tailwind";
+import {
+  includesTailwindVitePlugin,
+  loadTailwindVitePlugin,
+  TAILWIND_CSS_BROWSER_TARGET,
+} from "../build/tailwind";
 import {
   precompileFarmMarkdownPages,
   type FarmMarkdownPrecompile,
@@ -1576,41 +1580,11 @@ export async function buildUniversal(
     );
     logger.info(`📋 Found ${pageRoutes.length} page routes`);
 
-    // Discover layout files early (needed for client CSS scanning)
     const fs = await import("fs/promises");
-    const layoutRoutes: Array<{ pattern: string; modulePath: string }> = [];
-    const appDir = path.join(root, srcDir, "app");
-
-    async function findLayoutsForClient(dir: string, routePrefix: string = "/"): Promise<void> {
-      try {
-        const entries = await fs.readdir(dir, { withFileTypes: true });
-        for (const entry of entries) {
-          if (entry.isFile() && entry.name.match(/^layout\.(tsx?|jsx?|vue|svelte)$/)) {
-            layoutRoutes.push({
-              pattern: routePrefix,
-              modulePath: path.join(dir, entry.name),
-            });
-          } else if (
-            entry.isDirectory() &&
-            !entry.name.startsWith(".") &&
-            !entry.name.startsWith("_")
-          ) {
-            const childPrefix =
-              routePrefix === "/" ? `/${entry.name}` : `${routePrefix}/${entry.name}`;
-            await findLayoutsForClient(path.join(dir, entry.name), childPrefix);
-          }
-        }
-      } catch {
-        // Directory doesn't exist or can't be read
-      }
-    }
-    await findLayoutsForClient(appDir);
-    const seenLayoutPatterns = new Set(layoutRoutes.map((layout) => layout.pattern));
-    for (const [pattern, entry] of routeManager.getLayouts()) {
-      if (seenLayoutPatterns.has(pattern)) continue;
-      seenLayoutPatterns.add(pattern);
-      layoutRoutes.push({ pattern, modulePath: entry.modulePath });
-    }
+    const layoutRoutes = Array.from(routeManager.getLayouts(), ([pattern, { modulePath }]) => ({
+      pattern,
+      modulePath,
+    }));
     logger.info(`📋 Found ${pageRoutes.length} page routes and ${layoutRoutes.length} layouts`);
 
     const isolatedClientBoundaryModules = routeManager.getIsolatedClientBoundaryModules(root);
@@ -2570,6 +2544,14 @@ async function buildClient(
           // Preserve Farm's Vite 5 browser baseline when the production builder
           // uses Vite 8, whose default target only covers newer browsers.
           target: FARM_CLIENT_BUILD_TARGET,
+          // Tailwind CSS 4 already requires newer browsers than that baseline. An app's own
+          // `build.target` or `build.cssTarget` still decides, as Vite derives one from the other.
+          ...(config.vite?.build?.target === undefined &&
+          config.vite?.build?.cssTarget === undefined &&
+          (includesTailwindVitePlugin(tailwindVitePlugin) ||
+            includesTailwindVitePlugin(config.vite?.plugins))
+            ? { cssTarget: TAILWIND_CSS_BROWSER_TARGET }
+            : {}),
           outDir: outputDir,
           emptyOutDir: platform === "web",
           // Never public: see resolveFarmClientSourcemap.
@@ -2639,7 +2621,7 @@ async function buildClient(
           ...(tailwindVitePlugin ? [tailwindVitePlugin] : []),
           ...(rendererVitePlugins as any[]),
           ...(config.vite.plugins || []),
-          farmServerOnlyEntriesPlugin({ platform }),
+          farmServerOnlyEntriesPlugin({ platform, distDir: config.distDir || ".farm" }),
           farmDocsClientConfigPlugin(
             adapterOwnsDocsRuntime ? getFarmDocsAdapterConfigModule(config.docs) : undefined,
           ),
@@ -4163,7 +4145,7 @@ export function generateClientHydrationEntry(
   );
   const appSetupPath = resolveFarmRendererAppSetup(root, renderer);
   const rendererClientImports = isReactRenderer(renderer)
-    ? `import React from "react";\nimport { createRoot, hydrateRoot } from "react-dom/client";`
+    ? `import React from "react";\nimport { createRoot, hydrateRoot } from "react-dom/client";\nimport { restorePagePosition } from "@farm.js/core/internal/client-runtime";`
     : appSetupPath
       ? `import React, { createRoot, hydrateRoot, configureApp as __farmConfigureApp } from ${JSON.stringify(renderer.client)};\nimport __farmAppSetup from ${JSON.stringify(toPosixPath(appSetupPath))};\n__farmConfigureApp(__farmAppSetup);`
       : `import React, { createRoot, hydrateRoot } from ${JSON.stringify(renderer.client)};`;
@@ -4903,7 +4885,7 @@ function reviveServerPageProps(serverProps) {
     : serverProps;
 }
 
-async function createMatchedHydrationRoute(matched, pathname, searchParams, serverHtml, serverProps, layoutSource) {
+async function createMatchedHydrationRoute(matched, pathname, searchParams, navigationPage, serverProps, layoutSource, hydrationContainer) {
   const hydrateLayouts = hasHydratableLayout(pathname);
   const params = matched.params;
   let pageElement = null;
@@ -4940,24 +4922,30 @@ async function createMatchedHydrationRoute(matched, pathname, searchParams, serv
       pageElement = React.createElement(Component, props);
     }
   } else if (hydrateLayouts) {
+    // A navigation passes the page element of the document it fetched, read as it is rather
+    // than serialized and parsed again; hydration reads the page in this document.
     const serverPage = document.getElementById("__farm_page__");
-    const pageSource = typeof serverHtml === "string" ? serverHtml : serverPage;
+    const pageSource = navigationPage === undefined ? serverPage : navigationPage;
     const serverTree = pageSource ? await createFarmServerTreePageElement(pageSource, pathname) : null;
     // A payload-only page (islands mode) has no HTML to fall back to: fetch the whole document.
-    if (!serverTree && typeof serverHtml === "string" && serverHtml.includes('<script type="f/tree" partial')) {
+    if (
+      !serverTree &&
+      pageSource &&
+      pageSource !== serverPage &&
+      pageSource.querySelector('script[type="f/tree"][partial]')
+    ) {
       return null;
     }
     pageElement = serverTree
       ? createLayoutPageBoundary(matched.route, serverTree)
-      : createLayoutPageBoundary(
-          matched.route,
-          null,
-          typeof serverHtml === "string" ? serverHtml : serverPage ? serverPage.innerHTML : "",
-        );
+      : createLayoutPageBoundary(matched.route, null, pageSource ? pageSource.innerHTML : "");
   }
 
   if (!pageElement) return null;
-  if (!hydrateLayouts) return createFarmRouteState(pageElement, pathname, params, false);
+  if (!hydrateLayouts) {
+    ${isReactRenderer(renderer) ? "if (hydrationContainer) pageElement = restorePagePosition(React, hydrationContainer, pageElement);" : ""}
+    return createFarmRouteState(pageElement, pathname, params, false);
+  }
   if (matched.route.pageShouldHydrate) {
     pageElement = createLayoutPageBoundary(matched.route, pageElement);
   }
@@ -5342,15 +5330,17 @@ async function hydrate() {
           return;
         }
         const searchParams = searchParamsToObject(new URLSearchParams(window.location.search));
+        const shouldHydrate = !isHydrated && Boolean(container.innerHTML.trim());
         const routeState = await createMatchedHydrationRoute(
           matched,
           pathname,
           searchParams,
           undefined,
           window.__FARM_PROPS__,
+          undefined,
+          shouldHydrate ? container : undefined,
         );
         if (!routeState) return;
-        const shouldHydrate = !isHydrated && Boolean(container.innerHTML.trim());
         const hydrationSession = await farmClientRuntime.beginHydration({
           container,
           mode: shouldHydrate ? "hydrate" : "render",
@@ -5990,7 +5980,7 @@ ${
         matched,
         newPathname,
         searchParamsToObject(targetUrl.searchParams),
-        nextPage.innerHTML,
+        nextPage,
         nextPageProps,
         newRoot,
       );
@@ -6014,7 +6004,7 @@ ${
         matched,
         newPathname,
         searchParams,
-        nextPage ? nextPage.innerHTML : "",
+        nextPage,
         nextPageProps,
         newRoot,
       );
@@ -6063,6 +6053,8 @@ ${
         searchParams,
         undefined,
         nextPageProps,
+        undefined,
+        pageContainer,
       );
       if (!isNavigationCurrent()) return false;
       if (routeState) {
@@ -6706,7 +6698,7 @@ async function buildSSRInMemory(
             ]
           : []),
         { ...createReactProductionModePlugin(), enforce: "pre" as const },
-        farmServerOnlyEntriesPlugin(),
+        farmServerOnlyEntriesPlugin({ distDir: config.distDir || ".farm" }),
         farmIslandContainersPlugin(config),
         farmPlugin(
           {
@@ -7199,6 +7191,10 @@ function useFarmNodePageResponse(ResponseClass) {
 // Web body the way reading response.body would.
 const farmLazyBufferedHtml = new WeakMap();
 
+// Bind the stored shell to the response Farm built from it. A body replacement
+// gets a new response and takes the ordinary scan path.
+const farmPreloadShells = new WeakMap();
+
 function hasFarmContentType(headers) {
   if (!headers) return false;
   if (typeof headers.has === "function") return headers.has("content-type");
@@ -7306,7 +7302,8 @@ async function applyFarmPreloadBudget(response, pathname, request) {
   // formatting), but do not consume and re-encode a proven preload-free body.
   const ownedHtml = hasNoHtmlPreloads ? undefined : getFarmOwnedBufferedHtml(response);
   const html = hasNoHtmlPreloads ? "" : (ownedHtml ?? await response.text());
-  const managed = manageFarmDocumentPreloads(html, linkHeader, farmPreloadConfig);
+  const managed = manageFarmDocumentPreloads(html, linkHeader, farmPreloadConfig,
+    ownedHtml === undefined ? undefined : farmPreloadShells.get(response));
   // A remembered document the budget left unchanged keeps its unread body.
   const reusesBody = hasNoHtmlPreloads || (ownedHtml !== undefined && managed.html === html);
   if (ownedHtml !== undefined && !reusesBody && !isLazyPage) {
@@ -7453,7 +7450,7 @@ function generateVirtualEntryCode(
   // renderToString; see renderFarmElementSync.
   const hasReactSyncRender = isReactRenderer(config.renderer);
   const rendererServerImports = isReactRenderer(config.renderer)
-    ? `import * as React from "react";\nimport * as ReactDOMServer from "react-dom/server";${
+    ? `import * as React from "react";\nimport * as ReactDOMServer from "react-dom/server";\nimport { markPagePosition, markLayoutPosition } from "@farm.js/core/internal/production-runtime";${
         hasIsolatedClientGraphRuntime
           ? farmIslandsMode
             ? '\nimport { isolateFarmServerPageGraph, wrapFarmIsolatedClientGraph, renderFarmServerTreePage, renderFarmServerTreeLayout, withFarmIslandsRender } from "@farm.js/core/internal/islands-runtime";'
@@ -7915,6 +7912,7 @@ function renderFarmServerTreeLayout(Layout, props, outlets) {
       ? `import { mergePluginAPIRoutes, getAllowedAPIRouteMethods, invokeAPIRouteEndpoint, createStaticAPIRouteMatcherAtBasePath, resolveAPIRouteEndpoint } from "@farm.js/core/api/runtime";`
       : "";
   const productionRuntimeImport = `import {
+  _getRequestCookieReadCount,
   _getRequestReadCount,
   _runWithAfterRequest,
   _resolveCurrentCspNonce,
@@ -11031,7 +11029,6 @@ function getPPRShellBypassReason(request, middlewareData, middlewareContext) {
   if (farmSecurityConfig.csp && farmSecurityConfig.csp.nonce) return "csp-nonce";
   const method = request.method.toUpperCase();
   if (method !== "GET" && method !== "HEAD") return "method";
-  if (withoutFarmDeploymentCookie(request.headers.get("cookie"))) return "cookie";
   if (request.headers.get("authorization")) return "authorization";
   if (request.headers.get("x-farm-intercept-from")) return "route-interception";
   if (request.headers.get("x-farm-ppr-refresh")) return "refresh";
@@ -11086,13 +11083,10 @@ function getRouteSharedCacheControl(route, pprCanCache) {
   return resolveRouteSharedCacheControl(resolveRouteRenderingView(route), pprCanCache);
 }
 
+// { html, cookieIndependent }: cookieIndependent marks a shell whose render read no cookies.
 async function getCachedPPRShell(cacheKey) {
   const entry = await pprShellCache.getEntryAsync(cacheKey);
-  if (!entry) {
-    return null;
-  }
-
-  return entry.value.html;
+  return entry ? entry.value : null;
 }
 
 /**
@@ -11913,7 +11907,7 @@ ${
         ? getPPRShellBypassReason(request, middlewareData, middlewareContext)
         : undefined;
       let pprCanCache = pprConfig.enabled && !pprBypassReason;
-      const pprCacheKey = pprCanCache
+      let pprCacheKey = pprCanCache
         ? getPPRShellCacheKey(
             url,
             farmLocaleResolution?.locale,
@@ -11929,8 +11923,18 @@ ${
           emitFarmEvent({ type: "ppr.refresh.start", route: pathname });
         }
       }
+      const cachedPPRShellEntry = pprCacheKey ? await getCachedPPRShell(pprCacheKey) : null;
+      const pprVisitorCookies = Boolean(withoutFarmDeploymentCookie(request.headers.get("cookie")));
+      if (cachedPPRShellEntry && pprVisitorCookies && !cachedPPRShellEntry.cookieIndependent) {
+        // The shell's render read cookies (the theme, an auth helper), so it is what a visitor
+        // without them sees: this visitor's page renders on its own and is not stored.
+        pprCanCache = false;
+        pprCacheKey = null;
+        emitFarmEvent({ type: "ppr.shell.bypass", route: pathname, reason: "cookie" });
+        emitFarmEvent({ type: "cache.bypass", route: pathname, reason: "cookie" });
+      }
       if (pprCacheKey) {
-        const cachedPPRShell = await getCachedPPRShell(pprCacheKey);
+        const cachedPPRShell = cachedPPRShellEntry?.html;
         if (cachedPPRShell) {
           emitFarmEvent({ type: "ppr.shell.hit", route: pathname, key: pprCacheKey });
           emitFarmEvent({
@@ -11940,16 +11944,21 @@ ${
             status: 200,
             durationMs: Date.now() - requestStartTime,
           });
-          return rememberFarmBufferedHtml(applyProductionMiddlewareHeaders(farmOwnedHtmlResponse(cachedPPRShell, {
+          const response = rememberFarmBufferedHtml(applyProductionMiddlewareHeaders(farmOwnedHtmlResponse(cachedPPRShell, {
             status: 200,
             headers: {
               "Content-Type": "text/html; charset=utf-8",
-              "x-farm-preload-buffered": getFarmBufferedPreloadMarker(cachedPPRShell),
+              "x-farm-preload-buffered": "1",
               ...(farmFontPreloadHeader ? { "Link": farmFontPreloadHeader } : {}),
               ...getPPRHeaders("hit", pprConfig),
               // The policy the miss that stored this shell was sent with.
               ...(getRouteSharedCacheControl(route, true)
                 ? { "Cache-Control": getRouteSharedCacheControl(route, true) }
+                : {}),
+              // A stored shell read no request state, so a visitor's cookies cannot change it, but
+              // the response to a request with credentials stays out of shared caches.
+              ...(hasPrivateFarmRequestHeaders(request, farmLocaleResolution)
+                ? { "Cache-Control": "private, no-store" }
                 : {}),
               // A segment is one navigation's answer, never a CDN entry: some CDNs ignore Vary.
               ...(farmKeptLayouts
@@ -11957,6 +11966,8 @@ ${
                 : {}),
             },
           }), middlewareHeaders), cachedPPRShell);
+          farmPreloadShells.set(response, cachedPPRShellEntry);
+          return response;
         }
         emitFarmEvent({ type: "ppr.shell.miss", route: pathname, key: pprCacheKey });
         if (request.method.toUpperCase() !== "HEAD") {
@@ -11972,6 +11983,7 @@ ${
 
       // Reads from here on belong to the page render, not to middleware.
       const requestReadsBeforeRender = _getRequestReadCount();
+      const requestCookieReadsBeforeRender = _getRequestCookieReadCount();
       // A swr or cache route rule stores this page by URL for every visitor. Nitro hands Farm the
       // request without its cookies, Authorization, or any header the rule does not key on, so a
       // render that reads nothing of the request is that shared page, whatever its route config.
@@ -12297,6 +12309,7 @@ ${
               pageElement,
             );
 
+            ${isReactRenderer(config.renderer) ? "if (route.shouldHydrate && !shouldHydrateLayout) pageElement = markPagePosition(React, pageElement);" : ""}
             // Wrap with layouts (from innermost to outermost)
             // Layouts are sorted by depth (root first), so we process in reverse
             let wrappedElement = pageElement;
@@ -12368,6 +12381,7 @@ ${
             wrappedElement = wrapFarmRouteClientGraph(wrappedElement);
           }
 
+          ${isReactRenderer(config.renderer) ? "if (route.shouldHydrate && !shouldHydrateLayout) wrappedElement = markLayoutPosition(React, wrappedElement);" : ""}
           wrappedElement = wrapWithFarmIntegrationProviders(wrappedElement);
           return renderFarmElement(ReactDOMServer, wrappedElement, route.pattern, farmFlushToken);
         };
@@ -12463,6 +12477,16 @@ ${
           pprCanCache = false;
           emitFarmEvent({ type: "ppr.shell.bypass", route: pathname, reason: "request-read" });
           emitFarmEvent({ type: "cache.bypass", route: pathname, reason: "request-read" });
+        }
+        // An auth helper or integration client read this visitor's cookies: the shell a later
+        // visitor gets must come from one without them.
+        const renderReadCookies = () =>
+          _getRequestCookieReadCount() !== requestCookieReadsBeforeRender;
+        if (shouldCachePPRShell && pprVisitorCookies && renderReadCookies()) {
+          shouldCachePPRShell = false;
+          pprCanCache = false;
+          emitFarmEvent({ type: "ppr.shell.bypass", route: pathname, reason: "cookie" });
+          emitFarmEvent({ type: "cache.bypass", route: pathname, reason: "cookie" });
         }
 
         const renderedMetadata = renderMetadataHead(mergedMetadata, { pathname, jsonLd: ${JSON.stringify(config.agent?.jsonLd ?? false)} });
@@ -12813,13 +12837,24 @@ ${
           pprCacheKey &&
           request.method.toUpperCase() !== "HEAD"
         ) {
-          await pprShellWrite?.commit(pprCacheKey, { html: fullHtml });
-          emitFarmEvent({
-            type: "ppr.shell.cached",
-            route: pathname,
-            key: pprCacheKey,
-            revalidate: pprConfig.revalidate,
-          });
+          // The theme document above reads the theme cookie too. A render that read cookies
+          // stores what a visitor without them sees, and only from such a visitor.
+          const shellReadCookies = renderReadCookies();
+          if (shellReadCookies && pprVisitorCookies) {
+            emitFarmEvent({ type: "ppr.shell.bypass", route: pathname, reason: "cookie" });
+            emitFarmEvent({ type: "cache.bypass", route: pathname, reason: "cookie" });
+          } else {
+            await pprShellWrite?.commit(pprCacheKey, {
+              html: fullHtml,
+              ...(shellReadCookies ? {} : { cookieIndependent: true }),
+            });
+            emitFarmEvent({
+              type: "ppr.shell.cached",
+              route: pathname,
+              key: pprCacheKey,
+              revalidate: pprConfig.revalidate,
+            });
+          }
         }
 
         if (pprBypassReason === "refresh") {
@@ -14439,26 +14474,6 @@ function toFarmNodeResponse(request, response) {
     }),
   );
 
-  // Nitro's static handler answers a prerendered page at both spellings (it strips the trailing
-  // slash and tries the file and its index.html) before the request reaches Farm, so the other
-  // spelling would get the page with 200 instead of Farm's 308 to the canonical URL. Redirect it
-  // with a route rule, as a dynamic page and development do. Platform presets serve their own
-  // static files and redirects.
-  const prerenderTrailingSlashRedirects =
-    isVercel || preset.startsWith("cloudflare") || preset.startsWith("netlify")
-      ? {}
-      : Object.fromEntries(
-          prerenderRoutes.flatMap((route) => {
-            const canonical = toPrerenderPublicPath(route);
-            const other = canonical.endsWith("/") ? canonical.slice(0, -1) : `${canonical}/`;
-            if (!other || other === "/" || canonical === "/") return [];
-            // A route rule key is a match pattern: only a path of plain URL characters names
-            // itself. Another path (a static param such as "a+b") keeps answering both spellings.
-            if (!/^[A-Za-z0-9._~/-]+$/.test(canonical)) return [];
-            return [[other, { redirect: { to: canonical, status: 308 } }]];
-          }),
-        );
-
   // Content-hashed client files never change, so they are cached for a year. Vercel gets the same
   // policy from the immutable route postProcessVercelOutput writes, which replaces Nitro's routes.
   const immutableAssets = isVercel
@@ -14572,7 +14587,6 @@ function toFarmNodeResponse(request, response) {
       // Exact user rules must retain their runtime settings without replacing
       // the headers and prerender marker generated for a safe physical page.
       ...prerenderNitroRouteRules,
-      ...prerenderTrailingSlashRedirects,
     },
     rollupConfig: {
       external: nitroRollupExternal,
@@ -14676,8 +14690,17 @@ function toFarmNodeResponse(request, response) {
           ? [configuredRollupPlugins]
           : []),
       ...(ssrRollupPlugin ? [ssrRollupPlugin] : []),
-      // Added after the checks above: it changes no SSR output, only how public files answer `Range`.
-      createNitroStaticRangePlugin(resolveNitroPackageEntry(root)),
+      // Added after the checks above: it changes no SSR output, only how public files answer
+      // `Range` and how a prerendered page's other slash spelling redirects. Nitro's static
+      // handler answers both spellings, and a route rule cannot redirect one of them: Nitro's
+      // router matches the rule at the canonical URL too, which loops on h3 before 2.0.8.
+      // Platform presets serve their own static files and redirects.
+      createNitroStaticRangePlugin(
+        resolveNitroPackageEntry(root),
+        isVercel || preset.startsWith("cloudflare") || preset.startsWith("netlify")
+          ? []
+          : prerenderRoutes.map(toPrerenderPublicPath),
+      ),
     ],
   };
 

@@ -70,6 +70,7 @@ const entry = {
   image: "src/image.tsx",
   "image/server": "src/image-server.ts",
   "image/sharp": "src/image-sharp.ts",
+  "safe-fetch": "src/safe-fetch.ts",
   og: "src/og.ts",
   "i18n/index": "src/i18n/index.ts",
   "i18n/server": "src/i18n/server.ts",
@@ -100,6 +101,7 @@ const entry = {
   "internal/compression-runtime": "src/plugins/compression.ts",
   "internal/vercel-edge-middleware": "src/middleware/vercel-edge.ts",
   "internal/build-runtime": "src/nitro/build-runtime.ts",
+  "internal/start-manifest": "src/build/start-manifest.ts",
   "internal/config-runtime": "src/config-runtime.ts",
   "internal/production-node-env": "src/build/production-node-env.ts",
   "internal/cli-runtime": "src/cli-runtime.ts",
@@ -115,8 +117,6 @@ const entry = {
 export const farmPackageBuildOptions = {
   entry,
   format: ["cjs", "esm"],
-  // Declarations for every entry except the CLI's React-free runtime. Everything it exports
-  // is typed by index.d.ts, which package.json points it at.
   // The bundled declarations are built from what `tsc -p tsconfig.dts.json` emits first in
   // the build and dev scripts, not from source:
   // given source entries, tsup's declaration plugin starts a TypeScript program for each run
@@ -124,12 +124,10 @@ export const farmPackageBuildOptions = {
   // again (34 programs here, about 11 GB). Given .d.ts entries, it starts none.
   dts: {
     entry: Object.fromEntries(
-      Object.entries(entry)
-        .filter(([name]) => name !== "internal/cli-runtime")
-        .map(([name, source]) => [
-          name,
-          source.replace(/^src\//, ".tmp-dts/").replace(/\.tsx?$/, ".d.ts"),
-        ]),
+      Object.entries(entry).map(([name, source]) => [
+        name,
+        source.replace(/^src\//, ".tmp-dts/").replace(/\.tsx?$/, ".d.ts"),
+      ]),
     ),
   },
   clean: true,

@@ -1,5 +1,4 @@
 import type { FarmConfig } from "@farm.js/core";
-import { ensureFarmRscPackages } from "./rsc-packages";
 
 export async function startDevServer(
   config: FarmConfig = {},
@@ -9,7 +8,11 @@ export async function startDevServer(
   const { startDevServer: startFarmDevServer } = await import("@farm.js/core/server");
   return startFarmDevServer(config, port, {
     host,
-    ensureServerComponentsPackages: (userConfig: unknown, root: string) =>
-      ensureFarmRscPackages(userConfig as Record<string, any>, root),
+    // Core calls this only for an app with `experimental.serverComponents`. Loading it lazily keeps
+    // every other `farm dev` from loading the CLI's CommonJS copy of core beside the server's own.
+    ensureServerComponentsPackages: async (userConfig: unknown, root: string) => {
+      const { ensureFarmRscPackages } = await import("./rsc-packages");
+      return ensureFarmRscPackages(userConfig as Record<string, any>, root);
+    },
   });
 }

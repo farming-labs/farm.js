@@ -3,13 +3,22 @@ import { existsSync } from "node:fs";
 import { readFile } from "node:fs/promises";
 import path from "node:path";
 import { createRequire } from "node:module";
-import { pathToFileURL } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 import type { Plugin, ResolvedConfig, Rollup, ViteDevServer } from "vite";
 import type { FarmFontDisplay, FarmFontSource, RemoteFontSource } from "./font";
 
 const FONT_IMPORTS = new Set(["@farm.js/core", "@farm.js/core/font"]);
+/**
+ * The directory of the `@farm.js/core` build this code runs from. Its modules define the loaders
+ * and generate code that imports them, but never call one, and the development SSR runner
+ * transforms them: parsing them is about 1 MB of work on every start.
+ */
+const FARM_CORE_DIRECTORY = `${path
+  .dirname(typeof __filename === "string" ? __filename : fileURLToPath(import.meta.url))
+  .replace(/\\/g, "/")}/`;
 const FONT_FUNCTIONS = new Set<FontLoaderKind>(["localFont", "remoteFont"]);
-const FONT_CSS_PREFIX = "\0farm:font-css:";
+/** The id prefix of the stylesheet each set of font calls imports in development. */
+export const FONT_CSS_PREFIX = "\0farm:font-css:";
 const FONT_RUNTIME_ID = "\0farm:font-runtime";
 const PUBLIC_FONT_RUNTIME_ID = "virtual:farm-font-runtime";
 const PRELOAD_HEADER_MARKER = "__FARM_FONT_PRELOAD_HEADER__";
@@ -227,7 +236,8 @@ export async function transformFarmFontCalls(
   if (
     !MODULE_EXTENSION_RE.test(cleanId) ||
     /\.d\.[cm]?ts$/.test(cleanId) ||
-    !containsFontFunction(options.code)
+    !containsFontFunction(options.code) ||
+    cleanId.replace(/\\/g, "/").startsWith(FARM_CORE_DIRECTORY)
   ) {
     return null;
   }

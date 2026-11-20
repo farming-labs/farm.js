@@ -351,6 +351,10 @@ A shareable PPR page is sent with the same `Cache-Control` as any page with a sh
 whether the response renders the shell (`X-Farm-PPR: miss`) or serves the stored one
 (`X-Farm-PPR: hit`).
 
+On a production shell hit, Farm can reuse the image and font preload hints it parsed from that
+shell. It still applies the preload budget to the HTML and the current response's `Link` header
+together. A revalidated shell gets a fresh scan.
+
 When a production render actually suspends, Farm currently buffers that response for late status
 errors and bypasses the shared PPR shell cache. This preserves fresh request-specific content
 instead of caching a completed response as though it were a reusable partial shell.
@@ -368,6 +372,16 @@ pages and layouts count there; see
 
 `preloadQuery` from [`@farm.js/convex/server`](/docs/integrations/convex#caching) reads the request
 the same way, so a page that preloads live Convex data is never stored in the shared cache.
+
+Cookies alone do not keep a visitor from the shell. A request whose cookies the render never reads,
+such as a consent or analytics cookie, gets the stored shell (`X-Farm-PPR: hit`), and its miss
+stores the shell as any other miss does. Either response is sent with `Cache-Control: private, no-store`, so a CDN never stores
+a response to a request with cookies. Some helpers read the visitor's cookies without counting as a
+request read: [auth](/docs/auth) helpers such as `auth.user()`, the server [`api` client](/docs/api-client),
+integration clients, and the [theme](/docs/themes). A shell whose render used one shows what a
+visitor without those cookies sees. Farm serves that shell only to requests without cookies, renders
+other requests on their own with `X-Farm-PPR: bypass`, and never stores a shell from a request with
+cookies. A request with an `Authorization` header always renders on its own.
 
 ```tsx
 import { Suspense } from "react";

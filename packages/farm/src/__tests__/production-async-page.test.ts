@@ -2,6 +2,7 @@ import fs from "fs";
 import path from "path";
 import React from "react";
 import { describe, expect, it } from "vitest";
+import { isReactRenderer, REACT_RENDERER } from "../renderer";
 
 // The production renderer is emitted as a template literal, so extract the
 // generated renderPageElement block and execute it against stub components to
@@ -17,7 +18,11 @@ function extractRenderPageElement(source: string): string {
   const endIndex = source.indexOf(endMarker, start);
   expect(start).toBeGreaterThan(-1);
   expect(endIndex).toBeGreaterThan(-1);
-  return source.slice(start, source.indexOf("};", endIndex) + 2);
+  const template = source.slice(start, source.indexOf("};", endIndex) + 2);
+  // Expand the renderer branches just as the production entry generator does.
+  return new Function("isReactRenderer", "config", `return \`${template}\`;`)(isReactRenderer, {
+    renderer: REACT_RENDERER,
+  });
 }
 
 async function runRenderPageElement(

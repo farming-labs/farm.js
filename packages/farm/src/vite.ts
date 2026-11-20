@@ -262,8 +262,10 @@ import {
 import {
   invalidateFarmClientOnlyScan,
   farmRelativeImportFiles,
+  persistPackageScanCache,
   rewriteFarmReactServerClientModuleImports,
   rewriteFarmReactServerImports,
+  usePackageScanCacheFile,
 } from "./islands-react-server-exports";
 import {
   FARM_REACT_CACHE_MODULE,
@@ -603,6 +605,11 @@ export function farmServerOnlyEntriesPlugin(
      * and a build's own Vite server, which load the project's modules, set it; bundling does not.
      */
     prebundleServerPackages?: boolean;
+    /**
+     * The app's `distDir`. Package scans are saved under it and reused by later runs while the
+     * packages are unchanged; without it each process scans them again.
+     */
+    distDir?: string;
   } = {},
 ): Plugin {
   let root = process.cwd();
@@ -611,9 +618,17 @@ export function farmServerOnlyEntriesPlugin(
     name: "farm:server-only-entries",
     enforce: "pre",
     config(config) {
-      const bundledPackages = collectFarmServerBundledPackageInfo(
-        path.resolve(config.root ?? process.cwd()),
-      );
+      const appRoot = path.resolve(config.root ?? process.cwd());
+      if (options.distDir) {
+        usePackageScanCacheFile(
+          path.resolve(appRoot, options.distDir, "cache", "package-scans.json"),
+        );
+      }
+      const bundledPackages = collectFarmServerBundledPackageInfo(appRoot);
+      const prebundle = options.prebundleServerPackages
+        ? createFarmServerPrebundleConfig(bundledPackages)
+        : {};
+      persistPackageScanCache();
       return {
         optimizeDeps: { rolldownOptions: { plugins: [farmBrowserBuiltinsOptimizerPlugin()] } },
         ssr: {
@@ -623,9 +638,7 @@ export function farmServerOnlyEntriesPlugin(
             // Packages Node cannot load as a bundler does (stylesheet imports, `module`-only ESM).
             ...bundledPackages.map(({ name }) => name),
           ],
-          ...(options.prebundleServerPackages
-            ? createFarmServerPrebundleConfig(bundledPackages)
-            : {}),
+          ...prebundle,
         },
       };
     },
@@ -1999,6 +2012,7 @@ export function farmPlugin(
   let openAPIManager: OpenAPIManager | null = null;
   let middlewareManager: MiddlewareManager;
   let refreshRouteDiscovery: ((reason: string) => Promise<void>) | null = null;
+  const pendingRouteReloads = new Set<Set<string>>();
   let workflowHandler: ((request: Request) => Promise<Response | null>) | null = null;
   let isBuild = false;
   // Whether this dev server turned Vite's `server.cors` off (see the `config` hook).
@@ -2363,8 +2377,7 @@ export function farmPlugin(
       let typeArtifactGenScheduled: ReturnType<typeof setTimeout> | null = null;
       let pendingTypeArtifacts = createEmptyTypeArtifactSelection();
       let pendingTypeArtifactReason = "";
-      let routeRefreshScheduled: ReturnType<typeof setTimeout> | null = null;
-      let pendingRouteRefreshIncludesMiddleware = false;
+      let queuedRouteFiles: Set<string> | undefined;
       const scheduleTypeArtifactGen = (
         file: string,
         event: string,
@@ -2425,22 +2438,31 @@ export function farmPlugin(
               (isProgrammaticRouteSourceFile(file) &&
                 (ev === "unlink" || fileContainsProgrammaticPageRoute(file))));
           if (isRouteRefreshEvent) {
-            if (file.includes("middleware.")) {
-              pendingRouteRefreshIncludesMiddleware = true;
-            }
-            if (!routeRefreshScheduled) {
-              routeRefreshScheduled = setTimeout(() => {
-                routeRefreshScheduled = null;
-                const reloadsMiddleware = pendingRouteRefreshIncludesMiddleware;
-                pendingRouteRefreshIncludesMiddleware = false;
-                Promise.all([
-                  refreshRouteDiscovery?.(`${ev} ${file}`),
-                  reloadsMiddleware ? middlewareManager?.reload() : undefined,
-                ])
-                  .then(() => server.ws.send({ type: "full-reload", path: "*" }))
-                  .catch((error) => logger.warn(`Route refresh failed: ${error.message}`));
+            if (!queuedRouteFiles) {
+              const files = new Set<string>();
+              queuedRouteFiles = files;
+              pendingRouteReloads.add(files);
+              setTimeout(async () => {
+                queuedRouteFiles = undefined;
+                try {
+                  await Promise.all([
+                    refreshRouteDiscovery?.(`${ev} ${file}`),
+                    [...files].some((path) => path.includes("middleware."))
+                      ? middlewareManager?.reload()
+                      : undefined,
+                  ]);
+                  if (pendingRouteReloads.size === 1)
+                    server.ws.send({ type: "full-reload", path: "*" });
+                } catch (error) {
+                  logger.warn(
+                    `Route refresh failed: ${error instanceof Error ? error.message : String(error)}`,
+                  );
+                } finally {
+                  pendingRouteReloads.delete(files);
+                }
               }, 50);
             }
+            queuedRouteFiles.add(normalizedFile);
           }
         });
       });
@@ -4606,8 +4628,12 @@ export function farmPlugin(
                 );
                 const layoutHydrationMetadata = layouts.map(
                   (layout) =>
-                    navigationManifest.layouts.find((entry) => entry.pattern === layout.pattern) ??
-                    getClientModuleMetadata(layout.modulePath, server.config.root),
+                    navigationManifest.layouts.find(
+                      (entry) => entry.pattern === layout.pattern,
+                    ) ?? {
+                      ...getClientModuleMetadata(layout.modulePath, server.config.root),
+                      serverTree: false,
+                    },
                 );
                 const shouldHydrateLayout = layoutHydrationMetadata.some(
                   (metadata) => metadata.shouldHydrate,
@@ -4792,6 +4818,7 @@ export function farmPlugin(
                       layouts: layouts.map((layout, index) => ({
                         pattern: layout.pattern,
                         module: layoutModules[index] as any,
+                        serverTree: layoutHydrationMetadata[index]?.serverTree,
                       })),
                       layoutStartIndex,
                       slots: routeSlots.map((slot) => ({
@@ -5955,6 +5982,27 @@ if (import.meta.hot) {
 
       const currentFarmConfig = farmApp?.getConfig();
       const normalizedFile = file.replace(/\\/g, "/");
+      const reloadAfterEdit = () => {
+        // A save can report both add and change. Discovery owns the reload until the new
+        // manifest is available, while the change still invalidates the edited modules.
+        for (const files of pendingRouteReloads) {
+          if (files.has(normalizedFile)) return;
+        }
+        server.ws.send({ type: "full-reload", path: "*" });
+      };
+      // Rendering can write a package's client reference before the browser has requested it.
+      // Leave that generated module to Vite. The source edit has its own hot update.
+      if (
+        normalizedFile.includes(FARM_CLIENT_REFERENCE_DIRECTORY) &&
+        normalizedFile.startsWith(
+          path.posix.join(
+            toPosixPath(currentFarmConfig?.root || options.root || server.config.root),
+            FARM_CLIENT_REFERENCE_DIRECTORY,
+          ),
+        )
+      )
+        return modules;
+
       if (
         currentFarmConfig &&
         /\/route\.(?:ts|tsx|js|jsx)$/.test(normalizedFile) &&
@@ -5966,7 +6014,7 @@ if (import.meta.hot) {
         // types leaves both HTTP and direct server calls bound to old handlers.
         for (const mod of modules) server.moduleGraph.invalidateModule(mod);
         await refreshRouteDiscovery?.(`updated ${file}`);
-        server.ws.send({ type: "full-reload", path: "*" });
+        reloadAfterEdit();
         return [];
       }
       const currentSrcRoot = currentFarmConfig
@@ -5987,10 +6035,7 @@ if (import.meta.hot) {
 
         await refreshRouteDiscovery?.(`updated ${file}`);
 
-        server.ws.send({
-          type: "full-reload",
-          path: "*",
-        });
+        reloadAfterEdit();
 
         return [];
       }
@@ -6009,10 +6054,7 @@ if (import.meta.hot) {
 
         await refreshRouteDiscovery?.(`updated ${file}`);
 
-        server.ws.send({
-          type: "full-reload",
-          path: "*",
-        });
+        reloadAfterEdit();
 
         return [];
       }
@@ -6089,7 +6131,7 @@ if (import.meta.hot) {
                 const clientModule = server.moduleGraph.getModuleById(clientId);
                 if (clientModule) server.moduleGraph.invalidateModule(clientModule);
               }
-              server.ws.send({ type: "full-reload", path: "*" });
+              reloadAfterEdit();
               return [];
             }
             clientPlanCurrent = true;
@@ -6141,10 +6183,7 @@ if (import.meta.hot) {
             server.moduleGraph.invalidateModule(mod);
           }
 
-          server.ws.send({
-            type: "full-reload",
-            path: "*",
-          });
+          reloadAfterEdit();
 
           return [];
         }
@@ -6160,7 +6199,7 @@ if (import.meta.hot) {
         invalidateFarmDevDependents(server, file, getFarmRenderedServerModules()).length > 0
       ) {
         logUpdate("PAGE", `updated ${path.basename(file)}`);
-        server.ws.send({ type: "full-reload", path: "*" });
+        reloadAfterEdit();
         return [];
       }
 
@@ -6875,7 +6914,7 @@ function generateClientCode(
   );
   const appSetupPath = resolveFarmRendererAppSetup(root, renderer);
   const rendererClientImports = isReactRenderer(renderer)
-    ? `import React from 'react'\nimport { hydrateRoot, createRoot } from 'react-dom/client'`
+    ? `import React from 'react'\nimport { hydrateRoot, createRoot } from 'react-dom/client'\nimport { restorePagePosition } from '@farm.js/core/internal/client-runtime'`
     : appSetupPath
       ? `import React, { hydrateRoot, createRoot, configureApp as __farmConfigureApp } from ${JSON.stringify(renderer.client)}\nimport __farmAppSetup from ${JSON.stringify(toViteModuleId(appSetupPath, root))}\n__farmConfigureApp(__farmAppSetup)`
       : `import React, { hydrateRoot, createRoot } from ${JSON.stringify(renderer.client)}`;
@@ -7957,10 +7996,12 @@ async function tryHydrateImportedPage(
     );
   } else if (layoutShouldHydrate) {
     currentPageProps = existingProps || { params };
+    // A navigation passes the page element of the document it fetched, read as it is rather
+    // than serialized and parsed again; hydration reads the page in this document.
     const serverPage = document.getElementById('__farm_page__');
-    const pageSource = typeof hydrationOptions.serverHtml === 'string'
-      ? hydrationOptions.serverHtml
-      : serverPage;
+    const pageSource = hydrationOptions.navigationPage === undefined
+      ? serverPage
+      : hydrationOptions.navigationPage;
     const serverTree = pageSource
       ? await createFarmServerTreePageElement(pageSource, window.location.pathname)
       : null;
@@ -7971,9 +8012,7 @@ async function tryHydrateImportedPage(
           false,
           islandStrategy,
           null,
-          typeof hydrationOptions.serverHtml === 'string'
-            ? hydrationOptions.serverHtml
-            : serverPage ? serverPage.innerHTML : '',
+          pageSource ? pageSource.innerHTML : '',
         );
   }
   if (signal?.aborted || !container?.isConnected || !pageElement) return false;
@@ -7994,7 +8033,7 @@ async function tryHydrateImportedPage(
       wrap: wrapFarmClientRouteGraph,
     };
   } else if (useHydrate && container?.id === '__farm_page__') {
-    wrappedElement = wrapFarmClientRouteGraph(pageElement);
+    wrappedElement = wrapFarmClientRouteGraph(${isReactRenderer(renderer) ? "restorePagePosition(React, container, pageElement)" : "pageElement"});
   } else {
     wrappedElement = await buildWrappedHydrationElement(
       currentPageComponent,
@@ -8538,7 +8577,7 @@ async function renderPage(pageData, info) {
           pageShouldHydrate,
           layoutShouldHydrate,
           islandStrategy: route.islandStrategy,
-          serverHtml: nextPage ? nextPage.innerHTML : '',
+          navigationPage: nextPage,
           layoutSource: fragment,
           loadingModulePath: route.loadingModulePath,
         },
@@ -9166,7 +9205,7 @@ export async function defineConfig(config: FarmVitePluginOptions = {}): Promise<
       ...reactRefreshPlugins,
       viteBrowserExternalPlugin,
       farmI18nClientBridgePlugin(),
-      farmServerOnlyEntriesPlugin(),
+      farmServerOnlyEntriesPlugin({ distDir: config.distDir || ".farm" }),
       farmIslandContainersPlugin(config),
       farmPlugin(config),
       farmEnvironmentFunctionsPlugin(config),

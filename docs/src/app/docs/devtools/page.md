@@ -65,6 +65,10 @@ export default defineConfig({
 
 ## Configure the build activity indicator
 
+In islands mode, Farm can generate client references as it renders a page. Farm leaves updates to
+`.farm/client-references/` to Vite, so generating a reference during a render does not trigger
+the full reload used for a server component edit.
+
 During HMR, Farm briefly shows build status in the bottom-right corner. Move it when that corner
 overlaps application controls, or disable it independently from DevTools:
 

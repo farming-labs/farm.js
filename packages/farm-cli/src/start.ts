@@ -1,9 +1,8 @@
 import {
-  loadConfig,
-  logger,
-  resolveDeployConfig,
-  resolveDeployOutputPath,
-} from "@farm.js/core/internal/cli-runtime";
+  loadFarmStartEnvironment,
+  readFarmStartManifest,
+} from "@farm.js/core/internal/start-manifest";
+import { pathToFileURL } from "node:url";
 import { spawn } from "child_process";
 import { constants as osConstants } from "os";
 import { existsSync } from "fs";
@@ -59,11 +58,17 @@ function resolveStartPort(value: FarmStartOptions["port"]): string | undefined {
 export async function createFarmStartPlan(options: FarmStartOptions = {}): Promise<FarmStartPlan> {
   const port = resolveStartPort(options.port);
   const root = path.resolve(options.root || process.cwd());
-  const userConfig = await loadConfig(root, undefined, "production");
-  const deployConfig = resolveDeployConfig(userConfig || {});
+  let deployConfig = await readFarmStartManifest(root);
+  if (deployConfig) {
+    await loadFarmStartEnvironment(root);
+  } else {
+    const { loadConfig, resolveDeployConfig } =
+      await import("@farm.js/core/internal/config-runtime");
+    deployConfig = resolveDeployConfig((await loadConfig(root, undefined, "production")) ?? {});
+  }
   const target = deployConfig.target;
   const preset = deployConfig.preset || "node-server";
-  const outputDir = resolveDeployOutputPath(root, deployConfig.outputDir);
+  const outputDir = path.resolve(root, deployConfig.outputDir);
 
   if (target && target !== "node") {
     throw new FarmStartError(
@@ -107,7 +112,7 @@ export async function createFarmStartPlan(options: FarmStartOptions = {}): Promi
 
 export async function startFarm(options: FarmStartOptions = {}): Promise<void> {
   const plan = await createFarmStartPlan(options);
-  logger.info(`Starting Node server: node ${path.relative(plan.root, plan.serverEntry)}`);
+  console.info(`Starting Node server: node ${path.relative(plan.root, plan.serverEntry)}`);
 
   const child = spawn(plan.command.command, plan.command.args, {
     cwd: plan.root,
@@ -138,4 +143,14 @@ export async function startFarm(options: FarmStartOptions = {}): Promise<void> {
   } finally {
     for (const cleanup of cleanups) cleanup();
   }
+}
+
+/** The CLI owns this process; programmatic startFarm callers retain their child lifecycle. */
+export async function startFarmCli(options: FarmStartOptions): Promise<void> {
+  const plan = await createFarmStartPlan(options);
+  console.info(`Starting Node server: node ${path.relative(plan.root, plan.serverEntry)}`);
+  process.chdir(plan.root);
+  Object.assign(process.env, plan.env);
+  process.argv = [process.execPath, plan.serverEntry];
+  await import(pathToFileURL(plan.serverEntry).href);
 }

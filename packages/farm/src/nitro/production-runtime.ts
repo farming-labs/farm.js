@@ -1,3 +1,4 @@
+export { markPagePosition, markLayoutPosition } from "../renderer/react/page-position";
 export { _runWithAfterRequest } from "../after";
 export { createFarmAppManifestResponse } from "../app-manifest";
 export {
@@ -54,6 +55,7 @@ export {
   setFarmRouteLabel,
 } from "../route-label";
 export {
+  _getRequestCookieReadCount,
   _getRequestReadCount,
   _runWithCurrentRequest,
   _runWithFarmCspNonce,

@@ -317,8 +317,8 @@ program
   .option("-H, --host <host>", "Host for the server to bind to")
   .action(async (options) => {
     try {
-      const { startFarm } = require("../dist/index.js");
-      await startFarm(options);
+      const { startFarmCli } = require("../dist/start.js");
+      await startFarmCli(options);
     } catch (error) {
       const code = error?.name === "FarmStartError" ? ` [${error.code}]` : "";
       const message = error instanceof Error ? error.message : String(error);
@@ -721,6 +721,30 @@ program
       process.exit(1);
     }
   });
+
+const storageCommand = program.command("storage").description("Manage Farm application databases");
+for (const operation of ["plan", "apply"]) {
+  storageCommand
+    .command(operation)
+    .description(
+      operation === "plan"
+        ? "List configured managed databases locally"
+        : "Provision or reuse configured managed databases",
+    )
+    .option("-r, --root <root>", "App directory", process.cwd())
+    .action(async ({ root }) => {
+      try {
+        const { reconcileFarmStorage } = require("../dist/index.js");
+        const names = await reconcileFarmStorage(root, operation === "apply");
+        for (const name of names)
+          console.log(operation === "apply" ? "Ready:" : "Ensure SQLite:", name);
+        if (!names.length) console.log("No managed databases configured.");
+      } catch (error) {
+        console.error(error instanceof Error ? error.message : String(error));
+        process.exitCode = 1;
+      }
+    });
+}
 
 const cronCommand = program
   .command("cron")

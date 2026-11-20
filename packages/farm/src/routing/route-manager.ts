@@ -51,7 +51,7 @@ import {
   resolveFarmMdxComponentsModulePath,
   resolveMdxConfig,
 } from "../app-markdown";
-import { realpathSync } from "fs";
+import fs from "fs";
 import path from "path";
 import type { ViteDevServer } from "vite";
 import { toFileModuleUrl } from "../utils/file-module";
@@ -282,6 +282,22 @@ function compareRouteEntries(left: RouteEntry, right: RouteEntry): number {
 const PLAN_SOURCE = /\.(?:[cm]?[jt]sx?|vue|svelte)$/;
 const NODE_MODULES_SEGMENT = `${path.sep}node_modules${path.sep}`;
 
+/** `<...>/node_modules/<name>` or `<...>/node_modules/@scope/<name>` for a file below `start`. */
+function getInstalledPackageDirectory(file: string, start: number): string {
+  let end = file.indexOf(path.sep, start);
+  if (end !== -1 && file[start] === "@") end = file.indexOf(path.sep, end + 1);
+  return end === -1 ? file : file.slice(0, end);
+}
+
+function realPathOutsideNodeModules(target: string): string | null {
+  try {
+    const real = fs.realpathSync(target);
+    return real.includes(NODE_MODULES_SEGMENT) ? null : real;
+  } catch {
+    return null;
+  }
+}
+
 /**
  * Manages route discovery and matching for the Farm.js application
  */
@@ -329,6 +345,8 @@ export class RouteManager {
   private planStamps = new Map<string, string>();
   private sourceChangeTracking = false;
   private linkedSources = new Map<string, string | null>();
+  // Whether each package directory under `node_modules` a plan read from links to a workspace.
+  private linkedPackages = new Map<string, boolean>();
   // What the plans read, parsed and resolved, kept between dev plans while the files are unchanged.
   private sourceSnapshot?: FarmSourceSnapshotStore;
   // Source files edited since the last plan; null when the next plan must recompute every module.
@@ -859,6 +877,7 @@ export class RouteManager {
     this.editedSources = null;
     this.sourceSnapshot?.clear();
     this.linkedSources.clear();
+    this.linkedPackages.clear();
   }
 
   /**
@@ -934,17 +953,22 @@ export class RouteManager {
   /**
    * The path the watcher reports for a file a plan read: itself, or the real path of a workspace
    * package's source read through its `node_modules` link. Null for an installed package's file.
+   * Package managers link whole package directories, so one realpath of the directory rules out an
+   * installed package; a plan reads thousands of files of an icon package.
    */
   private planSourcePath(file: string): string | null {
-    if (!file.includes(NODE_MODULES_SEGMENT)) return file;
+    const index = file.lastIndexOf(NODE_MODULES_SEGMENT);
+    if (index === -1) return file;
+    const directory = getInstalledPackageDirectory(file, index + NODE_MODULES_SEGMENT.length);
+    let linked = this.linkedPackages.get(directory);
+    if (linked === undefined) {
+      linked = realPathOutsideNodeModules(directory) !== null;
+      this.linkedPackages.set(directory, linked);
+    }
+    if (!linked) return null;
     let source = this.linkedSources.get(file);
     if (source === undefined) {
-      try {
-        const real = realpathSync(file);
-        source = real.includes(NODE_MODULES_SEGMENT) ? null : real;
-      } catch {
-        source = null;
-      }
+      source = realPathOutsideNodeModules(file);
       this.linkedSources.set(file, source);
     }
     return source;
@@ -2158,7 +2182,7 @@ async function safeGlobFiles(pattern: string, cwd: string): Promise<string[]> {
 
 function toRealPath(filePath: string): string {
   try {
-    return realpathSync(filePath);
+    return fs.realpathSync(filePath);
   } catch {
     return filePath;
   }
