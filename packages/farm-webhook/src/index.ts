@@ -1,4 +1,4 @@
-import { defineIntegration, integrationRoute } from "@farm.js/core";
+import { defineIntegration, integrationRoute } from "@farm.js/core/integrations";
 import { verifyWebhook } from "@farm.js/webhooks";
 import { isSigningSecret } from "./signing-secret.js";
 

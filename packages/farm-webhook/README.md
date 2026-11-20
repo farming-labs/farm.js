@@ -60,6 +60,7 @@ export const appIntegrations = {
 };
 ```
 
+The receiver runs on the server and also works in backend-only Farm apps (`renderer: false`).
 Pass `appIntegrations` to `defineConfig({ integrations: appIntegrations })`. For a dashboard
 receiver, put its one-time signing secret in the receiving server's `STOCK_SIGNING_SECRET`.
 For programmatic registration, generate one secret per receiver (`whsec_` followed by 32
