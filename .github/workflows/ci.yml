@@ -946,8 +946,8 @@ jobs:
 
       # The Test job has no Chromium (it does not install on ubuntu-latest yet),
       # so these tests skip their browser halves there. Run them here, where it is.
-      - name: Verify prebuilt SSR output in the browser
-        run: pnpm --dir packages/farm exec vitest run src/__tests__/production-prebuilt-ssr.test.ts
+      - name: Verify prebuilt SSR output and route IDs in the browser
+        run: pnpm --dir packages/farm exec vitest run src/__tests__/production-prebuilt-ssr.test.ts src/__tests__/route-use-id.test.ts
         env:
           NODE_OPTIONS: --max-old-space-size=12288
           FARM_REQUIRE_TEST_BROWSER: "1"
