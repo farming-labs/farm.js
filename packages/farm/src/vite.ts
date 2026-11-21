@@ -6092,6 +6092,10 @@ if (import.meta.hot) {
           tracksAsyncOwnerIslands)
       ) {
         const routeManager = planRouteManager;
+        // An editor that saves in place empties the file first, and the watcher can report the
+        // edit before the new content lands. Vite's read() waits for it, so the check below reads
+        // the saved file instead of an empty one, which would replan twice and reload the page.
+        await ctx.read?.();
         // An edit inside a client component (its markup, state or handlers) changes no plan, so
         // React Fast Refresh applies it without the replan; the next replan reads the file again.
         if (routeManager?.isEditPlanNeutral(file)) {

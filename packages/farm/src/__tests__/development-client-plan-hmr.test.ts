@@ -80,6 +80,9 @@ export default function Page() { return <main><Counter /></main>; }`,
 
     const server = await createServer({ root, images: { provider: "none" } });
     servers.add(server);
+    // The test runs the update hook itself after each write. A watched file would also run it
+    // whenever the watcher reports the write, which can be after the test's next write starts.
+    server.watcher.unwatch(counter);
     await server.listen(await getAvailablePort());
     const address = server.httpServer?.address();
     if (!address || typeof address === "string") throw new Error("Missing dev server address");
@@ -96,13 +99,14 @@ export default function Page() { return <main><Counter /></main>; }`,
     );
     const farm = server.config.plugins.find((plugin) => plugin.name === "farm") as Plugin;
     const handleHotUpdate = farm.handleHotUpdate as (
-      context: Pick<HmrContext, "file" | "server" | "modules">,
+      context: Pick<HmrContext, "file" | "server" | "modules"> & Partial<Pick<HmrContext, "read">>,
     ) => Promise<unknown>;
-    const hotUpdate = () =>
+    const hotUpdate = (read?: HmrContext["read"]) =>
       handleHotUpdate({
         file: counter,
         server,
         modules: [...(server.moduleGraph.getModulesByFile(counter) ?? [])],
+        ...(read ? { read } : {}),
       });
     // An edit inside the component (its markup) keeps everything a plan reads, so the plan
     // stays as it is and Vite updates the module in place without a replan.
@@ -111,6 +115,18 @@ export default function Page() { return <main><Counter /></main>; }`,
       (await fs.readFile(counter, "utf8")).replace("count {count}", "n {count}"),
     );
     await hotUpdate();
+    expect(computeClientManifest).not.toHaveBeenCalled();
+    await requestPlanReaders();
+    expect(computeClientManifest).not.toHaveBeenCalled();
+
+    // An editor that saves in place empties the file first, and the watcher can report the edit
+    // then. Vite's read() returns once the new content lands, so the check sees the saved file.
+    const saved = (await fs.readFile(counter, "utf8")).replace("n {count}", "clicks {count}");
+    await fs.writeFile(counter, "");
+    await hotUpdate(async () => {
+      await fs.writeFile(counter, saved);
+      return saved;
+    });
     expect(computeClientManifest).not.toHaveBeenCalled();
     await requestPlanReaders();
     expect(computeClientManifest).not.toHaveBeenCalled();
