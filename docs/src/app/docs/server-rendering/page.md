@@ -450,8 +450,8 @@ focused, when one that waits for `"visible"` or `"idle"` is due, when the pointe
 or when a form gets focus. A click made before then is held and replayed once the component has
 hydrated, and a `<form>` written in a server component posts natively until the runtime runs. An
 app with client plugins, a `src/client.ts`, or `docs` loads the runtime on every page. On
-`benchmarks/server-components-payload`, with no change to the app, docs, blog and shop pages load
-1.7 KB of JavaScript (`"rsc"`: 69.9 KB). See
+`benchmarks/server-components-payload`, with no change to the app, docs, blog, guide and shop
+pages load 1.7 KB of JavaScript (`"rsc"`: 71.0 KB). See
 [how the two modes compare](/docs/server-rendering/islands#how-it-compares-with-react-server-components).
 
 The app's `vite` options and plugins apply as in other Farm apps, and so does built-in Tailwind.
