@@ -93,3 +93,109 @@ describe("config route matchers", () => {
     expect(applyConfigResponseHeaders(immutable, matched).headers.get("x-config")).toBe("on");
   });
 });
+
+describe("config route has/missing conditions", () => {
+  const headers = (init: Record<string, string>) => new Headers(init);
+
+  it("redirects only when every has condition holds", () => {
+    const match = createConfigRedirectMatcher([
+      {
+        source: "/beta",
+        destination: "/beta-on",
+        has: [
+          { type: "cookie", key: "beta", value: "^on$" },
+          { type: "header", key: "x-beta", value: "^yes$" },
+        ],
+      },
+      { source: "/beta", destination: "/beta-off" },
+    ]);
+    const url = new URL("https://farm.test/beta");
+    // No cookie and no header: the conditional rule is skipped for the fallback.
+    expect(match(url)).toEqual({ destination: "/beta-off", statusCode: 307 });
+    expect(match(url, headers({ cookie: "beta=on" }))).toEqual({
+      destination: "/beta-off",
+      statusCode: 307,
+    });
+    expect(match(url, headers({ cookie: "beta=on; other=1", "x-beta": "yes" }))).toEqual({
+      destination: "/beta-on",
+      statusCode: 307,
+    });
+    // The value is a regex, not an exact match: "on-2" does not satisfy ^on$.
+    expect(match(url, headers({ cookie: "beta=on-2", "x-beta": "yes" }))).toEqual({
+      destination: "/beta-off",
+      statusCode: 307,
+    });
+    // Header names match case-insensitively.
+    expect(match(url, headers({ cookie: "beta=on", "X-BETA": "yes" }))).toEqual({
+      destination: "/beta-on",
+      statusCode: 307,
+    });
+  });
+
+  it("treats a missing value as a presence check", () => {
+    const match = createConfigRedirectMatcher([
+      {
+        source: "/member",
+        destination: "/member-area",
+        has: [{ type: "cookie", key: "session" }],
+        missing: [{ type: "query", key: "preview" }],
+      },
+    ]);
+    const url = new URL("https://farm.test/member");
+    expect(match(url)).toBeNull();
+    expect(match(url, headers({ cookie: "session=abc" }))).toEqual({
+      destination: "/member-area",
+      statusCode: 307,
+    });
+    // The missing condition blocks the rule while ?preview is present.
+    expect(
+      match(new URL("https://farm.test/member?preview=1"), headers({ cookie: "session=abc" })),
+    ).toBeNull();
+  });
+
+  it("matches query values, including repeated parameters, and hosts", () => {
+    const match = createConfigRewriteMatcher([
+      { source: "/docs", destination: "/api/v2", has: [{ type: "query", key: "v", value: "^2$" }] },
+      { source: "/docs", destination: "/api/v1", missing: [{ type: "query", key: "v" }] },
+      {
+        source: "/home",
+        destination: "/home-eu",
+        has: [{ type: "host", value: "^eu\\.farm\\.test$" }],
+      },
+    ]);
+    expect(match(new URL("https://farm.test/docs?v=1"))).toBeNull();
+    expect(match(new URL("https://farm.test/docs?v=2"))?.pathname).toBe("/api/v2");
+    // A repeated parameter satisfies the condition when any value matches.
+    expect(match(new URL("https://farm.test/docs?v=1&v=2"))?.pathname).toBe("/api/v2");
+    // Without ?v the missing rule applies instead.
+    expect(match(new URL("https://farm.test/docs"))?.pathname).toBe("/api/v1");
+    expect(match(new URL("https://eu.farm.test/home"))?.pathname).toBe("/home-eu");
+    expect(match(new URL("https://us.farm.test/home"))).toBeNull();
+    // Without headers a cookie/header condition can never hold, so the rule is skipped.
+    const cookieMatch = createConfigRedirectMatcher([
+      { source: "/a", destination: "/b", has: [{ type: "cookie", key: "x" }] },
+    ]);
+    expect(cookieMatch(new URL("https://farm.test/a"))).toBeNull();
+  });
+
+  it("rejects malformed conditions when the matcher is created", () => {
+    expect(() =>
+      createConfigRedirectMatcher([
+        { source: "/a", destination: "/b", has: [{ type: "bogus" as never, key: "x" }] },
+      ]),
+    ).toThrow('type must be one of "cookie", "header", "query", or "host"');
+    expect(() =>
+      createConfigRedirectMatcher([
+        { source: "/a", destination: "/b", has: [{ type: "header", key: "" }] },
+      ]),
+    ).toThrow("key must be a non-empty string");
+    expect(() =>
+      createConfigRedirectMatcher([{ source: "/a", destination: "/b", has: [{ type: "host" }] }]),
+    ).toThrow('value is required for a "host" condition');
+    expect(() =>
+      createConfigRewriteMatcher([
+        { source: "/a", destination: "/b", has: [{ type: "query", key: "v", value: "([" }] },
+      ]),
+    ).toThrow("is not a valid regular expression");
+  });
+});
