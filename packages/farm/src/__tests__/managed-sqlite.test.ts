@@ -5,6 +5,7 @@ import { createClient } from "@libsql/client/http";
 import { afterEach, expect, it, vi } from "vitest";
 import {
   _collectFarmStorageModules,
+  _registerFarmStorageModules,
   createStorageClient,
   disposeStorage,
   farmStorage,
@@ -98,10 +99,35 @@ it("plans and loads only the hosted client for managed native and raw KV declara
       settings: createStorageClient({ driver: "cloudflare-kv-binding", managed: true }),
     },
   } as const;
-  expect(_collectFarmStorageModules(config)).toEqual(["@libsql/client/http"]);
+  expect(_collectFarmStorageModules(config)).toEqual([]);
   await initStorage(config);
   for (const name of Object.keys(config.mounts))
     await expect(getDatabase(name)).rejects.toThrow("FARMJS_API_KEY");
+});
+
+it("connects hosted storage without a libSQL client installed in the app", async () => {
+  const registry = Symbol.for("farmjs.storage.modules");
+  const previous = (globalThis as Record<PropertyKey, unknown>)[registry];
+  _registerFarmStorageModules({
+    "@libsql/client/http": () => Promise.reject(new Error("Cannot find package '@libsql/client'")),
+  });
+  try {
+    vi.stubEnv("FARMJS_API_KEY", "test-key");
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () =>
+        Response.json({
+          url: "https://drafts.example.test",
+          token: "fixture",
+          expiresAt: new Date(Date.now() + 300000).toISOString(),
+        }),
+      ),
+    );
+    await initStorage({ mounts: { drafts: farmStorage() } });
+    expect(await getDatabase("drafts", { raw: true })).toHaveProperty("execute");
+  } finally {
+    (globalThis as Record<PropertyKey, unknown>)[registry] = previous;
+  }
 });
 
 it("keeps native drivers when management is off and rejects mixed hosted connection options", () => {

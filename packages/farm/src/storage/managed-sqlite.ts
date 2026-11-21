@@ -101,7 +101,7 @@ async function credential(name: string) {
   };
 }
 
-type LoadClient = () => Promise<typeof import("@libsql/client/http")>;
+type LoadClient = () => Promise<typeof import("./libsql-http")>;
 
 async function connect(name: string, loadClient: LoadClient) {
   const [{ createClient }, initial] = await Promise.all([loadClient(), credential(name)]);
