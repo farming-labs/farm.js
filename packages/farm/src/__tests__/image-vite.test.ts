@@ -70,7 +70,9 @@ describe("Farm static image imports", () => {
 
       const result = await plugin.load.call({} as any, id as string);
       const code = typeof result === "string" ? result : result?.code;
-      expect(code).toContain(`import src from ${JSON.stringify(`${iconPath}?url`)};`);
+      // The plugin imports the asset with forward slashes, which Vite needs on Windows too.
+      const assetRequest = `${iconPath.replace(/\\/g, "/")}?url`;
+      expect(code).toContain(`import src from ${JSON.stringify(assetRequest)};`);
       expect(code).toContain('"width":48');
       expect(code).toContain('"height":32');
       // No blur placeholder: an SVG is not rasterized, as in Next.js.
