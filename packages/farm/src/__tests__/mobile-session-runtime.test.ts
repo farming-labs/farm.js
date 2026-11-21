@@ -21,7 +21,18 @@ const disposers = new Set<() => Promise<void>>();
 const APP = "com.example.notes";
 
 afterEach(async () => {
-  for (const child of children) child.kill("SIGKILL");
+  // A production server runs with the app as its working directory, which Windows will not
+  // remove until the process has exited.
+  await Promise.all(
+    [...children].map(
+      (child) =>
+        new Promise<void>((resolve) => {
+          if (child.exitCode !== null || child.signalCode !== null) return resolve();
+          child.once("exit", () => resolve());
+          child.kill("SIGKILL");
+        }),
+    ),
+  );
   children.clear();
   await Promise.all([...servers].map((server) => server.close()));
   servers.clear();
@@ -353,8 +364,7 @@ describe("mobile session tokens on a running server", () => {
     await expectMobileSessions("localhost", port);
   }, 120_000);
 
-  it("work in a production build", async (ctx) => {
-    if (process.platform === "win32") ctx.skip();
+  it("work in a production build", async () => {
     const root = await createApp("farm-mobile-session-build-");
     const port = await startProductionServer(root);
     await expectMobileSessions("127.0.0.1", port, { mobileClient: true });
@@ -369,8 +379,7 @@ describe("mobile session tokens on a running server", () => {
     await expectMobileSessions("localhost", port);
   }, 120_000);
 
-  it("work in a production build of a server components app in islands mode", async (ctx) => {
-    if (process.platform === "win32") ctx.skip();
+  it("work in a production build of a server components app in islands mode", async () => {
     const root = await createApp("farm-mobile-session-islands-build-", ISLANDS_FILES);
     const port = await startProductionServer(root);
     await expectMobileSessions("127.0.0.1", port, { mobileClient: true });
