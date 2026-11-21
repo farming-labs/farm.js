@@ -3,6 +3,8 @@
 import { describe, expect, it } from "vitest";
 import {
   buildFarmVercelRoutes,
+  createFarmVercelMarkdownRoutes,
+  FARM_VERCEL_MARKDOWN_ACCEPT_PATTERN,
   createFarmVercelImmutableAssetRoute,
   FARM_IMMUTABLE_ASSET_CACHE_CONTROL,
   type FarmVercelImmutableAssetRoute,
@@ -169,5 +171,65 @@ describe("buildFarmVercelRoutes", () => {
     expect(routes).toContainEqual(createFarmVercelImmutableAssetRoute());
     expect(routes).toContainEqual({ handle: "filesystem" });
     expect(routes[routes.length - 1]).toEqual({ src: "/(.*)", dest: "/__nitro" });
+  });
+});
+
+describe("Vercel routes for Markdown requests to prerendered pages", () => {
+  const acceptMatches = (route: FarmVercelRoute, accept: string) =>
+    new RegExp(`^(?:${route.has![0]!.value})$`).test(accept);
+
+  it("sends requests that name Markdown or plain text to the server", () => {
+    const [route] = createFarmVercelMarkdownRoutes(["/", "/docs/a.b", "/docs/a.b"]);
+    expect(route!.dest).toBe("/__nitro");
+    expect(route!.has).toEqual([
+      { type: "header", key: "accept", value: FARM_VERCEL_MARKDOWN_ACCEPT_PATTERN },
+    ]);
+    for (const pathname of ["/", "/docs/a.b"]) {
+      expect(new RegExp(route!.src!).test(pathname), pathname).toBe(true);
+    }
+    for (const pathname of ["/docs/axb", "/docs/a.b/", "/docs"]) {
+      expect(new RegExp(route!.src!).test(pathname), pathname).toBe(false);
+    }
+    for (const accept of [
+      "text/markdown",
+      "text/markdown;q=0.9, text/html;q=0.8",
+      "application/json, text/plain, */*",
+    ]) {
+      expect(acceptMatches(route!, accept), accept).toBe(true);
+    }
+    for (const accept of [
+      "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+      "*/*",
+      "application/json",
+    ]) {
+      expect(acceptMatches(route!, accept), accept).toBe(false);
+    }
+    expect(createFarmVercelMarkdownRoutes([])).toEqual([]);
+  });
+
+  it("splits many pages into routes Vercel accepts", () => {
+    const pages = Array.from({ length: 400 }, (_, i) => `/docs/a-long-prerendered-page-${i}`);
+    const routes = createFarmVercelMarkdownRoutes(pages);
+    expect(routes.length).toBeGreaterThan(1);
+    for (const route of routes) expect(route.src!.length).toBeLessThanOrEqual(4096);
+    for (const page of pages) {
+      expect(
+        routes.some((route) => new RegExp(route.src!).test(page)),
+        page,
+      ).toBe(true);
+    }
+  });
+
+  it("runs ahead of the preset's header routes, which end routing at the static file", () => {
+    const [markdown] = createFarmVercelMarkdownRoutes(["/secure/page"]);
+    const routes = buildFarmVercelRoutes({
+      presetRoutes: nitroPresetRoutes(),
+      runtimeRoutes: [],
+      markdownRoutes: [markdown!],
+    });
+    expect(routes.indexOf(markdown!)).toBe(0);
+    expect(routes.indexOf(markdown!)).toBeLessThan(
+      routes.findIndex((route) => route.src === "/secure/(.*)"),
+    );
   });
 });

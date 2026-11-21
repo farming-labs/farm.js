@@ -374,12 +374,13 @@ A built-in page's social metadata (`og:url`, `og:image`) is an absolute URL. Wit
 so those pages keep rendering on request and the build says how many. Set `socialImage.baseUrl`, or
 `socialImage: false` in a page's frontmatter, to prerender them.
 
-A docs page is a static file once prerendered, so it does not negotiate `Accept: text/markdown`;
-agents use the `.md` URL the page links to. Markdown, search, `llms.txt`, and MCP keep rendering on
-request. A page that middleware, a redirect, a rewrite, i18n, or a dynamic or cached route rule
-covers keeps rendering on request, as for static app pages; `routeRules: { "/docs/changelog": {
-prerender: false } }` keeps one page dynamic. Edge targets already serve docs pages from the build's
-docs snapshot.
+A docs page is a static file once prerendered, so on most targets it does not negotiate
+`Accept: text/markdown`; agents use the `.md` URL the page links to. On Vercel, a request for a
+prerendered page that asks for `text/markdown` or `text/plain` still reaches the server and gets the
+page's Markdown. Markdown, search, `llms.txt`, and MCP keep rendering on request. A page that
+middleware, a redirect, a rewrite, i18n, or a dynamic or cached route rule covers keeps rendering on
+request, as for static app pages; `routeRules: { "/docs/changelog": { prerender: false } }` keeps
+one page dynamic. Edge targets already serve docs pages from the build's docs snapshot.
 
 On Vercel, docs a sign-in guard covers can prerender too: give the guard's `middleware.ts`
 `export const config = { runtime: "edge" }`, and it runs before Vercel serves each page's file. The
