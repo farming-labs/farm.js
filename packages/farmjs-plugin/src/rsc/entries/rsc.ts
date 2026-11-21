@@ -407,7 +407,7 @@ import {
   createProductionMiddlewareRunner,
 } from '@farm.js/core/middleware';
 import { _withFarmDeploymentCookie, _withFarmGuardedResponseCache } from '@farm.js/core/internal/production-runtime';
-${ctx.mobileClient === "entry" ? "import { _applyFarmMobileShellClient, createFarmNativeTreeResponse, resolveFarmWebRequestOrigin } from '@farm.js/core/internal/production-runtime';\n" : ctx.mobileClient === "inline" ? "import { createFarmNativeTreeResponse, resolveFarmWebRequestOrigin } from '@farm.js/core/internal/production-runtime';\n" : ""}import {
+${ctx.compress ? "import { compressFarmResponse } from '@farm.js/core/internal/compression-runtime';\n" : ""}${ctx.mobileClient === "entry" ? "import { _applyFarmMobileShellClient, createFarmNativeTreeResponse, resolveFarmWebRequestOrigin } from '@farm.js/core/internal/production-runtime';\n" : ctx.mobileClient === "inline" ? "import { createFarmNativeTreeResponse, resolveFarmWebRequestOrigin } from '@farm.js/core/internal/production-runtime';\n" : ""}import {
   getAllowedAPIRouteMethods,
   invokeAPIRouteEndpoint,
   isFarmAPIPathname,
@@ -2811,7 +2811,18 @@ ${
   ))${i18n ? ")" : ""};
 }
 
-export default { fetch: handler };
+${
+  ctx.compress
+    ? `// Brotli or gzip, as Accept-Encoding asks, as core's production servers answer. Only what this
+// server sends is compressed: its own calls to handler() (local API requests, native trees) read
+// plain bodies.
+export default {
+  async fetch(request, context) {
+    return compressFarmResponse(request, await handler(request, context));
+  },
+};`
+    : "export default { fetch: handler };"
+}
 
 // Enable HMR - when server files change, accept the update
 if (import.meta.hot) {
