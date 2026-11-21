@@ -952,6 +952,12 @@ jobs:
           NODE_OPTIONS: --max-old-space-size=12288
           FARM_REQUIRE_TEST_BROWSER: "1"
 
+      - name: Verify core layout and navigation tests in the browser
+        run: pnpm --dir packages/farm exec vitest run src/__tests__/dev-docs-layout-hydration.test.ts src/__tests__/dev-document-layout-navigation.test.ts src/__tests__/link-search-preserve.test.ts src/__tests__/production-navigation-canonical-search.test.ts
+        env:
+          NODE_OPTIONS: --max-old-space-size=12288
+          FARM_REQUIRE_TEST_BROWSER: "1"
+
       - name: Verify islands from packed artifacts
         run: pnpm test:packed-islands
         env:
