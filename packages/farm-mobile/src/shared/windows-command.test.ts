@@ -53,4 +53,27 @@ describe("createSpawnCommand", () => {
       rmSync(dir, { recursive: true, force: true });
     }
   });
+
+  it.skipIf(process.platform !== "win32")(
+    "runs a batch file from a path with spaces and parentheses through cmd.exe",
+    () => {
+      const dir = mkdtempSync(path.join(tmpdir(), "farm mobile gradle (1) "));
+      try {
+        // Like gradlew.bat, the batch file hands %* to another program, so cmd.exe parses the
+        // arguments a second time there.
+        writeFileSync(
+          path.join(dir, "print-args.js"),
+          "process.stdout.write(JSON.stringify(process.argv.slice(2)));",
+        );
+        const wrapper = path.join(dir, "gradlew.bat");
+        writeFileSync(wrapper, `@"${process.execPath}" "%~dp0print-args.js" %*\r\n`);
+        const args = ["assembleDebug", 'a & b|c^d%PATH%"e\\', "(x) <y> z,w;v"];
+        const run = createSpawnCommand(wrapper, args);
+        const output = execFileSync(run.file, run.args, { encoding: "utf8", shell: run.shell });
+        expect(JSON.parse(output)).toEqual(args);
+      } finally {
+        rmSync(dir, { recursive: true, force: true });
+      }
+    },
+  );
 });
