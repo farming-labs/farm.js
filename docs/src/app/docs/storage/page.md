@@ -76,7 +76,7 @@ The development server and a built app both apply `storage` from `farm.config` b
 
 ## Farm-managed storage
 
-A Farm-managed mount gives your app durable key-value storage and SQL access to the same hosted database. Farm Infra provisions it using SQLite (libSQL).
+A Farm-managed mount gives your app durable key-value storage and SQL access to the same hosted database. Farm.js Infra provisions it using SQLite (libSQL).
 Declare a mount in `farm.config.ts` and install the remote client in the app with
 `pnpm add @libsql/client@^0.17.4`. Each named resource belongs to one project and environment.
 
@@ -116,10 +116,6 @@ Run `pnpm exec farm storage plan` to list the desired resources locally. Set
 `databases:provision` in your shell or the app's `.env.local`, then run
 `pnpm exec farm storage apply`. Reapplying
 reuses the database and records the mount names and drivers for each namespace.
-Open **Storage** in the project dashboard, choose the environment and select a resource.
-For example, a shared namespace declared with `postgresStorage` and `redisStorage`
-lists both PostgreSQL and Redis KV. Its detail page shows each mount and the hosted
-SQLite (libSQL) engine. Owners and admins can browse its tables and key-value entries.
 
 Configure the deployed server with a separate
 `databases:connect` key. A key covering several projects needs
@@ -176,6 +172,27 @@ To rename the mount and keep its data, declare
 `getDatabase("editor")`. A resource name accepts 1–63 lowercase letters,
 digits, and hyphens, starting with a letter. Removing a mount from config
 keeps the database. Disconnecting its Farm project schedules deletion.
+
+### Browse storage in Farm.js Infra
+
+Open **Storage** in the Farm.js Infra sidebar. On a phone, open the navigation menu first.
+Choose a project and environment. If you open Storage from a project, the dashboard carries
+that project and environment into the list. You can bookmark your selection.
+
+If the environment is empty, choose **Set up a database**. Once it has a database, choose
+**Set up another database** below the list. Both show a mount declaration, provisioning key
+instructions, and the CLI commands to apply it.
+
+Members can inspect mount details. Organization owners and admins can open a **Ready**
+resource to browse its data.
+
+- **KV** shows keys and values. Filter by key prefix and open a key to inspect its value.
+- **Tables** shows rows, column definitions, and foreign keys. Select a related table to inspect its rows.
+- **Details** lists the mount names and configured drivers and shows how to connect from your app.
+
+A Redis mount opens on **KV**. A PostgreSQL or SQLite mount opens on **Tables**.
+`farmStorage()` and namespaces shared by SQL and KV mounts offer both views.
+**Back to storage** returns to the selected project and environment.
 
 ### Existing SQLite mounts
 
