@@ -175,8 +175,7 @@ async function serverFilesContaining(root: string, marker: string): Promise<stri
 const SHELL = { "x-farm-shell": "android" };
 
 describe("a server components app on the RSC pipeline", () => {
-  it("builds the mobile client for a mobile block, and serves it to the documents a shell asks for", async (ctx) => {
-    if (process.platform === "win32") ctx.skip();
+  it("builds the mobile client for a mobile block, and serves it to the documents a shell asks for", async () => {
     const root = await createApp(MOBILE_BLOCK);
     await buildApp(root);
     const manifest = JSON.parse(
@@ -256,8 +255,7 @@ describe("a server components app on the RSC pipeline", () => {
     expect(challenge.body).not.toContain("nonce");
   }, 300_000);
 
-  it("adds nothing without a mobile block: no mobile entry, and documents ignore the header", async (ctx) => {
-    if (process.platform === "win32") ctx.skip();
+  it("adds nothing without a mobile block: no mobile entry, and documents ignore the header", async () => {
     const root = await createApp("");
     // A mobile client an earlier build left must not outlive the block.
     await fs.mkdir(path.join(root, ".farm"), { recursive: true });
