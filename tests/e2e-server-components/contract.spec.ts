@@ -1226,12 +1226,10 @@ test("Links in server components prefetch once the router loads", async ({ page 
   });
   await page.goto("/");
   await hydrated(page);
-  // Nothing hydrates here at load: a first hover loads the client entry, and the next one the
-  // production router (dev loads both with the page). From then on each Link follows its mode:
-  // the nav's Links use the default, intent and viewport, and are in view.
+  // Nothing hydrates here at load: one hover loads the client entry and, as that link is still
+  // under the pointer, the production router (dev loads both with the page). From then on each
+  // Link follows its mode: the nav's Links use the default, intent and viewport, and are in view.
   await page.getByRole("link", { name: "Stream", exact: true }).hover();
-  await expect.poll(() => page.evaluate(() => "__FARM_SPA_ROUTER__" in window)).toBe(true);
-  await page.getByRole("link", { name: "Async", exact: true }).hover();
   await expect.poll(() => fetched.includes("/meta")).toBe(true);
   expect(errors).toEqual([]);
 });

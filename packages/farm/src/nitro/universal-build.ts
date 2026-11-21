@@ -3959,6 +3959,10 @@ function farmRouterIntent(event) {
   void loadFarmRouter().catch(function() {});
 }
 for (const type of farmRouterIntentEvents) document.addEventListener(type, farmRouterIntent, true);
+// In islands mode the boot script loads this entry on a hover or focus over a link, and that
+// event fired before these listeners existed: a link still under the pointer or focused is it.
+const farmIntendedLink = document.querySelector("a[href]:hover, a[href]:focus");
+if (farmIntendedLink) farmRouterIntent({ target: farmIntendedLink });
 `;
 
 function bindingPattern(name: string): RegExp {
