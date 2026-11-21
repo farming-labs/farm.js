@@ -76,7 +76,7 @@ The development server and a built app both apply `storage` from `farm.config` b
 
 ## Farm-managed storage
 
-A Farm-managed mount gives your app durable key-value storage and SQL access to the same hosted database. Farm Infra provisions it using SQLite (libSQL).
+A Farm-managed mount gives your app durable key-value storage and SQL access to the same hosted database. Farm.js Infra provisions it using SQLite (libSQL).
 Declare a mount in `farm.config.ts` and install the remote client in the app with
 `pnpm add @libsql/client@^0.17.4`. Each named resource belongs to one project and environment.
 
@@ -173,9 +173,9 @@ To rename the mount and keep its data, declare
 digits, and hyphens, starting with a letter. Removing a mount from config
 keeps the database. Disconnecting its Farm project schedules deletion.
 
-### Browse project storage
+### Browse storage in Farm.js Infra
 
-Open **Storage** in the Farm Infra workspace sidebar. On a phone, open the navigation menu first.
+Open **Storage** in the Farm.js Infra sidebar. On a phone, open the navigation menu first.
 Choose a project and environment. If you open Storage from a project, the dashboard carries
 that project and environment into the list. You can bookmark your selection.
 
