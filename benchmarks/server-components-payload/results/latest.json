@@ -1,12 +1,12 @@
 {
-  "date": "2026-11-17T22:36:01.250Z",
+  "date": "2026-11-21T04:41:42.357Z",
   "rows": [
     {
       "scenario": "docs",
       "mode": "rsc",
       "document (br)": "16.3 KB",
       "document (raw)": "76.4 KB",
-      "first-load JS (br)": "70.9 KB",
+      "first-load JS (br)": "71.0 KB",
       "navigation data (br)": "12.0 KB",
       "navigation data (raw)": "37.5 KB",
       "navigation JS (br)": "0.0 KB",
@@ -17,7 +17,7 @@
       "mode": "rsc",
       "document (br)": "5.5 KB",
       "document (raw)": "33.2 KB",
-      "first-load JS (br)": "70.9 KB",
+      "first-load JS (br)": "71.0 KB",
       "navigation data (br)": "3.8 KB",
       "navigation data (raw)": "13.2 KB",
       "navigation JS (br)": "0.0 KB",
@@ -28,9 +28,20 @@
       "mode": "rsc",
       "document (br)": "17.9 KB",
       "document (raw)": "379.5 KB",
-      "first-load JS (br)": "70.9 KB",
+      "first-load JS (br)": "71.0 KB",
       "navigation data (br)": "10.8 KB",
       "navigation data (raw)": "203.7 KB",
+      "navigation JS (br)": "0.0 KB",
+      "page errors": 0
+    },
+    {
+      "scenario": "guide",
+      "mode": "rsc",
+      "document (br)": "18.0 KB",
+      "document (raw)": "379.8 KB",
+      "first-load JS (br)": "71.0 KB",
+      "navigation data (br)": "10.9 KB",
+      "navigation data (raw)": "203.9 KB",
       "navigation JS (br)": "0.0 KB",
       "page errors": 0
     },
@@ -42,18 +53,18 @@
       "first-load JS (br)": "1.7 KB",
       "navigation data (br)": "2.6 KB",
       "navigation data (raw)": "7.4 KB",
-      "navigation JS (br)": "9.2 KB",
+      "navigation JS (br)": "9.3 KB",
       "page errors": 0
     },
     {
       "scenario": "shop",
       "mode": "islands",
       "document (br)": "5.8 KB",
-      "document (raw)": "31.9 KB",
+      "document (raw)": "30.5 KB",
       "first-load JS (br)": "1.7 KB",
       "navigation data (br)": "1.9 KB",
-      "navigation data (raw)": "5.1 KB",
-      "navigation JS (br)": "9.3 KB",
+      "navigation data (raw)": "4.9 KB",
+      "navigation JS (br)": "9.4 KB",
       "page errors": 0
     },
     {
@@ -64,7 +75,18 @@
       "first-load JS (br)": "1.7 KB",
       "navigation data (br)": "9.1 KB",
       "navigation data (raw)": "127.5 KB",
-      "navigation JS (br)": "9.2 KB",
+      "navigation JS (br)": "9.3 KB",
+      "page errors": 0
+    },
+    {
+      "scenario": "guide",
+      "mode": "islands",
+      "document (br)": "9.4 KB",
+      "document (raw)": "128.7 KB",
+      "first-load JS (br)": "1.7 KB",
+      "navigation data (br)": "9.4 KB",
+      "navigation data (raw)": "128.9 KB",
+      "navigation JS (br)": "9.4 KB",
       "page errors": 0
     }
   ],
@@ -78,12 +100,12 @@
           "document": {
             "count": 1,
             "raw": 78286,
-            "br": 16338
+            "br": 16339
           },
           "javascript": {
             "count": 3,
-            "raw": 241732,
-            "br": 72555
+            "raw": 242290,
+            "br": 72684
           }
         },
         {
@@ -91,12 +113,12 @@
           "document": {
             "count": 1,
             "raw": 78260,
-            "br": 16637
+            "br": 16639
           },
           "javascript": {
             "count": 3,
-            "raw": 241732,
-            "br": 72555
+            "raw": 242290,
+            "br": 72684
           }
         },
         {
@@ -104,12 +126,12 @@
           "document": {
             "count": 1,
             "raw": 78346,
-            "br": 16860
+            "br": 16861
           },
           "javascript": {
             "count": 3,
-            "raw": 241732,
-            "br": 72555
+            "raw": 242290,
+            "br": 72684
           }
         },
         {
@@ -121,8 +143,8 @@
           },
           "javascript": {
             "count": 3,
-            "raw": 241732,
-            "br": 72555
+            "raw": 242290,
+            "br": 72684
           }
         },
         {
@@ -134,8 +156,8 @@
           },
           "javascript": {
             "count": 3,
-            "raw": 241732,
-            "br": 72555
+            "raw": 242290,
+            "br": 72684
           }
         }
       ],
@@ -286,8 +308,8 @@
           },
           "javascript": {
             "count": 3,
-            "raw": 241732,
-            "br": 72555
+            "raw": 242290,
+            "br": 72684
           }
         },
         {
@@ -295,12 +317,12 @@
           "document": {
             "count": 1,
             "raw": 33960,
-            "br": 5712
+            "br": 5711
           },
           "javascript": {
             "count": 3,
-            "raw": 241732,
-            "br": 72555
+            "raw": 242290,
+            "br": 72684
           }
         },
         {
@@ -308,12 +330,12 @@
           "document": {
             "count": 1,
             "raw": 34066,
-            "br": 5737
+            "br": 5735
           },
           "javascript": {
             "count": 3,
-            "raw": 241732,
-            "br": 72555
+            "raw": 242290,
+            "br": 72684
           }
         },
         {
@@ -325,8 +347,8 @@
           },
           "javascript": {
             "count": 3,
-            "raw": 241732,
-            "br": 72555
+            "raw": 242290,
+            "br": 72684
           }
         },
         {
@@ -334,12 +356,12 @@
           "document": {
             "count": 1,
             "raw": 34050,
-            "br": 5676
+            "br": 5675
           },
           "javascript": {
             "count": 3,
-            "raw": 241732,
-            "br": 72555
+            "raw": 242290,
+            "br": 72684
           }
         }
       ],
@@ -486,12 +508,12 @@
           "document": {
             "count": 1,
             "raw": 388603,
-            "br": 18237
+            "br": 18238
           },
           "javascript": {
             "count": 3,
-            "raw": 241732,
-            "br": 72555
+            "raw": 242290,
+            "br": 72684
           }
         },
         {
@@ -499,12 +521,12 @@
           "document": {
             "count": 1,
             "raw": 388495,
-            "br": 18348
+            "br": 18350
           },
           "javascript": {
             "count": 3,
-            "raw": 241732,
-            "br": 72555
+            "raw": 242290,
+            "br": 72684
           }
         },
         {
@@ -516,8 +538,8 @@
           },
           "javascript": {
             "count": 3,
-            "raw": 241732,
-            "br": 72555
+            "raw": 242290,
+            "br": 72684
           }
         },
         {
@@ -525,12 +547,12 @@
           "document": {
             "count": 1,
             "raw": 388430,
-            "br": 18239
+            "br": 18241
           },
           "javascript": {
             "count": 3,
-            "raw": 241732,
-            "br": 72555
+            "raw": 242290,
+            "br": 72684
           }
         },
         {
@@ -538,12 +560,12 @@
           "document": {
             "count": 1,
             "raw": 388513,
-            "br": 18338
+            "br": 18339
           },
           "javascript": {
             "count": 3,
-            "raw": 241732,
-            "br": 72555
+            "raw": 242290,
+            "br": 72684
           }
         }
       ],
@@ -682,6 +704,210 @@
       "errors": 0
     },
     {
+      "mode": "rsc",
+      "scenario": "guide",
+      "firstLoad": [
+        {
+          "pathname": "/guide/b0",
+          "document": {
+            "count": 1,
+            "raw": 388909,
+            "br": 18353
+          },
+          "javascript": {
+            "count": 3,
+            "raw": 242290,
+            "br": 72684
+          }
+        },
+        {
+          "pathname": "/guide/b20",
+          "document": {
+            "count": 1,
+            "raw": 388816,
+            "br": 18466
+          },
+          "javascript": {
+            "count": 3,
+            "raw": 242290,
+            "br": 72684
+          }
+        },
+        {
+          "pathname": "/guide/b40",
+          "document": {
+            "count": 1,
+            "raw": 389214,
+            "br": 18428
+          },
+          "javascript": {
+            "count": 3,
+            "raw": 242290,
+            "br": 72684
+          }
+        },
+        {
+          "pathname": "/guide/b60",
+          "document": {
+            "count": 1,
+            "raw": 388751,
+            "br": 18340
+          },
+          "javascript": {
+            "count": 3,
+            "raw": 242290,
+            "br": 72684
+          }
+        },
+        {
+          "pathname": "/guide/b80",
+          "document": {
+            "count": 1,
+            "raw": 388834,
+            "br": 18429
+          },
+          "javascript": {
+            "count": 3,
+            "raw": 242290,
+            "br": 72684
+          }
+        }
+      ],
+      "navigations": [
+        {
+          "pathname": "/guide/b1",
+          "data": {
+            "count": 1,
+            "raw": 208769,
+            "br": 11200
+          },
+          "javascript": {
+            "count": 0,
+            "raw": 0,
+            "br": 0
+          }
+        },
+        {
+          "pathname": "/guide/b2",
+          "data": {
+            "count": 1,
+            "raw": 208891,
+            "br": 11238
+          },
+          "javascript": {
+            "count": 0,
+            "raw": 0,
+            "br": 0
+          }
+        },
+        {
+          "pathname": "/guide/b3",
+          "data": {
+            "count": 1,
+            "raw": 208833,
+            "br": 10997
+          },
+          "javascript": {
+            "count": 0,
+            "raw": 0,
+            "br": 0
+          }
+        },
+        {
+          "pathname": "/guide/b4",
+          "data": {
+            "count": 1,
+            "raw": 208953,
+            "br": 10951
+          },
+          "javascript": {
+            "count": 0,
+            "raw": 0,
+            "br": 0
+          }
+        },
+        {
+          "pathname": "/guide/b5",
+          "data": {
+            "count": 1,
+            "raw": 208743,
+            "br": 11202
+          },
+          "javascript": {
+            "count": 0,
+            "raw": 0,
+            "br": 0
+          }
+        },
+        {
+          "pathname": "/guide/b6",
+          "data": {
+            "count": 1,
+            "raw": 208863,
+            "br": 11203
+          },
+          "javascript": {
+            "count": 0,
+            "raw": 0,
+            "br": 0
+          }
+        },
+        {
+          "pathname": "/guide/b7",
+          "data": {
+            "count": 1,
+            "raw": 208743,
+            "br": 11142
+          },
+          "javascript": {
+            "count": 0,
+            "raw": 0,
+            "br": 0
+          }
+        },
+        {
+          "pathname": "/guide/b8",
+          "data": {
+            "count": 1,
+            "raw": 208936,
+            "br": 11162
+          },
+          "javascript": {
+            "count": 0,
+            "raw": 0,
+            "br": 0
+          }
+        },
+        {
+          "pathname": "/guide/b9",
+          "data": {
+            "count": 1,
+            "raw": 208512,
+            "br": 11131
+          },
+          "javascript": {
+            "count": 0,
+            "raw": 0,
+            "br": 0
+          }
+        },
+        {
+          "pathname": "/guide/b10",
+          "data": {
+            "count": 1,
+            "raw": 208619,
+            "br": 11145
+          },
+          "javascript": {
+            "count": 0,
+            "raw": 0,
+            "br": 0
+          }
+        }
+      ],
+      "errors": 0
+    },
+    {
       "mode": "islands",
       "scenario": "docs",
       "firstLoad": [
@@ -703,7 +929,7 @@
           "document": {
             "count": 1,
             "raw": 71469,
-            "br": 16373
+            "br": 16371
           },
           "javascript": {
             "count": 1,
@@ -729,7 +955,7 @@
           "document": {
             "count": 1,
             "raw": 71366,
-            "br": 16547
+            "br": 16546
           },
           "javascript": {
             "count": 1,
@@ -742,7 +968,7 @@
           "document": {
             "count": 1,
             "raw": 71377,
-            "br": 16536
+            "br": 16534
           },
           "javascript": {
             "count": 1,
@@ -757,12 +983,12 @@
           "data": {
             "count": 1,
             "raw": 7490,
-            "br": 2496
+            "br": 2497
           },
           "javascript": {
             "count": 4,
-            "raw": 310401,
-            "br": 94238
+            "raw": 313462,
+            "br": 95123
           }
         },
         {
@@ -770,7 +996,7 @@
           "data": {
             "count": 1,
             "raw": 7598,
-            "br": 2681
+            "br": 2682
           },
           "javascript": {
             "count": 0,
@@ -783,7 +1009,7 @@
           "data": {
             "count": 1,
             "raw": 7667,
-            "br": 2695
+            "br": 2696
           },
           "javascript": {
             "count": 0,
@@ -796,7 +1022,7 @@
           "data": {
             "count": 1,
             "raw": 7678,
-            "br": 2699
+            "br": 2700
           },
           "javascript": {
             "count": 0,
@@ -809,7 +1035,7 @@
           "data": {
             "count": 1,
             "raw": 7563,
-            "br": 2666
+            "br": 2667
           },
           "javascript": {
             "count": 0,
@@ -822,7 +1048,7 @@
           "data": {
             "count": 1,
             "raw": 7556,
-            "br": 2637
+            "br": 2638
           },
           "javascript": {
             "count": 0,
@@ -835,7 +1061,7 @@
           "data": {
             "count": 1,
             "raw": 7578,
-            "br": 2689
+            "br": 2690
           },
           "javascript": {
             "count": 0,
@@ -848,7 +1074,7 @@
           "data": {
             "count": 1,
             "raw": 7481,
-            "br": 2610
+            "br": 2611
           },
           "javascript": {
             "count": 0,
@@ -861,7 +1087,7 @@
           "data": {
             "count": 1,
             "raw": 7623,
-            "br": 2710
+            "br": 2711
           },
           "javascript": {
             "count": 0,
@@ -874,7 +1100,7 @@
           "data": {
             "count": 1,
             "raw": 7510,
-            "br": 2644
+            "br": 2645
           },
           "javascript": {
             "count": 0,
@@ -893,8 +1119,8 @@
           "pathname": "/shop/s0",
           "document": {
             "count": 1,
-            "raw": 32688,
-            "br": 5810
+            "raw": 31241,
+            "br": 5740
           },
           "javascript": {
             "count": 1,
@@ -906,8 +1132,8 @@
           "pathname": "/shop/s30",
           "document": {
             "count": 1,
-            "raw": 32537,
-            "br": 5988
+            "raw": 31169,
+            "br": 5925
           },
           "javascript": {
             "count": 1,
@@ -919,8 +1145,8 @@
           "pathname": "/shop/s60",
           "document": {
             "count": 1,
-            "raw": 32639,
-            "br": 6024
+            "raw": 31217,
+            "br": 5957
           },
           "javascript": {
             "count": 1,
@@ -932,8 +1158,8 @@
           "pathname": "/shop/s90",
           "document": {
             "count": 1,
-            "raw": 32589,
-            "br": 5996
+            "raw": 31204,
+            "br": 5940
           },
           "javascript": {
             "count": 1,
@@ -945,8 +1171,8 @@
           "pathname": "/shop/s120",
           "document": {
             "count": 1,
-            "raw": 32634,
-            "br": 5965
+            "raw": 31215,
+            "br": 5899
           },
           "javascript": {
             "count": 1,
@@ -960,21 +1186,21 @@
           "pathname": "/shop/s1",
           "data": {
             "count": 1,
-            "raw": 15331,
-            "br": 4446
+            "raw": 15132,
+            "br": 4427
           },
           "javascript": {
             "count": 7,
-            "raw": 312111,
-            "br": 95241
+            "raw": 315172,
+            "br": 96126
           }
         },
         {
           "pathname": "/shop/s2",
           "data": {
             "count": 1,
-            "raw": 4146,
-            "br": 1719
+            "raw": 3947,
+            "br": 1687
           },
           "javascript": {
             "count": 0,
@@ -986,8 +1212,8 @@
           "pathname": "/shop/s3",
           "data": {
             "count": 1,
-            "raw": 4105,
-            "br": 1700
+            "raw": 3906,
+            "br": 1667
           },
           "javascript": {
             "count": 0,
@@ -999,8 +1225,8 @@
           "pathname": "/shop/s4",
           "data": {
             "count": 1,
-            "raw": 4184,
-            "br": 1739
+            "raw": 3985,
+            "br": 1703
           },
           "javascript": {
             "count": 0,
@@ -1012,8 +1238,8 @@
           "pathname": "/shop/s5",
           "data": {
             "count": 1,
-            "raw": 4179,
-            "br": 1728
+            "raw": 3980,
+            "br": 1695
           },
           "javascript": {
             "count": 0,
@@ -1025,8 +1251,8 @@
           "pathname": "/shop/s6",
           "data": {
             "count": 1,
-            "raw": 4159,
-            "br": 1718
+            "raw": 3960,
+            "br": 1689
           },
           "javascript": {
             "count": 0,
@@ -1038,8 +1264,8 @@
           "pathname": "/shop/s7",
           "data": {
             "count": 1,
-            "raw": 4143,
-            "br": 1725
+            "raw": 3944,
+            "br": 1694
           },
           "javascript": {
             "count": 0,
@@ -1051,8 +1277,8 @@
           "pathname": "/shop/s8",
           "data": {
             "count": 1,
-            "raw": 4097,
-            "br": 1700
+            "raw": 3898,
+            "br": 1661
           },
           "javascript": {
             "count": 0,
@@ -1064,8 +1290,8 @@
           "pathname": "/shop/s9",
           "data": {
             "count": 1,
-            "raw": 4155,
-            "br": 1732
+            "raw": 3956,
+            "br": 1699
           },
           "javascript": {
             "count": 0,
@@ -1077,8 +1303,8 @@
           "pathname": "/shop/s10",
           "data": {
             "count": 1,
-            "raw": 4122,
-            "br": 1702
+            "raw": 3923,
+            "br": 1666
           },
           "javascript": {
             "count": 0,
@@ -1098,7 +1324,7 @@
           "document": {
             "count": 1,
             "raw": 130299,
-            "br": 9210
+            "br": 9211
           },
           "javascript": {
             "count": 1,
@@ -1111,7 +1337,7 @@
           "document": {
             "count": 1,
             "raw": 130279,
-            "br": 9221
+            "br": 9205
           },
           "javascript": {
             "count": 1,
@@ -1124,7 +1350,7 @@
           "document": {
             "count": 1,
             "raw": 130463,
-            "br": 9259
+            "br": 9240
           },
           "javascript": {
             "count": 1,
@@ -1137,7 +1363,7 @@
           "document": {
             "count": 1,
             "raw": 130254,
-            "br": 9159
+            "br": 9160
           },
           "javascript": {
             "count": 1,
@@ -1150,7 +1376,7 @@
           "document": {
             "count": 1,
             "raw": 130303,
-            "br": 9296
+            "br": 9297
           },
           "javascript": {
             "count": 1,
@@ -1169,8 +1395,8 @@
           },
           "javascript": {
             "count": 4,
-            "raw": 310401,
-            "br": 94238
+            "raw": 313462,
+            "br": 95123
           }
         },
         {
@@ -1178,7 +1404,7 @@
           "data": {
             "count": 1,
             "raw": 130610,
-            "br": 9389
+            "br": 9388
           },
           "javascript": {
             "count": 0,
@@ -1191,7 +1417,7 @@
           "data": {
             "count": 1,
             "raw": 130552,
-            "br": 9132
+            "br": 9133
           },
           "javascript": {
             "count": 0,
@@ -1217,7 +1443,7 @@
           "data": {
             "count": 1,
             "raw": 130450,
-            "br": 9223
+            "br": 9224
           },
           "javascript": {
             "count": 0,
@@ -1256,7 +1482,7 @@
           "data": {
             "count": 1,
             "raw": 130703,
-            "br": 9433
+            "br": 9434
           },
           "javascript": {
             "count": 0,
@@ -1269,7 +1495,7 @@
           "data": {
             "count": 1,
             "raw": 130267,
-            "br": 9209
+            "br": 9208
           },
           "javascript": {
             "count": 0,
@@ -1282,7 +1508,211 @@
           "data": {
             "count": 1,
             "raw": 130390,
-            "br": 9336
+            "br": 9335
+          },
+          "javascript": {
+            "count": 0,
+            "raw": 0,
+            "br": 0
+          }
+        }
+      ],
+      "errors": 0
+    },
+    {
+      "mode": "islands",
+      "scenario": "guide",
+      "firstLoad": [
+        {
+          "pathname": "/guide/b0",
+          "document": {
+            "count": 1,
+            "raw": 131783,
+            "br": 9562
+          },
+          "javascript": {
+            "count": 1,
+            "raw": 4321,
+            "br": 1775
+          }
+        },
+        {
+          "pathname": "/guide/b20",
+          "document": {
+            "count": 1,
+            "raw": 131766,
+            "br": 9567
+          },
+          "javascript": {
+            "count": 1,
+            "raw": 4321,
+            "br": 1775
+          }
+        },
+        {
+          "pathname": "/guide/b40",
+          "document": {
+            "count": 1,
+            "raw": 131945,
+            "br": 9600
+          },
+          "javascript": {
+            "count": 1,
+            "raw": 4321,
+            "br": 1775
+          }
+        },
+        {
+          "pathname": "/guide/b60",
+          "document": {
+            "count": 1,
+            "raw": 131732,
+            "br": 9513
+          },
+          "javascript": {
+            "count": 1,
+            "raw": 4321,
+            "br": 1775
+          }
+        },
+        {
+          "pathname": "/guide/b80",
+          "document": {
+            "count": 1,
+            "raw": 131787,
+            "br": 9648
+          },
+          "javascript": {
+            "count": 1,
+            "raw": 4321,
+            "br": 1775
+          }
+        }
+      ],
+      "navigations": [
+        {
+          "pathname": "/guide/b1",
+          "data": {
+            "count": 1,
+            "raw": 131947,
+            "br": 9680
+          },
+          "javascript": {
+            "count": 7,
+            "raw": 315103,
+            "br": 96102
+          }
+        },
+        {
+          "pathname": "/guide/b2",
+          "data": {
+            "count": 1,
+            "raw": 132033,
+            "br": 9718
+          },
+          "javascript": {
+            "count": 0,
+            "raw": 0,
+            "br": 0
+          }
+        },
+        {
+          "pathname": "/guide/b3",
+          "data": {
+            "count": 1,
+            "raw": 131975,
+            "br": 9482
+          },
+          "javascript": {
+            "count": 0,
+            "raw": 0,
+            "br": 0
+          }
+        },
+        {
+          "pathname": "/guide/b4",
+          "data": {
+            "count": 1,
+            "raw": 132119,
+            "br": 9482
+          },
+          "javascript": {
+            "count": 0,
+            "raw": 0,
+            "br": 0
+          }
+        },
+        {
+          "pathname": "/guide/b5",
+          "data": {
+            "count": 1,
+            "raw": 131873,
+            "br": 9544
+          },
+          "javascript": {
+            "count": 0,
+            "raw": 0,
+            "br": 0
+          }
+        },
+        {
+          "pathname": "/guide/b6",
+          "data": {
+            "count": 1,
+            "raw": 132053,
+            "br": 9774
+          },
+          "javascript": {
+            "count": 0,
+            "raw": 0,
+            "br": 0
+          }
+        },
+        {
+          "pathname": "/guide/b7",
+          "data": {
+            "count": 1,
+            "raw": 131909,
+            "br": 9670
+          },
+          "javascript": {
+            "count": 0,
+            "raw": 0,
+            "br": 0
+          }
+        },
+        {
+          "pathname": "/guide/b8",
+          "data": {
+            "count": 1,
+            "raw": 132126,
+            "br": 9783
+          },
+          "javascript": {
+            "count": 0,
+            "raw": 0,
+            "br": 0
+          }
+        },
+        {
+          "pathname": "/guide/b9",
+          "data": {
+            "count": 1,
+            "raw": 131690,
+            "br": 9556
+          },
+          "javascript": {
+            "count": 0,
+            "raw": 0,
+            "br": 0
+          }
+        },
+        {
+          "pathname": "/guide/b10",
+          "data": {
+            "count": 1,
+            "raw": 131812,
+            "br": 9684
           },
           "javascript": {
             "count": 0,

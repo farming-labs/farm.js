@@ -48,6 +48,14 @@ const SCENARIOS = [
     start: "/blog/b0",
     page: (index) => `/blog/b${index}`,
   },
+  // guide: the blog's posts under a layout that hydrates as one root around a client provider, so
+  // each post is rebuilt from a server tree (the case HTML-first React Server Components target).
+  {
+    name: "guide",
+    firstLoad: ["/guide/b0", "/guide/b20", "/guide/b40", "/guide/b60", "/guide/b80"],
+    start: "/guide/b0",
+    page: (index) => `/guide/b${index}`,
+  },
 ];
 const NAVIGATIONS = 10;
 
