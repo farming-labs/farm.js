@@ -1380,12 +1380,14 @@ function findParserSensitiveJsxContainer(
     if (tokens[index].value !== "<") continue;
 
     if (tokens[index + 1].value === "/") {
-      const closing = tokens[index + 2]?.value;
-      const at = closing ? open.lastIndexOf(closing) : -1;
+      const closing = tokens[index + 2];
+      const at = closing?.kind === "identifier" ? open.lastIndexOf(closing.value) : -1;
       if (at !== -1) open.length = at;
       continue;
     }
 
+    // A tag name is an identifier; `ComponentProps<"table">` names one as a string.
+    if (tokens[index + 1].kind !== "identifier") continue;
     const tag = tokens[index + 1].value;
     if (names.has(tag)) {
       // The outermost container since the innermost cell is the one the author restructures.
