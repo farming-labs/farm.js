@@ -14,6 +14,11 @@ type BundleOutput = { type: string; source?: string | Uint8Array };
  * `createServerOnlyFn` bodies. Any enabled `build.sourcemap` becomes
  * `"hidden"` (the JS names no map), and the maps are moved beside the client
  * output.
+ *
+ * It takes the maps last: Vite's import analysis puts an entry's preload map on
+ * its first line in its own `generateBundle`, after `enforce: "post"` plugins,
+ * and rewrites that chunk's map in the bundle. A map taken before then is a
+ * line short.
  */
 export function rscPrivateClientSourcemaps(environmentName = "client"): Plugin {
   let maps: Array<[fileName: string, source: string | Uint8Array]> = [];
@@ -29,17 +34,20 @@ export function rscPrivateClientSourcemaps(environmentName = "client"): Plugin {
       if (name !== environmentName || !config.build?.sourcemap) return;
       return { build: { sourcemap: "hidden" } };
     },
-    generateBundle(outputOptions, bundle) {
-      if (!isClient(this.environment)) return;
-      maps = [];
-      mapsDir = outputOptions.dir
-        ? path.join(path.dirname(outputOptions.dir), RSC_CLIENT_SOURCEMAPS_DIR)
-        : undefined;
-      for (const [fileName, output] of Object.entries(bundle as Record<string, BundleOutput>)) {
-        if (output.type !== "asset" || !fileName.endsWith(".map")) continue;
-        maps.push([fileName, output.source ?? ""]);
-        delete bundle[fileName];
-      }
+    generateBundle: {
+      order: "post",
+      handler(outputOptions, bundle) {
+        if (!isClient(this.environment)) return;
+        maps = [];
+        mapsDir = outputOptions.dir
+          ? path.join(path.dirname(outputOptions.dir), RSC_CLIENT_SOURCEMAPS_DIR)
+          : undefined;
+        for (const [fileName, output] of Object.entries(bundle as Record<string, BundleOutput>)) {
+          if (output.type !== "asset" || !fileName.endsWith(".map")) continue;
+          maps.push([fileName, output.source ?? ""]);
+          delete bundle[fileName];
+        }
+      },
     },
     async writeBundle() {
       if (!isClient(this.environment) || !mapsDir) return;
