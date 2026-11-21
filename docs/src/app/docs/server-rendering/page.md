@@ -444,7 +444,8 @@ pass the same checks. Copy buttons, like buttons, menu toggles and tables of con
 qualify; anything else hydrates at load, and an explicit `island` export always wins (see
 [Deferred route islands](#deferred-route-islands)). A layout that hydrates as one root (a client
 provider around the pages) waits the same way when every client component inside it, on the page
-too, passes. A page whose client components all wait, or
+too, passes; it hydrates when the pointer reaches one of its links, so the click's navigation
+updates it. A page whose client components all wait, or
 that has none, starts with a 1.6 KB script, and loads the runtime when one is clicked, pressed or
 focused, when one that waits for `"visible"` or `"idle"` is due, when the pointer reaches a link,
 or when a form gets focus. A click made before then is held and replayed once the component has
