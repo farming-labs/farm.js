@@ -5373,6 +5373,35 @@ async function hydrate() {
       },
     });
     ${
+      islandValues
+        ? `// A layout root that waits for a click renders again on a navigation, and a link under the
+    // pointer is a navigation on its way: hydrate the root now, as a focus would, so the click
+    // updates it instead of rendering it from the start.
+    if (hasHydratableLayout(pathname) && (matched.route.islandStrategy || "load") !== "load") {
+      const hydrateForLink = function(target) {
+        const anchor = target instanceof Element ? target.closest("a[href]") : null;
+        const href = anchor && anchor.getAttribute("href");
+        if (!href || href.startsWith("#") || hasAbsoluteNavigationHref(href)) return false;
+        if (!container.contains(anchor)) return false;
+        document.dispatchEvent(
+          new CustomEvent("farm:island-interaction", { detail: { target: anchor, kind: null } }),
+        );
+        return true;
+      };
+      const onLinkIntent = function(event) {
+        if (hydrateForLink(event.target)) document.removeEventListener("mouseover", onLinkIntent, true);
+      };
+      // The hover that loaded this entry fired before it ran.
+      if (!hydrateForLink(container.querySelector("a[href]:hover"))) {
+        document.addEventListener("mouseover", onLinkIntent, true);
+        void pageHydration.finally(function() {
+          document.removeEventListener("mouseover", onLinkIntent, true);
+        });
+      }
+    }`
+        : ""
+    }
+    ${
       isolatedHydrationEnabled
         ? `// Not cancelled with the page: a navigation disposes the islands it removes, and one in a
     // layout it keeps still waits for its trigger, as on a page of islands only.

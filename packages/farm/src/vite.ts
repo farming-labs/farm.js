@@ -8887,6 +8887,31 @@ function farmIslandsOnlyDocument() {
         },
       });
       ${
+        islandValues
+          ? `// A layout root that waits for a click renders again on a navigation, and a link under the
+      // pointer is a navigation on its way: hydrate the root now, as the production entry does.
+      if (layoutShouldHydrate && islandStrategy !== 'load') {
+        const hydrateForLink = (target) => {
+          const anchor = target instanceof Element ? target.closest('a[href]') : null;
+          const href = anchor && anchor.getAttribute('href');
+          if (!href || href.startsWith('#') || hasAbsoluteNavigationHref(href)) return false;
+          if (!pageContainer.contains(anchor)) return false;
+          document.dispatchEvent(
+            new CustomEvent('farm:island-interaction', { detail: { target: anchor, kind: null } }),
+          );
+          return true;
+        };
+        const onLinkIntent = (event) => {
+          if (hydrateForLink(event.target)) document.removeEventListener('mouseover', onLinkIntent, true);
+        };
+        if (!hydrateForLink(pageContainer.querySelector('a[href]:hover'))) {
+          document.addEventListener('mouseover', onLinkIntent, true);
+          void pageHydration.finally(() => document.removeEventListener('mouseover', onLinkIntent, true));
+        }
+      }`
+          : ""
+      }
+      ${
         isolatedHydrationEnabled
           ? `const isolatedHydration =
         hasIsolatedClientBoundaries &&
