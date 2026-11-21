@@ -52,6 +52,50 @@ function readIfExists(filePath: string): string | null {
   );
 }
 
+const MARKDOWN_MODULE = /\.mdx?$/i;
+
+/**
+ * A module's code, as the import scanners read it. An MDX file's code is its top-level `import`
+ * and `export` blocks: its frontmatter, prose and fenced examples (which often show imports) are
+ * not code.
+ */
+function readModuleCode(filePath: string): string | null {
+  const content = readIfExists(filePath);
+  if (content === null || !MARKDOWN_MODULE.test(filePath)) return content;
+  return memoizeInFarmSourceSnapshot("markdown-code", content, () => scanMarkdownCode(content));
+}
+
+function scanMarkdownCode(content: string): string {
+  const lines = content.split(/\r?\n/);
+  const code: string[] = [];
+  let index = 0;
+  if (/^---\s*$/.test(lines[0] ?? "")) {
+    const end = lines.findIndex((line, lineIndex) => lineIndex > 0 && /^---\s*$/.test(line));
+    if (end > 0) index = end + 1;
+  }
+  let fence: string | null = null;
+  // An ESM block runs from a line that starts with `import` or `export` to a blank line.
+  let inCode = false;
+  for (; index < lines.length; index++) {
+    const line = lines[index]!;
+    const marker = /^ {0,3}(`{3,}|~{3,})/.exec(line)?.[1];
+    if (fence) {
+      if (marker?.[0] === fence[0] && marker.length >= fence.length && line.trim() === marker) {
+        fence = null;
+      }
+    } else if (inCode) {
+      inCode = line.trim() !== "";
+      code.push(line);
+    } else if (marker) {
+      fence = marker;
+    } else if (/^(?:import|export)(?=[\s{*])/.test(line)) {
+      inCode = true;
+      code.push(line);
+    }
+  }
+  return code.join("\n");
+}
+
 function readSourceFile(filePath: string): string | null {
   const content = readSourceFileContents(filePath);
   if (content !== null) noteFarmSourceRead(filePath);
@@ -1731,7 +1775,7 @@ function collectIsolatedClientBoundaries(
     if (cached !== undefined) return cached;
     if (visiting.has(moduleSourcePath)) return 0;
     visiting.add(moduleSourcePath);
-    const content = readIfExists(moduleSourcePath);
+    const content = readModuleCode(moduleSourcePath);
     const parsed = parseClientModuleMetadata(content, false);
 
     if (parsed.isClientComponent) {
@@ -1758,7 +1802,16 @@ function collectIsolatedClientBoundaries(
 
     const importedBindings = getStaticImportBindings(content);
     let estimatedBoundaryCount = 0;
-    for (const specifier of new Set(getImportSpecifiers(content))) {
+    const specifiers = new Set(getImportSpecifiers(content));
+    // A content collection loads its MDX pages with `import()`. Their client components render
+    // on the page that loads them, as the components of an MDX module it imports do.
+    for (const specifier of getImportSpecifiers(content, { dynamic: true })) {
+      if (specifiers.has(specifier)) continue;
+      const imported = resolveImportedModule(moduleSourcePath, specifier, root);
+      if (!imported.local || !imported.path || !MARKDOWN_MODULE.test(imported.path)) continue;
+      estimatedBoundaryCount += visit(imported.path);
+    }
+    for (const specifier of specifiers) {
       const imported = resolveImportedModule(moduleSourcePath, specifier, root);
       const importedPath = imported.path;
       if (!importedPath) continue;
