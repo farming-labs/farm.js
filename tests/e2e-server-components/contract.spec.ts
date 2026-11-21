@@ -1316,6 +1316,39 @@ test("the first navigation from a layout that hydrates as one root, before it ha
   expect(errors).toEqual([]);
 });
 
+test("a layout root that waits for a click hydrates once a link in it is hovered, and the click updates it", async ({
+  page,
+}) => {
+  test.skip(mode !== "islands", "rsc hydrates every client component on load");
+  const errors = collectErrors(page);
+  await page.goto("/context/wait/a");
+  await page.waitForLoadState("networkidle");
+  const root = page.locator("#root");
+  await expect(root).not.toHaveAttribute("data-farm-island-hydrated", "true");
+  // The hover that loads the client runtime also hydrates the root: a navigation is on its way.
+  await page.hover("[data-next]");
+  await expect(root).toHaveAttribute("data-farm-island-hydrated", "true");
+  await page.evaluate(() => {
+    const toggle = () =>
+      Array.from(document.querySelectorAll("button")).find(
+        (button) => button.textContent === "Toggle theme",
+      );
+    Object.assign(window, { __toggle: toggle(), __findToggle: toggle });
+  });
+  await page.click("[data-next]");
+  await expect(page.locator("h1")).toHaveText("Waiting b");
+  // The click updated the hydrated root, which kept the layout's nodes, instead of rendering a new one.
+  expect(
+    await page.evaluate(() => {
+      const state = window as unknown as { __toggle?: Element; __findToggle: () => Element };
+      return state.__toggle !== undefined && state.__toggle === state.__findToggle();
+    }),
+  ).toBe(true);
+  await page.getByRole("button", { name: "Toggle theme" }).click();
+  await expect(page.getByTestId("theme-label")).toHaveText("Theme: dark");
+  expect(errors).toEqual([]);
+});
+
 test("the next page of a layout that hydrates as one root updates the page on screen in place, as React Server Components do", async ({
   page,
 }) => {
