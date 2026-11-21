@@ -89,6 +89,7 @@ import {
 } from "./mcp-config";
 import { resolveFarmPerformanceConfig, type ResolvedFarmPerformanceConfig } from "./preload";
 import { validateConfigRouteSource } from "./plugins/route-pattern";
+import { validateFarmRouteConditions } from "./plugins/route-conditions";
 import { compileMiddlewareConfig } from "./middleware/matcher";
 import {
   farmCspBlocksFrameworkInlineScripts,
@@ -275,11 +276,37 @@ export type {
   ResolvedFarmAPIConfig,
 } from "./api/config";
 
+export type FarmRouteConditionType = "cookie" | "header" | "query" | "host";
+
+/**
+ * A condition a request must satisfy for a config redirect or rewrite rule to
+ * apply. `key` is the cookie name, header name, or query parameter name; it is
+ * unused for `host`, which matches the request URL's hostname instead.
+ * Without `value` the condition is a presence check; with `value` it is an
+ * unanchored regular-expression test against the looked-up value.
+ */
+export interface FarmRouteCondition {
+  type: FarmRouteConditionType;
+  key?: string;
+  value?: string;
+}
+
 export interface RedirectConfig {
   source: string;
   destination: string;
   permanent?: boolean;
   statusCode?: import("./navigation-errors").FarmRedirectStatus;
+  /**
+   * Conditions every request must satisfy for this redirect to apply. A rule
+   * whose conditions fail is skipped, so a later rule for the same source is
+   * tried instead.
+   */
+  has?: FarmRouteCondition[];
+  /**
+   * Conditions no request may satisfy for this redirect to apply. A request
+   * matching any `missing` condition skips this rule.
+   */
+  missing?: FarmRouteCondition[];
 }
 
 export interface HeaderConfig {
@@ -293,6 +320,17 @@ export interface HeaderConfig {
 export interface RewriteConfig {
   source: string;
   destination: string;
+  /**
+   * Conditions every request must satisfy for this rewrite to apply, as on
+   * `RedirectConfig.has`. A rule whose conditions fail is skipped, so a later
+   * rule for the same source is tried instead.
+   */
+  has?: FarmRouteCondition[];
+  /**
+   * Conditions no request may satisfy for this rewrite to apply, as on
+   * `RedirectConfig.missing`.
+   */
+  missing?: FarmRouteCondition[];
 }
 
 /** @deprecated Use FarmImageConfig. */
@@ -1237,8 +1275,19 @@ function validateRedirectConfigs(redirects: RedirectConfig[], field: string): Re
         `${field}[${index}].statusCode must be one of 301, 302, 303, 307, or 308.`,
       );
     }
+    validateFarmRouteConditions(redirect.has, `${field}[${index}].has`);
+    validateFarmRouteConditions(redirect.missing, `${field}[${index}].missing`);
   }
   return redirects;
+}
+
+function validateRewriteConfigs(rewrites: RewriteConfig[], field: string): RewriteConfig[] {
+  for (const [index, rewrite] of rewrites.entries()) {
+    validateConfigRouteSource(rewrite.source, `${field}[${index}].source`);
+    validateFarmRouteConditions(rewrite.has, `${field}[${index}].has`);
+    validateFarmRouteConditions(rewrite.missing, `${field}[${index}].missing`);
+  }
+  return rewrites;
 }
 
 // Compile once while resolving the config so an unsupported matcher string
@@ -1297,11 +1346,12 @@ export async function resolveConfig(
     "redirects",
   );
 
-  const rewrites =
+  const rewrites = validateRewriteConfigs(
     typeof userConfig.rewrites === "function"
       ? await userConfig.rewrites()
-      : userConfig.rewrites || [];
-  validateConfigRouteSources(rewrites, "rewrites");
+      : userConfig.rewrites || [],
+    "rewrites",
+  );
 
   const headers =
     typeof userConfig.headers === "function"
