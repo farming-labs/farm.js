@@ -1389,6 +1389,55 @@ Use `permanent: true` for the default permanent `308`; otherwise Farm defaults t
 Invalid values fail config resolution instead of producing a non-redirect response with a Location
 header.
 
+A redirect or rewrite rule can also carry `has` and `missing` conditions, so one source can
+answer differently per request: a cookie-gated A/B split, a header-gated rewrite, a
+query-gated redirect, or a host-gated move. A rule applies only when every `has` condition holds
+and no `missing` condition holds; a path-matching rule whose conditions fail is skipped, so a
+later rule for the same source is tried instead.
+
+```ts
+export default defineConfig({
+  async redirects() {
+    return [
+      // Visitors with the beta cookie go to the beta page; everyone else falls
+      // through to the second rule for the same source.
+      {
+        source: "/beta",
+        destination: "/beta-on",
+        has: [{ type: "cookie", key: "beta", value: "on" }],
+      },
+      { source: "/beta", destination: "/beta-off", missing: [{ type: "cookie", key: "beta" }] },
+    ];
+  },
+  async rewrites() {
+    return [
+      { source: "/docs", destination: "/api/v2", has: [{ type: "query", key: "v", value: "^2$" }] },
+    ];
+  },
+});
+```
+
+Each condition names its kind in `type`: `cookie` reads the named cookie, `header` reads the named
+request header (case-insensitive), `query` reads a query parameter of the request URL, and `host`
+matches the request URL's hostname. Without `value` a condition is a presence check: the cookie,
+header, or parameter only has to exist. With `value` it is an unanchored regular-expression test
+against the looked-up value, so `value: "^on$"` matches exactly `on` while `value: "beta"` also
+matches `beta-2`; a repeated query parameter satisfies the condition when any of its values
+matches. A `host` condition always needs a `value`, because a host is always present and a
+presence-only host condition would match every request. Named capture groups in `value` are not
+interpolated into the destination. Malformed conditions — an unknown `type`, a missing `key`, a
+`host` condition without a `value`, or a `value` that is not a valid regular expression — fail
+config resolution, in development and in production alike.
+
+Conditions are evaluated at runtime, in the dev server and in the generated Nitro entry, with the
+same semantics in both. They are not compiled into Nitro `routeRules`: Nitro route rules cannot
+express a match on a cookie, header, query parameter, or host, so every `has`/`missing` condition
+falls back to runtime evaluation inside the Farm server entry. That also means a conditional rule
+cannot apply to a response served before the Farm entry runs — a prerendered page or a public
+file served statically, which unconditional config redirects do not reach either — and `routeRules`
+redirect entries do not accept `has`/`missing`; use `redirects()` or `rewrites()` when the
+behavior depends on the request.
+
 Use `routeRules` when behavior belongs to a URL pattern instead of one page file. Rules are normalized into Farm redirects/headers and passed to Nitro route rules for production adapters.
 
 ```ts
