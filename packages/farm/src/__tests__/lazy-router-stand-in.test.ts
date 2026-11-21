@@ -115,6 +115,38 @@ describe("the lazy router stand-in", () => {
     expect(load).toHaveBeenCalledTimes(1);
   });
 
+  it("loads the router at once when the link that loaded the entry is still focused", async () => {
+    // The boot script loads the entry on that focus, before the entry listens for it.
+    const link = document.createElement("a");
+    link.href = "/next";
+    document.body.append(link);
+    link.focus();
+    try {
+      const { standIn, load, prefetchRouteTable } = createStandIn();
+      expect(load).toHaveBeenCalledTimes(1);
+      expect(prefetchRouteTable).toHaveBeenCalledTimes(1);
+      await vi.waitFor(() => expect(standIn.currentPath).toBe("/loaded"));
+    } finally {
+      link.remove();
+    }
+  });
+
+  it("leaves the router unloaded when no link is focused or under the pointer", () => {
+    const button = document.createElement("button");
+    const hashLink = document.createElement("a");
+    hashLink.setAttribute("href", "#section");
+    document.body.append(button, hashLink);
+    try {
+      button.focus();
+      expect(createStandIn().load).not.toHaveBeenCalled();
+      hashLink.focus();
+      expect(createStandIn().load).not.toHaveBeenCalled();
+    } finally {
+      button.remove();
+      hashLink.remove();
+    }
+  });
+
   it("stops watching a link that is unobserved before the router loads", () => {
     const { standIn, load, observers } = createStandIn();
     const link = document.createElement("a");
