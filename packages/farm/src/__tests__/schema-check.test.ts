@@ -16,6 +16,10 @@ if (process.env.FARM_REQUIRE_TEST_POSTGRES === "1" && !postgresTestUrl) {
   throw new Error("FARM_TEST_POSTGRES_URL is required when FARM_REQUIRE_TEST_POSTGRES=1.");
 }
 
+if (process.env.FARM_REQUIRE_TEST_MYSQL === "1" && !mysqlTestUrl) {
+  throw new Error("FARM_TEST_MYSQL_URL is required when FARM_REQUIRE_TEST_MYSQL=1.");
+}
+
 /** A real database, with the bits the scenarios need. */
 type TestDatabase = {
   dialect: FarmSqlDialect;
@@ -100,14 +104,33 @@ async function postgresDatabase(): Promise<TestDatabase> {
   };
 }
 
-async function mysqlDatabase(): Promise<TestDatabase> {
-  const mysql = requireModule("mysql2/promise") as {
-    createPool(url: string): {
-      query(sql: string): Promise<[Array<Record<string, unknown>>, unknown]>;
-      end(): Promise<void>;
-    };
+/** This file's own MySQL database, for the same reason as its Postgres schema. */
+const mysqlDatabaseName = `farm_check_${process.pid}_${Date.now() % 100000}`;
+let mysqlDatabaseReady: Promise<void> | undefined;
+
+type MysqlConnection = {
+  query(sql: string): Promise<[Array<Record<string, unknown>>, unknown]>;
+  end(): Promise<void>;
+};
+
+function mysqlModule() {
+  return requireModule("mysql2/promise") as {
+    createConnection(url: string): Promise<MysqlConnection>;
+    createPool(url: string): MysqlConnection;
   };
-  const pool = mysql.createPool(mysqlTestUrl!);
+}
+
+async function mysqlDatabase(): Promise<TestDatabase> {
+  const mysql = mysqlModule();
+  mysqlDatabaseReady ??= (async () => {
+    const admin = await mysql.createConnection(mysqlTestUrl!);
+    await admin.query(`CREATE DATABASE IF NOT EXISTS \`${mysqlDatabaseName}\``);
+    await admin.end();
+  })();
+  await mysqlDatabaseReady;
+  const url = new URL(mysqlTestUrl!);
+  url.pathname = `/${mysqlDatabaseName}`;
+  const pool = mysql.createPool(url.toString());
   return {
     dialect: "mysql",
     client: pool,
@@ -129,10 +152,16 @@ async function mysqlDatabase(): Promise<TestDatabase> {
 }
 
 afterAll(async () => {
-  if (!postgresSchemaReady) return;
-  const admin = pgPool();
-  await admin.query(`DROP SCHEMA IF EXISTS "${postgresSchema}" CASCADE`);
-  await admin.end();
+  if (postgresSchemaReady) {
+    const admin = pgPool();
+    await admin.query(`DROP SCHEMA IF EXISTS "${postgresSchema}" CASCADE`);
+    await admin.end();
+  }
+  if (mysqlDatabaseReady) {
+    const admin = await mysqlModule().createConnection(mysqlTestUrl!);
+    await admin.query(`DROP DATABASE IF EXISTS \`${mysqlDatabaseName}\``);
+    await admin.end();
+  }
 });
 
 const databases: Array<[string, () => Promise<TestDatabase>]> = [
