@@ -46,19 +46,47 @@ type VitePendingRequest = {
   request: Promise<unknown>;
 };
 
-async function drainVitePendingWork(server: ViteDevServer): Promise<void> {
-  const environments = Object.values(server.environments ?? {});
+async function settleViteDepsOptimizers(server: ViteDevServer): Promise<void> {
   // Vite 8 can cancel an optimizer without awaiting its active Rolldown write.
   // Let discovery finish before collecting processing promises: the scan can
-  // add dependencies that have no pending transform in the registry below.
+  // add dependencies that have no pending transform in the request registry.
   await Promise.allSettled(
-    environments.map(async ({ depsOptimizer }) => {
+    Object.values(server.environments ?? {}).map(async ({ depsOptimizer }) => {
       await depsOptimizer?.scanProcessing;
       await Promise.allSettled(
         Object.values(depsOptimizer?.metadata.discovered ?? {}).map((dep) => dep.processing),
       );
     }),
   );
+}
+
+/**
+ * Vite's restart closes the live generation without this drain. A dependency build that started
+ * after the startup scan, once the static import crawl has ended, is not cancelled by that close
+ * and keeps writing into the project after close() resolves. Let it finish first, bounded like
+ * close() so a stuck optimizer cannot block the restart that would replace it.
+ */
+async function settleViteDepsOptimizersBeforeRestart(server: ViteDevServer): Promise<void> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const timedOut = new Promise<"timeout">((resolve) => {
+    timer = setTimeout(() => resolve("timeout"), VITE_CLOSE_TIMEOUT_MS);
+    timer.unref?.();
+  });
+  try {
+    const outcome = await Promise.race([settleViteDepsOptimizers(server), timedOut]);
+    if (outcome === "timeout") {
+      logger.warn(
+        `Vite's dependency optimizer did not settle within ${VITE_CLOSE_TIMEOUT_MS}ms; restarting without it`,
+      );
+    }
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
+}
+
+async function drainVitePendingWork(server: ViteDevServer): Promise<void> {
+  const environments = Object.values(server.environments ?? {});
+  await settleViteDepsOptimizers(server);
   // Each Vite environment waits for this registry while it closes its plugin
   // container and dependency optimizer. That order can strand
   // optimized-dependency loads: the optimizer is gone, but the plugin hook
@@ -199,7 +227,9 @@ export function createFarmDevLifecyclePlugin(
             }
             // Retain Vite's coalescing and forceOptimize behavior. The shared set
             // also covers calls made through a replacement generation's wrapper.
-            const restart = restartViteServer(forceOptimize);
+            const restart = settleViteDepsOptimizersBeforeRestart(owner).then(() =>
+              restartViteServer(forceOptimize),
+            );
             pendingRestarts.add(restart);
             try {
               await restart;
