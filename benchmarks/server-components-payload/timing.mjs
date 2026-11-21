@@ -25,8 +25,10 @@ const SECTIONS = {
   docs: ["/docs/p0", "/docs/p40", "/docs/p120"],
   shop: ["/shop/s0", "/shop/s60", "/shop/s120"],
   blog: ["/blog/b0", "/blog/b40", "/blog/b80"],
+  guide: ["/guide/b0", "/guide/b40", "/guide/b80"],
 };
 const NAVIGATIONS = 10;
+const FIRST_NAVIGATION_HOVER_MS = 100;
 const SERVER_SECONDS = 5;
 const SERVER_CONCURRENCY = 16;
 
@@ -86,14 +88,14 @@ async function firstLoad(browser, url) {
  * frame after the new heading is in the DOM (the first frame renders it). Measured in the page, so
  * neither engine gains from where its commit falls relative to the test's polling.
  */
-async function navigations(browser, url, start, pageAt) {
+async function navigations(browser, url, start, pageAt, count = NAVIGATIONS, hoverMs = 0) {
   const context = await browser.newContext();
   const page = await context.newPage();
   const cdp = await context.newCDPSession(page);
   await cdp.send("Emulation.setCPUThrottlingRate", { rate: CPU_THROTTLE });
   await page.goto(url + start, { waitUntil: "networkidle" });
   const times = [];
-  for (let index = 0; index < NAVIGATIONS; index++) {
+  for (let index = 0; index < count; index++) {
     const expected = pageAt(index + 1);
     const title = /<h1>([^<]*)<\/h1>/.exec(await (await fetch(url + expected)).text())?.[1] ?? "";
     const painted = page.evaluate(
@@ -115,6 +117,10 @@ async function navigations(browser, url, start, pageAt) {
         }),
       title,
     );
+    if (hoverMs) {
+      await page.hover("[data-next]");
+      await page.waitForTimeout(hoverMs);
+    }
     await page.click("[data-next]");
     times.push(Math.round(await painted));
     await page.waitForLoadState("networkidle");
@@ -162,12 +168,31 @@ try {
           pathnames[0],
           (i) => `${prefix}${i}`,
         );
+        // The first navigation after a cold visit, when the pointer rests on "Next" for
+        // FIRST_NAVIGATION_HOVER_MS first, as a reader's does. It pays for whatever the
+        // first load deferred, which the median of ten above spreads out.
+        const firsts = [];
+        for (let run = 0; run < runs; run++) {
+          for (const pathname of pathnames) {
+            const at = Number(pathname.slice(prefix.length));
+            const [first] = await navigations(
+              browser,
+              server.url,
+              pathname,
+              (i) => `${prefix}${at + i}`,
+              1,
+              FIRST_NAVIGATION_HOVER_MS,
+            );
+            firsts.push(first);
+          }
+        }
         const load = await throughput(server.url, prefix);
         rows.push({
           section,
           mode,
           "first load main thread (ms)": Math.round(median(loads.map((entry) => entry.task))),
           "first load script (ms)": Math.round(median(loads.map((entry) => entry.script))),
+          "first navigation (ms)": median(firsts),
           "navigation (ms)": median(navigation),
           "server req/s": Math.round(load.rps),
           "server p50 (ms)": Number(load.p50.toFixed(1)),

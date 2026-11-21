@@ -15,7 +15,7 @@ const roundsFlag = process.argv.indexOf("--rounds");
 const ROUNDS = roundsFlag === -1 ? 8 : Number(process.argv[roundsFlag + 1]);
 const SECONDS = 5;
 const CONCURRENCY = 16;
-const SECTIONS = { docs: "/docs/p", shop: "/shop/s", blog: "/blog/b" };
+const SECTIONS = { docs: "/docs/p", shop: "/shop/s", blog: "/blog/b", guide: "/guide/b" };
 
 async function serve(mode, port) {
   const child = spawn(
