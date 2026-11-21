@@ -134,8 +134,7 @@ async function startWorker(root: string) {
 }
 
 describe("an RSC build for Cloudflare Pages", () => {
-  it("runs in workerd: it server-renders pages with React's production build and reads the worker's env", async (ctx) => {
-    if (process.platform === "win32") ctx.skip();
+  it("runs in workerd: it server-renders pages with React's production build and reads the worker's env", async () => {
     const root = await createApp();
     await buildApp(root);
 
