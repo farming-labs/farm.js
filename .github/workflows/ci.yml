@@ -544,6 +544,9 @@ jobs:
           # Vite cannot resolve a dynamic import whose path it percent-encodes.
           TEMP: ${{ runner.temp }}
           TMP: ${{ runner.temp }}
+          # The farmjs-plugin RSC build tests run many production builds in one vitest
+          # worker and exhaust the default heap, as release:check already accounts for.
+          NODE_OPTIONS: --max-old-space-size=12288
 
   type-check:
     name: Type Check
