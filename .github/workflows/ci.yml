@@ -476,9 +476,11 @@ jobs:
           - os: ubuntu-latest
             node-version: "22.13"
             test_args: --skip-incompatible --only-with-node-engine
+          # Every package runs on Linux and on Windows. The Node 22.13 leg adds
+          # only the packages that declare a Node engine.
           - os: ubuntu-latest
             node-version: "24"
-            test_args: --skip-incompatible --only-with-node-engine
+            test_args: --skip-incompatible
           - os: windows-latest
             node-version: "24"
             test_args: --skip-incompatible
