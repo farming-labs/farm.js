@@ -719,6 +719,11 @@
       "import": "./dist/internal/client-runtime.mjs",
       "require": "./dist/internal/client-runtime.cjs"
     },
+    "./internal/spa-router": {
+      "types": "./dist/internal/spa-router.d.ts",
+      "import": "./dist/internal/spa-router.mjs",
+      "require": "./dist/internal/spa-router.cjs"
+    },
     "./internal/client-error-overlay": {
       "types": "./dist/internal/client-error-overlay.d.ts",
       "import": "./dist/internal/client-error-overlay.mjs",
