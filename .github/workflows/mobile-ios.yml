@@ -67,6 +67,12 @@ jobs:
           xcodebuild -version | tee "$EVIDENCE/xcode-version.txt"
           xcrun simctl list runtimes | tee "$EVIDENCE/runtimes.txt"
 
+      # The package's iOS tests compile generated Swift with swiftc and check plists with plutil.
+      # The Linux and Windows Test jobs skip them, so they run here, once per workflow run.
+      - name: Test @farm.js/mobile with Xcode's tools
+        if: matrix.example == 'mobile'
+        run: pnpm --filter @farm.js/mobile test
+
       # The production apps load from the app's own production server, built by the same command
       # and served over HTTPS on this runner (the next step): production apps accept only HTTPS.
       - name: Build the production project with xcodebuild
