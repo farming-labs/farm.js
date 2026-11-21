@@ -111,8 +111,7 @@ async function fetchFromServer(root: string, pathname: string): Promise<Response
 }
 
 describe("a production server on the RSC pipeline", () => {
-  it("runs the app's plugins when one has server hooks", async (ctx) => {
-    if (process.platform === "win32") ctx.skip();
+  it("runs the app's plugins when one has server hooks", async () => {
     const root = await createApp();
     await buildApp(root);
 
