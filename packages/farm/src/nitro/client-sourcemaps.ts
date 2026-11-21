@@ -19,19 +19,28 @@ export function resolveFarmClientSourcemap(sourcemap: unknown): "hidden" | false
 
 type BundleOutput = { type: string; source?: string | Uint8Array };
 
-/** Move the client build's `.map` files from the public output to `outDir`. */
+/**
+ * Move the client build's `.map` files from the public output to `outDir`.
+ *
+ * It takes the maps last: Vite's import analysis puts an entry's preload map on its first line in
+ * its own `generateBundle`, after `enforce: "post"` plugins, and rewrites that chunk's map in the
+ * bundle. A map taken before then is a line short.
+ */
 export function createFarmPrivateClientSourcemapsPlugin(options: { outDir: string }) {
   let maps: Array<[fileName: string, source: string | Uint8Array]> = [];
   return {
     name: "farm-private-client-sourcemaps",
     enforce: "post" as const,
-    generateBundle(_output: unknown, bundle: Record<string, BundleOutput>) {
-      maps = [];
-      for (const [fileName, output] of Object.entries(bundle)) {
-        if (output.type !== "asset" || !fileName.endsWith(".map")) continue;
-        maps.push([fileName, output.source ?? ""]);
-        delete bundle[fileName];
-      }
+    generateBundle: {
+      order: "post" as const,
+      handler(_output: unknown, bundle: Record<string, BundleOutput>) {
+        maps = [];
+        for (const [fileName, output] of Object.entries(bundle)) {
+          if (output.type !== "asset" || !fileName.endsWith(".map")) continue;
+          maps.push([fileName, output.source ?? ""]);
+          delete bundle[fileName];
+        }
+      },
     },
     async writeBundle() {
       await fs.rm(options.outDir, { recursive: true, force: true });
