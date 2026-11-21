@@ -127,7 +127,7 @@ Farm Infra can store incoming JSON events and retry delivery while your app is o
 Install the managed webhook SDK in the sending and receiving apps.
 
 ```bash
-pnpm add @farm.js/webhook@beta
+pnpm add @farm.js/webhook
 ```
 
 In the Infra dashboard, open **Webhooks**, choose the project and environment, and create a
