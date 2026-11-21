@@ -79,6 +79,32 @@ const BASE_PATH_APP: Fixture = {
   "src/app/about/page.tsx": `export default function Page() { return <h1>about page</h1>; }`,
 };
 
+const CONDITIONS_APP: Fixture = {
+  "farm.config.ts": `export default {
+  images: { provider: "none" },
+  telemetry: false,
+  redirects: () => [
+    { source: "/beta", destination: "/beta-on", has: [{ type: "cookie", key: "beta", value: "on" }] },
+    { source: "/beta", destination: "/beta-off", missing: [{ type: "cookie", key: "beta" }] },
+    { source: "/go", destination: "/go-header", has: [{ type: "header", key: "x-beta", value: "^yes$" }] },
+    { source: "/go", destination: "/go-default" },
+    { source: "/home", destination: "/home-local", has: [{ type: "host", value: "^(localhost|127\\.0\\.0\\.1)$" }] },
+  ],
+  rewrites: () => [
+    { source: "/docs", destination: "/api/echo", has: [{ type: "query", key: "v", value: "^2$" }] },
+    { source: "/plain", destination: "/api/echo", missing: [{ type: "query", key: "v" }] },
+  ],
+};`,
+  "src/app/layout.tsx": `export default function Layout({ children }) { return <main>{children}</main>; }`,
+  "src/app/page.tsx": `export default function Page() { return <h1>home page</h1>; }`,
+  "src/app/beta-on/page.tsx": `export default function Page() { return <h1>beta on</h1>; }`,
+  "src/app/beta-off/page.tsx": `export default function Page() { return <h1>beta off</h1>; }`,
+  "src/app/go-header/page.tsx": `export default function Page() { return <h1>go header</h1>; }`,
+  "src/app/go-default/page.tsx": `export default function Page() { return <h1>go default</h1>; }`,
+  "src/app/home-local/page.tsx": `export default function Page() { return <h1>home local</h1>; }`,
+  "src/app/api/echo/route.ts": ECHO_ROUTE,
+};
+
 const BACKEND_APP: Fixture = {
   "farm.config.ts": `export default {
   renderer: false,
@@ -255,6 +281,52 @@ const expectBasePathApp: Run = async (origin) => {
   expect(about.response.headers.get("x-about")).toBe("on");
 };
 
+const expectConditionsApp: Run = async (origin) => {
+  // A cookie-gated redirect falls through to the missing-cookie rule.
+  const betaOff = await get(origin, "/beta");
+  expect(betaOff.response.status, "/beta without cookie").toBe(307);
+  expect(betaOff.response.headers.get("location")).toBe("/beta-off");
+
+  const betaOn = await get(origin, "/beta", { headers: { cookie: "beta=on" } });
+  expect(betaOn.response.status, "/beta with cookie").toBe(307);
+  expect(betaOn.response.headers.get("location")).toBe("/beta-on");
+
+  // A cookie with another value matches neither rule, so there is no redirect.
+  const betaWrong = await get(origin, "/beta", { headers: { cookie: "beta=off" } });
+  expect(betaWrong.response.status, "/beta with another cookie value").toBe(404);
+
+  // A header-gated redirect falls through to the unconditional rule.
+  const goDefault = await get(origin, "/go");
+  expect(goDefault.response.status, "/go without header").toBe(307);
+  expect(goDefault.response.headers.get("location")).toBe("/go-default");
+
+  const goHeader = await get(origin, "/go", { headers: { "x-beta": "yes" } });
+  expect(goHeader.response.status, "/go with header").toBe(307);
+  expect(goHeader.response.headers.get("location")).toBe("/go-header");
+
+  // The host condition matches the test server's host in both modes:
+  // localhost in development, 127.0.0.1 in the production helper.
+  const home = await get(origin, "/home");
+  expect(home.response.status, "/home on localhost").toBe(307);
+  expect(home.response.headers.get("location")).toBe("/home-local");
+
+  // A query-gated rewrite applies only with ?v=2, keeping the query.
+  const docsV2 = await get(origin, "/docs?v=2");
+  expect(docsV2.response.status, "/docs?v=2").toBe(200);
+  expect(JSON.parse(docsV2.body)).toEqual({ path: "/api/echo", q: null });
+
+  const docsV1 = await get(origin, "/docs?v=1");
+  expect(docsV1.response.status, "/docs?v=1").toBe(404);
+
+  // A missing-query rewrite applies only without ?v.
+  const plain = await get(origin, "/plain");
+  expect(plain.response.status, "/plain").toBe(200);
+  expect(JSON.parse(plain.body)).toEqual({ path: "/api/echo", q: null });
+
+  const plainV = await get(origin, "/plain?v=1");
+  expect(plainV.response.status, "/plain?v=1").toBe(404);
+};
+
 const expectBackendApp: Run = async (origin) => {
   const rewritten = await get(origin, "/rw/foo?q=1");
   expect(rewritten.response.status, "/rw/foo").toBe(200);
@@ -362,6 +434,12 @@ const cases: Array<[name: string, prefix: string, files: Fixture, run: Run]> = [
     "farm-config-routes-api-",
     BACKEND_APP,
     expectBackendApp,
+  ],
+  [
+    "has/missing conditions on redirects and rewrites",
+    "farm-config-routes-conditions-",
+    CONDITIONS_APP,
+    expectConditionsApp,
   ],
   [
     "encoded captures and non-GET requests for public files",

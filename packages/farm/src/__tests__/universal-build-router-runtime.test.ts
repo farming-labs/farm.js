@@ -10,12 +10,14 @@ import {
 import { createFarmRouter } from "../router";
 import {
   generateClientPageDirectorySource,
+  generateConfigRouteConditionsSource,
   generateConfiguredResponseHeadersRuntimeSource,
   generateRedirectInterpolationSource,
   generateRuntimePathMatcherSource,
   generateUniversalRouterStateRuntime,
   generateUniversalRouterStateProperties,
 } from "../nitro/universal-build";
+import { matchesFarmRouteConditions, type FarmRouteCondition } from "../plugins/route-conditions";
 import {
   compileConfigRoutePattern,
   interpolateConfigRouteDestination,
@@ -1073,6 +1075,134 @@ describe("generateRedirectInterpolationSource", () => {
       expect(production).toBe(expected);
       // Production must match what the development redirect plugin produces.
       expect(production).toBe(runDevelopment(source, destination, pathname));
+    });
+  }
+});
+
+describe("generateConfigRouteConditionsSource", () => {
+  // The production condition evaluator must agree with the development path
+  // (plugins/route-conditions.ts) exactly: the same has/missing semantics run
+  // in the dev plugins and in the generated Nitro entry.
+  const prod = new Function(
+    `${generateConfigRouteConditionsSource()}; return { matchesFarmRouteConditions };`,
+  )() as {
+    matchesFarmRouteConditions: (
+      has: FarmRouteCondition[] | undefined,
+      missing: FarmRouteCondition[] | undefined,
+      url: URL,
+      headers?: Headers,
+    ) => boolean;
+  };
+
+  const cases: Array<{
+    label: string;
+    expected: boolean;
+    has?: FarmRouteCondition[];
+    missing?: FarmRouteCondition[];
+    url: string;
+    headers?: Record<string, string>;
+  }> = [
+    {
+      label: "cookie presence",
+      expected: true,
+      has: [{ type: "cookie", key: "beta" }],
+      url: "https://farm.test/beta",
+      headers: { cookie: "beta=on" },
+    },
+    {
+      label: "cookie absent",
+      expected: false,
+      has: [{ type: "cookie", key: "beta" }],
+      url: "https://farm.test/beta",
+      headers: { cookie: "other=1" },
+    },
+    {
+      label: "cookie regex value",
+      expected: false,
+      has: [{ type: "cookie", key: "beta", value: "^on$" }],
+      url: "https://farm.test/beta",
+      headers: { cookie: "beta=on-2" },
+    },
+    {
+      label: "percent-encoded cookie value",
+      expected: true,
+      has: [{ type: "cookie", key: "tier", value: "^gold$" }],
+      url: "https://farm.test/beta",
+      headers: { cookie: "tier=%67old" },
+    },
+    {
+      label: "header presence, case-insensitive name",
+      expected: true,
+      has: [{ type: "header", key: "x-beta" }],
+      url: "https://farm.test/beta",
+      headers: { "X-BETA": "yes" },
+    },
+    {
+      label: "header regex value",
+      expected: false,
+      has: [{ type: "header", key: "x-beta", value: "^yes$" }],
+      url: "https://farm.test/beta",
+      headers: { "x-beta": "yes please" },
+    },
+    {
+      label: "query presence",
+      expected: true,
+      has: [{ type: "query", key: "v" }],
+      url: "https://farm.test/docs?v=1",
+    },
+    {
+      label: "query regex value on a repeated parameter",
+      expected: true,
+      has: [{ type: "query", key: "v", value: "^2$" }],
+      url: "https://farm.test/docs?v=1&v=2",
+    },
+    {
+      label: "query regex value with no match",
+      expected: false,
+      has: [{ type: "query", key: "v", value: "^2$" }],
+      url: "https://farm.test/docs?v=1&v=12",
+    },
+    {
+      label: "host regex value",
+      expected: true,
+      has: [{ type: "host", value: "^eu\\.farm\\.test$" }],
+      url: "https://EU.farm.test/home",
+    },
+    {
+      label: "missing cookie blocks the rule",
+      expected: false,
+      missing: [{ type: "cookie", key: "beta" }],
+      url: "https://farm.test/beta",
+      headers: { cookie: "beta=on" },
+    },
+    {
+      label: "missing query lets the rule through",
+      expected: true,
+      missing: [{ type: "query", key: "preview" }],
+      url: "https://farm.test/beta",
+    },
+    {
+      label: "has and missing together",
+      expected: false,
+      has: [{ type: "cookie", key: "session" }],
+      missing: [{ type: "query", key: "preview" }],
+      url: "https://farm.test/member?preview=1",
+      headers: { cookie: "session=abc" },
+    },
+    {
+      label: "no conditions always matches",
+      expected: true,
+      url: "https://farm.test/any",
+    },
+  ];
+
+  for (const { label, expected, has, missing, url, headers } of cases) {
+    it(`evaluates ${label} in parity with development`, () => {
+      const requestUrl = new URL(url);
+      const requestHeaders = headers ? new Headers(headers) : undefined;
+      const production = prod.matchesFarmRouteConditions(has, missing, requestUrl, requestHeaders);
+      expect(production).toBe(expected);
+      expect(production).toBe(matchesFarmRouteConditions(has, missing, requestUrl, requestHeaders));
     });
   }
 });
