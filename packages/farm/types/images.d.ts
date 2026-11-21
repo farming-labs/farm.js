@@ -44,6 +44,15 @@ declare module "*.png" {
   export default image;
 }
 
+declare module "*.svg" {
+  const image: import("@farm.js/core/image").StaticImageData;
+  export const src: string;
+  export const width: number;
+  export const height: number;
+  export const blurDataURL: string | undefined;
+  export default image;
+}
+
 declare module "*.webp" {
   const image: import("@farm.js/core/image").StaticImageData;
   export const src: string;
