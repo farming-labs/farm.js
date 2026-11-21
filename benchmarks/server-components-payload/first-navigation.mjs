@@ -2,13 +2,15 @@
 // a navigation waits for, which a server on localhost hides (RFC 0003).
 //
 //   node benchmarks/server-components-payload/first-navigation.mjs [--modes rsc,islands]
-//     [--latency 50] [--cpu 4] [--hover 100 | --tap | --tap-hold 80] [--rounds 5] [--http1]
+//     [--latency 50] [--down <kbit/s>] [--cpu 4] [--hover 100 | --tap | --tap-hold 80] [--rounds 5]
+//     [--http1]
 //
 // Uses the production builds measure.mjs leaves in app/.farm; a mode names a build directory
 // (`.output-<mode>`), so a copy of one (`.output-islands-before`) can run beside it. Each round
 // visits every section once per mode, in alternating order, in a new browser context:
 //
-// - the network adds `--latency` ms to every response, and Chrome runs with `--cpu`x throttling;
+// - the network adds `--latency` ms to every response, downloads at `--down` kbit/s (unlimited by
+//   default), and Chrome runs with `--cpu`x throttling;
 // - the pointer rests on "Next" for `--hover` ms and clicks, or a finger taps it at once (`--tap`)
 //   or after `--tap-hold` ms (a tap usually lasts 50 to 120 ms);
 // - the time runs from the click's own timestamp, when the browser received the input (a page
@@ -17,7 +19,9 @@
 //
 // Responses go over HTTP/2, as from a CDN, through a local TLS proxy with a self-signed certificate
 // (made with `openssl`): over HTTP/1.1 Chrome opens at most six connections to a host, which
-// delays a page's seventh module by a round trip. `--http1` serves the builds directly.
+// delays a page's seventh module by a round trip. `--http1` serves the builds directly. Like a CDN,
+// the proxy brotli-compresses a text response the server sent uncompressed: the `rsc` engine's
+// Node server leaves its pages and Flight responses uncompressed, the `islands` one does not.
 import { execFileSync, spawn } from "node:child_process";
 import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import http from "node:http";
@@ -26,6 +30,7 @@ import { createRequire } from "node:module";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { constants, createBrotliCompress } from "node:zlib";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const repositoryRoot = path.resolve(here, "../..");
@@ -39,6 +44,7 @@ const modes = option("--modes", "rsc,islands").split(",");
 const sections = option("--sections", "docs,shop,blog,guide").split(",");
 const rounds = Number(option("--rounds", "5"));
 const latency = Number(option("--latency", "50"));
+const down = args.includes("--down") ? Number(option("--down", "0")) : null;
 const cpu = Number(option("--cpu", "4"));
 const hover = Number(option("--hover", "100"));
 const tapHold = args.includes("--tap-hold") ? Number(option("--tap-hold", "80")) : null;
@@ -91,8 +97,27 @@ async function proxy(port, upstream, credentials) {
         for (const [name, value] of Object.entries(answer.headers)) {
           if (!hopByHop.has(name)) out[name] = value;
         }
+        const compress =
+          !answer.headers["content-encoding"] &&
+          /^text\//.test(answer.headers["content-type"] ?? "") &&
+          /\bbr\b/.test(request.headers["accept-encoding"] ?? "");
+        if (!compress) {
+          response.writeHead(answer.statusCode, out);
+          answer.pipe(response);
+          return;
+        }
+        // Quality 5 and a flush per chunk, as Farm's own compression, so a stream still streams.
+        delete out["content-length"];
+        out["content-encoding"] = "br";
         response.writeHead(answer.statusCode, out);
-        answer.pipe(response);
+        answer
+          .pipe(
+            createBrotliCompress({
+              flush: constants.BROTLI_OPERATION_FLUSH,
+              params: { [constants.BROTLI_PARAM_QUALITY]: 5 },
+            }),
+          )
+          .pipe(response);
       },
     );
     forwarded.on("error", () => response.destroy());
@@ -120,7 +145,7 @@ async function firstNavigation(browser, origin, section) {
     await cdp.send("Network.emulateNetworkConditions", {
       offline: false,
       latency,
-      downloadThroughput: -1,
+      downloadThroughput: down === null ? -1 : (down * 1000) / 8,
       uploadThroughput: -1,
     });
     const first = FIRST_PAGES[section];
@@ -228,7 +253,7 @@ try {
         ? "a tap"
         : `a ${hover} ms hover, then a click`;
   console.log(
-    `Medians of ${rounds}; ${latency} ms latency, ${http1 ? "HTTP/1.1" : "HTTP/2"}, ${cpu}x CPU throttling; ${input}.`,
+    `Medians of ${rounds}; ${latency} ms latency, ${down === null ? "unlimited" : `${down} kbit/s`} down, ${http1 ? "HTTP/1.1" : "HTTP/2"}, ${cpu}x CPU throttling; ${input}.`,
   );
   console.table(rows);
 } finally {

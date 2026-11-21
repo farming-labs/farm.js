@@ -10,6 +10,7 @@ node benchmarks/server-components-payload/measure.mjs --skip-build --modes islan
 node benchmarks/server-components-payload/timing.mjs                 # uses the builds above
 node benchmarks/server-components-payload/throughput.mjs             # uses the builds above
 node benchmarks/server-components-payload/first-navigation.mjs --latency 150 --tap-hold 80
+node benchmarks/server-components-payload/first-navigation.mjs --latency 150 --down 1600 --tap-hold 80
 ```
 
 ## The app
@@ -123,35 +124,47 @@ engines, so both see the same load. This run had other work on the machine (load
 ### First navigation over a network (`first-navigation.mjs`)
 
 A server on the same machine answers at once, which hides the round trips a first navigation
-waits for. `first-navigation.mjs` adds a fixed latency to every response
-(`Network.emulateNetworkConditions`), serves the builds over HTTP/2 through a local TLS proxy, and
-throttles Chrome's CPU 4x. Each of 5 rounds visits every section cold, alternating the engines'
-order, and either hovers "Next" for 100 ms and clicks, taps it at once, or taps it for 80 ms (a
-tap usually lasts 50 to 120 ms). The time runs from the click's own timestamp, when the browser
-received the input, to the second frame after the new heading is in the document. Medians, in ms.
+waits for. `first-navigation.mjs` adds a fixed latency to every response and can limit the
+download bandwidth (`Network.emulateNetworkConditions`), serves the builds over HTTP/2 through a
+local TLS proxy, and throttles Chrome's CPU 4x. Each of 5 rounds visits every section cold,
+alternating the engines' order, and either hovers "Next" for 100 ms and clicks, taps it at once, or
+taps it for 80 ms (a tap usually lasts 50 to 120 ms). The time runs from the click's own
+timestamp, when the browser received the input, to the second frame after the new heading is in
+the document. Medians, in ms.
 
-| Section | Engine    | 50 ms, hover | 50 ms, instant tap | 150 ms, hover | 150 ms, 80 ms tap |
-| ------- | --------- | ------------ | ------------------ | ------------- | ----------------- |
-| docs    | `rsc`     | 89           | 113                | 183           | 200               |
-| docs    | `islands` | 46           | 146                | 181           | 184               |
-| shop    | `rsc`     | 85           | 114                | 183           | 201               |
-| shop    | `islands` | 64           | 195                | 217           | 215               |
-| blog    | `rsc`     | 133          | 148                | 227           | 235               |
-| blog    | `islands` | 64           | 181                | 215           | 214               |
-| guide   | `rsc`     | 131          | 147                | 224           | 232               |
-| guide   | `islands` | 84           | 214                | 235           | 241               |
+The proxy brotli-compresses a text response the server left uncompressed, as a CDN would. The
+`rsc` engine's Node server sends its pages and Flight responses uncompressed (`islands` compresses
+them), which at 1.6 Mbit/s makes an RSC blog navigation take over a second. The 1.6 Mbit/s column
+is measured with that compression; the others were measured before it, which changes nothing
+without a bandwidth limit.
+
+| Section | Engine    | 50 ms, hover | 50 ms, instant tap | 150 ms, hover | 150 ms, 80 ms tap | 150 ms at 1.6 Mbit/s, 80 ms tap |
+| ------- | --------- | ------------ | ------------------ | ------------- | ----------------- | ------------------------------- |
+| docs    | `rsc`     | 89           | 113                | 183           | 200               | 264                             |
+| docs    | `islands` | 46           | 146                | 181           | 184               | 698                             |
+| shop    | `rsc`     | 85           | 114                | 183           | 201               | 220                             |
+| shop    | `islands` | 64           | 195                | 217           | 215               | 790                             |
+| blog    | `rsc`     | 133          | 148                | 227           | 235               | 286                             |
+| blog    | `islands` | 64           | 181                | 215           | 214               | 773                             |
+| guide   | `rsc`     | 131          | 147                | 224           | 232               | 286                             |
+| guide   | `islands` | 84           | 214                | 235           | 241               | 827                             |
 
 - RSC fetches the page after the click. With a 100 ms hover on a fast network, islands has loaded
   the runtime and router and prefetched the page by then, so its first navigation takes about half
   as long.
 - A click made before the runtime runs is held by the boot entry, which requests the page with
-  the click; the router renders that response once the runtime runs. On a mobile network (150 ms)
-  that makes a first tap faster than RSC's on docs and blog, and 9 to 14 ms slower under a
-  hydrating layout (shop, guide). Before the boot entry requested the page, the same taps took
+  the click; the router renders that response once the runtime runs. With 150 ms of latency and
+  unlimited bandwidth that makes a first tap faster than RSC's on docs and blog, and 9 to 14 ms
+  slower under a hydrating layout (shop, guide). A rerun under heavier load (load average 7 to 9)
+  put the two engines within about 25 ms of each other either way. Before the boot entry
+  requested the page, the same taps took
   305, 342, 335 and 364 ms. A 100 ms hover is too short to load the runtime over that network, so
   its click gains the same way: from 241, 289, 276 and 310 ms.
 - An instant tap on a fast network is still 33 to 81 ms slower: the click arrives before the
   runtime, which then has to start (and hydrate the layout, on shop and guide) before the page
   renders.
+- On a slow connection the runtime's download decides. At 1.6 Mbit/s the client runtime and
+  router (about 91 KB br) take over 450 ms to arrive, so a first tap is 434 to 570 ms slower than
+  RSC's on every section, whose first load already brought its 71.0 KB.
 
 `results/latest.json` has the per-page numbers of the last run.
