@@ -133,10 +133,10 @@ timestamp, when the browser received the input, to the second frame after the ne
 the document. Medians, in ms.
 
 The proxy brotli-compresses a text response the server left uncompressed, as a CDN would. The
-`rsc` engine's Node server sends its pages and Flight responses uncompressed (`islands` compresses
-them), which at 1.6 Mbit/s makes an RSC blog navigation take over a second. The 1.6 Mbit/s column
-is measured with that compression; the others were measured before it, which changes nothing
-without a bandwidth limit.
+`rsc` engine's Node server sent its pages and Flight responses uncompressed until #3053 (`islands`
+compresses them), which at 1.6 Mbit/s makes an RSC blog navigation take over a second. The
+1.6 Mbit/s column is measured with that compression; the others were measured before it, which
+changes nothing without a bandwidth limit.
 
 | Section | Engine    | 50 ms, hover | 50 ms, instant tap | 150 ms, hover | 150 ms, 80 ms tap | 150 ms at 1.6 Mbit/s, 80 ms tap |
 | ------- | --------- | ------------ | ------------------ | ------------- | ----------------- | ------------------------------- |
