@@ -35,7 +35,7 @@ type ResourceState = {
   failRestart?: boolean;
 };
 
-async function createProject(middlewareMode = false) {
+async function createProject(middlewareMode = false, depsBuildDelayMs = 0) {
   const root = await fs.realpath(await fs.mkdtemp(path.join(os.tmpdir(), "farm-dev-restart-")));
   const project: { root: string; server?: ViteDevServer } = { root };
   projects.push(project);
@@ -75,7 +75,15 @@ export default {
     },
   }],
   vite: {
-    server: { middlewareMode: ${middlewareMode} },
+    server: { middlewareMode: ${middlewareMode} },${
+      depsBuildDelayMs
+        ? `
+    optimizeDeps: { rolldownOptions: { plugins: [{
+      name: "deps-build-delay",
+      generateBundle: () => new Promise((resolve) => setTimeout(resolve, ${depsBuildDelayMs})),
+    }] } },`
+        : ""
+    }
     plugins: [{
       name: "restart-control",
       async config() {
@@ -175,6 +183,16 @@ describe("development server restart lifecycle", () => {
     expect(state.dispose).toBe(1);
     expect(state.shutdown).toBe(1);
     expect(server.watcher.closed).toBe(true);
+  }, 60_000);
+
+  it("finishes the dependency build of the generation a restart retires before close resolves", async () => {
+    // Vite starts a dependency build after its startup scan. Once the import crawl has ended, the
+    // close a restart runs does not cancel it, and it kept writing into the project after close().
+    const { server } = await createProject(false, 500);
+    await server.restart();
+    await server.close();
+    const cache = await fs.readdir(path.join(server.config.root, "node_modules", ".vite"));
+    expect(cache.filter((entry) => entry.startsWith("deps_temp"))).toEqual([]);
   }, 60_000);
 
   it("releases resources when the replacement HTTP listener is closed directly", async () => {
