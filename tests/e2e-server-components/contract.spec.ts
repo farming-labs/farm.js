@@ -1191,6 +1191,39 @@ test("a link followed before the client runtime loads is a client navigation", a
   expect(errors).toEqual([]);
 });
 
+test("a link followed before the client runtime loads requests its page with the click", async ({
+  page,
+}) => {
+  test.skip(mode !== "islands", "rsc hydrates every client component on load");
+  const errors = collectErrors(page);
+  await page.goto("/timing/later");
+  await hydrated(page);
+  const pageRequests: string[] = [];
+  page.on("request", (request) => {
+    if (new URL(request.url()).pathname === "/timing") pageRequests.push(request.url());
+  });
+  // While the runtime is held back none of its code runs, so a request for the page meanwhile is
+  // the boot's, and the router answers the click with it rather than with a second one.
+  let release!: () => void;
+  const released = new Promise<void>((resolve) => (release = resolve));
+  await page.route(
+    (url) => isClientRuntime(url.pathname),
+    async (route) => {
+      await released;
+      await route.continue();
+    },
+  );
+  await page.evaluate(() => Object.assign(window, { __farmSameDocument: true }));
+  await page.getByRole("link", { name: "To timing" }).click();
+  await expect.poll(() => pageRequests.length).toBe(1);
+  release();
+  await expect(page).toHaveURL(/\/timing$/);
+  await expect(page.getByRole("heading", { name: "Timing", exact: true })).toBeVisible();
+  expect(await page.evaluate(() => "__farmSameDocument" in window)).toBe(true);
+  expect(pageRequests).toHaveLength(1);
+  expect(errors).toEqual([]);
+});
+
 test("a page that hydrates loads the router only when a navigation needs it", async ({ page }) => {
   test.skip(mode !== "islands" || dev, "the production islands client entry splits its router");
   const errors = collectErrors(page);

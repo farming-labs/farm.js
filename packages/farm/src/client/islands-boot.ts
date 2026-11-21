@@ -23,6 +23,26 @@ interface FarmQueuedInteraction {
   createdAt: number;
 }
 
+/**
+ * @internal The request for a link clicked before the runtime ran, which the boot sends with the
+ * click (`window.__FARM_EARLY_NAVIGATION__`). The router's next navigation request takes the
+ * response when it would send the same request, and drops it otherwise.
+ */
+export interface FarmEarlyNavigation {
+  /** The absolute URL requested. */
+  url: string;
+  /** The request's headers, names in lower case. */
+  headers: Record<string, string>;
+  response: Promise<Response>;
+  /** When the request was sent (`Date.now()`). */
+  at: number;
+  /** Aborts the request. */
+  controller: AbortController;
+}
+
+/** Kept equal to the routers' deployment header (FARM_DEPLOYMENT_ID_HEADER); a test compares them. */
+export const FARM_ISLANDS_BOOT_DEPLOYMENT_HEADER = "x-farm-deployment-id";
+
 const ISLAND = "f-island";
 const HYDRATED_ISLAND = '[data-farm-island-hydrated="true"]';
 
@@ -206,6 +226,38 @@ export function startFarmIslandsBoot(load: () => Promise<unknown> = loadFarmClie
   };
   for (const type of ["pointerdown", "focusin", "mouseover"]) listen(type, observe, true);
 
+  // The page a held click goes to is requested with the click, alongside the runtime, rather than
+  // a round trip after it runs. The headers are the ones the router sends for that navigation from
+  // this document: the layouts it shows, and the tree a root that hydrates renders the next page
+  // into, or else flush markers for a page that streams. The island values the router holds
+  // (F-Values) are left out, so the server sends every value the page needs.
+  const requestPage = (href: string) => {
+    const headers: Record<string, string> = { accept: "text/html" };
+    const layouts = Array.from(
+      (document.getElementById("root") ?? document.body).querySelectorAll(
+        '[data-farm-layout-boundary="true"]',
+      ),
+      (boundary) =>
+        boundary.getAttribute("data-farm-layout-key") ||
+        boundary.getAttribute("data-farm-layout-pattern"),
+    ).filter(Boolean);
+    if (layouts.length) headers["f-layouts"] = JSON.stringify(layouts);
+    if (rootId === "root") headers["f-render"] = "tree";
+    else headers["f-stream"] = "flush";
+    const scope = window as Window & {
+      __FARM_DEPLOYMENT_ID__?: string;
+      __FARM_EARLY_NAVIGATION__?: FarmEarlyNavigation;
+    };
+    if (scope.__FARM_DEPLOYMENT_ID__) {
+      headers[FARM_ISLANDS_BOOT_DEPLOYMENT_HEADER] = scope.__FARM_DEPLOYMENT_ID__;
+    }
+    const controller = new AbortController();
+    const response = fetch(href, { headers, redirect: "manual", signal: controller.signal });
+    // A request the router does not take is aborted, which is not an error.
+    response.catch(() => {});
+    scope.__FARM_EARLY_NAVIGATION__ = { url: href, headers, response, at: Date.now(), controller };
+  };
+
   // A link clicked before the runtime runs: held, then clicked again once the router listens, so
   // it decides as for any click. Bubble phase, like the router, so a handler that prevents the
   // default first still wins.
@@ -217,6 +269,7 @@ export function startFarmIslandsBoot(load: () => Promise<unknown> = loadFarmClie
       const anchor = routedLink(click.target);
       if (!anchor) return;
       click.preventDefault();
+      requestPage(anchor.href);
       start().then(
         () => {
           if (anchor.isConnected) {

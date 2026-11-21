@@ -72,7 +72,10 @@ lets the browser give `useId` the ids in the HTML. The full contract is islx's
   islands all wait loads a 1.9 KB boot script instead of the runtime. When the page first needs
   the runtime, the boot script fetches it together with what comes next: the router when a link
   starts it, and the modules of a layout that hydrates as one root when the start is inside it.
-  They arrive in one round trip instead of one after another.
+  They arrive in one round trip instead of one after another. A link clicked before the runtime
+  runs has its page requested with the click, so the page and the runtime travel together and the
+  router renders the response once it runs. That first response carries every island value the
+  page needs, including ones the current page already has.
 - **Layouts.** A layout that needs one React root (a client provider around the pages) renders as
   an islx server tree: the browser rebuilds it from the HTML, so its module stays on the server,
   and a navigation keeps the provider's state. The pages below it, Markdown pages included, join

@@ -111,7 +111,10 @@ import {
   FARM_SERVER_TREE_LAYOUT_CLIENT_SOURCE,
 } from "../document-layout-client";
 import { FARM_NAVIGATION_SCRIPT_SOURCE } from "../client/navigation-scripts";
-import { FARM_NAVIGATION_STREAM_READER_SOURCE } from "../client/navigation-stream-client";
+import {
+  FARM_EARLY_NAVIGATION_SOURCE,
+  FARM_NAVIGATION_STREAM_READER_SOURCE,
+} from "../client/navigation-stream-client";
 import { FARM_REFRESH_FIELDS_SOURCE } from "../client/refresh-fields";
 import { fileURLToPath } from "url";
 import { builtinModules, createRequire } from "module";
@@ -2822,11 +2825,14 @@ function createHistoryState(path, pageState, currentState) {
 
 async function fetchFarmNavigationDocument(url, headers, recover = true, signal) {
   const deploymentId = window.__FARM_DEPLOYMENT_ID__;
-  const response = await fetch(url, {
-    headers: createFarmDeploymentRequestHeaders(deploymentId, headers),
+  const requestHeaders = createFarmDeploymentRequestHeaders(deploymentId, headers);
+  const response = await (${
+    streamNavigations ? "(recover && takeFarmEarlyNavigation(url, requestHeaders, signal)) || " : ""
+  }fetch(url, {
+    headers: requestHeaders,
     signal,
     redirect: "manual",
-  });
+  }));
   // Let a document navigation follow redirects, including cross-origin chains
   // and fragment inheritance. Never cache/swap their HTML under the source URL.
   if (response.type === "opaqueredirect" || response.redirected) {
@@ -2853,7 +2859,13 @@ async function fetchFarmNavigationDocument(url, headers, recover = true, signal)
   return response;
 }
 
-${streamNavigations ? FARM_NAVIGATION_STREAM_READER_SOURCE : ""}
+${
+  streamNavigations
+    ? `${FARM_NAVIGATION_STREAM_READER_SOURCE}
+
+${FARM_EARLY_NAVIGATION_SOURCE}`
+    : ""
+}
 
 function clearFarmPrefetchCacheOnDeploymentMismatch(router, error) {
   if (error?.name === "FarmDeploymentMismatchError") {
