@@ -1,6 +1,6 @@
 ---
 title: "Migrate from TanStack Start"
-description: "Move a TanStack Start app to Farm: file routes, the root route, loaders, server functions, and server routes."
+description: "Compare Farm.js with TanStack Start on measured performance, typed APIs, developer tools, agents, and integrations, then migrate routes and server behavior."
 section: "Migrations"
 ---
 
@@ -15,6 +15,117 @@ server functions with Farm data loading and API routes. Components and styles ca
 > Point it at [`/docs/migrations/tanstack.md`](/docs/migrations/tanstack.md). That version maps
 > every TanStack Start feature to its Farm equivalent, with before and after code, failure
 > symptoms, and a verification checklist.
+
+## Why move from TanStack Start
+
+**Keep React and a Vite development workflow, and put more of the application behind one typed
+framework contract.** [TanStack Start](https://tanstack.com/start/latest/docs/framework/react/overview)
+already provides typed routing, server functions, and SSR. Farm's case is the combination of those
+application concerns with integrations, generated API callers, operational tools, and agent access.
+
+- **One place for product services.** Auth, billing, email, jobs, storage, and agent runtimes fit
+  into Farm's integration and configuration model. An integration can own its routes, callers,
+  middleware, and lifecycle rather than requiring each application to assemble that wiring.
+- **Endpoint types beyond one router.** Define validation at the API boundary and consume the
+  generated client in the browser. Route handlers remain ordinary Web `Request`/`Response`
+  endpoints for other clients too.
+- **A measurable development baseline.** The published fixture reaches its first usable dev
+  response sooner on Farm. The build difference is smaller; the numbers below show both.
+- **Inspection before guesswork.** The same app exposes route explanations, diagnostics,
+  generated-type checks, and a browser DevTools view.
+- **Agent native at the core.** Markdown, page discovery, capability manifests, and read-only
+  MCP are built into `@farm.js/core`. Explicit tools and optional durable agent execution extend
+  the same application's routes and authorization boundaries.
+
+### Performance evidence
+
+The [published November 3, 2026 snapshot](https://github.com/farming-labs/farm.js/blob/5ff3c9fb20319c9344c1cc1fe918b7eab71b3877/benchmarks/frameworks/results/latest.md)
+compares Farm.js 0.1.51-beta.2 with TanStack Start 1.168.32. Both use React 19.2.4; the Farm stack
+uses Vite 8.3.4/Rolldown and the TanStack stack uses Vite 8.1.5. Lower durations are better.
+
+| Measure                                   | TanStack Start | Farm.js        |
+| ----------------------------------------- | -------------- | -------------- |
+| Process launch to first dev page, median  | 815.62 ms      | 271.78 ms      |
+| Warm dev response, median                 | 4.59 ms        | 2.08 ms        |
+| Clean fixture build, median               | 690.24 ms      | 589.12 ms      |
+| Production boot to first response, median | 83.21 ms       | 77.69 ms       |
+| Production response, median / p95         | 0.99 / 1.74 ms | 0.74 / 1.64 ms |
+
+In this fixture, Farm reaches the first dev page in about one-third of the time and builds in
+about 15% less time. The small production-boot and p95 differences are not a capacity forecast.
+This benchmark does not measure HMR, browser navigation, database work, or a production traffic mix.
+
+The workload is one fresh SSR page with 120 list items and shared CSS. The run used an Apple M1,
+16 GB RAM, macOS 26.2, Node 24.21.0, one discarded burn-in, and seven position-balanced measured
+rounds. Each server received 30 warmup and 30 measured requests per round over local HTTP/1.1,
+requesting identity encoding. Generated framework caches were removed for dev and build; OS and
+product-enabled Node compile caches stayed warm. Farm package preparation and dependency installs
+are outside the build timer. See the
+[method and raw samples](https://github.com/farming-labs/farm.js/tree/5ff3c9fb20319c9344c1cc1fe918b7eab71b3877/benchmarks/frameworks).
+Rerun your routes before treating these historical results as a migration estimate.
+
+### Developer experience after the move
+
+Farm's [API client](/docs/api-client) connects validated endpoints to inferred browser calls.
+Use [typed URL state](/docs/query) where appropriate, and
+[layers](/docs/layers) to share app foundations. [Internationalization](/docs/internationalization),
+[themes](/docs/themes), [storage](/docs/storage), and [cron](/docs/cron) have documented framework
+contracts rather than being migration-specific glue.
+
+Use `farm explain /products/42` to inspect the page, layouts, middleware, and runtime that apply
+to a URL. `farm doctor --json` gives an agent or CI structured diagnostics;
+`farm generate --check` catches stale declarations. [DevTools](/docs/plugins/devtools),
+[Hints](/docs/plugins/hints), and [Analyzer](/docs/plugins/analyzer) cover runtime inspection,
+live-page issues, and build-size investigation.
+
+You can keep TanStack Query where it already owns application data. Decide which cache owns each
+read before adding Farm caching; moving the framework does not require replacing every TanStack
+library. Loader context, search validation, invalidation, and navigation behavior still need the
+explicit mappings in this guide.
+
+### Agent experience after the move
+
+**The core makes the app readable and discoverable by default.** You do not need an agent
+integration or a separate MCP server for its public-page reading surface. On Farm's normal
+page-serving pipeline,
+[Markdown mirrors](/docs/markdown), [discovery metadata](/docs/configuration#agent-readiness),
+and a [read-only MCP catalog](/docs/configuration#default-mcp-server) let agents read eligible
+public pages. The [app manifest](/docs/configuration#app-manifest) describes installed capabilities.
+These are useful for product documentation and support agents, not only for the agent doing the
+migration.
+
+Core also publishes an [AI catalog](/docs/configuration#ai-catalog) for MCP servers the app already
+serves. See [core defaults and limits](/docs/migrations#agent-native-at-the-core), including the
+docs engine's ownership of its indexes and the experimental RSC pipeline's default-MCP limitation.
+
+For actions, expose selected endpoints through [API MCP](/docs/plugins/mcp), retaining validation
+and authorization. [WebMCP](/docs/plugins/webmcp) registers explicit actions in an open, supporting
+browser and remains experimental. For long-running work, the
+[agent integration](/docs/integrations/agent) adds durable steps, pauses, and event waits. Use
+`farm agent check` to inspect the running surface; none of these discovery features grants access
+to a private endpoint.
+
+### Integrations and plugins worth carrying into the plan
+
+- Use [integrations](/docs/integrations) for services such as Better Auth, Stripe, Resend, and
+  Jobs. Keep provider SDKs on the server and reuse an owned client where supported.
+- Add [Prefetch](/docs/plugins/prefetch), [Progress](/docs/plugins/progress), and
+  [Scroll restoration](/docs/plugins/scroll-restoration) after checking the migrated navigation.
+- Use [MSW](/docs/plugins/msw) for request fixtures and [Health](/docs/plugins/health) or
+  [Sentry](/docs/plugins/sentry) for operating the deployed app.
+- Evaluate [PWA](/docs/plugins/pwa) for offline navigation, [Sync](/docs/plugins/sync) for
+  row-level data, and [Content](/docs/plugins/content) plus [Search](/docs/plugins/search) for
+  content-heavy applications. The [full catalog](/docs/migrations#integrations-for-the-product-plugins-for-the-framework)
+  also covers scripts, workers, styling, and custom lifecycle hooks.
+
+### Decide the data and rendering contract first
+
+`createFileRoute`, router context, loaders, and TanStack server functions do not run unchanged
+under Farm. Keep the existing app runnable while you migrate them. API endpoints provide a
+straightforward browser/server boundary; React server components and their action transport have
+[experimental modes](/docs/server-rendering#react-server-components) with their own requirements.
+The RSC pipeline does not yet run every Farm integration or plugin. Check its feature limits, and
+do not enable an experimental renderer merely to preserve a function's name.
 
 ## Set up Farm
 
@@ -62,8 +173,8 @@ starter's `#/*` alias is a `package.json` `imports` entry and keeps working, and
 
 ## Turn the root route into a layout
 
-Farm does not read `__root.tsx`. Recreate it as `src/app/layout.tsx`, which can return the whole
-`<html>` document:
+Farm does not read `__root.tsx`. Recreate it as `src/app/layout.tsx`. Farm owns the HTML document
+shell, so the layout returns application UI:
 
 ```tsx
 import type { LayoutProps, Metadata } from "@farm.js/core";
@@ -77,17 +188,11 @@ export const metadata: Metadata = {
 
 export default function RootLayout({ children }: LayoutProps) {
   return (
-    <html lang="en">
-      <head>
-        <meta charSet="utf-8" />
-        <meta name="viewport" content="width=device-width, initial-scale=1" />
-      </head>
-      <body>
-        <Header />
-        {children}
-        <Footer />
-      </body>
-    </html>
+    <>
+      <Header />
+      {children}
+      <Footer />
+    </>
   );
 }
 ```
@@ -144,10 +249,10 @@ validation, guards, caching, or pending and error components. See [Routing](/doc
 
 Farm supports two ways to move `createServerFn` calls.
 
-| Approach              | Status       | Use it when                                                                  |
-| --------------------- | ------------ | ---------------------------------------------------------------------------- |
-| API routes            | Stable       | Most apps. Each server function becomes a typed endpoint.                    |
-| Farm server functions | Experimental | You want the closest shape to `createServerFn` and accept the RSC toolchain. |
+| Approach              | Status       | Use it when                                                                          |
+| --------------------- | ------------ | ------------------------------------------------------------------------------------ |
+| API routes            | Stable       | Most apps. Each server function becomes a typed endpoint.                            |
+| Farm server functions | Experimental | You want typed browser-callable functions and accept an experimental rendering mode. |
 
 With API routes, keep the handler logic in a server module, call it directly from async pages, and
 mount it as an endpoint for the browser:
@@ -167,9 +272,9 @@ Client components call it through the generated client, `apiClient.todos.post({ 
 [API Routes](/docs/api-routes) and [API Client](/docs/api-client).
 
 Farm's own `createServerFn` from `@farm.js/core/server-fn` takes an `input` schema in place of
-`.inputValidator()`. Calling it from client components requires the experimental
-`@farm.js/plugin/rsc` setup with `experimental.serverActions: true`. See
-[Route actions](/docs/routing#route-actions).
+`.inputValidator()`. Calling it from client components requires Farm's server-function transform.
+Follow the current [server-component setup](/docs/server-rendering#react-server-components) for
+the islands or RSC mode you choose, then see [Route actions](/docs/routing#route-actions).
 
 ## Server routes and middleware
 

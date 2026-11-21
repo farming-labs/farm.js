@@ -8,6 +8,30 @@ and status. Do the migration by hand from this document: do not run `farm migrat
 checked against the Farm 0.1.14 source (`@farm.js/core` 0.1.14, `@farm.js/cli` 0.1.14,
 `@farm.js/svelte` 0.1.0-beta.33, `svelte` 5.56.8).
 
+## Migration goals and current capabilities
+
+Read the [SvelteKit migration rationale](/docs/migrations/sveltekit#why-move-from-sveltekit). Keep
+Svelte components while evaluating Farm's typed server APIs, integrations, diagnostics, plugins,
+and agent access. Preserving forms, data loading, and navigation comes before adding new features.
+
+The [performance evidence](/docs/migrations/sveltekit#performance-evidence) compares SvelteKit
+with Farm's React fixture, not Farm's Svelte renderer. Farm leads in startup/build there, while
+SvelteKit leads in warm-dev response, production boot, and production response. Do not generalize
+it into a universal performance claim or a measured result for the migrated application.
+
+Use the [DX and AX overview](/docs/migrations#what-you-gain-with-farmjs) for current capabilities.
+Keep Svelte code on renderer-neutral API clients and Svelte bindings; React server-function
+transforms and compiler experiments are not Svelte features. Markdown/discovery, MCP, experimental
+WebMCP, and durable server agents have separate configuration and authorization requirements.
+The procedure below records its original validation versions; consult the current
+[Svelte renderer guide](/docs/renderers/svelte) before applying version-specific instructions.
+
+Core agent readiness is part of `@farm.js/core`: Markdown mirrors, page discovery, capability
+manifests, and the default read-only MCP server. Check the
+[core defaults and limits](/docs/migrations#agent-native-at-the-core) for the selected rendering
+mode. Callable API tools, experimental WebMCP, and durable agent execution remain explicit,
+separately configured extensions.
+
 ## Task contract
 
 - Keep the SvelteKit app runnable until Farm passes dev, build, start, and type-check. Work on a
