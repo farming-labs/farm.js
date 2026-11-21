@@ -213,3 +213,70 @@ describe("startFarmIslandsBoot", () => {
     expect(load).toHaveBeenCalledTimes(1);
   });
 });
+
+describe("the boot's preloads", () => {
+  const runtime =
+    '<script type="module" data-farm-runtime="/base/farm-client-h1.js" data-farm-preload="chunks/react.js" data-farm-preload-router="chunks/router.js chunks/shared.js" data-farm-preload-root="chunks/theme.js chunks/shared.js"';
+  const [react, router, shared, theme] = ["react", "router", "shared", "theme"].map(
+    (name) => `/base/chunks/${name}.js`,
+  );
+  const preloaded = () =>
+    Array.from(document.head.querySelectorAll<HTMLLinkElement>('link[rel="modulepreload"]')).map(
+      (link) => new URL(link.href).pathname,
+    );
+  const hover = (target: Element) =>
+    target.dispatchEvent(new MouseEvent("mouseover", { bubbles: true }));
+
+  afterEach(() => {
+    for (const link of Array.from(document.head.querySelectorAll("link"))) link.remove();
+  });
+
+  it("fetches nothing before the runtime starts, then the entry's imports and the router for a link", () => {
+    boot(
+      `${runtime}></script><f-island strategy="interaction"><button>+</button></f-island><a href="/next">Next</a>`,
+    );
+    const script = document.querySelector<HTMLScriptElement>("script")!;
+    script.nonce = "n0nce";
+    expect(preloaded()).toEqual([]);
+    hover(document.querySelector("a")!);
+    expect(preloaded()).toEqual([react, router, shared]);
+    const links = Array.from(document.head.querySelectorAll<HTMLLinkElement>("link"));
+    expect(links.map((link) => link.nonce)).toEqual(["n0nce", "n0nce", "n0nce"]);
+  });
+
+  it("leaves the router for a navigation when an island starts the runtime", () => {
+    boot(
+      `${runtime}></script><f-island strategy="interaction"><button>+</button></f-island><a href="/next">Next</a>`,
+    );
+    click(document.querySelector("button")!);
+    expect(preloaded()).toEqual([react]);
+    // A link's intent while the runtime loads brings the router with it.
+    hover(document.querySelector("a")!);
+    expect(preloaded()).toEqual([react, router, shared]);
+  });
+
+  it("fetches a waiting root's modules for an interaction in it, and the router for a link in it", () => {
+    boot(
+      `${runtime} data-farm-root="root" data-farm-root-strategy="interaction"></script><div id="root"><button>Toggle</button><a href="/next">Next</a></div><a href="/out">Out</a>`,
+    );
+    click(document.querySelector("button")!);
+    expect(preloaded()).toEqual([react, theme, shared]);
+    // A file in two groups is listed twice; the browser fetches a module once.
+    hover(document.querySelector('a[href="/next"]')!);
+    expect(preloaded()).toEqual([react, theme, shared, router, shared]);
+  });
+
+  it("leaves a waiting root's modules for a link outside it", () => {
+    boot(
+      `${runtime} data-farm-root="root" data-farm-root-strategy="interaction"></script><div id="root"></div><a href="/out">Out</a>`,
+    );
+    hover(document.querySelector("a")!);
+    expect(preloaded()).toEqual([react, router, shared]);
+  });
+
+  it("fetches each group once", () => {
+    boot(`${runtime}></script><a href="/a">A</a><a href="/b">B</a>`);
+    for (const link of Array.from(document.querySelectorAll("a"))) hover(link);
+    expect(preloaded()).toEqual([react, router, shared]);
+  });
+});

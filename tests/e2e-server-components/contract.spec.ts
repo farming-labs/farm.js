@@ -1375,3 +1375,47 @@ test("the next page of a layout that hydrates as one root updates the page on sc
   await expect(page.getByTestId("clicker-item")).toHaveText("item: 1");
   expect(errors).toEqual([]);
 });
+
+test("the hover that loads the client runtime fetches what it imports alongside it", async ({
+  page,
+}) => {
+  test.skip(mode !== "islands" || dev, "the production boot script lists the runtime's chunks");
+  const errors = collectErrors(page);
+  await page.goto("/context/wait/a");
+  await page.waitForLoadState("networkidle");
+  const boot = page.locator("script[data-farm-runtime]");
+  const runtime = (await boot.getAttribute("data-farm-runtime"))!;
+  // The entry's imports, the router and route table it imports on a link's intent, and the
+  // layout's modules: a link in the layout needs all three.
+  const listed: string[] = [];
+  for (const group of ["data-farm-preload", "data-farm-preload-router", "data-farm-preload-root"]) {
+    listed.push(...((await boot.getAttribute(group)) ?? "").split(" ").filter(Boolean));
+  }
+  expect(listed).toContainEqual(
+    expect.stringMatching(/^chunks\/farm-client-router-h[0-9a-f]+\.js$/),
+  );
+  expect(listed).toContainEqual(
+    expect.stringMatching(/^chunks\/farm-client-routes-h[0-9a-f]+\.js$/),
+  );
+  expect(listed).toContainEqual(expect.stringMatching(/^chunks\/theme-h[0-9a-f]+\.js$/));
+  const requested = new Set<string>();
+  page.on("request", (request) => requested.add(new URL(request.url()).pathname));
+  // While the runtime is held back none of its code runs, so whatever is fetched meanwhile, the
+  // boot fetched.
+  let release!: () => void;
+  const held = new Promise<void>((resolve) => (release = resolve));
+  await page.route(
+    (url) => url.pathname === runtime,
+    async (route) => {
+      await held;
+      await route.continue();
+    },
+  );
+  await page.hover("[data-next]");
+  await expect.poll(() => listed.filter((file) => !requested.has(`/${file}`))).toEqual([]);
+  release();
+  await expect(page.locator("#root")).toHaveAttribute("data-farm-island-hydrated", "true");
+  await page.click("[data-next]");
+  await expect(page.locator("h1")).toHaveText("Waiting b");
+  expect(errors).toEqual([]);
+});

@@ -69,7 +69,10 @@ lets the browser give `useId` the ids in the HTML. The full contract is islx's
   React Server Components'.
 - **Browser.** Farm's client entry hands every `<f-island>` to islx's hydration runtime, which
   imports the island's module when its strategy is due and hydrates it in place. A page whose
-  islands all wait loads a 1.7 KB boot script instead of the runtime.
+  islands all wait loads a 1.9 KB boot script instead of the runtime. When the page first needs
+  the runtime, the boot script fetches it together with what comes next: the router when a link
+  starts it, and the modules of a layout that hydrates as one root when the start is inside it.
+  They arrive in one round trip instead of one after another.
 - **Layouts.** A layout that needs one React root (a client provider around the pages) renders as
   an islx server tree: the browser rebuilds it from the HTML, so its module stays on the server,
   and a navigation keeps the provider's state. The pages below it, Markdown pages included, join
@@ -101,9 +104,9 @@ same or less everywhere else.** These are the numbers for one app built in both 
 
 | Measure                    | Docs page       | Shop page      | Blog post      | Guide post     |
 | -------------------------- | --------------- | -------------- | -------------- | -------------- |
-| First-load JavaScript      | 71.0 to 1.7 KB  | 71.0 to 1.7 KB | 71.0 to 1.7 KB | 71.0 to 1.7 KB |
-| HTML document              | 16.3 to 16.0 KB | 5.5 to 5.8 KB  | 17.9 to 9.0 KB | 18.0 to 9.4 KB |
-| Data per navigation        | 12.0 to 2.6 KB  | 3.8 to 1.9 KB  | 10.8 to 9.1 KB | 10.9 to 9.4 KB |
+| First-load JavaScript      | 71.0 to 1.9 KB  | 71.0 to 1.9 KB | 71.0 to 1.9 KB | 71.0 to 1.9 KB |
+| HTML document              | 16.3 to 16.1 KB | 5.5 to 5.9 KB  | 17.9 to 9.1 KB | 18.0 to 9.5 KB |
+| Data per navigation        | 12.0 to 2.6 KB  | 3.8 to 1.7 KB  | 10.8 to 9.1 KB | 10.9 to 9.5 KB |
 | First-load main thread     | 168 to 87 ms    | 162 to 80 ms   | 216 to 106 ms  | 216 to 105 ms  |
 | First navigation           | 42 to 57 ms     | 40 to 106 ms   | 85 to 90 ms    | 84 to 120 ms   |
 | Navigation until painted   | 44 to 45 ms     | 43 to 44 ms    | 76 to 71 ms    | 73 to 77 ms    |
@@ -113,10 +116,11 @@ A guide post is a blog post under a layout that hydrates as one root around a cl
 provider. Sizes are brotli at quality 5. Times are medians with Chrome at 4x CPU throttling; the
 first navigation is the first click after a cold visit, with the pointer on the link for 100 ms.
 Requests per second are the median of 8 rounds alternating between the modes, on one Node process.
-Measured 2026-11-20 on an Apple M1 with other work running (load average 11 to 20), at commit
-`33b402362` (Farm 0.1.77, islx 0.0.25).
+Measured 2026-11-20 on an Apple M1 with other work running (load average 11 to 20): times at
+commit `33b402362` (Farm 0.1.77, islx 0.0.25), sizes once the boot script preloaded the runtime's
+chunks.
 
-- **First load.** 41 times less JavaScript and about half the main-thread work, because these pages'
+- **First load.** 37 times less JavaScript and about half the main-thread work, because these pages'
   client components wait for a click.
 - **Navigation data.** A fifth of the data on docs pages, half on shop pages, and
   slightly less on blog posts. A navigation carries the page as islx HTML (or its server tree,
@@ -142,7 +146,7 @@ Where islands mode does not win:
   out: 15 ms slower than `"rsc"` on docs pages and 5 ms on blog posts. Under a layout that hydrates
   as one root it is also the layout's first React render, which `"rsc"` does during the first load:
   36 ms slower on guide posts and 66 ms on shop pages.
-- **A small page's HTML is a little larger.** The shop page is 0.3 KB larger, for islx's island
+- **A small page's HTML is a little larger.** The shop page is 0.4 KB larger, for islx's island
   markers and props.
 
 To measure it yourself, see the benchmark's
