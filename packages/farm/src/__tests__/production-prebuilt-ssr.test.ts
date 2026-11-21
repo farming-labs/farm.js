@@ -4352,9 +4352,11 @@ await server.listen(Number(process.env.PORT));
                 observer.callback([{ isIntersecting: true, target: observer.target }], observer);
               }
             });
+            // The server HTML already reads "visible:0". Wait for the island to mount, or idle
+            // fires while its module is still loading and can mount first.
             await expect
-              .poll(() => page.locator('[data-strategy="visible"]').textContent())
-              .toBe("visible:0");
+              .poll(() => page.evaluate(() => (globalThis as any).__farmStrategyLifecycle.mounts))
+              .toEqual(["load", "interaction", "visible"]);
             expect(await boundary("idle").getAttribute("data-farm-hydrated")).toBeNull();
 
             await page.evaluate(() => {
