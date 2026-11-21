@@ -55,11 +55,10 @@ function stepThrough(event: KeyboardEvent, current: number | null, count: number
 }
 
 type FigureFrameProps = {
-  /** The header, styled like the site's section labels: "01 / One codebase", "[ Fig 1 ]". */
+  /** The header, styled like the site's section labels: "01 / One codebase". */
   index: string;
   icon: LucideIcon;
   label: string;
-  tag: string;
   /** A short headline and a sentence on what the scene shows. */
   heading: string;
   summary: string;
@@ -78,7 +77,6 @@ function FigureFrame({
   index,
   icon: Icon,
   label,
-  tag,
   heading,
   summary,
   readout,
@@ -106,7 +104,6 @@ function FigureFrame({
         <Icon className="agents-iso-label-icon" strokeWidth={1.5} />
         <span className="agents-iso-label-text">{label}</span>
       </span>
-      <span className="agents-iso-tag">[ {tag} ]</span>
     </div>
   );
   const drawing = (
@@ -549,7 +546,6 @@ export function CodebaseFigure() {
       readout={readout}
       rootRef={rootRef}
       summary="farm deploy turns your agent/ folder, your API routes, and your pages into an agent, an MCP server, and a website, live together on your domain."
-      tag="Fig 1"
       view={DEPLOY_VIEW}
     >
       <LensContext.Provider value={lens(camera)}>
@@ -957,7 +953,6 @@ export function ReadinessFigure() {
       readout={readout}
       rootRef={rootRef}
       summary="Every layer an agent looks for, from robots.txt and Markdown to MCP and the WebMCP tools in your page, checked the way /agents/check does."
-      tag="Fig 2"
       view={STACK_VIEW}
     >
       {STACK_BASE}
@@ -1291,7 +1286,6 @@ export function DevFigure() {
       readout={readout}
       rootRef={rootRef}
       summary="farm dev starts your app with its agent and its tools beside it, all served from the origin you already use."
-      tag="Fig 3"
       view={DEV_VIEW}
     >
       <LensContext.Provider value={lens(blend(ISOMETRIC, DEV_FACE_ON, swung))}>
@@ -1496,7 +1490,6 @@ export function PermissionsFigure() {
       readout={readout}
       rootRef={rootRef}
       summary="Every MCP call goes through your authorize(). A reader's token opens the read tools; only the writer's opens create_project."
-      tag="Fig 4"
       view={LOCK_VIEW}
     >
       <>

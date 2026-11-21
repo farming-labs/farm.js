@@ -30,7 +30,7 @@
   outline: 1px solid rgb(255 255 255 / 0.4);
   outline-offset: -6px;
 }
-/* The header reads like the page's section labels: "01 / One codebase" and a bracketed tag. */
+/* The header reads like the page's section labels: "01 / One codebase". */
 .agents-iso-top {
   display: flex;
   align-items: center;
@@ -61,14 +61,6 @@
 .agents-iso-label-text {
   overflow: hidden;
   text-overflow: ellipsis;
-  white-space: nowrap;
-}
-.agents-iso-tag {
-  color: #6e6e6e;
-  font-family: var(--font-geist-mono), ui-monospace, monospace;
-  font-size: 10px;
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
   white-space: nowrap;
 }
 .agents-iso-title {
