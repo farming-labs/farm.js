@@ -1,6 +1,6 @@
 {
   "name": "@farm.js/webhooks",
-  "version": "0.1.0-beta.1",
+  "version": "0.1.0",
   "description": "Verify webhooks from any sender and sign the ones you send",
   "keywords": [
     "farm.js",
