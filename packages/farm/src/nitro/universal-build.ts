@@ -2603,6 +2603,10 @@ async function buildClient(
                 root,
                 buildDir: path.dirname(outputDir),
                 entryName: "farm-client",
+                routerModules: [
+                  path.join(clientEntryDir, "farm-client-router.tsx"),
+                  path.join(clientEntryDir, `${FARM_CLIENT_ROUTE_TABLE_MODULE}.tsx`),
+                ],
               }),
           ...(adapterOwnsDocsRuntime && platform === "web"
             ? [
@@ -9109,12 +9113,14 @@ function farmDocumentBootsClient(markup, hydratesAtLoad, routeSlots) {
   return true;
 }
 
-// The boot entry runs the client entry from the URL on its script. A root that waits (the element
-// a hydrating layout or client page hydrates) is named with its strategy, for the boot to watch.
-function renderFarmClientBootScript(root, rootStrategy) {
+// The boot entry runs the client entry from the URL on its script, with the files listed for what
+// started it. A root that waits (the element a hydrating layout or client page hydrates) is named
+// with its strategy, for the boot to watch.
+function renderFarmClientBootScript(root, rootStrategy, markup, pageModule) {
   return stampFarmCspNonce('<script type="module" src="${
     farmClientBoot ? FARM_CLIENT_BOOT_SRC_PLACEHOLDER : ""
   }" data-farm-runtime="/__farm_client_js_src__"' +
+    renderFarmClientBootPreloads(markup, pageModule, root, rootStrategy) +
     (root ? ' data-farm-root="' + root + '" data-farm-root-strategy="' + rootStrategy + '"' : '') +
     '></script>');
 }
@@ -9915,22 +9921,17 @@ function renderFarmClientModulePreload(index) {
     '" fetchpriority="low">';
 }
 
-// The modulepreload links for a document: the entry's static imports, then the
-// modules its hydrating page and its markup load.
-function renderFarmClientModulePreloads(markup, pageModule) {
-  // A nonce policy blocks parser-inserted links without the nonce, and the
-  // response filter manages nonces on script elements only, so CSP nonce mode
-  // keeps the documents it had.
-  if (!farmClientModulePreloads || (farmSecurityConfig.csp && farmSecurityConfig.csp.nonce)) return "";
+// The manifest indexes of the modules a document's hydrating page and its markup
+// load, leaving out those already listed.
+function collectFarmClientDocumentModules(markup, pageModule, listed) {
   const modules = farmClientModulePreloads.modules;
-  const listed = new Set();
-  let tags = farmClientEntryPreloadTags;
+  const indexes = [];
   const add = (moduleId) => {
     if (!moduleId || !Object.prototype.hasOwnProperty.call(modules, moduleId)) return;
     for (const index of modules[moduleId]) {
       if (listed.has(index)) continue;
       listed.add(index);
-      tags += renderFarmClientModulePreload(index);
+      indexes.push(index);
     }
   };
   add(pageModule);
@@ -9940,7 +9941,45 @@ function renderFarmClientModulePreloads(markup, pageModule) {
       add(match[1] || match[3]);
     }
   }
-  return tags;
+  return indexes;
+}
+
+// The modulepreload links for a document: the entry's static imports, then the
+// modules its hydrating page and its markup load.
+function renderFarmClientModulePreloads(markup, pageModule) {
+  // A nonce policy blocks parser-inserted links without the nonce, and the
+  // response filter manages nonces on script elements only, so CSP nonce mode
+  // keeps the documents it had.
+  if (!farmClientModulePreloads || (farmSecurityConfig.csp && farmSecurityConfig.csp.nonce)) return "";
+  return farmClientEntryPreloadTags +
+    collectFarmClientDocumentModules(markup, pageModule, new Set())
+      .map(renderFarmClientModulePreload)
+      .join("");
+}
+
+// What a boot document's runtime fetches as it starts, for the boot to request with it rather
+// than each a round trip after the file that imports it: the entry's static imports, the router
+// and route table a link's intent loads, and the modules the root hydrates with. A root that
+// waits for its time hydrates once the runtime runs, so its modules come with the entry's; one
+// that waits for a click hydrates on an interaction in it, and the boot fetches them then. The
+// boot adds the links itself with the script's nonce, so CSP nonce mode keeps them.
+function renderFarmClientBootPreloads(markup, pageModule, root, rootStrategy) {
+  if (!farmClientModulePreloads) return "";
+  const files = farmClientModulePreloads.files;
+  const attribute = function(name, indexes) {
+    if (indexes.length === 0) return "";
+    return " " + name + '="' + escapeFarmHtmlAttribute(
+      indexes.map(function(index) { return files[index]; }).join(" ")
+    ) + '"';
+  };
+  const entry = farmClientModulePreloads.entry;
+  const rootModules = root
+    ? collectFarmClientDocumentModules(markup, pageModule, new Set(entry))
+    : [];
+  const waitsForClick = rootStrategy === "interaction";
+  return attribute("data-farm-preload", waitsForClick ? entry : entry.concat(rootModules)) +
+    attribute("data-farm-preload-router", farmClientModulePreloads.router || []) +
+    (waitsForClick ? attribute("data-farm-preload-root", rootModules) : "");
 }
 
 // The origin hreflang alternates resolve against when the route sets no
@@ -12809,7 +12848,9 @@ ${
         const farmEntryScript = farmBootsClient
           ? renderFarmClientBootScript(
               farmHydratesRoot ? (shouldHydrateLayout ? "root" : "__farm_page__") : "",
-              route.rootStrategy
+              route.rootStrategy,
+              html,
+              route.clientModule
             )
           : renderFarmClientEntryScript();
 

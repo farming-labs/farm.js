@@ -103,6 +103,24 @@ export function startFarmIslandsBoot(load: () => Promise<unknown> = loadFarmClie
   const script = document.querySelector<HTMLScriptElement>("script[data-farm-runtime]");
   const rootId = script?.dataset.farmRoot;
   const root = rootId ? document.getElementById(rootId) : null;
+  // What the runtime imports as it starts, which the server lists relative to it, fetched with it
+  // rather than each a round trip after the file that imports it: the entry's imports
+  // (data-farm-preload), the router a link's intent loads (-router), and the modules a root that
+  // waits for a click hydrates with (-root). A file listed twice is fetched once.
+  const preloaded = new Set<string>();
+  const preload = (group: "farmPreload" | "farmPreloadRouter" | "farmPreloadRoot") => {
+    const files = script?.dataset[group];
+    if (!script || !files || preloaded.has(group)) return;
+    preloaded.add(group);
+    const base = new URL(script.dataset.farmRuntime ?? "", document.baseURI);
+    for (const file of files.split(" ")) {
+      const link = document.createElement("link");
+      link.rel = "modulepreload";
+      link.href = new URL(file, base).href;
+      if (script.nonce) link.nonce = script.nonce;
+      document.head.append(link);
+    }
+  };
 
   // The runtime holds and replays from here on: its scheduler for islands, its router for links.
   // A capture left in place would hold clicks it never replays, and one left after a failed load
@@ -111,6 +129,7 @@ export function startFarmIslandsBoot(load: () => Promise<unknown> = loadFarmClie
     for (const cleanup of cleanups.splice(0)) cleanup();
   };
   const start = (): Promise<unknown> => {
+    preload("farmPreload");
     if (!loading) {
       loading = load().then(release, (error: unknown) => {
         release();
@@ -121,6 +140,12 @@ export function startFarmIslandsBoot(load: () => Promise<unknown> = loadFarmClie
       });
     }
     return loading;
+  };
+  // What an interaction on `target` needs besides the entry: the router for a link, and the
+  // modules of a root that waits around it, which hydrates on it (a link's hover included).
+  const forTarget = (target: Element) => {
+    if (routedLink(target)) preload("farmPreloadRouter");
+    if (root && pendingIsland(target, root) === root) preload("farmPreloadRoot");
   };
   const listen = (type: string, handler: (event: Event) => void, capture: boolean) => {
     document.addEventListener(type, handler, capture);
@@ -140,6 +165,7 @@ export function startFarmIslandsBoot(load: () => Promise<unknown> = loadFarmClie
       );
     }
     void start();
+    forTarget(target);
   };
 
   listen(
@@ -170,12 +196,12 @@ export function startFarmIslandsBoot(load: () => Promise<unknown> = loadFarmClie
   const observe = (event: Event) => {
     const target = event.target;
     if (!(target instanceof Element)) return;
-    if (routedLink(target)) void start();
-    else if (
-      event.type !== "mouseover" &&
-      (pendingIsland(target, root) || target.closest("form"))
+    if (
+      routedLink(target) ||
+      (event.type !== "mouseover" && (pendingIsland(target, root) || target.closest("form")))
     ) {
       void start();
+      forTarget(target);
     }
   };
   for (const type of ["pointerdown", "focusin", "mouseover"]) listen(type, observe, true);
@@ -199,6 +225,7 @@ export function startFarmIslandsBoot(load: () => Promise<unknown> = loadFarmClie
         },
         () => location.assign(anchor.href),
       );
+      forTarget(anchor);
     },
     false,
   );

@@ -56,6 +56,34 @@ describe("client module preloads", () => {
       "chunks/counter.js",
       "chunks/icons.js",
     ]);
+    expect(manifest.router).toEqual([]);
+  });
+
+  it("lists the router modules' chunks and their static imports outside the entry's", () => {
+    const router = path.join(root, ".farm/tmp/client-entry-1/farm-client-router.tsx");
+    const routes = path.join(root, ".farm/tmp/client-entry-1/farm-client-routes.tsx");
+    const manifest = collectFarmClientModulePreloads(
+      {
+        ...bundle,
+        "chunks/router.js": chunk("chunks/router.js", ["chunks/react.js", "chunks/nav.js"], {
+          module: router,
+        }),
+        "chunks/nav.js": chunk("chunks/nav.js"),
+        "chunks/routes.js": chunk("chunks/routes.js", ["chunks/nav.js"], {
+          module: `${routes}?v=1`,
+        }),
+      },
+      {
+        root,
+        entryName: "farm-client",
+        routerModules: [router, routes, path.join(root, "src/missing.tsx")],
+      },
+    )!;
+    expect(manifest.router.map((index) => manifest.files[index])).toEqual([
+      "chunks/router.js",
+      "chunks/nav.js",
+      "chunks/routes.js",
+    ]);
   });
 
   it("returns null without the entry", () => {
@@ -68,7 +96,7 @@ describe("client module preloads", () => {
   });
 
   it("encodes a manifest that survives any string literal", () => {
-    const manifest = { files: ["chunks/a$&'`\" .js"], entry: [0], modules: {} };
+    const manifest = { files: ["chunks/a$&'`\" .js"], entry: [0], router: [0], modules: {} };
     const encoded = encodeFarmClientModulePreloads(manifest);
     for (const quote of [`"`, `'`, "`"]) {
       // eslint-disable-next-line no-new-func

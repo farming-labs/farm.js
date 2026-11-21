@@ -1,5 +1,5 @@
 {
-  "date": "2026-11-21T04:41:42.357Z",
+  "date": "2026-11-21T07:51:36.659Z",
   "rows": [
     {
       "scenario": "docs",
@@ -48,44 +48,44 @@
     {
       "scenario": "docs",
       "mode": "islands",
-      "document (br)": "16.0 KB",
-      "document (raw)": "69.8 KB",
-      "first-load JS (br)": "1.7 KB",
+      "document (br)": "16.1 KB",
+      "document (raw)": "69.9 KB",
+      "first-load JS (br)": "1.9 KB",
       "navigation data (br)": "2.6 KB",
-      "navigation data (raw)": "7.4 KB",
+      "navigation data (raw)": "7.5 KB",
       "navigation JS (br)": "9.3 KB",
       "page errors": 0
     },
     {
       "scenario": "shop",
       "mode": "islands",
-      "document (br)": "5.8 KB",
-      "document (raw)": "30.5 KB",
-      "first-load JS (br)": "1.7 KB",
-      "navigation data (br)": "1.9 KB",
-      "navigation data (raw)": "4.9 KB",
+      "document (br)": "5.9 KB",
+      "document (raw)": "30.7 KB",
+      "first-load JS (br)": "1.9 KB",
+      "navigation data (br)": "1.7 KB",
+      "navigation data (raw)": "4.1 KB",
       "navigation JS (br)": "9.4 KB",
       "page errors": 0
     },
     {
       "scenario": "blog",
       "mode": "islands",
-      "document (br)": "9.0 KB",
-      "document (raw)": "127.3 KB",
-      "first-load JS (br)": "1.7 KB",
+      "document (br)": "9.1 KB",
+      "document (raw)": "127.4 KB",
+      "first-load JS (br)": "1.9 KB",
       "navigation data (br)": "9.1 KB",
-      "navigation data (raw)": "127.5 KB",
+      "navigation data (raw)": "127.6 KB",
       "navigation JS (br)": "9.3 KB",
       "page errors": 0
     },
     {
       "scenario": "guide",
       "mode": "islands",
-      "document (br)": "9.4 KB",
-      "document (raw)": "128.7 KB",
-      "first-load JS (br)": "1.7 KB",
-      "navigation data (br)": "9.4 KB",
-      "navigation data (raw)": "128.9 KB",
+      "document (br)": "9.5 KB",
+      "document (raw)": "129.0 KB",
+      "first-load JS (br)": "1.9 KB",
+      "navigation data (br)": "9.5 KB",
+      "navigation data (raw)": "129.1 KB",
       "navigation JS (br)": "9.4 KB",
       "page errors": 0
     }
@@ -100,7 +100,7 @@
           "document": {
             "count": 1,
             "raw": 78286,
-            "br": 16339
+            "br": 16338
           },
           "javascript": {
             "count": 3,
@@ -113,7 +113,7 @@
           "document": {
             "count": 1,
             "raw": 78260,
-            "br": 16639
+            "br": 16636
           },
           "javascript": {
             "count": 3,
@@ -126,7 +126,7 @@
           "document": {
             "count": 1,
             "raw": 78346,
-            "br": 16861
+            "br": 16859
           },
           "javascript": {
             "count": 3,
@@ -139,7 +139,7 @@
           "document": {
             "count": 1,
             "raw": 78050,
-            "br": 16795
+            "br": 16794
           },
           "javascript": {
             "count": 3,
@@ -152,7 +152,7 @@
           "document": {
             "count": 1,
             "raw": 78003,
-            "br": 16759
+            "br": 16758
           },
           "javascript": {
             "count": 3,
@@ -317,7 +317,7 @@
           "document": {
             "count": 1,
             "raw": 33960,
-            "br": 5711
+            "br": 5710
           },
           "javascript": {
             "count": 3,
@@ -330,7 +330,7 @@
           "document": {
             "count": 1,
             "raw": 34066,
-            "br": 5735
+            "br": 5734
           },
           "javascript": {
             "count": 3,
@@ -508,7 +508,7 @@
           "document": {
             "count": 1,
             "raw": 388603,
-            "br": 18238
+            "br": 18237
           },
           "javascript": {
             "count": 3,
@@ -521,7 +521,7 @@
           "document": {
             "count": 1,
             "raw": 388495,
-            "br": 18350
+            "br": 18348
           },
           "javascript": {
             "count": 3,
@@ -534,7 +534,7 @@
           "document": {
             "count": 1,
             "raw": 388908,
-            "br": 18350
+            "br": 18348
           },
           "javascript": {
             "count": 3,
@@ -547,7 +547,7 @@
           "document": {
             "count": 1,
             "raw": 388430,
-            "br": 18241
+            "br": 18239
           },
           "javascript": {
             "count": 3,
@@ -560,7 +560,7 @@
           "document": {
             "count": 1,
             "raw": 388513,
-            "br": 18339
+            "br": 18337
           },
           "javascript": {
             "count": 3,
@@ -712,7 +712,7 @@
           "document": {
             "count": 1,
             "raw": 388909,
-            "br": 18353
+            "br": 18349
           },
           "javascript": {
             "count": 3,
@@ -725,7 +725,7 @@
           "document": {
             "count": 1,
             "raw": 388816,
-            "br": 18466
+            "br": 18463
           },
           "javascript": {
             "count": 3,
@@ -738,7 +738,7 @@
           "document": {
             "count": 1,
             "raw": 389214,
-            "br": 18428
+            "br": 18426
           },
           "javascript": {
             "count": 3,
@@ -751,7 +751,7 @@
           "document": {
             "count": 1,
             "raw": 388751,
-            "br": 18340
+            "br": 18337
           },
           "javascript": {
             "count": 3,
@@ -764,7 +764,7 @@
           "document": {
             "count": 1,
             "raw": 388834,
-            "br": 18429
+            "br": 18427
           },
           "javascript": {
             "count": 3,
@@ -915,65 +915,65 @@
           "pathname": "/docs/p0",
           "document": {
             "count": 1,
-            "raw": 71483,
-            "br": 16065
+            "raw": 71634,
+            "br": 16127
           },
           "javascript": {
             "count": 1,
-            "raw": 4321,
-            "br": 1775
+            "raw": 4735,
+            "br": 1931
           }
         },
         {
           "pathname": "/docs/p40",
           "document": {
             "count": 1,
-            "raw": 71469,
-            "br": 16371
+            "raw": 71620,
+            "br": 16430
           },
           "javascript": {
             "count": 1,
-            "raw": 4321,
-            "br": 1775
+            "raw": 4735,
+            "br": 1931
           }
         },
         {
           "pathname": "/docs/p120",
           "document": {
             "count": 1,
-            "raw": 71521,
-            "br": 16569
+            "raw": 71672,
+            "br": 16630
           },
           "javascript": {
             "count": 1,
-            "raw": 4321,
-            "br": 1775
+            "raw": 4735,
+            "br": 1931
           }
         },
         {
           "pathname": "/docs/p200",
           "document": {
             "count": 1,
-            "raw": 71366,
-            "br": 16546
+            "raw": 71517,
+            "br": 16607
           },
           "javascript": {
             "count": 1,
-            "raw": 4321,
-            "br": 1775
+            "raw": 4735,
+            "br": 1931
           }
         },
         {
           "pathname": "/docs/p299",
           "document": {
             "count": 1,
-            "raw": 71377,
-            "br": 16534
+            "raw": 71528,
+            "br": 16598
           },
           "javascript": {
             "count": 1,
-            "raw": 4321,
-            "br": 1775
+            "raw": 4735,
+            "br": 1931
           }
         }
       ],
@@ -982,21 +982,21 @@
           "pathname": "/docs/p1",
           "data": {
             "count": 1,
-            "raw": 7490,
-            "br": 2497
+            "raw": 7641,
+            "br": 2556
           },
           "javascript": {
             "count": 4,
-            "raw": 313462,
-            "br": 95123
+            "raw": 314085,
+            "br": 95267
           }
         },
         {
           "pathname": "/docs/p2",
           "data": {
             "count": 1,
-            "raw": 7598,
-            "br": 2682
+            "raw": 7749,
+            "br": 2742
           },
           "javascript": {
             "count": 0,
@@ -1008,8 +1008,8 @@
           "pathname": "/docs/p3",
           "data": {
             "count": 1,
-            "raw": 7667,
-            "br": 2696
+            "raw": 7818,
+            "br": 2759
           },
           "javascript": {
             "count": 0,
@@ -1021,8 +1021,8 @@
           "pathname": "/docs/p4",
           "data": {
             "count": 1,
-            "raw": 7678,
-            "br": 2700
+            "raw": 7829,
+            "br": 2758
           },
           "javascript": {
             "count": 0,
@@ -1034,8 +1034,8 @@
           "pathname": "/docs/p5",
           "data": {
             "count": 1,
-            "raw": 7563,
-            "br": 2667
+            "raw": 7714,
+            "br": 2725
           },
           "javascript": {
             "count": 0,
@@ -1047,8 +1047,8 @@
           "pathname": "/docs/p6",
           "data": {
             "count": 1,
-            "raw": 7556,
-            "br": 2638
+            "raw": 7707,
+            "br": 2694
           },
           "javascript": {
             "count": 0,
@@ -1060,8 +1060,8 @@
           "pathname": "/docs/p7",
           "data": {
             "count": 1,
-            "raw": 7578,
-            "br": 2690
+            "raw": 7729,
+            "br": 2748
           },
           "javascript": {
             "count": 0,
@@ -1073,8 +1073,8 @@
           "pathname": "/docs/p8",
           "data": {
             "count": 1,
-            "raw": 7481,
-            "br": 2611
+            "raw": 7632,
+            "br": 2668
           },
           "javascript": {
             "count": 0,
@@ -1086,8 +1086,8 @@
           "pathname": "/docs/p9",
           "data": {
             "count": 1,
-            "raw": 7623,
-            "br": 2711
+            "raw": 7774,
+            "br": 2769
           },
           "javascript": {
             "count": 0,
@@ -1099,8 +1099,8 @@
           "pathname": "/docs/p10",
           "data": {
             "count": 1,
-            "raw": 7510,
-            "br": 2645
+            "raw": 7661,
+            "br": 2704
           },
           "javascript": {
             "count": 0,
@@ -1119,65 +1119,65 @@
           "pathname": "/shop/s0",
           "document": {
             "count": 1,
-            "raw": 31241,
-            "br": 5740
+            "raw": 31502,
+            "br": 5845
           },
           "javascript": {
             "count": 1,
-            "raw": 4321,
-            "br": 1775
+            "raw": 4735,
+            "br": 1931
           }
         },
         {
           "pathname": "/shop/s30",
           "document": {
             "count": 1,
-            "raw": 31169,
-            "br": 5925
+            "raw": 31430,
+            "br": 6030
           },
           "javascript": {
             "count": 1,
-            "raw": 4321,
-            "br": 1775
+            "raw": 4735,
+            "br": 1931
           }
         },
         {
           "pathname": "/shop/s60",
           "document": {
             "count": 1,
-            "raw": 31217,
-            "br": 5957
+            "raw": 31478,
+            "br": 6063
           },
           "javascript": {
             "count": 1,
-            "raw": 4321,
-            "br": 1775
+            "raw": 4735,
+            "br": 1931
           }
         },
         {
           "pathname": "/shop/s90",
           "document": {
             "count": 1,
-            "raw": 31204,
-            "br": 5940
+            "raw": 31465,
+            "br": 6044
           },
           "javascript": {
             "count": 1,
-            "raw": 4321,
-            "br": 1775
+            "raw": 4735,
+            "br": 1931
           }
         },
         {
           "pathname": "/shop/s120",
           "document": {
             "count": 1,
-            "raw": 31215,
-            "br": 5899
+            "raw": 31476,
+            "br": 6002
           },
           "javascript": {
             "count": 1,
-            "raw": 4321,
-            "br": 1775
+            "raw": 4735,
+            "br": 1931
           }
         }
       ],
@@ -1186,21 +1186,21 @@
           "pathname": "/shop/s1",
           "data": {
             "count": 1,
-            "raw": 15132,
-            "br": 4427
+            "raw": 4113,
+            "br": 1733
           },
           "javascript": {
             "count": 7,
-            "raw": 315172,
-            "br": 96126
+            "raw": 315795,
+            "br": 96270
           }
         },
         {
           "pathname": "/shop/s2",
           "data": {
             "count": 1,
-            "raw": 3947,
-            "br": 1687
+            "raw": 4208,
+            "br": 1790
           },
           "javascript": {
             "count": 0,
@@ -1212,8 +1212,8 @@
           "pathname": "/shop/s3",
           "data": {
             "count": 1,
-            "raw": 3906,
-            "br": 1667
+            "raw": 4167,
+            "br": 1770
           },
           "javascript": {
             "count": 0,
@@ -1225,8 +1225,8 @@
           "pathname": "/shop/s4",
           "data": {
             "count": 1,
-            "raw": 3985,
-            "br": 1703
+            "raw": 4246,
+            "br": 1807
           },
           "javascript": {
             "count": 0,
@@ -1238,8 +1238,8 @@
           "pathname": "/shop/s5",
           "data": {
             "count": 1,
-            "raw": 3980,
-            "br": 1695
+            "raw": 4241,
+            "br": 1801
           },
           "javascript": {
             "count": 0,
@@ -1251,8 +1251,8 @@
           "pathname": "/shop/s6",
           "data": {
             "count": 1,
-            "raw": 3960,
-            "br": 1689
+            "raw": 4221,
+            "br": 1792
           },
           "javascript": {
             "count": 0,
@@ -1264,8 +1264,8 @@
           "pathname": "/shop/s7",
           "data": {
             "count": 1,
-            "raw": 3944,
-            "br": 1694
+            "raw": 4205,
+            "br": 1799
           },
           "javascript": {
             "count": 0,
@@ -1277,8 +1277,8 @@
           "pathname": "/shop/s8",
           "data": {
             "count": 1,
-            "raw": 3898,
-            "br": 1661
+            "raw": 4159,
+            "br": 1763
           },
           "javascript": {
             "count": 0,
@@ -1290,8 +1290,8 @@
           "pathname": "/shop/s9",
           "data": {
             "count": 1,
-            "raw": 3956,
-            "br": 1699
+            "raw": 4217,
+            "br": 1804
           },
           "javascript": {
             "count": 0,
@@ -1303,8 +1303,8 @@
           "pathname": "/shop/s10",
           "data": {
             "count": 1,
-            "raw": 3923,
-            "br": 1666
+            "raw": 4184,
+            "br": 1773
           },
           "javascript": {
             "count": 0,
@@ -1323,65 +1323,65 @@
           "pathname": "/blog/b0",
           "document": {
             "count": 1,
-            "raw": 130299,
-            "br": 9211
+            "raw": 130450,
+            "br": 9257
           },
           "javascript": {
             "count": 1,
-            "raw": 4321,
-            "br": 1775
+            "raw": 4735,
+            "br": 1931
           }
         },
         {
           "pathname": "/blog/b20",
           "document": {
             "count": 1,
-            "raw": 130279,
-            "br": 9205
+            "raw": 130430,
+            "br": 9267
           },
           "javascript": {
             "count": 1,
-            "raw": 4321,
-            "br": 1775
+            "raw": 4735,
+            "br": 1931
           }
         },
         {
           "pathname": "/blog/b40",
           "document": {
             "count": 1,
-            "raw": 130463,
-            "br": 9240
+            "raw": 130614,
+            "br": 9301
           },
           "javascript": {
             "count": 1,
-            "raw": 4321,
-            "br": 1775
+            "raw": 4735,
+            "br": 1931
           }
         },
         {
           "pathname": "/blog/b60",
           "document": {
             "count": 1,
-            "raw": 130254,
-            "br": 9160
+            "raw": 130405,
+            "br": 9223
           },
           "javascript": {
             "count": 1,
-            "raw": 4321,
-            "br": 1775
+            "raw": 4735,
+            "br": 1931
           }
         },
         {
           "pathname": "/blog/b80",
           "document": {
             "count": 1,
-            "raw": 130303,
-            "br": 9297
+            "raw": 130454,
+            "br": 9346
           },
           "javascript": {
             "count": 1,
-            "raw": 4321,
-            "br": 1775
+            "raw": 4735,
+            "br": 1931
           }
         }
       ],
@@ -1390,21 +1390,21 @@
           "pathname": "/blog/b1",
           "data": {
             "count": 1,
-            "raw": 130524,
-            "br": 9330
+            "raw": 130675,
+            "br": 9394
           },
           "javascript": {
             "count": 4,
-            "raw": 313462,
-            "br": 95123
+            "raw": 314085,
+            "br": 95267
           }
         },
         {
           "pathname": "/blog/b2",
           "data": {
             "count": 1,
-            "raw": 130610,
-            "br": 9388
+            "raw": 130761,
+            "br": 9442
           },
           "javascript": {
             "count": 0,
@@ -1416,8 +1416,8 @@
           "pathname": "/blog/b3",
           "data": {
             "count": 1,
-            "raw": 130552,
-            "br": 9133
+            "raw": 130703,
+            "br": 9196
           },
           "javascript": {
             "count": 0,
@@ -1429,8 +1429,8 @@
           "pathname": "/blog/b4",
           "data": {
             "count": 1,
-            "raw": 130696,
-            "br": 9169
+            "raw": 130847,
+            "br": 9222
           },
           "javascript": {
             "count": 0,
@@ -1442,8 +1442,8 @@
           "pathname": "/blog/b5",
           "data": {
             "count": 1,
-            "raw": 130450,
-            "br": 9224
+            "raw": 130601,
+            "br": 9268
           },
           "javascript": {
             "count": 0,
@@ -1455,8 +1455,8 @@
           "pathname": "/blog/b6",
           "data": {
             "count": 1,
-            "raw": 130630,
-            "br": 9420
+            "raw": 130781,
+            "br": 9490
           },
           "javascript": {
             "count": 0,
@@ -1468,8 +1468,8 @@
           "pathname": "/blog/b7",
           "data": {
             "count": 1,
-            "raw": 130486,
-            "br": 9308
+            "raw": 130637,
+            "br": 9378
           },
           "javascript": {
             "count": 0,
@@ -1481,8 +1481,8 @@
           "pathname": "/blog/b8",
           "data": {
             "count": 1,
-            "raw": 130703,
-            "br": 9434
+            "raw": 130854,
+            "br": 9498
           },
           "javascript": {
             "count": 0,
@@ -1494,8 +1494,8 @@
           "pathname": "/blog/b9",
           "data": {
             "count": 1,
-            "raw": 130267,
-            "br": 9208
+            "raw": 130418,
+            "br": 9275
           },
           "javascript": {
             "count": 0,
@@ -1507,8 +1507,8 @@
           "pathname": "/blog/b10",
           "data": {
             "count": 1,
-            "raw": 130390,
-            "br": 9335
+            "raw": 130541,
+            "br": 9404
           },
           "javascript": {
             "count": 0,
@@ -1527,65 +1527,65 @@
           "pathname": "/guide/b0",
           "document": {
             "count": 1,
-            "raw": 131783,
-            "br": 9562
+            "raw": 132049,
+            "br": 9660
           },
           "javascript": {
             "count": 1,
-            "raw": 4321,
-            "br": 1775
+            "raw": 4735,
+            "br": 1931
           }
         },
         {
           "pathname": "/guide/b20",
           "document": {
             "count": 1,
-            "raw": 131766,
-            "br": 9567
+            "raw": 132032,
+            "br": 9675
           },
           "javascript": {
             "count": 1,
-            "raw": 4321,
-            "br": 1775
+            "raw": 4735,
+            "br": 1931
           }
         },
         {
           "pathname": "/guide/b40",
           "document": {
             "count": 1,
-            "raw": 131945,
-            "br": 9600
+            "raw": 132211,
+            "br": 9706
           },
           "javascript": {
             "count": 1,
-            "raw": 4321,
-            "br": 1775
+            "raw": 4735,
+            "br": 1931
           }
         },
         {
           "pathname": "/guide/b60",
           "document": {
             "count": 1,
-            "raw": 131732,
-            "br": 9513
+            "raw": 131998,
+            "br": 9611
           },
           "javascript": {
             "count": 1,
-            "raw": 4321,
-            "br": 1775
+            "raw": 4735,
+            "br": 1931
           }
         },
         {
           "pathname": "/guide/b80",
           "document": {
             "count": 1,
-            "raw": 131787,
-            "br": 9648
+            "raw": 132053,
+            "br": 9746
           },
           "javascript": {
             "count": 1,
-            "raw": 4321,
-            "br": 1775
+            "raw": 4735,
+            "br": 1931
           }
         }
       ],
@@ -1594,21 +1594,21 @@
           "pathname": "/guide/b1",
           "data": {
             "count": 1,
-            "raw": 131947,
-            "br": 9680
+            "raw": 132213,
+            "br": 9788
           },
           "javascript": {
             "count": 7,
-            "raw": 315103,
-            "br": 96102
+            "raw": 315726,
+            "br": 96246
           }
         },
         {
           "pathname": "/guide/b2",
           "data": {
             "count": 1,
-            "raw": 132033,
-            "br": 9718
+            "raw": 132299,
+            "br": 9823
           },
           "javascript": {
             "count": 0,
@@ -1620,8 +1620,8 @@
           "pathname": "/guide/b3",
           "data": {
             "count": 1,
-            "raw": 131975,
-            "br": 9482
+            "raw": 132241,
+            "br": 9587
           },
           "javascript": {
             "count": 0,
@@ -1633,8 +1633,8 @@
           "pathname": "/guide/b4",
           "data": {
             "count": 1,
-            "raw": 132119,
-            "br": 9482
+            "raw": 132385,
+            "br": 9585
           },
           "javascript": {
             "count": 0,
@@ -1646,8 +1646,8 @@
           "pathname": "/guide/b5",
           "data": {
             "count": 1,
-            "raw": 131873,
-            "br": 9544
+            "raw": 132139,
+            "br": 9652
           },
           "javascript": {
             "count": 0,
@@ -1659,8 +1659,8 @@
           "pathname": "/guide/b6",
           "data": {
             "count": 1,
-            "raw": 132053,
-            "br": 9774
+            "raw": 132319,
+            "br": 9875
           },
           "javascript": {
             "count": 0,
@@ -1672,8 +1672,8 @@
           "pathname": "/guide/b7",
           "data": {
             "count": 1,
-            "raw": 131909,
-            "br": 9670
+            "raw": 132175,
+            "br": 9779
           },
           "javascript": {
             "count": 0,
@@ -1685,8 +1685,8 @@
           "pathname": "/guide/b8",
           "data": {
             "count": 1,
-            "raw": 132126,
-            "br": 9783
+            "raw": 132392,
+            "br": 9884
           },
           "javascript": {
             "count": 0,
@@ -1698,8 +1698,8 @@
           "pathname": "/guide/b9",
           "data": {
             "count": 1,
-            "raw": 131690,
-            "br": 9556
+            "raw": 131956,
+            "br": 9666
           },
           "javascript": {
             "count": 0,
@@ -1711,8 +1711,8 @@
           "pathname": "/guide/b10",
           "data": {
             "count": 1,
-            "raw": 131812,
-            "br": 9684
+            "raw": 132078,
+            "br": 9785
           },
           "javascript": {
             "count": 0,

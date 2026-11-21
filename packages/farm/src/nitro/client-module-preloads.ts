@@ -20,6 +20,12 @@ export interface FarmClientModulePreloadManifest {
   /** The entry's static imports, directly or through another chunk. Every page loads them. */
   entry: number[];
   /**
+   * The chunks of the modules the entry imports by itself to navigate (islands mode's router and
+   * route table), and their static imports outside `entry`. Islands mode's boot fetches them with
+   * the entry when a link starts it.
+   */
+  router: number[];
+  /**
    * Each dynamically imported module's chunk and that chunk's static imports outside
    * `entry`, by the module id the client loads it with (`/src/app/page.tsx`).
    */
@@ -47,7 +53,7 @@ interface ClientBundleChunk {
  */
 export function collectFarmClientModulePreloads(
   bundle: Record<string, { type: string }>,
-  options: { root: string; entryName: string },
+  options: { root: string; entryName: string; routerModules?: string[] },
 ): FarmClientModulePreloadManifest | null {
   const chunks = Object.values(bundle).filter(
     (output): output is ClientBundleChunk => output.type === "chunk",
@@ -94,7 +100,27 @@ export function collectFarmClientModulePreloads(
     ].map(index);
   }
 
-  return { files, entry: entryFiles.map(index), modules };
+  const routerFiles: string[] = [];
+  const routerLoaded = new Set(entryLoaded);
+  for (const routerModule of options.routerModules ?? []) {
+    const chunk = chunks.find(
+      (candidate) =>
+        candidate.isDynamicEntry &&
+        candidate.facadeModuleId &&
+        path.resolve(candidate.facadeModuleId.split("?")[0]!) === path.resolve(routerModule),
+    );
+    if (!chunk || routerLoaded.has(chunk.fileName)) continue;
+    routerLoaded.add(chunk.fileName);
+    routerFiles.push(chunk.fileName);
+    staticImports(chunk, routerLoaded, routerFiles);
+  }
+
+  return {
+    files,
+    entry: entryFiles.map(index),
+    router: routerFiles.map(index),
+    modules,
+  };
 }
 
 /**
@@ -111,6 +137,7 @@ export function createFarmClientModulePreloadPlugin(options: {
   root: string;
   buildDir: string;
   entryName: string;
+  routerModules?: string[];
 }) {
   return {
     name: "farm-client-module-preloads",
