@@ -9,6 +9,7 @@ import {
   resolveConfigRedirectDestination,
   resolveConfigRoutePathname,
 } from "./route-pattern";
+import { matchesFarmRouteConditions, validateFarmRouteConditions } from "./route-conditions";
 
 /**
  * Matchers for the config `redirects()`, `rewrites()` and `headers()`, shared by the dev plugins
@@ -23,10 +24,12 @@ export interface FarmConfigRouteMatchOptions {
 
 export type FarmConfigRedirectMatcher = (
   url: URL,
+  /** Request headers, for `has`/`missing` conditions on cookies and headers. */
+  headers?: Headers,
 ) => { destination: string; statusCode: number } | null;
 
 /** The destination a request URL is rewritten to (its query kept when it names none), or null. */
-export type FarmConfigRewriteMatcher = (url: URL) => URL | null;
+export type FarmConfigRewriteMatcher = (url: URL, headers?: Headers) => URL | null;
 
 /** The `headers` of every config entry whose source matches the request URL, in config order. */
 export type FarmConfigHeadersMatcher = (url: URL) => HeaderConfig["headers"][];
@@ -41,18 +44,23 @@ export function createConfigRedirectMatcher(
         `Redirect "${redirect.source}" statusCode must be one of 301, 302, 303, 307, or 308.`,
       );
     }
+    validateFarmRouteConditions(redirect.has, `Redirect "${redirect.source}" has`);
+    validateFarmRouteConditions(redirect.missing, `Redirect "${redirect.source}" missing`);
   }
   const compiledRedirects = redirects.map((redirect) => ({
     redirect,
     pattern: compileConfigRoutePattern(redirect.source),
   }));
 
-  return (url) => {
+  return (url, headers) => {
     if (compiledRedirects.length === 0) return null;
     const routePath = resolveConfigRoutePathname(url.pathname, i18n, basePath);
     for (const { redirect, pattern } of compiledRedirects) {
       const match = routePath.pathname.match(pattern.regex);
       if (!match) continue;
+      // A rule whose conditions fail is skipped, so a later rule for the same
+      // source can still apply.
+      if (!matchesFarmRouteConditions(redirect.has, redirect.missing, url, headers)) continue;
       const localizedDestination = resolveConfigRedirectDestination(
         interpolateConfigRouteDestination(redirect.destination, match, pattern.tokens),
         routePath.locale,
@@ -72,17 +80,24 @@ export function createConfigRewriteMatcher(
   rewrites: readonly RewriteConfig[],
   { i18n, basePath }: FarmConfigRouteMatchOptions = {},
 ): FarmConfigRewriteMatcher {
+  for (const rewrite of rewrites) {
+    validateFarmRouteConditions(rewrite.has, `Rewrite "${rewrite.source}" has`);
+    validateFarmRouteConditions(rewrite.missing, `Rewrite "${rewrite.source}" missing`);
+  }
   const compiledRewrites = rewrites.map((rewrite) => ({
     rewrite,
     pattern: compileConfigRoutePattern(rewrite.source),
   }));
 
-  return (url) => {
+  return (url, headers) => {
     if (compiledRewrites.length === 0) return null;
     const routePath = resolveConfigRoutePathname(url.pathname, i18n, basePath);
     for (const { rewrite, pattern } of compiledRewrites) {
       const match = routePath.pathname.match(pattern.regex);
       if (!match) continue;
+      // A rule whose conditions fail is skipped, so a later rule for the same
+      // source can still apply.
+      if (!matchesFarmRouteConditions(rewrite.has, rewrite.missing, url, headers)) continue;
       const destinationUrl = new URL(
         localizeConfigRouteDestination(
           interpolateConfigRouteDestination(rewrite.destination, match, pattern.tokens),
