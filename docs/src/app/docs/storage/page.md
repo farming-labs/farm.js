@@ -77,8 +77,8 @@ The development server and a built app both apply `storage` from `farm.config` b
 ## Farm-managed storage
 
 A Farm-managed mount gives your app durable key-value storage and SQL access to the same hosted database. Farm.js Infra provisions it using SQLite (libSQL).
-Declare a mount in `farm.config.ts` and install the remote client in the app with
-`pnpm add @libsql/client@^0.17.4`. Each named resource belongs to one project and environment.
+Declare a mount in `farm.config.ts`. `@farm.js/core` includes the client it uses, so there is nothing
+else to install. Each named resource belongs to one project and environment.
 
 ```ts
 import { defineConfig } from "@farm.js/core";

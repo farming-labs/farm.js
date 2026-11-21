@@ -299,7 +299,7 @@ async function resolveDriver(config?: FarmStorageMountConfig, mount?: string): P
     if (!mount) throw new TypeError("Register managed SQLite in storage.mounts.");
     return managedSqliteDriver(
       managedSqliteName(mount, hosted.managed),
-      () => loadModule("@libsql/client/http"),
+      () => import("./libsql-http"),
       hosted.schema,
     );
   }
@@ -634,10 +634,9 @@ function collectDriverModules(config: unknown, modules: Set<string>): void {
 
   const source = config as Record<string, unknown>;
   const driver = source.driver;
-  if (typeof driver === "string") {
-    if (resolveManagedStorageMount(config)) {
-      modules.add("@libsql/client/http");
-    } else if (isDatabaseDriverName(driver)) {
+  // Core bundles the hosted client, so a managed mount adds no module of its own.
+  if (typeof driver === "string" && !resolveManagedStorageMount(config)) {
+    if (isDatabaseDriverName(driver)) {
       modules.add("db0");
       modules.add(DATABASE_CONNECTORS[driver].module);
       modules.add("unstorage/drivers/db0");

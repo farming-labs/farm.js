@@ -853,6 +853,7 @@
     "@formatjs/icu-messageformat-parser": "3.5.15",
     "@jridgewell/trace-mapping": "0.3.31",
     "@libsql/core": "0.17.4",
+    "@libsql/hrana-client": "0.10.0",
     "@mdx-js/mdx": "^3.1.1",
     "@opentelemetry/api": "1.9.1",
     "@vitejs/plugin-react": "6.1.2",
@@ -866,6 +867,7 @@
     "nitro": "3.0.260903-beta",
     "pg": "^8.20.0",
     "picocolors": "^1.0.0",
+    "promise-limit": "2.7.0",
     "remark-gfm": "^4.0.1",
     "rolldown": "^1.2.7",
     "sugar-high": "^0.9.5",
@@ -912,7 +914,6 @@
   },
   "peerDependencies": {
     "@farming-labs/docs": "^0.2.118",
-    "@libsql/client": "^0.17.4",
     "@tailwindcss/vite": "^4.3.3",
     "@vercel/og": "^1.0.1",
     "react": "^18.2.0 || ^19.0.0",
@@ -921,9 +922,6 @@
   },
   "peerDependenciesMeta": {
     "@farming-labs/docs": {
-      "optional": true
-    },
-    "@libsql/client": {
       "optional": true
     },
     "@tailwindcss/vite": {
