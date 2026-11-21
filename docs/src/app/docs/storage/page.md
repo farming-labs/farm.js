@@ -186,11 +186,11 @@ instructions, and the CLI commands to apply it.
 Members can inspect mount details. Organization owners and admins can open a **Ready**
 resource to browse its data.
 
-- **KV pairs** shows keys and values. Filter by key prefix and open a key to inspect its value.
+- **KV** shows keys and values. Filter by key prefix and open a key to inspect its value.
 - **Tables** shows rows, column definitions, and foreign keys. Select a related table to inspect its rows.
 - **Details** lists the mount names and configured drivers and shows how to connect from your app.
 
-A Redis mount opens on **KV pairs**. A PostgreSQL or SQLite mount opens on **Tables**.
+A Redis mount opens on **KV**. A PostgreSQL or SQLite mount opens on **Tables**.
 `farmStorage()` and namespaces shared by SQL and KV mounts offer both views.
 **Back to storage** returns to the selected project and environment.
 
