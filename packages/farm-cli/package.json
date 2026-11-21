@@ -67,7 +67,7 @@
     "lint:fix": "biome lint --write .",
     "format": "biome format --write .",
     "type-check": "tsc --noEmit",
-    "test": "tsdown && node --test test/*.test.mjs",
+    "test": "tsdown && NODE_PATH= node --test test/*.test.mjs",
     "clean": "rm -rf dist"
   },
   "dependencies": {
