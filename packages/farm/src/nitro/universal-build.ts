@@ -4154,9 +4154,10 @@ export function generateClientHydrationEntry(
   const appSetupPath = resolveFarmRendererAppSetup(root, renderer);
   const rendererClientImports = isReactRenderer(renderer)
     ? `import React from "react";\nimport { createRoot, hydrateRoot } from "react-dom/client";\nimport { restorePagePosition } from "@farm.js/core/internal/client-runtime";`
-    : appSetupPath
-      ? `import React, { createRoot, hydrateRoot, configureApp as __farmConfigureApp } from ${JSON.stringify(renderer.client)};\nimport __farmAppSetup from ${JSON.stringify(toPosixPath(appSetupPath))};\n__farmConfigureApp(__farmAppSetup);`
-      : `import React, { createRoot, hydrateRoot } from ${JSON.stringify(renderer.client)};`;
+    : // Named exports only, as the server entry and the development client read them.
+      appSetupPath
+      ? `import * as React from ${JSON.stringify(renderer.client)};\nimport { createRoot, hydrateRoot, configureApp as __farmConfigureApp } from ${JSON.stringify(renderer.client)};\nimport __farmAppSetup from ${JSON.stringify(toPosixPath(appSetupPath))};\n__farmConfigureApp(__farmAppSetup);`
+      : `import * as React from ${JSON.stringify(renderer.client)};\nimport { createRoot, hydrateRoot } from ${JSON.stringify(renderer.client)};`;
   const providerClientCode = generateFarmIntegrationProviderClientCode(
     integrationProviders,
     root,
@@ -7494,7 +7495,9 @@ function generateVirtualEntryCode(
             : '\nimport { isolateFarmServerPageGraph, wrapFarmIsolatedClientGraph } from "@farm.js/core/internal/isolated-boundary";\nimport { renderFarmServerTreePage } from "@farm.js/core/internal/server-tree";'
           : ""
       }`
-    : `import React, * as ReactDOMServer from ${JSON.stringify(config.renderer.server)};${generateFarmRendererAppSetupServerCode(config)}`;
+    : // The renderer contract is the server module's named exports, which the development
+      // server reads too; a renderer needs no default export.
+      `import * as ReactDOMServer from ${JSON.stringify(config.renderer.server)};\nconst React = ReactDOMServer;${generateFarmRendererAppSetupServerCode(config)}`;
   const routeClientGraphServerRuntime = hasIsolatedClientGraphRuntime
     ? `function wrapFarmRouteClientGraph(element) {
   return wrapFarmIsolatedClientGraph(React, element);
