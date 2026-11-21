@@ -9,6 +9,7 @@ node benchmarks/server-components-payload/measure.mjs            # builds app/ i
 node benchmarks/server-components-payload/measure.mjs --skip-build --modes islands
 node benchmarks/server-components-payload/timing.mjs                 # uses the builds above
 node benchmarks/server-components-payload/throughput.mjs             # uses the builds above
+node benchmarks/server-components-payload/first-navigation.mjs --latency 150 --tap-hold 80
 ```
 
 ## The app
@@ -38,8 +39,8 @@ a client navigation, and page errors are counted.
 ## Results
 
 2026-11-20, Apple M1, macOS 26.2, Node 24.21.0, Chrome 157. Times on `main` at 33b402362 (Farm
-0.1.77, islx 0.0.25); bytes re-measured once the boot entry preloaded the runtime's chunks, on
-`main` at aac021576 with that change. Averages; KB = 1024 bytes.
+0.1.77, islx 0.0.25); bytes and first navigations over a network measured 2026-11-21 on `main` at
+5e9dfcbd9 with the boot entry requesting a held click's page. Averages; KB = 1024 bytes.
 
 Four sections of the app:
 
@@ -58,13 +59,13 @@ Four sections of the app:
 | Section | Engine    | Document, br (raw) | First-load JS, br | Navigation data, br (raw) | Navigation JS, br |
 | ------- | --------- | ------------------ | ----------------- | ------------------------- | ----------------- |
 | docs    | `rsc`     | 16.3 KB (76.4 KB)  | 71.0 KB           | 12.0 KB (37.5 KB)         | 0                 |
-| docs    | `islands` | 16.1 KB (69.9 KB)  | 1.9 KB            | 2.6 KB (7.5 KB)           | 9.3 KB            |
+| docs    | `islands` | 16.1 KB (69.9 KB)  | 2.2 KB            | 2.6 KB (7.5 KB)           | 9.3 KB            |
 | shop    | `rsc`     | 5.5 KB (33.2 KB)   | 71.0 KB           | 3.8 KB (13.2 KB)          | 0                 |
-| shop    | `islands` | 5.9 KB (30.7 KB)   | 1.9 KB            | 1.7 KB (4.1 KB)           | 9.4 KB            |
+| shop    | `islands` | 5.9 KB (30.7 KB)   | 2.2 KB            | 2.0 KB (5.2 KB)           | 9.4 KB            |
 | blog    | `rsc`     | 17.9 KB (379.5 KB) | 71.0 KB           | 10.8 KB (203.7 KB)        | 0                 |
-| blog    | `islands` | 9.1 KB (127.4 KB)  | 1.9 KB            | 9.1 KB (127.6 KB)         | 9.3 KB            |
+| blog    | `islands` | 9.1 KB (127.4 KB)  | 2.2 KB            | 9.1 KB (127.6 KB)         | 9.3 KB            |
 | guide   | `rsc`     | 18.0 KB (379.8 KB) | 71.0 KB           | 10.9 KB (203.9 KB)        | 0                 |
-| guide   | `islands` | 9.5 KB (129.0 KB)  | 1.9 KB            | 9.5 KB (129.1 KB)         | 9.4 KB            |
+| guide   | `islands` | 9.5 KB (129.0 KB)  | 2.2 KB            | 9.5 KB (129.1 KB)         | 9.4 KB            |
 
 An islands page whose client components only react to clicks starts with the boot entry (RFC 0003,
 sections 10 and 11). The client runtime, about 92 KB, arrives with the first navigation or click;
@@ -93,7 +94,7 @@ engines, so both see the same load. This run had other work on the machine (load
 | guide   | `rsc`     | 216 ms (89 ms)                   | 84 ms            | 73 ms      | 52 (34-57)           |
 | guide   | `islands` | 105 ms (3 ms)                    | 120 ms           | 77 ms      | 176 (122-205)        |
 
-- A first load sends 1.9 KB of JavaScript instead of 71.0 KB, does about half the main-thread work
+- A first load sends 2.2 KB of JavaScript instead of 71.0 KB, does about half the main-thread work
   and runs 3 to 5 ms of script instead of 67 to 91 ms: nothing on these pages hydrates at load.
 - Navigations carry a fifth of RSC's data on docs pages and half on shop pages. On a
   content page (blog) Flight sends every token twice, as HTML and as rows: islands sends half the
@@ -102,10 +103,11 @@ engines, so both see the same load. This run had other work on the machine (load
   data, as a server tree leaves out its static HTML, and the server renders 3.4 times as many pages.
 - After the first, navigations paint within a millisecond of RSC on docs and shop pages, 5 ms
   sooner on blog posts and 4 ms later on guide posts, within this machine's noise.
-- The first navigation is slower than RSC's: by 15 ms on docs, 5 ms on blog, 36 ms on guide and
-  66 ms on shop. It loads what the first load left out, the client runtime (81.5 KB br, with
-  React DOM) and the router. On shop and guide the click is also the layout's first React render,
-  which RSC does during the first load.
+- From a server on the same machine, the first navigation is slower than RSC's: by 15 ms on docs,
+  5 ms on blog, 36 ms on guide and 66 ms on shop. It loads what the first load left out, the
+  client runtime (81.5 KB br, with React DOM) and the router. On shop and guide the click is also
+  the layout's first React render, which RSC does during the first load. Over a network the
+  picture changes; see below.
 - A docs navigation request takes 0.58 ms on the server against 0.66 to 0.69 ms for RSC's `.rsc`
   request (medians of 1,495 requests alternating between the engines, `accept-encoding: identity`
   for both, so neither pays for compression), and returns 7.3 KB instead of 37.3 KB.
@@ -114,6 +116,42 @@ engines, so both see the same load. This run had other work on the machine (load
 - shop: the catalog travels once, and a navigation leaves it out. The browser rebuilds a shop
   page in the layout's React tree from its payload, so a navigation carries only that payload,
   not the page's HTML (`F-Render: tree`). That holds from the first navigation, before the
-  layout has hydrated: the router creates the layout's root with the next page.
+  layout has hydrated: the router creates the layout's root with the next page. A click made
+  before the runtime runs is the exception: its request goes out with the click, before the
+  browser holds the catalog, so that one response carries it again (the shop row's 2.0 KB).
+
+### First navigation over a network (`first-navigation.mjs`)
+
+A server on the same machine answers at once, which hides the round trips a first navigation
+waits for. `first-navigation.mjs` adds a fixed latency to every response
+(`Network.emulateNetworkConditions`), serves the builds over HTTP/2 through a local TLS proxy, and
+throttles Chrome's CPU 4x. Each of 5 rounds visits every section cold, alternating the engines'
+order, and either hovers "Next" for 100 ms and clicks, taps it at once, or taps it for 80 ms (a
+tap usually lasts 50 to 120 ms). The time runs from the click's own timestamp, when the browser
+received the input, to the second frame after the new heading is in the document. Medians, in ms.
+
+| Section | Engine    | 50 ms, hover | 50 ms, instant tap | 150 ms, hover | 150 ms, 80 ms tap |
+| ------- | --------- | ------------ | ------------------ | ------------- | ----------------- |
+| docs    | `rsc`     | 89           | 113                | 183           | 200               |
+| docs    | `islands` | 46           | 146                | 181           | 184               |
+| shop    | `rsc`     | 85           | 114                | 183           | 201               |
+| shop    | `islands` | 64           | 195                | 217           | 215               |
+| blog    | `rsc`     | 133          | 148                | 227           | 235               |
+| blog    | `islands` | 64           | 181                | 215           | 214               |
+| guide   | `rsc`     | 131          | 147                | 224           | 232               |
+| guide   | `islands` | 84           | 214                | 235           | 241               |
+
+- RSC fetches the page after the click. With a 100 ms hover on a fast network, islands has loaded
+  the runtime and router and prefetched the page by then, so its first navigation takes about half
+  as long.
+- A click made before the runtime runs is held by the boot entry, which requests the page with
+  the click; the router renders that response once the runtime runs. On a mobile network (150 ms)
+  that makes a first tap faster than RSC's on docs and blog, and 9 to 14 ms slower under a
+  hydrating layout (shop, guide). Before the boot entry requested the page, the same taps took
+  305, 342, 335 and 364 ms. A 100 ms hover is too short to load the runtime over that network, so
+  its click gains the same way: from 241, 289, 276 and 310 ms.
+- An instant tap on a fast network is still 33 to 81 ms slower: the click arrives before the
+  runtime, which then has to start (and hydrate the layout, on shop and guide) before the page
+  renders.
 
 `results/latest.json` has the per-page numbers of the last run.
