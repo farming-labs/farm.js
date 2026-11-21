@@ -46,7 +46,9 @@ test("idle WebSocket previews close when the authority fails", { timeout: 15_000
 test("WebSocket revocation denies traffic and reconnects without forwarding secrets to access hooks", async () => {
   let allowed = true;
   let forwarded = 0;
-  const target = createServer((_req, res) => {
+  let connectionHeader;
+  const target = createServer((req, res) => {
+    connectionHeader = req.headers["x-farm-preview-connection"];
     forwarded++;
     res.end("ok");
   });
@@ -76,6 +78,16 @@ test("WebSocket revocation denies traffic and reconnects without forwarding secr
   const agent = await startTypeScriptPreviewAgent(options);
   try {
     assert.equal((await fetch(agent.publicUrl)).status, 200);
+    const send = (id) =>
+      fetch(agent.publicUrl, {
+        method: "POST",
+        body: "event",
+        headers: { "x-farm-preview-connection": id },
+      });
+    assert.equal((await send("previous-connection")).status, 412);
+    assert.equal(forwarded, 1);
+    assert.equal((await send(seen[0].id)).status, 200);
+    assert.equal(connectionHeader, undefined);
     const before = forwarded;
     allowed = false;
     assert.equal((await fetch(agent.publicUrl)).status, 403);

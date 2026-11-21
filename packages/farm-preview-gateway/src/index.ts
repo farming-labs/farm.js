@@ -1194,6 +1194,10 @@ async function proxyPublicRequest(
   if (!session) {
     return inactivePreviewResponse(request, route.name);
   }
+  const expectedConnection = request.headers.get("x-farm-preview-connection");
+  if (expectedConnection !== null && expectedConnection !== session.id) {
+    return text("The selected preview connection has changed.", 412);
+  }
   if (!isPreviewClientOnline(session, config)) {
     await releasePreviewSession(store, config, session);
     reportSession(config, session, "disconnected");
@@ -1449,6 +1453,7 @@ async function serializePreviewRequest(
     const normalized = key.toLowerCase();
     if (
       !requestHopByHopHeaders.has(normalized) &&
+      normalized !== "x-farm-preview-connection" &&
       normalized !== "forwarded" &&
       !normalized.startsWith("x-forwarded-")
     ) {

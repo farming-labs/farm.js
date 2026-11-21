@@ -1006,3 +1006,10 @@ export const { api, apiClient } = createIntegrations({
 - Add database tests with real data when `schema` is present.
 - Log enough request metadata to debug failures without logging secrets.
 - Document env vars, route paths, API callers, and database models for app teams.
+
+### Receive durable webhooks from Farm Infra
+
+`@farm.js/webhook` mounts verified POST routes through the normal Farm integration registry.
+Provision a receiver from the Infra Webhooks dashboard or with `registerWebhook` on a trusted
+server. See [Managed receivers](/docs/integrations/webhooks#managed-receivers) for the sender
+and receiver code and the development and production setup.
