@@ -26,6 +26,8 @@ test("storage plan is local and apply reconciles each named database once", asyn
       editor: sqliteStorage({managed:{name:"drafts"}}),
       drafts: sqliteStorage({managed:true}),
       copy: farmStorage({namespace:"drafts"}),
+      stats: farmStorage({type:"kv"}),
+      notes: farmStorage({type:"sql", namespace:"notebook"}),
       orders: postgresStorage({managed:true}),
       legacy: {driver:"farm-managed-sqlite", managed:true},
       cache: redisStorage({managed:true, namespace:"sessions"}),
@@ -61,12 +63,13 @@ test("storage plan is local and apply reconciles each named database once", asyn
   };
   const command = (action) =>
     run(process.execPath, [cli, "storage", action, "--root", root], { env });
-  const names = ["drafts", "legacy", "orders", "raw-only", "sessions"];
+  const names = ["drafts", "legacy", "notebook", "orders", "raw-only", "sessions", "stats"];
   const plan = await command("plan");
   assert.deepEqual(
     [...plan.stdout.matchAll(/Ensure SQLite: ([a-z-]+)/g)].map((m) => m[1]),
     names,
   );
+  assert.match(plan.stderr, /farmStorage\(\) without `type` is deprecated \(`copy`, `legacy`\)/);
   assert.deepEqual(received, []);
   await assert.rejects(command("apply"), /FARMJS_API_KEY/);
   assert.deepEqual(received, []);
@@ -79,12 +82,14 @@ test("storage plan is local and apply reconciles each named database once", asyn
       { mount: "drafts", driver: "sqlite" },
       { mount: "editor", driver: "sqlite" },
     ],
+    notebook: [{ mount: "notes", driver: "farm-sql" }],
     orders: [{ mount: "orders", driver: "postgres" }],
     "raw-only": [{ mount: "raw", driver: "redis" }],
     sessions: [
       { mount: "cache", driver: "redis" },
       { mount: "sessions", driver: "cloudflare-kv-binding" },
     ],
+    stats: [{ mount: "stats", driver: "farm-kv" }],
   };
   assert.deepEqual(
     received,
@@ -95,6 +100,33 @@ test("storage plan is local and apply reconciles each named database once", asyn
       environment: "development",
       body: name === "legacy" ? { name } : { name, declarations: declarations[name] },
     })),
+  );
+});
+
+test("storage plan refuses a key-value mount and a SQL mount on one database", async (t) => {
+  const root = await mkdtemp(path.join(tmpdir(), "farm-storage-mixed-"));
+  t.after(() => rm(root, { recursive: true, force: true }));
+  const scope = path.join(root, "node_modules", "@farm.js");
+  await mkdir(scope, { recursive: true });
+  await symlink(core, path.join(scope, "core"), "junction");
+  await writeFile(
+    path.join(root, "farm.config.ts"),
+    `
+    import { farmStorage, redisStorage } from "@farm.js/core/storage";
+    export default {storage: {mounts: {
+      cache: redisStorage({managed:true, namespace:"app"}),
+      app: farmStorage({type:"sql"})
+    }}};
+  `,
+  );
+  const failure = await run(process.execPath, [cli, "storage", "plan", "--root", root]).then(
+    () => assert.fail("plan accepted a database shared by a key-value and a SQL mount"),
+    (error) => error,
+  );
+  assert.equal(failure.code, 1);
+  assert.match(
+    failure.stderr,
+    /The key-value mount `cache` and the SQL mount `app` share the database "app"\. Give one of them its own `namespace`/,
   );
 });
 
@@ -124,13 +156,15 @@ test("generates the ORM model types from each configured mount", async (t) => {
     path.join(root, "farm.config.ts"),
     `
     import { defineConfig } from "@farm.js/core";
-    import { farmStorage, redisStorage } from "@farm.js/core/storage";
+    import { farmStorage, postgresStorage, redisStorage } from "@farm.js/core/storage";
     import { defineSchema, id, model } from "@farming-labs/orm";
     const schema = defineSchema({ draft: model({ table: "drafts", fields: { id: id() }, relations: {} }) });
     const optionalSchema = (enabled: boolean) => enabled ? schema : undefined;
     export default defineConfig({ extends: ["./base"], storage: { mounts: {
-      drafts: farmStorage({ schema }), editor: redisStorage({ managed: true, schema }), plain: farmStorage(),
-      optional: farmStorage({schema: optionalSchema(false)})
+      drafts: farmStorage({ schema }), editor: postgresStorage({ managed: true, schema }), plain: farmStorage(),
+      optional: farmStorage({schema: optionalSchema(false)}),
+      notes: farmStorage({ type: "sql", schema }), rows: farmStorage({ type: "sql" }),
+      stats: farmStorage({ type: "kv" }), cache: redisStorage({ managed: true })
     } } });
   `,
   );
@@ -148,6 +182,12 @@ test("generates the ORM model types from each configured mount", async (t) => {
       (await getDatabase("editor")).draft.findMany();
       (await getDatabase("inherited")).note.findMany();
       (await getDatabase("plain")).execute("select 1");
+      (await getDatabase("notes")).draft.findMany();
+      (await getDatabase("rows")).execute("select 1");
+      // @ts-expect-error A key-value mount has no database.
+      (await getDatabase("stats")).execute("select 1");
+      // @ts-expect-error A managed Redis mount holds key-value data, not tables.
+      (await getDatabase("cache")).execute("select 1");
       const optional = await getDatabase("optional");
       // @ts-expect-error Conditional schemas require narrowing or an explicit raw lookup.
       optional.execute("select 1");
