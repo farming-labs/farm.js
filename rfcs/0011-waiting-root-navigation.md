@@ -1,6 +1,7 @@
 # A first navigation out of a root that has not hydrated
 
-Status: Draft (islands mode, web). Implementation: #3071, open.
+Status: Draft (islands mode, web). Implementation: #3071, open; values before islx runs: #3073,
+open.
 
 ## Problem
 
@@ -97,7 +98,8 @@ No configuration or public API changes.
 - **Data per navigation.** Until the root hydrates, a navigation carries the page's HTML as well as
   its tree. Before islx runs, the browser holds no value store, so the router names no values
   (`F-Values`) and the server sends them again. On the bench's shop section that is 6.0 KB br per
-  navigation instead of 2.0 KB. The JavaScript a navigation loads falls by more, from 9.7 to 2.7 KB
+  navigation instead of 2.0 KB. #3073 names the value scripts the page holds until islx runs and
+  keeps them through the swap, which brings it to 4.4 KB, three quarters of it the page's HTML. The JavaScript a navigation loads falls by more, from 9.7 to 2.7 KB
   br on average over ten navigations, since React DOM, islx and the root's modules no longer load
   on the first hover.
 - **Root hydration moves.** It happens on the destination's first interaction, not on a link's
@@ -148,8 +150,8 @@ This RFC's draft estimated 320 to 400 ms at 1.6 Mbit/s, which held, and an insta
 
 ## Open questions
 
-- Values before islx runs. Until islx loads, the page's `f/value` scripts are the only copy of its
-  values, so a navigation names none and the server sends them again. The router could name the
-  scripts the document holds if a swap kept the ones the next page leaves out. That applies to
-  every islands navigation before islx runs, not only under a waiting root, so it is a separate
-  change.
+- Values before islx runs, answered by #3073. Until islx loads, the page's `f/value` scripts are
+  the only copy of its values, so a navigation named none and the server sent them again. The
+  router and the boot now name the scripts the document holds, and the swap keeps the ones the
+  next page leaves out. That applies to every islands navigation before islx runs, not only under
+  a waiting root.
