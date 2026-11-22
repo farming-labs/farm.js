@@ -74,7 +74,7 @@ The higher-level framework features below use those adapter primitives:
 | Programmatic UI routes                           | Available                | Compatibility surface           | React-oriented today | React-oriented today | React-oriented today |
 | Markdown and MDX pages (`page.md`)               | Available                | Available                       | Available            | Available            | Available            |
 | Docs adapter                                     | Available                | Compatibility surface           | React-oriented today | React-oriented today | React-oriented today |
-| Generated JSX metadata images                    | Available                | Compatibility surface           | React-oriented today | React-oriented today | React-oriented today |
+| Generated metadata images (`opengraph-image`)    | Available                | Available                       | Available            | Available            | Available            |
 | React Server Components and optimized boundaries | Available experimentally | Not applicable                  | Not applicable       | Not applicable       | Not applicable       |
 | Other integration UI providers and starters      | Available                | Provider-specific compatibility | React-oriented today | React-oriented today | React-oriented today |
 

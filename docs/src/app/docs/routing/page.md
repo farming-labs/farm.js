@@ -1447,9 +1447,6 @@ serves a file added while it runs.
 
 ### Generated metadata images
 
-Generated JSX metadata images currently use the React image renderer. Every renderer can use static
-`opengraph-image.png`, `twitter-image.png`, and explicit metadata image URLs.
-
 Place `opengraph-image.tsx` or `twitter-image.tsx` next to a route segment when the image needs data or route params. Return ordinary stateless JSX: Farm owns the image endpoint and PNG renderer, so the component does not import `ImageResponse` or declare an API URL. The renderer is `@vercel/og`, which the app installs with `pnpm add @vercel/og`; `farm build` fails with that command when a generated image exists and the package is missing. Farm also adds the nearest matching image to the page head when `openGraph.images` or `twitter.images` is not already set.
 
 **src/app/products/[id]/opengraph-image.tsx**
@@ -1499,7 +1496,42 @@ Satori-compatible TTF, OTF, and WOFF files are supported; WOFF2 is not. Set `fon
 
 Generated images revalidate on every request by default. Export `revalidate = 300` to let a CDN cache the route for five minutes, or `revalidate = false` only when the output is permanently immutable. Farm emits an `ETag`, supports conditional requests and `HEAD`, and performs JSX-to-image rendering internally.
 
-For advanced renderers, the default export may still return a `Response`, string, or bytes. To preserve the earlier React-to-SVG behavior, export `contentType = "image/svg+xml"` and return an SVG React element. A returned `Response` keeps its own status, headers, and body.
+For advanced renderers, the default export may still return a `Response`, string, or bytes. To preserve the earlier React-to-SVG behavior, export `contentType = "image/svg+xml"` and return an SVG element. A returned `Response` keeps its own status, headers, and body.
+
+#### With Preact, Solid, Vue, and Svelte
+
+Write the image with the app's renderer. Preact and Solid use JSX in `opengraph-image.tsx`, as
+above. Vue and Svelte can also use a component in their own file type:
+
+**src/app/products/[id]/opengraph-image.vue**
+
+```vue
+<script lang="ts">
+export const size = { width: 1200, height: 630 };
+export const alt = "Product preview";
+</script>
+
+<script setup lang="ts">
+const props = defineProps<{ params: { id: string } }>();
+</script>
+
+<template>
+  <div class="flex h-full w-full flex-col justify-between bg-[#09090b] p-20 text-white">
+    <span class="text-3xl font-medium text-emerald-400">Acme</span>
+    <span class="text-8xl font-bold tracking-tight">Product {{ props.params.id }}</span>
+  </div>
+</template>
+```
+
+An `opengraph-image.svelte` works the same way, with `params`, `searchParams`, and `path` from
+`$props()`. A component file gets those three as props. A default-exported function is called
+with them and can be async, so load data there and return the renderer's elements: Vue's `h()`, for
+example, in `opengraph-image.ts`.
+
+Farm renders the image with the app's renderer, as it renders a page, and draws that markup. Inline
+`style` attributes become the image's styles, and `class` takes the same utilities as `className`.
+The supported CSS is the same as above, and the image renders once on the server, so there are no
+hooks, effects, or client state.
 
 Keep only one implementation for each image kind in a segment. For example, defining both `opengraph-image.png` and `opengraph-image.tsx` produces a build error. For broad social-platform compatibility, use 1200 by 630; generated JSX routes emit PNG automatically.
 

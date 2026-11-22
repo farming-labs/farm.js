@@ -130,9 +130,10 @@ Use the Svelte-native bindings for router, action, server-query, theme, and i18n
 The returned values implement Svelte's readable-store contract. `createReadable(store)` wraps
 your own state, a store from `createStore` in `@farm.js/core/renderer-client`, the same way; see
 [Shared client state](/docs/renderers#shared-client-state). Renderer-specific `Link` and form
-components, fetchers, integration providers, programmatic UI routes, the docs adapter, and
-generated JSX metadata images remain React-oriented today. Markdown and MDX pages render with
-Svelte.
+components, fetchers, integration providers, programmatic UI routes, and the docs adapter remain
+React-oriented today. Markdown and MDX pages render with Svelte, and an
+`opengraph-image.svelte` component draws a
+[generated metadata image](/docs/routing#generated-metadata-images).
 
 The Better Auth starter includes native Svelte routes, runes, and forms:
 

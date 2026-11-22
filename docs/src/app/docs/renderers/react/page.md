@@ -3080,7 +3080,6 @@ Choose React when the application needs the complete built-in client layer:
 - `useTheme`, `useLocale`, translations, and the built-in auth hook;
 - integration providers and generated integration UI;
 - interactive islands inside Markdown pages, and the docs adapter;
-- generated JSX metadata images;
 - experimental React Server Components and optimized Strata boundaries.
 
 Server APIs such as endpoints, server functions, middleware, storage, caching, observability, and
