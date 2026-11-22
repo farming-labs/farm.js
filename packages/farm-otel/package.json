@@ -32,7 +32,6 @@
     "test": "pnpm run build && node --test test/*.test.mjs"
   },
   "dependencies": {
-    "@farm.js/core": "workspace:*",
     "@opentelemetry/api": "1.9.1",
     "@opentelemetry/auto-instrumentations-node": "0.79.0",
     "@opentelemetry/exporter-trace-otlp-http": "0.221.0",
@@ -43,8 +42,12 @@
     "@opentelemetry/semantic-conventions": "1.43.0"
   },
   "devDependencies": {
+    "@farm.js/core": "workspace:*",
     "@types/node": "^20.10.5",
     "typescript": "^5.3.3"
+  },
+  "peerDependencies": {
+    "@farm.js/core": ">=0.1.78 <0.3.0"
   },
   "engines": {
     "node": ">=22.13.0"

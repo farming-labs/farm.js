@@ -41,15 +41,18 @@
     "test": "vitest run"
   },
   "dependencies": {
-    "@farm.js/core": "workspace:*",
     "@modelcontextprotocol/server": "^2.3.0",
     "zod": "^4.6.7"
   },
   "devDependencies": {
+    "@farm.js/core": "workspace:*",
     "@types/node": "^22.20.5",
     "typescript": "^5.3.3",
     "vite": "8.3.4",
     "vitest": "5.0.5"
+  },
+  "peerDependencies": {
+    "@farm.js/core": ">=0.1.78 <0.3.0"
   },
   "engines": {
     "node": ">=22.13.0"

@@ -12,7 +12,7 @@ This package is in beta. See [Stability and Support](https://farmjs.dev/docs/sta
 pnpm add @farm.js/core @farm.js/vue vue
 ```
 
-`@farm.js/core` (`>=0.1.0 <0.2.0`) and `vue` (`^3.5.44`) are peer dependencies.
+`@farm.js/core` (`>=0.1.0 <0.3.0`) and `vue` (`^3.5.44`) are peer dependencies.
 `@vitejs/plugin-vue` and `@vue/server-renderer` are installed with the adapter.
 
 To start a new project with Vue already selected:
