@@ -1,0 +1,1 @@
+<span className="badge" id="badge">{props.label}</span>

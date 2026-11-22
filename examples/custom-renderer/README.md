@@ -1,0 +1,40 @@
+# Custom renderer example
+
+**A Farm app rendered by leaf, a UI library Farm has no code for, through an adapter you can copy.**
+
+`leaf/` is the library. It knows nothing about Farm: elements, function components, hooks, a DOM
+patcher that hydrates server markup, and `renderToString()`. `farm-leaf/` is the adapter that
+plugs it into Farm:
+
+| File                        | What Farm gets from it                                                   |
+| --------------------------- | ------------------------------------------------------------------------ |
+| `farm-leaf/src/index.js`    | The descriptor `renderer: leaf()` selects, from `defineRenderer()`       |
+| `farm-leaf/src/server.js`   | `createElement`, `renderToString`, and the rest of the server contract   |
+| `farm-leaf/src/client.js`   | `createRoot` and `hydrateRoot` for the browser entry                     |
+| `farm-leaf/src/vite.js`     | The Vite plugin: JSX against leaf's runtime, and the `.leaf` compiler    |
+| `farm-leaf/src/bindings.js` | `useRouter`, `useTheme`, and `Link`, over Farm's renderer-neutral stores |
+
+Both packages are plain JavaScript with `.d.ts` files, the shape a published renderer has, so
+neither needs a build step. `farm-leaf/test/` runs the conformance suites from
+`@farm.js/renderer-tests` and type-checks the modules against Farm's contract types.
+
+The app covers a hydrating layout that keeps its state across client navigation, a counter page,
+a page that ships no JavaScript, a dynamic route with metadata, a page and component in leaf's own
+`.leaf` file format, an API route backed by a validated `createServerFn`, and not-found and error
+pages.
+
+```bash
+pnpm --filter farm-custom-renderer-example dev
+pnpm --filter farm-leaf test
+pnpm test:e2e:custom-renderer
+```
+
+## What it does not do
+
+- leaf doesn't stream, so Farm renders its pages buffered through `renderToString()`.
+- Browser code reaches the server through API routes and the typed API client. Importing a
+  `createServerFn` or `createServerQuery` module into browser code needs the React-only server
+  actions transform, so the adapter has no `useAction` or `useServerQuery` hook.
+- leaf matches children by position and has no keys, so reordering a list re-renders its items.
+
+See [Renderer modules](https://farmjs.dev/docs/renderers#renderer-modules) for the full contract.

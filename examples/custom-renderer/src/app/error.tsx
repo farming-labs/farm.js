@@ -1,0 +1,7 @@
+export default function ErrorPage() {
+  return (
+    <section>
+      <h1 id="error">Something broke while rendering this page.</h1>
+    </section>
+  );
+}
