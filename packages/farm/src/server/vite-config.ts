@@ -58,6 +58,7 @@ export function createFarmClientOptimizeDepsConfig(
   // `renderer: false` serves no browser code, so there is nothing to pre-bundle, and Farm's
   // browser runtimes would pull in React, which a backend-only app does not install.
   if (isFarmRendererDisabled(renderer)) return { noDiscovery: true, include: [] };
+  const jsxImportSource = renderer ? renderer.jsxImportSource : undefined;
   return {
     // Keep normal application dependency discovery for CJS-only packages, but
     // seed every Farm browser runtime so React is present in the first crawl.
@@ -70,6 +71,17 @@ export function createFarmClientOptimizeDepsConfig(
     // Explicit entries let Vite finish that crawl before a navigation can
     // rotate the optimizer hash underneath a hydrated React runtime.
     ...(entries?.length ? { entries: [...entries] } : {}),
+    // Vite's dependency scan compiles JSX on its own: with the app tsconfig's `jsxImportSource`
+    // when there is one, otherwise as React, whatever the renderer's plugin set for its own
+    // transforms. React is the default already, and naming it here would override a tsconfig
+    // source such as Emotion's. A renderer plugin's own scan setting is merged over this one.
+    ...(jsxImportSource && jsxImportSource !== "react"
+      ? {
+          rolldownOptions: {
+            transform: { jsx: { runtime: "automatic" as const, importSource: jsxImportSource } },
+          },
+        }
+      : {}),
   };
 }
 
