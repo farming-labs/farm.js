@@ -286,7 +286,14 @@ runtime. Production still checks the function before calling it, but only a prim
 the resolved descriptor can be selected. This keeps the declaration and runtime export in
 agreement instead of treating an accidental export as support. FARMJS uses buffered
 `renderToString()` when neither capability is enabled. Descriptors without a `capabilities` field
-remain buffered for compatibility.
+remain buffered for compatibility. A renderer that exports only `renderToReadableStream()` streams
+in development as well as in production builds.
+
+A render error before any output should fail the stream (`onShellError()`, or an errored Web
+stream), and FARMJS answers with the error's status. After output has started, the status is sent,
+so report the error through the `onError` callback or option and end the stream. FARMJS logs it and
+the response ends with what was sent. In a production build, a Web stream that errors after output
+resets the connection instead.
 
 Farm also uses `renderToString()` for documents it sends whole, such as the not-found and error
 pages with their layouts, so it may return a promise and should wait for the renderer's own async
