@@ -1,16 +1,29 @@
 "use client";
 
-import { createSignal, onCleanup, type Accessor } from "solid-js";
+import {
+  createComponent,
+  createSignal,
+  mergeProps,
+  onCleanup,
+  splitProps,
+  type Accessor,
+  type JSX,
+} from "solid-js";
+import { Dynamic } from "solid-js/web";
 import {
   createRendererAction,
   createRendererI18n,
   createRendererQuery,
   createRendererRouter,
   createRendererTheme,
+  FARM_LINK_OPTION_KEYS,
+  resolveLinkAttributes,
+  type DefaultRouteHref,
   type FarmActionOptions,
   type FarmActionSnapshot,
   type FarmActionSubmit,
   type FarmClientStore,
+  type FarmLinkOptions,
   type FarmRendererI18n,
   type FarmRendererQueryOptions,
   type FarmRendererQuerySnapshot,
@@ -203,4 +216,26 @@ function createReactiveTranslator(
  */
 export function useStore<T>(store: FarmClientStore<T>): Accessor<T> {
   return bindFarmStore(store);
+}
+
+export type FarmSolidLinkProps<
+  TRoute extends string = DefaultRouteHref,
+  THref extends string = string,
+> = Omit<JSX.AnchorHTMLAttributes<HTMLAnchorElement>, "href"> & FarmLinkOptions<TRoute, THref>;
+
+/**
+ * An anchor that navigates and prefetches through the FARMJS router, with the same props as the
+ * React `Link`: a typed `href` or route pattern with `params`, `query`, `hash`, `prefetch`,
+ * `replace`, `scroll`, `viewTransition`, and `locale`. Other props go on the `<a>`.
+ */
+export function Link<TRoute extends string = DefaultRouteHref, THref extends string = string>(
+  props: FarmSolidLinkProps<TRoute, THref>,
+): JSX.Element {
+  const [options, anchor] = splitProps(props as FarmSolidLinkProps<string>, FARM_LINK_OPTION_KEYS);
+  return createComponent(
+    Dynamic,
+    mergeProps(anchor, () => resolveLinkAttributes(options as FarmLinkOptions<string>), {
+      component: "a",
+    }),
+  );
 }

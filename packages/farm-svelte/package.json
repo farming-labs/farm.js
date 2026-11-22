@@ -45,6 +45,11 @@
       "types": "./dist/vite.d.ts",
       "import": "./dist/vite.mjs",
       "require": "./dist/vite.cjs"
+    },
+    "./link": {
+      "types": "./dist/link.d.ts",
+      "svelte": "./dist/Link.svelte",
+      "default": "./dist/Link.svelte"
     }
   },
   "publishConfig": {
