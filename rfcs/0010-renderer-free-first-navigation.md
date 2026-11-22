@@ -1,6 +1,6 @@
 # A first navigation that does not wait for the renderer
 
-Status: Draft (islands mode, web).
+Status: Draft (islands mode, web). Implementation: #3061, open.
 
 ## Problem
 
@@ -60,56 +60,81 @@ React DOM.
 
 ## Decision
 
-A navigation that streams HTML no longer waits for the renderer. The router swaps the page in as
-soon as its response arrives, and the renderer loads alongside to hydrate what the new page holds.
+A navigation that streams HTML no longer waits for the renderer. In an islands web build, the
+client entry loads React DOM and islx with its first render or hydration instead of importing
+them. The router still imports the entry, but the entry's own imports are now small, so the router
+swaps the new page in as soon as its response arrives, and the renderer loads alongside to hydrate
+what the page holds.
 
-1. **The router stops importing the entry.** The generated web client of an islands app splits
-   into the entry (`farm-client`: React, islx, hydration, tree renders) and a renderer-free core
-   module the entry and the router both import (`farm-client-core`: base path and trailing-slash
-   policy, chunk-error recovery, the route table and its matcher, history keys, the router
-   stand-in, link interception). The router reaches the entry's functions through a cached
-   `import()`, only on the paths that render or hydrate. Once the entry has loaded, that import
-   resolves in a microtask.
+1. **The entry loads the renderer when it first needs it.** The generated entry
+   (`generateClientHydrationEntry` in `packages/farm/src/nitro/universal-build.ts`) imports React
+   but not React DOM or islx. `loadFarmRenderer()` imports `react-dom/client` and
+   `@farm.js/core/internal/islands-runtime` together, once, and sets `createRoot`, `hydrateRoot`
+   and the islands runtime. Whatever renders or hydrates awaits it first: the entry's first
+   hydration, a route that renders its page component or its hydrating layouts
+   (`loadRouteComponent`, `createMatchedHydrationRoute`), and docs search. Once it has settled, an
+   await costs a microtask. A chunk that fails to load is requested again on the next call.
 2. **The streamed path renders first.** The router swaps the markup, reconciles the head, writes
-   history, restores scroll and focus, and then waits for the entry to hydrate the new content's
-   islands. Islands hydrate by their strategies, as on a first load.
-3. **The boot sends the router ahead.** A held click on a link whose navigation streams (the boot
-   already tells: it sends `F-Stream` unless the layout hydrates as one root) imports the core and
-   the router and starts the navigation. The entry's download starts after the page request and
-   the router's, so it does not compete with them for bandwidth. A click inside a root that
-   hydrates whole (`F-Render: tree`) keeps today's order.
+   history and restores scroll as it does today, and hands the new page's islands to the islands
+   runtime without waiting. Until islx loads, that runtime is a stand-in: `hydrate`, `dispose`
+   and `endStream` wait for islx in the order they were called, and `carryOver` applies only to an
+   island that has hydrated. A navigation that replaces the page before islx arrives disposes its
+   islands in order. Islands hydrate by their strategies, as on a first load.
+3. **Islands keep a click.** The boot holds clicks on islands until the entry runs. From then
+   until islx loads, the entry holds clicks and submits on islands that have not hydrated, in the
+   same queue (`holdFarmIslandInteractions`), and each island's scheduler replays what it finds
+   there, as it does for the boot's. If the renderer fails to load, the entry stops holding, and
+   the page acts natively.
+4. **The boot fetches the renderer when the start needs it at once.** The build lists the
+   renderer's chunks in `client-module-preloads.json` (`renderer`, beside `entry` and `router`),
+   and the boot script carries them as `data-farm-preload-renderer`. The boot preloads them with
+   the entry when what started it renders or hydrates right away: an island's trigger, or a link
+   in a layout that hydrates as one root (`F-Render: tree`). For a link whose page streams, it
+   leaves them out, so the page request, the entry and the router get the bandwidth first, and the
+   entry requests the renderer once it runs. A document that runs the entry at once (no boot)
+   preloads them with the entry's imports.
 
 ### Eligibility
 
-Before it changes the DOM without the renderer, the router proves the navigation needs none. Any
-other case loads the renderer first, as today:
+The entry loads the renderer lazily when the app:
 
-- the response streams HTML (`F-Stream`), not a tree payload;
-- no React root owns the swap target (`reactRootContainer` is unset);
-- the app registers no client plugins (the build already emits `createPluginlessClientRuntime`
-  for that case). A plugin can intercept navigations (`runFarmNavigationDelegates`), and its
-  module may import the renderer, so an app with client plugins waits for the entry.
+- runs islands mode (`experimental.serverComponents: { mode: "islands" }`) on the web platform
+  with the React renderer;
+- has no client route slots. A slot renders with React DOM wherever a navigation shows it, so an
+  app with slots keeps the static import.
+
+Every other build keeps today's entry. Client plugins keep working: the entry still imports them
+statically, so a plugin that imports React DOM brings it back into the entry's closure, and that
+app keeps today's timing.
 
 ### Why the contract holds
 
 Before the runtime runs, nothing on the page has hydrated: no blocker (`useBlocker`) is
-registered, no component listens to navigation state, and no React root exists. The swap that
-runs early is the one the router runs today; only what follows it moves later. Islands on the new
-page hydrate when the renderer arrives, by their strategies, which is what a first load promises.
+registered, no component listens to navigation state, and no React root exists. The swap that runs
+before React DOM is the one the router runs today; only the hydration after it moves later.
+Islands on the new page hydrate when the renderer arrives, by their strategies, which is what a
+first load promises, and a click on one in between is replayed.
 
 ## Costs
 
-- One more module on the intent path (`farm-client-core`). Its bytes move out of the entry, so the
-  total stays the same within a chunk header; HTTP/2 fetches it beside the others.
-- The router's render and hydration branches become async, awaiting the cached entry import.
-- `splitFarmClientRouter` grows a second split. It is textual, like the first, and its output is
-  covered by the generator tests.
-- Islands on the new page cannot react to input until the renderer arrives. The boot's queued
-  interactions (`replayFarmQueuedInteraction`) must cover them as they cover a first load's; the
-  verification plan tests it.
+- The generated entry has a second shape beside the static one. The generator tests cover both,
+  and the islands production browser tests run the lazy one.
+- The entry's render and hydration paths await one promise.
+- The preload manifest gains a list, and the boot script a third preload attribute.
+- A streamed first navigation requests the renderer's chunks after the router's. Over HTTP/2 they
+  share the connection; they no longer arrive before the page.
+- Islands on the new page cannot react to input until the renderer arrives. Their clicks and
+  submits are held and replayed; a keystroke or a toggle goes through natively, as before an
+  island hydrates on a first load.
 
 ## Alternatives
 
+- **Split the entry into a renderer-free core the router imports** (this RFC's first draft): a
+  `farm-client-core` module for the route table, base path, history keys and link interception,
+  with the router reaching the entry through a cached `import()`. It takes the same bytes off the
+  tap's path, but needs a second textual split of the generated client and makes the router's
+  render and hydration branches async. Loading the renderer inside the entry gives the router the
+  same small closure with one loader and no new module.
 - **Load the runtime when the browser is idle after load.** Small to build, but it breaks RFC
   0003's promise that a reader who never navigates or interacts loads no runtime, and it spends
   about 91 KB on every visit. Rejected.
@@ -123,28 +148,45 @@ page hydrate when the renderer arrives, by their strategies, which is what a fir
 
 ## Implementation
 
-1. Generator: emit `farm-client-core` and import it from the entry and the router. No behavior
-   change; generator tests cover the split, and the runtime-size report lists the chunks.
-2. Router: reach the entry through the cached import; run the streamed path before it loads when
-   the navigation is eligible.
-3. Boot: import the core and the router for a held click on a streaming link; fetch the entry
-   after them.
-4. Development: the dev entry keeps today's order. It shares the router's semantics (render, then
-   hydrate) but loads unbundled modules, where the order costs nothing worth the parity work.
+- **Entry.** `generateClientHydrationEntry` emits `loadFarmRenderer()` and the islands runtime
+  stand-in for an eligible build, and awaits the renderer on the paths that render or hydrate. The
+  dynamic import names the islx exports it uses (`import(...).then(function({ ... }) { ... })`):
+  passing the module object along whole kept every export of islx's runtime, 11 KB raw more than
+  the static import kept.
+- **Held interactions.** `holdFarmIslandInteractions` in `packages/farm/src/client/island-runtime.ts`
+  holds clicks and submits on islands that have not hydrated, from the entry's start until islx
+  has loaded.
+- **Preloads.** `createFarmClientModulePreloadPlugin` resolves the renderer's specifiers as the
+  build resolved them and writes the `renderer` list. The server puts it on the boot script, and the
+  boot (`packages/farm/src/client/islands-boot.ts`) preloads it by what started it.
 
-## Verification plan
+Development keeps today's entry: `farm dev` generates its own, which loads unbundled modules,
+where the order costs nothing worth the parity work.
 
-- A production browser test that holds the entry chunk's response until the new page's heading is
-  in the document, for a held click on a streaming link: the page must render while React DOM is
-  still pending, a click on one of its islands before then must apply once the chunk is released,
-  and its islands must hydrate. The same test on a
-  `F-Render: tree` link must wait for the chunk.
-- The islands contract suites (`tests/e2e-server-components`), production and development.
-- `first-navigation.mjs` before and after, interleaved: 150 ms with 1.6 Mbit/s and an 80 ms tap,
-  and 50 ms with an instant tap, all sections. shop and guide must not get slower.
-- Bytes per chunk before and after (`measure.mjs`): first-load JavaScript stays 2.2 KB, and the
-  runtime's total stays within a chunk header of today's.
+## Results
 
-The expected effect is an estimate until then: at 1.6 Mbit/s a docs or blog tap would wait for the
-router and the page (about 14 KB) instead of about 100 KB, which puts it near the `rsc` engine's
-264 to 286 ms rather than 698 to 773 ms.
+Measured 2026-11-21 with `first-navigation.mjs`, interleaved with a build from before the change
+(HTTP/2, 4x CPU; Apple M1, macOS 26.2, Node 24.21.0, Chrome 157; load average 8 to 55 from other
+work). Medians of 5 rounds in ms, `rsc` / before / after:
+
+| Section | 150 ms latency at 1.6 Mbit/s, 80 ms tap | 50 ms latency, instant tap |
+| ------- | --------------------------------------- | -------------------------- |
+| docs    | 266 / 715 / 316                         | 124 / 163 / 137            |
+| shop    | 225 / 819 / 776                         | 121 / 249 / 216            |
+| blog    | 290 / 801 / 389                         | 169 / 213 / 162            |
+| guide   | 307 / 871 / 826                         | 226 / 323 / 250            |
+
+- docs and blog stream their pages, so React DOM left the tap's path: at 1.6 Mbit/s a first tap
+  is 50 to 100 ms behind `rsc` instead of 450 to 510. What remains is the entry and the router
+  (26.8 KB br) on top of the page.
+- shop and guide render in the layout's React root, so they still wait for React DOM. Closing that
+  gap needs React DOM before the tap (the idle preload rejected above) or a layout that renders
+  without it.
+- An instant tap got 26 to 73 ms faster on every section.
+- With 150 ms of latency and unlimited bandwidth, a 100 ms hover and an 80 ms tap are unchanged
+  within noise (9 rounds; a 15-round rerun of shop and guide taps alone: 246 to 240 ms and 269 to
+  255 ms).
+- Bytes: first-load JavaScript stays 2.2 KB br (the boot grows by 32 B). The router's static
+  closure goes from 93.1 to 26.8 KB br. The runtime as a whole goes from 93.2 to 95.5 KB br: about
+  0.4 KB of code, the rest compression lost to three files instead of one. A navigation's response
+  leaves the renderer list out, so navigation data stays within 0.1 KB.
