@@ -458,7 +458,8 @@ Farm includes plugins for logging, compression, redirects, rewrites, headers, an
 The production compression plugin negotiates Brotli or gzip from `Accept-Encoding`, streams the
 encoded response body, adds `Vary: Accept-Encoding`, and removes the identity `Content-Length`.
 Responses that are already encoded, partial, marked `no-transform`, or sent as server-sent events
-are left unchanged.
+are left unchanged. It runs on Node and Bun servers; on edge runtimes such as Cloudflare Workers the
+platform compresses responses instead.
 
 Dynamic Brotli responses use compression quality 5 to balance response latency and transfer size.
 Both Brotli and gzip flush each chunk so streaming content can arrive before the response finishes.
