@@ -6510,7 +6510,8 @@ function generateProgrammaticClientRouteModuleForId(
         : clientRoutes?.routes.get(
             programmaticClientRouteKey(routesFile, parsed.kind, parsed.routePath),
           ),
-    rendererServer: renderer.server,
+    // React's client module exports no createElement; the main client entry imports React too.
+    rendererClient: isReactRenderer(renderer) ? "react" : renderer.client,
     toImportSpecifier: (file) => toProgrammaticRouteImportSpecifier(file, root),
   });
 }

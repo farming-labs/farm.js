@@ -267,6 +267,7 @@ import {
 import {
   generateFarmIntegrationProviderClientCode,
   generateFarmIntegrationProviderServerModules,
+  isRendererCompiledComponent,
 } from "../integration-provider-build";
 import { loadFarmProductionVite, type FarmProductionViteRuntime } from "../build/production-vite";
 import {
@@ -2614,6 +2615,7 @@ async function buildClient(
                 ...(islandsMode && isReactRenderer(config.renderer)
                   ? {
                       rendererImports: [
+                        "react",
                         "react-dom/client",
                         "@farm.js/core/internal/islands-runtime",
                       ],
@@ -4174,17 +4176,17 @@ export function generateClientHydrationEntry(
     platform,
   );
   const appSetupPath = resolveFarmRendererAppSetup(root, renderer);
-  // Islands mode's web client loads React DOM and islx with its first render or hydration (RFC
-  // 0010). Its router imports this entry, so a navigation that streams HTML swaps the page in while
-  // they download. Client route slots render with React DOM wherever a navigation shows them, so an
-  // app with them keeps it in the entry.
+  // Islands mode's web client loads React, React DOM and islx with its first render or hydration
+  // (RFC 0010). Its router imports this entry, so a navigation that swaps HTML in does it while they
+  // download. Client route slots render with React DOM wherever a navigation shows them, so an app
+  // with them keeps it in the entry.
   const lazyRenderer =
     islandValues &&
     platform !== "mobile" &&
     isReactRenderer(renderer) &&
     clientRouteSlots.length === 0;
   const rendererClientImports = lazyRenderer
-    ? `import React from "react";\nimport { holdFarmIslandInteractions, restorePagePosition } from "@farm.js/core/internal/client-runtime";`
+    ? `import { holdFarmIslandInteractions, restorePagePosition } from "@farm.js/core/internal/client-runtime";`
     : isReactRenderer(renderer)
       ? `import React from "react";\nimport { createRoot, hydrateRoot } from "react-dom/client";\nimport { restorePagePosition } from "@farm.js/core/internal/client-runtime";`
       : // Named exports only, as the server entry and the development client read them. A copy
@@ -4681,7 +4683,8 @@ installFarmLinkPrefetch();
     ...(hasServerTreeLayouts ? ["createFarmServerTreeLayout"] : []),
   ].join(", ");
   const lazyRendererRuntime = lazyRenderer
-    ? `// React DOM${isolatedHydrationEnabled ? " and islx" : ""} load with the first render or hydration (RFC 0010).
+    ? `// React, React DOM${isolatedHydrationEnabled ? " and islx" : ""} load with the first render or hydration (RFC 0010).
+let React;
 let createRoot;
 let hydrateRoot;
 let farmRendererLoading = null;
@@ -4695,6 +4698,7 @@ const releaseFarmIslandInteractions = holdFarmIslandInteractions("f-island");`
       }
 function loadFarmRenderer() {
   return farmRendererLoading || (farmRendererLoading = Promise.all([
+    import("react"),
     import("react-dom/client"),${
       isolatedHydrationEnabled
         ? `
@@ -4705,8 +4709,9 @@ function loadFarmRenderer() {
         : ""
     }
   ]).then(function(modules) {
-    createRoot = modules[0].createRoot;
-    hydrateRoot = modules[0].hydrateRoot;${isolatedHydrationEnabled ? "\n    startFarmIslandsRuntime(modules[1]);\n    releaseFarmIslandInteractions();" : ""}
+    React = modules[0].default;
+    createRoot = modules[1].createRoot;
+    hydrateRoot = modules[1].hydrateRoot;${isolatedHydrationEnabled ? "\n    startFarmIslandsRuntime(modules[2]);\n    releaseFarmIslandInteractions();" : ""}
     farmRendererLoaded = true;
   }, function(error) {${
     isolatedHydrationEnabled
@@ -8023,12 +8028,16 @@ function renderFarmServerTreeLayout(Layout, props, outlets) {
       metadataImageImports.push(
         `import * as ${varName} from ${toVirtualEntryImportSpecifier(image.modulePath)};`,
       );
+      // An `opengraph-image.vue` default-exports a component, not a function to call.
+      const component =
+        !isReactRenderer(config.renderer) &&
+        isRendererCompiledComponent(image.modulePath, config.renderer?.componentExtensions ?? []);
       metadataImageRegistrations.push(`
   {
     pattern: ${JSON.stringify(image.pattern)},
     kind: ${JSON.stringify(image.kind)},
     fileName: ${JSON.stringify(image.fileName)},
-    sourceType: "module",
+    sourceType: "module",${component ? "\n    component: true," : ""}
     module: ${varName},
   }`);
       return;
@@ -8264,7 +8273,7 @@ function resolveFarmMobileShellRender(request, route, routePathname) {
     ? `import { createFarmProductionSiteReporter } from "@farm.js/core/internal/product-telemetry-runtime";`
     : "";
   const metadataImageRuntimeImport = hasGeneratedMetadataImages
-    ? `import { createFarmMetadataImageResponse } from "@farm.js/core/internal/metadata-image-runtime";`
+    ? `import { createFarmMetadataImageResponse, resolveFarmMetadataImageValue } from "@farm.js/core/internal/metadata-image-runtime";`
     : "";
   const pluginRuntimeImport = hasPluginRuntime
     ? `import { PluginManager } from "@farm.js/core/plugin";`
@@ -10367,13 +10376,15 @@ async function handleMetadataImageRequest(request, routePathname) {
       searchParams: createFarmSearchParams(searchParams),
       path: match.pagePath,
     };
-    const value = typeof imageModule.default === "function"
-      ? await imageModule.default(props)
-      : imageModule.default;
 
     ${
       hasGeneratedMetadataImages
-        ? `return createFarmMetadataImageResponse(value, imageModule, {
+        ? `const value = await resolveFarmMetadataImageValue(imageModule, props${
+            isReactRenderer(config.renderer)
+              ? ""
+              : ", {\n      renderer: ReactDOMServer,\n      component: image.component === true,\n    }"
+          });
+    return createFarmMetadataImageResponse(value, imageModule, {
       method,
       ifNoneMatch: request.headers.get("if-none-match"),${
         isReactRenderer(config.renderer) ? "" : "\n      renderer: ReactDOMServer,"

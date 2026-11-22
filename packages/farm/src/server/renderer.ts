@@ -141,7 +141,7 @@ import {
 import { sendWebResponse } from "./response";
 import { createFarmNodeRequestAbortSignal, matchesFarmIfNoneMatch } from "../server-http";
 import { renderFarmFontDevHead } from "../font-vite";
-import { createFarmMetadataImageResponse } from "../metadata-image";
+import { createFarmMetadataImageResponse, resolveFarmMetadataImageValue } from "../metadata-image";
 import { createFarmMetadataRouteResponse } from "../metadata-route";
 import {
   collectFarmLlmsTxtPages,
@@ -3625,10 +3625,13 @@ window.__FARM_I18N__ = ${i18nSnapshot ? serializeInlineValue(i18nSnapshot) : "nu
       searchParams: createFarmSearchParams(options.searchParamsObject),
       path: options.pagePath,
     };
-    const handlerResult =
-      typeof imageModule.default === "function"
-        ? await (imageModule.default as any)(imageProps)
-        : imageModule.default;
+    const handlerResult = await resolveFarmMetadataImageValue(imageModule, imageProps, {
+      renderer: this.getMetadataImageRenderer(),
+      component: isRendererCompiledComponent(
+        options.image.modulePath,
+        this.config.renderer?.componentExtensions ?? [],
+      ),
+    });
 
     await this.writeMetadataImageResponse(req, res, handlerResult, imageModule);
   }
@@ -3643,9 +3646,14 @@ window.__FARM_I18N__ = ${i18nSnapshot ? serializeInlineValue(i18nSnapshot) : "nu
     const response = await createFarmMetadataImageResponse(value, imageModule, {
       method: req.method,
       ifNoneMatch: Array.isArray(ifNoneMatch) ? ifNoneMatch[0] : ifNoneMatch,
-      renderer: isReactRenderer(this.config.renderer) ? undefined : this.rendererRuntime,
+      renderer: this.getMetadataImageRenderer(),
     });
     await sendWebResponse(res as any, response);
+  }
+
+  /** The renderer that draws a metadata image: none for React, whose elements Satori reads directly. */
+  private getMetadataImageRenderer() {
+    return isReactRenderer(this.config.renderer) ? undefined : this.rendererRuntime;
   }
 
   private async writeStaticMetadataImageResponse(

@@ -39,8 +39,11 @@ const brandSvg = (content: string, viewBox = "0 0 24 24") =>
 // The build reads this config from the docs app and embeds the fonts in the JSON copy that
 // renders social images. The production server also imports this module (for the adapter's
 // icons and components), where node_modules isn't on disk, so it goes without the fonts there
-// rather than failing every request.
+// rather than failing every request. The browser imports it as well, to restore the callbacks
+// the server's JSON copy of the config can't carry (agent feedback's `onFeedback`). It has no
+// filesystem and never renders social images, so it skips the lookup.
 const resolveGeistFontsDirectory = () => {
+  if (typeof process === "undefined") return undefined;
   const candidates = [
     path.join(process.cwd(), "node_modules", "geist", "dist", "fonts"),
     path.join(process.cwd(), "docs", "node_modules", "geist", "dist", "fonts"),

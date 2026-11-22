@@ -1,4 +1,14 @@
-import { belongsTo, boolean, datetime, defineSchema, hasMany, id, integer, model, string } from "@farming-labs/orm";
+import {
+  belongsTo,
+  boolean,
+  datetime,
+  defineSchema,
+  hasMany,
+  id,
+  integer,
+  model,
+  string,
+} from "@farming-labs/orm";
 
 /** At most this many `missingContext` and `docIssues` entries each are kept per submission. */
 export const MAX_FEEDBACK_ISSUES = 20;

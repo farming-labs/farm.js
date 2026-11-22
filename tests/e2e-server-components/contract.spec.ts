@@ -1238,6 +1238,8 @@ async function holdRenderer(page: Page, html: string, baseURL: string | undefine
   const shared = new Set([...list("data-farm-preload"), ...list("data-farm-preload-router")]);
   const renderer = list("data-farm-preload-renderer").filter((file) => !shared.has(file));
   expect(renderer.length).toBeGreaterThan(0);
+  // React comes with them: the entry and the router swap a page in without it.
+  expect(renderer.some((file) => /(?:^|\/)react-h[0-9a-f]+\.js$/.test(file))).toBe(true);
   const base = new URL(runtime!, baseURL);
   const held = new Set(renderer.map((file) => new URL(file, base).pathname));
   const requested: string[] = [];
