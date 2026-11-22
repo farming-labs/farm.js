@@ -151,9 +151,9 @@ export function startFarmIslandsBoot(load: () => Promise<unknown> = loadFarmClie
   const release = () => {
     for (const cleanup of cleanups.splice(0)) cleanup();
   };
-  // `renderer`: whether what starts it renders or hydrates at once. Only a link outside a root that
-  // hydrates does not: its page streams in before React DOM runs (RFC 0010), and the entry imports
-  // React DOM after the page and the router rather than beside them.
+  // `renderer`: whether what starts it renders or hydrates at once. A link does not: its page swaps
+  // in before React DOM runs (RFC 0010), inside a root that waits too, which keeps waiting (RFC
+  // 0011), and the entry imports React DOM once something hydrates rather than beside the router.
   const start = (renderer = true): Promise<unknown> => {
     preload("farmPreload");
     if (renderer) preload("farmPreloadRenderer");
@@ -168,15 +168,16 @@ export function startFarmIslandsBoot(load: () => Promise<unknown> = loadFarmClie
     }
     return loading;
   };
-  // What an interaction on `target` needs besides the entry: the router for a link, and the
-  // modules of a root that waits around it, which hydrates on it (a link's hover included). A link
-  // whose navigation renders in a root (F-Render: tree) needs the renderer too.
+  // What an interaction on `target` needs besides the entry: the router for a link, which swaps
+  // the next page in without hydrating anything; otherwise the renderer, and the modules of a root
+  // that waits around it, which hydrates on it.
   const forTarget = (target: Element) => {
-    const link = routedLink(target);
-    const inRoot = Boolean(root && pendingIsland(target, root) === root);
-    if (link) preload("farmPreloadRouter");
-    if (inRoot) preload("farmPreloadRoot");
-    if (!link || inRoot || rootId === "root") preload("farmPreloadRenderer");
+    if (routedLink(target)) {
+      preload("farmPreloadRouter");
+      return;
+    }
+    if (root && pendingIsland(target, root) === root) preload("farmPreloadRoot");
+    preload("farmPreloadRenderer");
   };
   const listen = (type: string, handler: (event: Event) => void, capture: boolean) => {
     document.addEventListener(type, handler, capture);
@@ -239,9 +240,10 @@ export function startFarmIslandsBoot(load: () => Promise<unknown> = loadFarmClie
 
   // The page a held click goes to is requested with the click, alongside the runtime, rather than
   // a round trip after it runs. The headers are the ones the router sends for that navigation from
-  // this document: the layouts it shows, and the tree a root that hydrates renders the next page
-  // into, or else flush markers for a page that streams. The island values the router holds
-  // (F-Values) are left out, so the server sends every value the page needs.
+  // this document: the layouts it shows, and flush markers for a page that streams. From under a
+  // layout that hydrates as one root it asks for the page whole, as the router does for a page
+  // under it, and the router takes a whole page for one it would stream too. The island values the
+  // router holds (F-Values) are left out, so the server sends every value the page needs.
   const requestPage = (href: string) => {
     const headers: Record<string, string> = { accept: "text/html" };
     const layouts = Array.from(
@@ -253,8 +255,7 @@ export function startFarmIslandsBoot(load: () => Promise<unknown> = loadFarmClie
         boundary.getAttribute("data-farm-layout-pattern"),
     ).filter(Boolean);
     if (layouts.length) headers["f-layouts"] = JSON.stringify(layouts);
-    if (rootId === "root") headers["f-render"] = "tree";
-    else headers["f-stream"] = "flush";
+    if (rootId !== "root") headers["f-stream"] = "flush";
     const scope = window as Window & {
       __FARM_DEPLOYMENT_ID__?: string;
       __FARM_EARLY_NAVIGATION__?: FarmEarlyNavigation;
