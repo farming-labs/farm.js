@@ -208,4 +208,23 @@ That is 150 ms at 1.6 Mbit/s with an 80 ms tap: 12 to 21 ms faster in every sect
 tap and a 100 ms hover at 50 ms latency are unchanged within noise (7 rounds; a 21-round rerun of
 docs and shop taps: 116 to 116 ms and 131 to 128 ms).
 
+Measured again 2026-11-22 once a `node-server` build sent client scripts and stylesheets with
+brotli at top quality instead of gzip. The proxy passes a response the server compressed through
+as it is, so this is what a browser receives from the Node server: the app's seven scripts over
+1 KB went from 102.2 KB of gzip to 90.2 KB of brotli. Interleaved with `rsc` and a build from just
+before it (`main` at a8ce675d6), load average 4 to 9, medians of 9 rounds in ms:
+
+| Section | `rsc` | `islands`, before | `islands` |
+| ------- | ----- | ----------------- | --------- |
+| docs    | 261   | 297               | 277       |
+| shop    | 216   | 321               | 304       |
+| blog    | 290   | 352               | 331       |
+| guide   | 291   | 355               | 336       |
+
+That is 150 ms at 1.6 Mbit/s with an 80 ms tap: 17 to 21 ms faster in every section, where an A/A
+run of one build against a copy of it differed by 6 ms at most (5 rounds). With 150 ms of latency
+and no bandwidth limit the two builds are within 4 ms (5 rounds). The `rsc` build does not
+compress its static files, so the proxy brotli-compresses its scripts at quality 5 here, as a CDN
+would; its Node server alone sends them uncompressed.
+
 `results/latest.json` has the per-page numbers of the last run.
