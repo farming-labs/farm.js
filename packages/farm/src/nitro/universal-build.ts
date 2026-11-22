@@ -14749,11 +14749,13 @@ function toFarmNodeResponse(request, response) {
     // Nitro gives the root directory no Cache-Control on any preset (it falls through to the
     // app), so public files keep revalidating; the hashed directories carry their own maxAge.
     publicAssets: [{ dir: clientOutputDir, baseURL: "/" }, ...immutableAssets.publicAssets],
-    // A self-hosted Node server sends static files itself, so precompress them
-    // with gzip and let Nitro serve that by Accept-Encoding. Brotli at Nitro's
+    // A self-hosted Node or Bun server sends static files itself, so precompress
+    // them with gzip and let Nitro serve that by Accept-Encoding. Brotli at Nitro's
     // fixed top quality cost a docs app ~20 s of build CPU for a small further
     // saving. Serverless and edge targets sit behind a CDN that compresses.
-    ...(preset === "node-server" ? { compressPublicAssets: { gzip: true } } : {}),
+    ...(preset === "node-server" || preset === "bun"
+      ? { compressPublicAssets: { gzip: true } }
+      : {}),
     // Nitro gzips every server output file at level 9, node_modules included, to
     // print sizes after the build. A self-hosted server is never shipped compressed,
     // so list plain sizes; zipped serverless and edge bundles keep the gzip column.

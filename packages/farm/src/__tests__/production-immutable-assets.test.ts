@@ -160,7 +160,7 @@ async function cacheControl(origin: string, pathname: string) {
 describe("production caching of content-hashed client assets (node-server)", () => {
   // it.for, not it.each: only it.for hands the test context over, so ctx.skip() works without bun.
   it.for(["node-server", "bun"] as const)(
-    "serves hashed client files immutable and public files revalidatable ($0)",
+    "serves hashed client files immutable, gzipped, and public files revalidatable ($0)",
     async (preset, ctx) => {
       if (preset === "bun" && !hasBun) ctx.skip();
       const { root, files, production } = await buildAndStart(
@@ -197,6 +197,15 @@ describe("production caching of content-hashed client assets (node-server)", () 
           expect(result.status, file).toBe(200);
           expect(result.cacheControl ?? "", file).not.toContain("immutable");
         }
+
+        // The server sends a client file's gzip copy to a browser that accepts gzip.
+        const gzipped = await fetch(`${production.origin}/${entry}`, {
+          headers: { "accept-encoding": "gzip" },
+        });
+        expect(gzipped.headers.get("content-encoding")).toBe("gzip");
+        expect(await gzipped.text()).toBe(
+          await fs.readFile(path.join(root, ".farm", ".output", "public", entry), "utf8"),
+        );
 
         // A chunk an older deployment referenced is a 404 that no cache keeps.
         const missing = await cacheControl(production.origin, "/chunks/gone-h0123abcd.js");
