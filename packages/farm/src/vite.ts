@@ -148,7 +148,10 @@ import {
   FARM_SERVER_TREE_LAYOUT_CLIENT_SOURCE,
 } from "./document-layout-client";
 import { FARM_NAVIGATION_SCRIPT_SOURCE } from "./client/navigation-scripts";
-import { FARM_NAVIGATION_STREAM_READER_SOURCE } from "./client/navigation-stream-client";
+import {
+  FARM_EARLY_NAVIGATION_SOURCE,
+  FARM_NAVIGATION_STREAM_READER_SOURCE,
+} from "./client/navigation-stream-client";
 import { FARM_REFRESH_FIELDS_SOURCE } from "./client/refresh-fields";
 import {
   getClientModuleMetadata,
@@ -8262,6 +8265,8 @@ ${
   islandValues
     ? `${FARM_NAVIGATION_STREAM_READER_SOURCE}
 
+${FARM_EARLY_NAVIGATION_SOURCE}
+
 // Islands mode navigates as the production client does: it fetches the page itself, names the
 // layouts it shows by key (F-Layouts), and asks for flush markers (F-Stream), so the shell arrives
 // before slow Suspense content. Other pages (a client page, a layout that hydrates, route slots)
@@ -8333,19 +8338,20 @@ async function fetchFarmNavigationDocument(path, context) {
       keepLayouts && !context.refresh && !activeLayoutShouldHydrate
         ? readLayoutIdentities(container)
         : [];
-    const response = await fetch(url.pathname + url.search, {
-      signal: context.signal,
-      redirect: 'manual',
-      headers: createFarmDeploymentRequestHeaders(deploymentId, {
-        Accept: 'text/html',
-        // A refresh arrives whole, like a transition: the islands it keeps are all in it.
-        ...(context.prefetch || context.refresh ? {} : { 'F-Stream': 'flush' }),
-        ...getFarmIslandValueHeaders(),
-        // A prefetch names its layouts even when it keeps none: that marks it as a navigation,
-        // which the server answers without loading.tsx.
-        ...(identities.length || context.prefetch ? { 'F-Layouts': JSON.stringify(identities) } : {}),
-      }),
+    const headers = createFarmDeploymentRequestHeaders(deploymentId, {
+      Accept: 'text/html',
+      // A refresh arrives whole, like a transition: the islands it keeps are all in it.
+      ...(context.prefetch || context.refresh ? {} : { 'F-Stream': 'flush' }),
+      ...getFarmIslandValueHeaders(),
+      // A prefetch names its layouts even when it keeps none: that marks it as a navigation,
+      // which the server answers without loading.tsx.
+      ...(identities.length || context.prefetch ? { 'F-Layouts': JSON.stringify(identities) } : {}),
     });
+    const target = url.pathname + url.search;
+    const response = await (
+      (!context.prefetch && takeFarmEarlyNavigation(target, headers, context.signal)) ||
+      fetch(target, { signal: context.signal, redirect: 'manual', headers })
+    );
     if (isFarmDeploymentMismatchResponse(response, deploymentId)) {
       const error = createFarmDeploymentMismatchError(response, deploymentId || 'unknown');
       window.dispatchEvent(new CustomEvent('farm:deployment-mismatch', { detail: error }));

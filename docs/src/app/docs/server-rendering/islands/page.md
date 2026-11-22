@@ -72,10 +72,13 @@ lets the browser give `useId` the ids in the HTML. The full contract is islx's
   React Server Components'.
 - **Browser.** Farm's client entry hands every `<f-island>` to islx's hydration runtime, which
   imports the island's module when its strategy is due and hydrates it in place. A page whose
-  islands all wait loads a 1.9 KB boot script instead of the runtime. When the page first needs
+  islands all wait loads a 2.2 KB boot script instead of the runtime. When the page first needs
   the runtime, the boot script fetches it together with what comes next: the router when a link
   starts it, and the modules of a layout that hydrates as one root when the start is inside it.
-  They arrive in one round trip instead of one after another.
+  They arrive in one round trip instead of one after another. A link clicked before the runtime
+  runs has its page requested with the click, so the page and the runtime travel together and the
+  router renders the response once it runs. That first response carries every island value the
+  page needs, including ones the current page already has.
 - **Layouts.** A layout that needs one React root (a client provider around the pages) renders as
   an islx server tree: the browser rebuilds it from the HTML, so its module stays on the server,
   and a navigation keeps the provider's state. The pages below it, Markdown pages included, join
@@ -107,23 +110,28 @@ same or less everywhere else.** These are the numbers for one app built in both 
 
 | Measure                    | Docs page       | Shop page      | Blog post      | Guide post     |
 | -------------------------- | --------------- | -------------- | -------------- | -------------- |
-| First-load JavaScript      | 71.0 to 1.9 KB  | 71.0 to 1.9 KB | 71.0 to 1.9 KB | 71.0 to 1.9 KB |
+| First-load JavaScript      | 71.0 to 2.2 KB  | 71.0 to 2.2 KB | 71.0 to 2.2 KB | 71.0 to 2.2 KB |
 | HTML document              | 16.3 to 16.1 KB | 5.5 to 5.9 KB  | 17.9 to 9.1 KB | 18.0 to 9.5 KB |
-| Data per navigation        | 12.0 to 2.6 KB  | 3.8 to 1.7 KB  | 10.8 to 9.1 KB | 10.9 to 9.5 KB |
+| Data per navigation        | 12.0 to 2.6 KB  | 3.8 to 2.0 KB  | 10.8 to 9.1 KB | 10.9 to 9.5 KB |
 | First-load main thread     | 168 to 87 ms    | 162 to 80 ms   | 216 to 106 ms  | 216 to 105 ms  |
 | First navigation           | 42 to 57 ms     | 40 to 106 ms   | 85 to 90 ms    | 84 to 120 ms   |
+| First tap, 150 ms latency  | 200 to 184 ms   | 201 to 215 ms  | 235 to 214 ms  | 232 to 241 ms  |
+| First tap, at 1.6 Mbit/s   | 264 to 698 ms   | 220 to 790 ms  | 286 to 773 ms  | 286 to 827 ms  |
 | Navigation until painted   | 44 to 45 ms     | 43 to 44 ms    | 76 to 71 ms    | 73 to 77 ms    |
 | Server requests per second | 246 to 256      | 564 to 701     | 31 to 224      | 52 to 176      |
 
 A guide post is a blog post under a layout that hydrates as one root around a client theme
 provider. Sizes are brotli at quality 5. Times are medians with Chrome at 4x CPU throttling; the
-first navigation is the first click after a cold visit, with the pointer on the link for 100 ms.
+first navigation is the first click after a cold visit, with the pointer on the link for 100 ms,
+from a server on the same machine. The first tap is that click made as an 80 ms tap, over an
+emulated network that adds 150 ms to every response, with unlimited bandwidth or at 1.6 Mbit/s,
+served over HTTP/2 and compressed as a CDN would (`first-navigation.mjs`).
 Requests per second are the median of 8 rounds alternating between the modes, on one Node process.
 Measured 2026-11-20 on an Apple M1 with other work running (load average 11 to 20): times at
-commit `33b402362` (Farm 0.1.77, islx 0.0.25), sizes once the boot script preloaded the runtime's
-chunks.
+commit `33b402362` (Farm 0.1.77, islx 0.0.25), sizes and first taps on 2026-11-21, once the boot
+script requested a held click's page.
 
-- **First load.** 37 times less JavaScript and about half the main-thread work, because these pages'
+- **First load.** 32 times less JavaScript and about half the main-thread work, because these pages'
   client components wait for a click.
 - **Navigation data.** A fifth of the data on docs pages, half on shop pages, and
   slightly less on blog posts. A navigation carries the page as islx HTML (or its server tree,
@@ -145,10 +153,15 @@ Where islands mode does not win:
   JavaScript than `"rsc"`, not less: about 77 to 80 KB against 69.5 KB on a small app. The
   production build keeps navigation code in a separate 8 KB chunk, loaded on the first link hover,
   focus, tap, or navigation.
-- **The first navigation is slower.** It loads the runtime and the router that the first load left
-  out: 15 ms slower than `"rsc"` on docs pages and 5 ms on blog posts. Under a layout that hydrates
-  as one root it is also the layout's first React render, which `"rsc"` does during the first load:
-  36 ms slower on guide posts and 66 ms on shop pages.
+- **The first navigation pays for the runtime.** It loads the runtime and the router that the
+  first load left out. From a server on the same machine it is 15 ms slower than `"rsc"` on docs
+  pages and 5 ms on blog posts. Under a layout that hydrates as one root it is also the layout's
+  first React render, which `"rsc"` does during the first load: 36 ms slower on guide posts and
+  66 ms on shop pages. With 150 ms of latency and unlimited bandwidth the runtime and the page
+  travel together, and a first tap is within about 20 ms of `"rsc"` either way. On a slow connection
+  the runtime's download decides: at 1.6 Mbit/s a first tap is 434 to 570 ms slower than `"rsc"`
+  on every page. An instant tap (finger down and up at once) on a fast network (50 ms) is 33 to
+  81 ms slower, as the runtime has to start before the page renders.
 - **A small page's HTML is a little larger.** The shop page is 0.4 KB larger, for islx's island
   markers and props.
 

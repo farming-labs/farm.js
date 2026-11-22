@@ -1,13 +1,27 @@
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { FARM_DEPLOYMENT_ID_HEADER } from "../deployment";
 import { FARM_ISLAND_REPLAYABLE_SELECTOR } from "../island";
 import {
+  FARM_ISLANDS_BOOT_DEPLOYMENT_HEADER,
   FARM_ISLANDS_BOOT_REPLAYABLE_SELECTOR,
   FARM_ISLANDS_BOOT_VISIBLE_MARGIN,
+  type FarmEarlyNavigation,
   startFarmIslandsBoot,
 } from "../client/islands-boot";
 import { observeIslandVisibility } from "../client/island-triggers";
 
-type QueueWindow = Window & { __FARM_PREHYDRATION_CLICK_QUEUE__?: unknown[] };
+type QueueWindow = Window & {
+  __FARM_PREHYDRATION_CLICK_QUEUE__?: unknown[];
+  __FARM_EARLY_NAVIGATION__?: FarmEarlyNavigation;
+  __FARM_DEPLOYMENT_ID__?: string;
+};
+
+// A link click the boot holds requests its page; no test reaches the network.
+let pageRequests: ReturnType<typeof vi.fn>;
+beforeEach(() => {
+  pageRequests = vi.fn((_url: string, _init: RequestInit) => new Promise<Response>(() => {}));
+  vi.stubGlobal("fetch", pageRequests);
+});
 
 let finishLoad: (() => void) | undefined;
 let started: ReturnType<typeof vi.fn> | undefined;
@@ -62,6 +76,8 @@ afterEach(async () => {
   finishLoad = undefined;
   started = undefined;
   delete (window as QueueWindow).__FARM_PREHYDRATION_CLICK_QUEUE__;
+  delete (window as QueueWindow).__FARM_EARLY_NAVIGATION__;
+  delete (window as QueueWindow).__FARM_DEPLOYMENT_ID__;
   vi.unstubAllGlobals();
   document.body.innerHTML = "";
 });
@@ -278,5 +294,70 @@ describe("the boot's preloads", () => {
     boot(`${runtime}></script><a href="/a">A</a><a href="/b">B</a>`);
     for (const link of Array.from(document.querySelectorAll("a"))) hover(link);
     expect(preloaded()).toEqual([react, router, shared]);
+  });
+});
+
+describe("the boot's request for a held link click", () => {
+  const early = () => (window as QueueWindow).__FARM_EARLY_NAVIGATION__;
+
+  it("sends the router's deployment header", () => {
+    expect(FARM_ISLANDS_BOOT_DEPLOYMENT_HEADER).toBe(FARM_DEPLOYMENT_ID_HEADER);
+  });
+
+  it("requests the page with the click, with the headers the router sends for it", () => {
+    (window as QueueWindow).__FARM_DEPLOYMENT_ID__ = "d1";
+    boot(
+      '<div id="root"><div data-farm-layout-boundary="true" data-farm-layout-pattern="/docs" data-farm-layout-key="/docs"><a href="/docs/b#top">B</a></div></div>',
+    );
+    expect(pageRequests).not.toHaveBeenCalled();
+    click(document.querySelector("a")!);
+    expect(pageRequests).toHaveBeenCalledTimes(1);
+    const [url, init] = pageRequests.mock.calls[0]!;
+    expect(url).toBe(new URL("/docs/b#top", document.baseURI).href);
+    expect(init.redirect).toBe("manual");
+    // The layouts shown and flush markers, as a navigation the router streams; no held values.
+    expect(init.headers).toEqual({
+      accept: "text/html",
+      "x-farm-deployment-id": "d1",
+      "f-layouts": '["/docs"]',
+      "f-stream": "flush",
+    });
+    expect(early()).toMatchObject({ url, headers: init.headers });
+    expect(early()!.response).toBe(pageRequests.mock.results[0]!.value);
+  });
+
+  it("asks for the tree when the page's layout hydrates as one root", () => {
+    boot(
+      '<script type="module" data-farm-runtime="/farm-client-h1.js" data-farm-root="root" data-farm-root-strategy="interaction"></script><div id="root"><a href="/shop/b">B</a></div>',
+    );
+    click(document.querySelector("a")!);
+    expect(pageRequests.mock.calls[0]![1].headers).toEqual({
+      accept: "text/html",
+      "f-render": "tree",
+    });
+  });
+
+  it("requests the page of the last click when two are held", () => {
+    boot('<a href="/a">A</a><a href="/b">B</a>');
+    const [a, b] = Array.from(document.querySelectorAll("a"));
+    click(a!);
+    click(b!);
+    expect(early()!.url).toBe(new URL("/b", document.baseURI).href);
+    expect(early()!.response).toBe(pageRequests.mock.results[1]!.value);
+  });
+
+  it("requests nothing for a hover, a link the router does not take, or once the runtime runs", async () => {
+    boot(
+      '<a href="/next">Next</a><a href="https://example.com/">Out</a><a href="/file" download>File</a>',
+    );
+    const [next, out, file] = Array.from(document.querySelectorAll("a"));
+    next!.dispatchEvent(new MouseEvent("mouseover", { bubbles: true }));
+    click(out!);
+    click(file!);
+    expect(pageRequests).not.toHaveBeenCalled();
+    finishLoad!();
+    await settle();
+    click(next!);
+    expect(pageRequests).not.toHaveBeenCalled();
   });
 });

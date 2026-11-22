@@ -2077,7 +2077,12 @@ export function Chart() {}
     );
 
     expect(source).toContain("async function fetchFarmNavigationDocument(");
-    expect(source).toContain("headers: createFarmDeploymentRequestHeaders(deploymentId, headers)");
+    // The request, and a click's request the boot script sent first, carry the deployment id.
+    expect(source).toContain(
+      "const requestHeaders = createFarmDeploymentRequestHeaders(deploymentId, headers);",
+    );
+    expect(source).toContain("takeFarmEarlyNavigation(url, requestHeaders, signal)");
+    expect(source).toContain("headers: requestHeaders,");
     expect(source).toContain("isFarmDeploymentMismatchResponse(response, deploymentId)");
     expect(source).toContain(
       'window.dispatchEvent(new CustomEvent("farm:deployment-mismatch", { detail: error }))',
