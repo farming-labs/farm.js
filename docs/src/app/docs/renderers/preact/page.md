@@ -103,10 +103,10 @@ The renderer uses the official `@preact/preset-vite`, which aliases React and Re
 second UI runtime. Compatibility for third-party React integration providers still depends on each
 provider, so verify provider UI before relying on it in production.
 
-React Server Components remain React-only. Programmatic UI routes, the docs adapter, and
-integration UI providers should be treated as compatibility surfaces until their Preact paths are
-covered by dedicated tests. Markdown and MDX pages and
-[generated metadata images](/docs/routing#generated-metadata-images) render with Preact.
+React Server Components remain React-only. The docs adapter and integration UI providers should be
+treated as compatibility surfaces until their Preact paths are covered by dedicated tests. Markdown
+and MDX pages, [generated metadata images](/docs/routing#generated-metadata-images), and
+[programmatic UI routes](/docs/routing#programmatic-routes) render with Preact.
 
 ## Experimental AOT compiler
 
