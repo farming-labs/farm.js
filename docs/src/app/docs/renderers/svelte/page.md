@@ -91,16 +91,16 @@ Svelte hydration in the browser.
 ## Call FARMJS server code
 
 API routes, endpoint schemas, server functions, middleware, cache, storage, and observability are
-renderer-neutral. Use the generated typed API client from a Svelte component:
+renderer-neutral. Call them from a Svelte component with `apiClient`, created once in `src/lib/api.ts` as shown in [API Client](/docs/api-client#create-both-callers-once):
 
 ```svelte
 <script lang="ts">
-  import { api } from "../lib/api.generated";
+  import { apiClient } from "../lib/api";
 
   let message = $state("Ready");
 
   async function callServer() {
-    const result = await api.greeting.post({ body: { name: "Svelte" } });
+    const result = await apiClient.greeting.post({ body: { name: "Svelte" } });
     if (result.data) message = result.data.message;
   }
 </script>
@@ -109,23 +109,27 @@ renderer-neutral. Use the generated typed API client from a Svelte component:
 ```
 
 The endpoint can call a validated `createServerFn`; its handler, database access, and secrets remain
-in the server bundle.
+in the server bundle. Browser code can't import the server function itself yet: only React's server-function
+transform turns that import into a call to the server, so other renderers go through an API route.
 
 ## Current boundaries
 
-Use the Svelte-native bindings for router, action, server-query, theme, and i18n stores:
+Use the Svelte-native bindings for router, theme, and i18n stores:
 
 ```svelte
 <script lang="ts">
-  import { createAction, createRouter, createTheme } from "@farm.js/svelte/bindings";
+  import { createRouter, createTheme } from "@farm.js/svelte/bindings";
 
   const router = createRouter();
-  const save = createAction(saveProduct);
   const theme = createTheme();
 </script>
 
-<button on:click={() => save({ name: "FARMJS" })} disabled={$save.pending}>Save</button>
+<button on:click={() => router.push("/products")}>{$router.pathname}</button>
+<button on:click={theme.toggleTheme}>Theme</button>
 ```
+
+`createAction` and `createServerQuery` take a server function or server query, which browser code can't
+import outside React's server-function transform yet, so call server code through `apiClient`.
 
 The returned values implement Svelte's readable-store contract. `createReadable(store)` wraps
 your own state, a store from `createStore` in `@farm.js/core/renderer-client`, the same way; see
