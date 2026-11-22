@@ -96,6 +96,14 @@ describe("parseSearchParams", () => {
 });
 
 describe("parseRoutePath", () => {
+  it("reads the file type behind a third-party renderer's extension", () => {
+    expect(parseRoutePath("blog/layout.leaf").type).toBe("layout");
+    expect(parseRoutePath("blog/loading.leaf").type).toBe("loading");
+    expect(parseRoutePath("blog/error.leaf").type).toBe("error");
+    expect(parseRoutePath("not-found.leaf").type).toBe("not-found");
+    expect(parseRoutePath("blog/page.leaf").type).toBe("page");
+  });
+
   it("should parse static routes", () => {
     const result = parseRoutePath("about/page.tsx");
     expect(result.segments).toEqual([

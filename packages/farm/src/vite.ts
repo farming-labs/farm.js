@@ -1874,6 +1874,24 @@ async function warnClientBoundaryOnce(
 }
 
 /**
+ * Whether adding or removing this file changes the routes `farm dev` serves. Route modules
+ * count with any of `routeModuleExtensions`: the renderer's component extensions and Markdown.
+ */
+export function isFarmAppRuntimeFile(
+  file: string,
+  appDirs: readonly string[],
+  routeModuleExtensions: ReadonlySet<string>,
+): boolean {
+  const normalized = file.replace(/\\/g, "/");
+  if (!appDirs.some((appDir) => normalized.startsWith(`${appDir}/`))) return false;
+  const routeModule = /\/(?:page|default|layout|loading|error)(\.[^./]+)$/.exec(normalized);
+  if (routeModule) return routeModuleExtensions.has(routeModule[1]!.toLowerCase());
+  return /\/(?:middleware|route)\.(?:ts|tsx|js|jsx|md|mdx)$|\/(?:sitemap|robots|manifest)\.(?:ts|js)$|\/(?:opengraph-image|twitter-image)(?:\.(?:ts|tsx|js|jsx|png|jpg|jpeg|gif|webp)|\.alt\.txt)$/.test(
+    normalized,
+  );
+}
+
+/**
  * Whether Farm should append its own client-root HMR handler to a
  * `"use client"` module.
  *
@@ -2364,15 +2382,8 @@ export function farmPlugin(
           isPotentialProgrammaticRouteSourceFile(normalized, srcDir),
         );
       };
-      const isAppRuntimeFile = (file: string) => {
-        const normalized = file.replace(/\\/g, "/");
-        return (
-          appDirSlugs.some((appDir) => normalized.startsWith(`${appDir}/`)) &&
-          /\/(?:page|default|layout|loading|error|middleware|route)\.(?:ts|tsx|js|jsx|md|mdx)$|\/(?:sitemap|robots|manifest)\.(?:ts|js)$|\/(?:opengraph-image|twitter-image)(?:\.(?:ts|tsx|js|jsx|png|jpg|jpeg|gif|webp)|\.alt\.txt)$/.test(
-            normalized,
-          )
-        );
-      };
+      const isAppRuntimeFile = (file: string) =>
+        isFarmAppRuntimeFile(file, appDirSlugs, routeModuleExtensions);
       const isStaticMetadataImageFile = (file: string) =>
         /\/(?:opengraph-image|twitter-image)(?:\.(?:png|jpg|jpeg|gif|webp)|\.alt\.txt)$/.test(
           file.replace(/\\/g, "/"),

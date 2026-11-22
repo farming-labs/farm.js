@@ -24,8 +24,11 @@ export function parseRouteSlotFile(filePath: string): RouteSlotConvention | null
   const normalized = filePath.replace(/\\/g, "/");
   const parts = normalized.split("/").filter(Boolean);
   const fileName = parts.at(-1) ?? "";
-  const baseName = fileName.replace(/\.(tsx?|jsx?|vue|svelte)$/, "");
-  if (baseName !== "page" && baseName !== "default") return null;
+  // Route scanning passes the renderer's component files (`.tsx`, `.svelte`, a custom `.leaf`)
+  // and Markdown pages. Markdown is not slot content.
+  const file = /^(page|default)\.([^./]+)$/.exec(fileName);
+  if (!file || file[2] === "md" || file[2] === "mdx") return null;
+  const baseName = file[1];
 
   const slotIndex = parts.findIndex((part) => SLOT_SEGMENT.test(part));
   if (slotIndex < 0) return null;
