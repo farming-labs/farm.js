@@ -104,7 +104,8 @@ const MAX_BODY_BYTES = 128 * 1024;
 const MAX_PAYLOAD_BYTES = 8 * 1024;
 const MAX_PAYLOAD_DEPTH = 32;
 /** Keys whose values a tool call payload never sends: `password`, `apiKey`, `x-session-token`. */
-const SECRET_KEY = /pass(?:word|wd|phrase)|secret|token|api[-_]?key|authori[sz]ation|cookie|credential|private[-_]?key|session/i;
+const SECRET_KEY =
+  /pass(?:word|wd|phrase)|secret|token|api[-_]?key|authori[sz]ation|cookie|credential|private[-_]?key|session/i;
 const REDACTED = "[redacted]";
 const MAX_AGE = 300_000;
 const MAX_ATTEMPTS = 5;

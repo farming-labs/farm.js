@@ -236,7 +236,10 @@ export function _farmToolCallPayload(event: unknown): FarmToolCallPayload | unde
 }
 
 /** @internal Attaches a tool call payload to an event input, out of its enumerable fields. */
-export function _withFarmToolCallPayload<T extends object>(input: T, payload: FarmToolCallPayload): T {
+export function _withFarmToolCallPayload<T extends object>(
+  input: T,
+  payload: FarmToolCallPayload,
+): T {
   return Object.defineProperty(input, FARM_TOOL_CALL_PAYLOAD, { value: payload });
 }
 

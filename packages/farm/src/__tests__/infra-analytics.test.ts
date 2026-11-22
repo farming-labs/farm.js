@@ -955,9 +955,22 @@ describe("tool call payloads", () => {
       call("search", { arguments: { query: "boots" }, result: "2 products" }),
     );
     expect(Object.keys(sent!).sort()).toEqual(
-      ["agent", "durationMs", "id", "kind", "outcome", "path", "requestId", "route", "timestamp", "tool"].sort(),
+      [
+        "agent",
+        "durationMs",
+        "id",
+        "kind",
+        "outcome",
+        "path",
+        "requestId",
+        "route",
+        "timestamp",
+        "tool",
+      ].sort(),
     );
-    expect(resolveFarmInfraAnalytics({ FARMJS_API_KEY: ingestionKey, FARMJS_TOOL_PAYLOADS: "on" })).toEqual({
+    expect(
+      resolveFarmInfraAnalytics({ FARMJS_API_KEY: ingestionKey, FARMJS_TOOL_PAYLOADS: "on" }),
+    ).toEqual({
       options: { endpoint: expect.any(String), key: ingestionKey },
     });
   });
@@ -969,7 +982,9 @@ describe("tool call payloads", () => {
     const unsubscribe = onFarmEvent((event) => {
       seen.push(JSON.stringify(event), { ...event }, Object.keys(event));
     });
-    await run({}, () => call("search", { arguments: { query: "private-query" }, result: "private-result" }));
+    await run({}, () =>
+      call("search", { arguments: { query: "private-query" }, result: "private-result" }),
+    );
     unsubscribe();
     expect(JSON.stringify(seen)).not.toContain("private-");
     expect(log.mock.calls.flat().join(" ")).toContain("mcp.tool.complete");
@@ -1066,7 +1081,8 @@ describe("bounded sender", () => {
     await flushed;
     const bodies = send.mock.calls.map(([, init]) => init!.body as string);
     expect(bodies.length).toBeGreaterThan(1);
-    for (const body of bodies) expect(new TextEncoder().encode(body).length).toBeLessThanOrEqual(128 * 1024);
+    for (const body of bodies)
+      expect(new TextEncoder().encode(body).length).toBeLessThanOrEqual(128 * 1024);
     expect(sentEvents(send)).toHaveLength(50);
     expect(onDiagnostic).not.toHaveBeenCalledWith(expect.objectContaining({ code: "dropped" }));
     await exporter.close();
