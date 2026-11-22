@@ -7,6 +7,7 @@ import {
   launchPost,
   nativeInternalsPost,
   nativePost,
+  rendererPost,
 } from "../../lib/blog";
 
 /**
@@ -23,6 +24,23 @@ export interface PostArt {
 }
 
 export const POST_ART: Record<string, PostArt> = {
+  [rendererPost.href]: {
+    heading: (
+      <>
+        Bring your own renderer, <span>build your own React.</span>
+      </>
+    ),
+    header: (
+      <div className="blog-post-artwork">
+        <BlogFigure fit kind="renderer-seams" />
+      </div>
+    ),
+    card: (
+      <div className="blog-post-artwork">
+        <BlogFigure fit kind="renderer-seams" />
+      </div>
+    ),
+  },
   [agentScanPost.href]: {
     heading: (
       <>

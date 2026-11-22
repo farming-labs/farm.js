@@ -5,7 +5,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { build, type Plugin, type Rollup } from "vite";
-import { farmEnvironmentFunctionsPlugin } from "../environment-vite";
+import { farmEnvironmentFunctionsPlugin, transformEnvironmentFunctions } from "../environment-vite";
 
 const temporaryRoots: string[] = [];
 
@@ -162,6 +162,36 @@ describe("environment function Vite transform", () => {
     expect(output).toContain("VAR_SHADOWED_CALL_VALUE");
   });
 
+  // A renderer's Vite plugin compiles its own files (`.svelte`, `.vue`, a custom `.leaf`) to
+  // JavaScript before this transform runs, so they carry the same implementations to strip.
+  it("removes server implementations from a renderer's component files in client chunks", async () => {
+    const output = await buildComponentFixture(false);
+
+    expect(output).not.toContain("COMPONENT_SERVER_SECRET");
+    expect(output).toContain("COMPONENT_CLIENT_VALUE");
+  });
+
+  it("removes client implementations from a renderer's component files in server chunks", async () => {
+    const output = await buildComponentFixture(true);
+
+    expect(output).toContain("COMPONENT_SERVER_SECRET");
+    expect(output).not.toContain("COMPONENT_CLIENT_VALUE");
+  });
+
+  it("leaves a component file's style block alone", () => {
+    const result = transformEnvironmentFunctions({
+      code: "/* createServerOnlyFn */ .page { color: red; }",
+      id: "/src/app/page.leaf?leaf&type=style&lang.css",
+      environment: "client",
+      parse: () => {
+        throw new Error("A style block is not JavaScript");
+      },
+      componentExtensions: new Set([".leaf"]),
+    });
+
+    expect(result).toBeNull();
+  });
+
   it("rejects isomorphic options that cannot be statically selected", async () => {
     const root = createFixtureRoot();
     const entry = path.join(root, "entry.ts");
@@ -231,12 +261,46 @@ async function buildFixture(ssr: boolean): Promise<string> {
   return buildEntry(root, entry, ssr);
 }
 
-async function buildEntry(root: string, entry: string, ssr: boolean): Promise<string> {
+async function buildComponentFixture(ssr: boolean): Promise<string> {
+  const root = createFixtureRoot();
+  const entry = path.join(root, "entry.ts");
+  writeFileSync(entry, 'export { serverValue, clientValue } from "./page.leaf";\n');
+  writeFileSync(
+    path.join(root, "page.leaf"),
+    `<script>
+import { createClientOnlyFn, createServerOnlyFn } from "@farm.js/core/environment";
+export const serverValue = createServerOnlyFn(() => "COMPONENT_SERVER_SECRET");
+export const clientValue = createClientOnlyFn(() => "COMPONENT_CLIENT_VALUE");
+</script>
+`,
+  );
+  // Stands in for a renderer's Vite plugin: compiles `.leaf` files to JavaScript.
+  const leafCompiler: Plugin = {
+    name: "test:leaf",
+    enforce: "pre",
+    transform(code, id) {
+      if (!id.split("?", 1)[0]!.endsWith(".leaf")) return null;
+      return code.replace(/<\/?script>/g, "");
+    },
+  };
+
+  return buildEntry(root, entry, ssr, [
+    leafCompiler,
+    farmEnvironmentFunctionsPlugin({ renderer: { componentExtensions: [".leaf"] } }),
+  ]);
+}
+
+async function buildEntry(
+  root: string,
+  entry: string,
+  ssr: boolean,
+  plugins: Plugin[] = [farmEnvironmentFunctionsPlugin()],
+): Promise<string> {
   const result = await build({
     configFile: false,
     root,
     logLevel: "silent",
-    plugins: [farmEnvironmentFunctionsPlugin()],
+    plugins,
     build: {
       ssr,
       write: false,

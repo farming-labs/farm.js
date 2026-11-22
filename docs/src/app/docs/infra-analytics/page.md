@@ -52,12 +52,13 @@ Site analytics key instead.
 
 ## Environment variables
 
-| Variable             | Purpose                                                                                                           |
-| -------------------- | ----------------------------------------------------------------------------------------------------------------- |
-| `FARMJS_API_KEY`     | A Farm Infra API key with the `analytics:write` permission (`farmjs_…`), or an older write-only key (`fti_…`).    |
-| `FARMJS_PROJECT_ID`  | The project to report to. Only for a key that reaches more than one project.                                      |
-| `FARMJS_ENVIRONMENT` | `production`, `staging` or `development`. Defaults to Vercel's environment (preview is staging), then `NODE_ENV`. |
-| `FARMJS_API_URL`     | Farm Infra's address, if it isn't `https://app.farmjs.dev`. Must be HTTPS, except for localhost.                  |
+| Variable               | Purpose                                                                                                           |
+| ---------------------- | ----------------------------------------------------------------------------------------------------------------- |
+| `FARMJS_API_KEY`       | A Farm Infra API key with the `analytics:write` permission (`farmjs_…`), or an older write-only key (`fti_…`).    |
+| `FARMJS_PROJECT_ID`    | The project to report to. Only for a key that reaches more than one project.                                      |
+| `FARMJS_ENVIRONMENT`   | `production`, `staging` or `development`. Defaults to Vercel's environment (preview is staging), then `NODE_ENV`. |
+| `FARMJS_API_URL`       | Farm Infra's address, if it isn't `https://app.farmjs.dev`. Must be HTTPS, except for localhost.                  |
+| `FARMJS_TOOL_PAYLOADS` | `off` stops sending MCP tool call arguments and results. Defaults to `on`.                                        |
 
 A value Farm can't use, such as a malformed key or project ID, leaves analytics off and prints one
 warning when the server starts. It never stops the app. If Farm Infra refuses the key, Farm stops
@@ -92,12 +93,32 @@ Removing `FARMJS_API_KEY` also turns it off.
   docs page's own path, the **path** that was requested (such as `/users/42`), the method, the
   response status and the time until Farm returned the response.
 - For each registered MCP tool call, including calls to the [docs engine](/docs/docs-engine)'s
-  MCP endpoint: the tool name, whether it succeeded, and its duration, linked to its request.
+  MCP endpoint: the tool name, whether it succeeded, its duration, and its arguments and result,
+  linked to its request. See [Tool call payloads](#tool-call-payloads).
 - The kind of client that sent each request, and its name when Farm knows it. See
   [Which client sent a request](#which-client-sent-a-request).
 
 Farm never sends query strings, fragments, origins, headers, cookies, IP addresses, full
-user-agents, request or response bodies, tool arguments or results, or error messages.
+user-agents, HTTP request or response bodies, or error messages.
+
+### Tool call payloads
+
+Farm Infra shows a tool call's arguments and result in its event details. Before sending them,
+Farm replaces the value of every key that looks secret with `[redacted]`: any key containing
+`password`, `passwd`, `passphrase`, `secret`, `token`, `api_key` or `apiKey`, `authorization`,
+`cookie`, `credential`, `private_key` or `session`, at any depth. An argument or result larger
+than 8 KB as JSON, or nested more than 32 levels deep, is left out, and the event says so.
+
+Redaction only looks at key names. A secret inside a string, such as a tool result that prints a
+connection string, is sent as it is. Everyone in the Farm Infra organization can read the
+payloads, and they're kept for a year like the rest of the event.
+
+Only the Farm Infra sender reads the payloads. Farm's logs, traces and `onEvent` handlers never
+receive them. To stop sending them and keep the rest of the analytics:
+
+```bash title=".env"
+FARMJS_TOOL_PAYLOADS=off
+```
 
 ### Which client sent a request
 

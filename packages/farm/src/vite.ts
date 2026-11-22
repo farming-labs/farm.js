@@ -1874,6 +1874,24 @@ async function warnClientBoundaryOnce(
 }
 
 /**
+ * Whether adding or removing this file changes the routes `farm dev` serves. Route modules
+ * count with any of `routeModuleExtensions`: the renderer's component extensions and Markdown.
+ */
+export function isFarmAppRuntimeFile(
+  file: string,
+  appDirs: readonly string[],
+  routeModuleExtensions: ReadonlySet<string>,
+): boolean {
+  const normalized = file.replace(/\\/g, "/");
+  if (!appDirs.some((appDir) => normalized.startsWith(`${appDir}/`))) return false;
+  const routeModule = /\/(?:page|default|layout|loading|error)(\.[^./]+)$/.exec(normalized);
+  if (routeModule) return routeModuleExtensions.has(routeModule[1]!.toLowerCase());
+  return /\/(?:middleware|route)\.(?:ts|tsx|js|jsx|md|mdx)$|\/(?:sitemap|robots|manifest)\.(?:ts|js)$|\/(?:opengraph-image|twitter-image)(?:\.(?:ts|tsx|js|jsx|png|jpg|jpeg|gif|webp)|\.alt\.txt)$/.test(
+    normalized,
+  );
+}
+
+/**
  * Whether Farm should append its own client-root HMR handler to a
  * `"use client"` module.
  *
@@ -2364,15 +2382,8 @@ export function farmPlugin(
           isPotentialProgrammaticRouteSourceFile(normalized, srcDir),
         );
       };
-      const isAppRuntimeFile = (file: string) => {
-        const normalized = file.replace(/\\/g, "/");
-        return (
-          appDirSlugs.some((appDir) => normalized.startsWith(`${appDir}/`)) &&
-          /\/(?:page|default|layout|loading|error|middleware|route)\.(?:ts|tsx|js|jsx|md|mdx)$|\/(?:sitemap|robots|manifest)\.(?:ts|js)$|\/(?:opengraph-image|twitter-image)(?:\.(?:ts|tsx|js|jsx|png|jpg|jpeg|gif|webp)|\.alt\.txt)$/.test(
-            normalized,
-          )
-        );
-      };
+      const isAppRuntimeFile = (file: string) =>
+        isFarmAppRuntimeFile(file, appDirSlugs, routeModuleExtensions);
       const isStaticMetadataImageFile = (file: string) =>
         /\/(?:opengraph-image|twitter-image)(?:\.(?:png|jpg|jpeg|gif|webp)|\.alt\.txt)$/.test(
           file.replace(/\\/g, "/"),
@@ -6923,10 +6934,12 @@ function generateClientCode(
   const appSetupPath = resolveFarmRendererAppSetup(root, renderer);
   const rendererClientImports = isReactRenderer(renderer)
     ? `import React from 'react'\nimport { hydrateRoot, createRoot } from 'react-dom/client'\nimport { restorePagePosition } from '@farm.js/core/internal/client-runtime'`
-    : // Named exports only: a renderer's client module needs no default export.
+    : // Named exports only: a renderer's client module needs no default export. `React` is a
+      // copy of the namespace, as in the production entry, where Rolldown warns about each
+      // optional export (`Children`, `markFunctionComponent`) feature-checked on the namespace.
       appSetupPath
-      ? `import * as React from ${JSON.stringify(renderer.client)}\nimport { hydrateRoot, createRoot, configureApp as __farmConfigureApp } from ${JSON.stringify(renderer.client)}\nimport __farmAppSetup from ${JSON.stringify(toViteModuleId(appSetupPath, root))}\n__farmConfigureApp(__farmAppSetup)`
-      : `import * as React from ${JSON.stringify(renderer.client)}\nimport { hydrateRoot, createRoot } from ${JSON.stringify(renderer.client)}`;
+      ? `import * as __farmRendererClient from ${JSON.stringify(renderer.client)}\nimport { hydrateRoot, createRoot, configureApp as __farmConfigureApp } from ${JSON.stringify(renderer.client)}\nimport __farmAppSetup from ${JSON.stringify(toViteModuleId(appSetupPath, root))}\nconst React = { ...__farmRendererClient }\n__farmConfigureApp(__farmAppSetup)`
+      : `import * as __farmRendererClient from ${JSON.stringify(renderer.client)}\nimport { hydrateRoot, createRoot } from ${JSON.stringify(renderer.client)}\nconst React = { ...__farmRendererClient }`;
   // Islands mode runs on islx (internal/islands-runtime), under the same names.
   const isolatedHydrationImport = isolatedHydrationEnabled
     ? `${islandValues ? "import { createFarmIsolatedHydrationRuntime, createFarmServerPageBoundary, wrapFarmIsolatedClientGraph, createFarmServerTreeElement, createFarmServerTreeLayout } from '@farm.js/core/internal/islands-runtime'" : "import { createFarmIsolatedHydrationRuntime, createFarmServerPageBoundary, wrapFarmIsolatedClientGraph } from '@farm.js/core/internal/isolated-boundary'\nimport { createFarmServerTreeElement } from '@farm.js/core/internal/server-tree'"}`
@@ -8898,31 +8911,6 @@ function farmIslandsOnlyDocument() {
           }
         },
       });
-      ${
-        islandValues
-          ? `// A layout root that waits for a click renders again on a navigation, and a link under the
-      // pointer is a navigation on its way: hydrate the root now, as the production entry does.
-      if (layoutShouldHydrate && islandStrategy !== 'load') {
-        const hydrateForLink = (target) => {
-          const anchor = target instanceof Element ? target.closest('a[href]') : null;
-          const href = anchor && anchor.getAttribute('href');
-          if (!href || href.startsWith('#') || hasAbsoluteNavigationHref(href)) return false;
-          if (!pageContainer.contains(anchor)) return false;
-          document.dispatchEvent(
-            new CustomEvent('farm:island-interaction', { detail: { target: anchor, kind: null } }),
-          );
-          return true;
-        };
-        const onLinkIntent = (event) => {
-          if (hydrateForLink(event.target)) document.removeEventListener('mouseover', onLinkIntent, true);
-        };
-        if (!hydrateForLink(pageContainer.querySelector('a[href]:hover'))) {
-          document.addEventListener('mouseover', onLinkIntent, true);
-          void pageHydration.finally(() => document.removeEventListener('mouseover', onLinkIntent, true));
-        }
-      }`
-          : ""
-      }
       ${
         isolatedHydrationEnabled
           ? `const isolatedHydration =

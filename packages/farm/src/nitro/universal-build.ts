@@ -4187,10 +4187,11 @@ export function generateClientHydrationEntry(
     ? `import React from "react";\nimport { holdFarmIslandInteractions, restorePagePosition } from "@farm.js/core/internal/client-runtime";`
     : isReactRenderer(renderer)
       ? `import React from "react";\nimport { createRoot, hydrateRoot } from "react-dom/client";\nimport { restorePagePosition } from "@farm.js/core/internal/client-runtime";`
-      : // Named exports only, as the server entry and the development client read them.
+      : // Named exports only, as the server entry and the development client read them. A copy
+        // of the namespace, so feature checks of optional exports don't make Rolldown warn.
         appSetupPath
-        ? `import * as React from ${JSON.stringify(renderer.client)};\nimport { createRoot, hydrateRoot, configureApp as __farmConfigureApp } from ${JSON.stringify(renderer.client)};\nimport __farmAppSetup from ${JSON.stringify(toPosixPath(appSetupPath))};\n__farmConfigureApp(__farmAppSetup);`
-        : `import * as React from ${JSON.stringify(renderer.client)};\nimport { createRoot, hydrateRoot } from ${JSON.stringify(renderer.client)};`;
+        ? `import * as __farmRendererClient from ${JSON.stringify(renderer.client)};\nimport { createRoot, hydrateRoot, configureApp as __farmConfigureApp } from ${JSON.stringify(renderer.client)};\nimport __farmAppSetup from ${JSON.stringify(toPosixPath(appSetupPath))};\nconst React = { ...__farmRendererClient };\n__farmConfigureApp(__farmAppSetup);`
+        : `import * as __farmRendererClient from ${JSON.stringify(renderer.client)};\nimport { createRoot, hydrateRoot } from ${JSON.stringify(renderer.client)};\nconst React = { ...__farmRendererClient };`;
   const providerClientCode = generateFarmIntegrationProviderClientCode(
     integrationProviders,
     root,
@@ -5421,8 +5422,8 @@ async function hydrate() {
   window.__FARM_ROUTE_SLOTS__ = initialPayload.slots;
 ${
   lazyRenderer
-    ? `  // A navigation the runtime started for (a held link click) does not wait for this.
-  await loadFarmRenderer();
+    ? `  // React DOM and islx load with what first renders or hydrates, not here (RFC 0010): a root
+  // that waits for its trigger, or a navigation that swaps its page in, does not wait for them.
 `
     : ""
 }
@@ -5466,109 +5467,86 @@ ${
     return;
   }
   
+  const pageHydration = scheduleFarmRouteHydration(matched, pathname, container, window.__FARM_PROPS__);
+  ${
+    isolatedHydrationEnabled
+      ? `// Not cancelled with the page: a navigation disposes the islands it removes, and one in a
+  // layout it keeps still waits for its trigger, as on a page of islands only.
+  const isolatedHydration =
+    !hasHydratableLayout(pathname) &&
+    document.querySelector('f-island[src]')
+      ? hydrateFarmIsolatedClientBoundaries(document)
+      : Promise.resolve();
+  await Promise.all([pageHydration, isolatedHydration]);`
+      : "await pageHydration;"
+  }
+}
+
+// Hydrates the route's page or layout root in \`container\` when its strategy is due: at once, or
+// on its idle, visible or interaction trigger (RFC 0003, section 11). The first load schedules it,
+// and so does a navigation that swaps a page into a root that never hydrated (RFC 0011): nothing
+// in that root ran, so it waits for the next page's trigger as a first load of that page would.
+function scheduleFarmRouteHydration(matched, pathname, container, serverProps) {
   container.dataset.farmIsland = "page";
   container.dataset.farmIslandStrategy = matched.route.islandStrategy || "load";
 
   const hydrationController = new AbortController();
   pendingPageHydrationController = hydrationController;
-  try {
-    const pageHydration = scheduleFarmIslandHydration({
-      container,
-      strategy: matched.route.islandStrategy,
-      signal: hydrationController.signal,
-      hydrate: async function() {
-        if (
-          hydrationController.signal.aborted ||
-          !container.isConnected ||
-          window.location.pathname !== pathname
-        ) {
-          return;
-        }
-        const searchParams = searchParamsToObject(new URLSearchParams(window.location.search));
-        const shouldHydrate = !isHydrated && Boolean(container.innerHTML.trim());
-        const routeState = await createMatchedHydrationRoute(
-          matched,
-          pathname,
-          searchParams,
-          undefined,
-          window.__FARM_PROPS__,
-          undefined,
-          shouldHydrate ? container : undefined,
-        );
-        if (!routeState) return;
-        const hydrationSession = await farmClientRuntime.beginHydration({
-          container,
-          mode: shouldHydrate ? "hydrate" : "render",
-        });
-
-        try {
-          // A navigation replaced this route before it hydrated. Like a superseded
-          // navigation, that is not a failure, so error hooks never see it.
-          if (hydrationController.signal.aborted || !container.isConnected) return;
-          if (shouldHydrate) {
-            reactRoot = hydrateFarmRoute(container, routeState);
-            reactRootContainer = container;
-            isHydrated = true;
-          } else {
-            if (!reactRoot) {
-              reactRoot = createRoot(container);
-              reactRootContainer = container;
-            }
-            renderFarmRoute(reactRoot, routeState);
-          }
-          await farmClientRuntime.completeHydration(hydrationSession);
-        } catch (error) {
-          await farmClientRuntime.failHydration(hydrationSession, error);
-          console.error("[Farm.js] Hydration error:", error);
-        }
-      },
-    });
-    ${
-      islandValues
-        ? `// A layout root that waits for a click renders again on a navigation, and a link under the
-    // pointer is a navigation on its way: hydrate the root now, as a focus would, so the click
-    // updates it instead of rendering it from the start.
-    if (hasHydratableLayout(pathname) && (matched.route.islandStrategy || "load") !== "load") {
-      const hydrateForLink = function(target) {
-        const anchor = target instanceof Element ? target.closest("a[href]") : null;
-        const href = anchor && anchor.getAttribute("href");
-        if (!href || href.startsWith("#") || hasAbsoluteNavigationHref(href)) return false;
-        if (!container.contains(anchor)) return false;
-        document.dispatchEvent(
-          new CustomEvent("farm:island-interaction", { detail: { target: anchor, kind: null } }),
-        );
-        return true;
-      };
-      const onLinkIntent = function(event) {
-        if (hydrateForLink(event.target)) document.removeEventListener("mouseover", onLinkIntent, true);
-      };
-      // The hover that loaded this entry fired before it ran.
-      if (!hydrateForLink(container.querySelector("a[href]:hover"))) {
-        document.addEventListener("mouseover", onLinkIntent, true);
-        void pageHydration.finally(function() {
-          document.removeEventListener("mouseover", onLinkIntent, true);
-        });
+  return scheduleFarmIslandHydration({
+    container,
+    strategy: matched.route.islandStrategy,
+    signal: hydrationController.signal,
+    hydrate: async function() {
+      if (
+        hydrationController.signal.aborted ||
+        !container.isConnected ||
+        window.location.pathname !== pathname
+      ) {
+        return;
       }
-    }`
-        : ""
-    }
-    ${
-      isolatedHydrationEnabled
-        ? `// Not cancelled with the page: a navigation disposes the islands it removes, and one in a
-    // layout it keeps still waits for its trigger, as on a page of islands only.
-    const isolatedHydration =
-      !hasHydratableLayout(pathname) &&
-      document.querySelector('f-island[src]')
-        ? hydrateFarmIsolatedClientBoundaries(document)
-        : Promise.resolve();
-    await Promise.all([pageHydration, isolatedHydration]);`
-        : "await pageHydration;"
-    }
-  } finally {
+      const searchParams = searchParamsToObject(new URLSearchParams(window.location.search));
+      const shouldHydrate = !isHydrated && Boolean(container.innerHTML.trim());
+      const routeState = await createMatchedHydrationRoute(
+        matched,
+        pathname,
+        searchParams,
+        undefined,
+        serverProps,
+        undefined,
+        shouldHydrate ? container : undefined,
+      );
+      if (!routeState) return;
+      const hydrationSession = await farmClientRuntime.beginHydration({
+        container,
+        mode: shouldHydrate ? "hydrate" : "render",
+      });
+
+      try {
+        // A navigation replaced this route before it hydrated. Like a superseded
+        // navigation, that is not a failure, so error hooks never see it.
+        if (hydrationController.signal.aborted || !container.isConnected) return;
+        if (shouldHydrate) {
+          reactRoot = hydrateFarmRoute(container, routeState);
+          reactRootContainer = container;
+          isHydrated = true;
+        } else {
+          if (!reactRoot) {
+            reactRoot = createRoot(container);
+            reactRootContainer = container;
+          }
+          renderFarmRoute(reactRoot, routeState);
+        }
+        await farmClientRuntime.completeHydration(hydrationSession);
+      } catch (error) {
+        await farmClientRuntime.failHydration(hydrationSession, error);
+        console.error("[Farm.js] Hydration error:", error);
+      }
+    },
+  }).finally(function() {
     if (pendingPageHydrationController === hydrationController) {
       pendingPageHydrationController = null;
     }
-  }
+  });
 }
 
 /*farm-router-start*/
@@ -5803,11 +5781,9 @@ ${
   partialNavigationHeaders: function() {
     const root = document.getElementById("root") || document.body;
     const layouts = getLayoutPatterns(root);
-    // The root React owns, or one whose layouts hydrate together but have not yet: the
-    // navigation creates it (swapContent).
-    const rendersTree = reactRoot
-      ? reactRootContainer === root
-      : root.id === "root" && hasHydratableLayout(window.location.pathname);
+    // Only a root React owns rebuilds the next page from its tree. One that has not hydrated
+    // swaps the next page's HTML in and keeps waiting (swapContent), without React DOM.
+    const rendersTree = Boolean(reactRoot) && reactRootContainer === root;
     return {
       ...(layouts.length ? { "F-Layouts": JSON.stringify(layouts) } : {}),
       ...(rendersTree ? { "F-Render": "tree" } : {}),
@@ -6152,34 +6128,6 @@ ${
     const hydrateLayouts = hasHydratableLayout(newPathname);
     const nextPage = newRoot.querySelector("#__farm_page__");
 
-    ${
-      islandValues
-        ? `// A layout that hydrates as one root but has not yet (its client components wait for a
-    // click): its first navigation renders the page's payload in a new root, as later ones do.
-    if (
-      matched && hydrateLayouts && !reactRoot && currentRoot.id === "root" &&
-      nextPage?.querySelector('script[type="f/tree"][partial]')
-    ) {
-      const routeState = await createMatchedHydrationRoute(
-        matched,
-        newPathname,
-        searchParamsToObject(targetUrl.searchParams),
-        nextPage,
-        nextPageProps,
-        newRoot,
-      );
-      if (!isNavigationCurrent()) return false;
-      if (!routeState) return "segment-mismatch";
-      cancelPendingPageHydration();
-      resetRouteSlotRoots();
-      setFarmReactRoot(createRoot(currentRoot), currentRoot);
-      renderFarmRoute(reactRoot, routeState);
-      window.__FARM_ROUTE_SLOTS__ = nextRouteSlots;
-      setFarmHydrated();
-      return true;
-    }`
-        : ""
-    }
     // If React already owns the shared layout, update that root. React keeps
     // matching layout component instances and their state mounted.
     if (matched && hydrateLayouts && reactRoot && reactRootContainer === currentRoot) {
@@ -6228,22 +6176,35 @@ ${
 
     // Check if the new HTML contains an interactive route boundary.
     if (matched) {
-      const searchParams = searchParamsToObject(targetUrl.searchParams);
       const pageContainer =
         hydrateLayouts ? currentRoot : document.getElementById("__farm_page__") || currentRoot;
-      const routeState = await createMatchedHydrationRoute(
-        matched,
-        newPathname,
-        searchParams,
-        undefined,
-        nextPageProps,
-        undefined,
-        pageContainer,
-      );
-      if (!isNavigationCurrent()) return false;
-      if (routeState) {
-        setFarmReactRoot(hydrateFarmRoute(pageContainer, routeState), pageContainer);
-        setFarmHydrated();
+      if (
+        (hydrateLayouts || matched.route.pageShouldHydrate) &&
+        (matched.route.islandStrategy || "load") !== "load"
+      ) {
+        // A root that waits for its trigger waits after a navigation too, as on a first load:
+        // the page is server HTML and its tree until then, and React DOM loads when it hydrates.
+        scheduleFarmRouteHydration(matched, newPathname, pageContainer, nextPageProps).catch(
+          function(error) {
+            console.error("[Farm.js] Hydration error:", error);
+          },
+        );
+      } else {
+        const searchParams = searchParamsToObject(targetUrl.searchParams);
+        const routeState = await createMatchedHydrationRoute(
+          matched,
+          newPathname,
+          searchParams,
+          undefined,
+          nextPageProps,
+          undefined,
+          pageContainer,
+        );
+        if (!isNavigationCurrent()) return false;
+        if (routeState) {
+          setFarmReactRoot(hydrateFarmRoute(pageContainer, routeState), pageContainer);
+          setFarmHydrated();
+        }
       }
       ${
         isolatedHydrationEnabled
@@ -7658,8 +7619,10 @@ function generateVirtualEntryCode(
           : ""
       }`
     : // The renderer contract is the server module's named exports, which the development
-      // server reads too; a renderer needs no default export.
-      `import * as ReactDOMServer from ${JSON.stringify(config.renderer.server)};\nconst React = ReactDOMServer;${generateFarmRendererAppSetupServerCode(config)}`;
+      // server reads too; a renderer needs no default export. The entry feature-checks optional
+      // exports (streaming, `capabilities`, `generateHydrationScript`) on a copy of the
+      // namespace, because Rolldown warns about each such read off the namespace itself.
+      `import * as __farmRendererServer from ${JSON.stringify(config.renderer.server)};\nconst ReactDOMServer = { ...__farmRendererServer };\nconst React = ReactDOMServer;${generateFarmRendererAppSetupServerCode(config)}`;
   const routeClientGraphServerRuntime = hasIsolatedClientGraphRuntime
     ? `function wrapFarmRouteClientGraph(element) {
   return wrapFarmIsolatedClientGraph(React, element);

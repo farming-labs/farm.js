@@ -101,12 +101,12 @@ test("blog connects the index, article, contents, and Markdown mirror", async ({
   // The index features the newest post and lists the rest, so these follow the collection.
   await expect(page.locator(".blog-featured h3 a")).toHaveAttribute(
     "href",
-    "/blog/agent-markdown-scan",
+    "/blog/bring-your-own-renderer",
   );
   await expect(page.locator(".blog-featured .blog-post-meta time")).toHaveText("Nov 2026");
   await expect(page.locator(".blog-featured .blog-post-meta time")).toHaveAttribute(
     "datetime",
-    "2026-11-16",
+    "2026-11-21",
   );
   await expect(page.locator(".blog-featured .blog-post-meta time")).toHaveCSS(
     "font-family",
@@ -139,7 +139,7 @@ test("blog connects the index, article, contents, and Markdown mirror", async ({
   await expect(page.locator(".blog-read-link")).toHaveText("Read article");
   await expect(page.locator(".blog-read-link")).toHaveAttribute(
     "href",
-    "/blog/agent-markdown-scan",
+    "/blog/bring-your-own-renderer",
   );
   await expect(page.locator(".blog-explore a")).toHaveCount(2);
   await expect(page.locator(".blog-explore a").first()).toHaveAttribute(
@@ -1034,6 +1034,7 @@ for (const width of [280, 320, 345, 360, 1440]) {
         "/blog/web-to-native",
         "/blog/native-internals",
         "/blog/agent-markdown-scan",
+        "/blog/bring-your-own-renderer",
         "/blog",
         "/",
       ]) {
@@ -1092,6 +1093,7 @@ test("blog figure captions stay in view while their figures scroll sideways", as
       "/blog/web-to-native",
       "/blog/native-internals",
       "/blog/agent-markdown-scan",
+      "/blog/bring-your-own-renderer",
     ]) {
       await page.goto(pathname);
       const result = await page

@@ -5,7 +5,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { init, parse } from "es-module-lexer";
 import type { ViteDevServer } from "vite";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { build } from "../build";
 import { loadConfig, resolveConfig } from "../config";
 import { createServer } from "../server/create-server";
@@ -142,7 +142,18 @@ describe("a renderer that exports its contract only by name", () => {
       { ...(await loadConfig(root, undefined, "production")), root, srcDir: "src" },
       "production",
     );
-    await build(config, { root, preset: "node-server" });
+    // This renderer leaves out every optional export (`Children`, `markFunctionComponent`,
+    // streaming, `capabilities`). The generated entries feature-check those, and reading one off
+    // a module namespace makes Rolldown warn IMPORT_IS_UNDEFINED.
+    const warn = vi.spyOn(console, "warn");
+    let warnings: string[];
+    try {
+      await build(config, { root, preset: "node-server" });
+    } finally {
+      warnings = warn.mock.calls.map((args) => args.map(String).join(" "));
+      warn.mockRestore();
+    }
+    expect(warnings.filter((message) => message.includes("IMPORT_IS_UNDEFINED"))).toEqual([]);
     const server = await startProductionServer(path.join(root, ".farm", ".output", "server"));
     try {
       const response = await fetch(`${server.origin}/`);
