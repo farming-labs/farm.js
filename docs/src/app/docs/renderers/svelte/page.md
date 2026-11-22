@@ -81,6 +81,10 @@ Export `hydrate = true` from the module script, then use Svelte runes and events
 <button type="button" onclick={() => (count += 1)}>Count: {count}</button>
 ```
 
+FARMJS reads `hydrate` from the file before Svelte compiles it, so write the literal `true` or `false`. Any declaration works,
+including a type annotation or an export list. A value FARMJS can't read without running the code,
+such as an expression, an import, or a re-export, fails the build with an error that names the file.
+
 FARMJS server-renders the component with Svelte's server runtime and claims the existing markup with
 Svelte hydration in the browser.
 

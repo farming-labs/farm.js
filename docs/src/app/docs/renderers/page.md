@@ -171,6 +171,9 @@ default export.
 - `createRoot()` and `hydrateRoot()` return a root with `render(element)` and `unmount()`, plus the
   optional `renderRoute()` described under [Re-render behavior](#re-render-behavior).
 - Both modules must export `configureApp()` when the descriptor sets `appSetup`.
+- A renderer with its own file format lists its extensions in `componentExtensions` and compiles
+  them in the Vite module. FARMJS reads a route's `hydrate` export from the file as written, before
+  that compiler runs, so `hydrate` must be the literal `true` or `false` in any format.
 
 Check a renderer against the contract types from `@farm.js/core/renderer`. The full list of optional
 server exports is on `FarmServerRendererRuntime`.
