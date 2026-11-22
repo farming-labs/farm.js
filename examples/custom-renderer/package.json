@@ -1,0 +1,22 @@
+{
+  "name": "farm-custom-renderer-example",
+  "version": "0.0.1",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "farm dev",
+    "build": "farm build",
+    "start": "farm start",
+    "type-check": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@farm.js/core": "workspace:*",
+    "farm-leaf": "workspace:*",
+    "leaf": "workspace:*",
+    "zod": "4.6.7"
+  },
+  "devDependencies": {
+    "@farm.js/cli": "workspace:*",
+    "typescript": "^5.3.3"
+  }
+}

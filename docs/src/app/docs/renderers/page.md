@@ -216,6 +216,13 @@ defineRendererServerConformance(server);
 [package README](https://github.com/farming-labs/farm.js/tree/main/packages/farm-renderer-tests)
 lists every suite and what it checks.
 
+For a complete renderer to copy from, see
+[`examples/custom-renderer`](https://github.com/farming-labs/farm.js/tree/main/examples/custom-renderer).
+It renders an app with leaf, a small UI library that isn't one of the official renderers, through
+an adapter written in plain JavaScript: the descriptor, the three modules, router and theme hooks,
+a `Link`, a `.leaf` file format, and the conformance suites. CI runs its browser tests against
+`farm dev` and a production build.
+
 ## Client state in a custom renderer
 
 FARMJS keeps its client state in plain stores that any renderer can read. Each one implements

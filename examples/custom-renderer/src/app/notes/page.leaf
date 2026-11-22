@@ -1,0 +1,19 @@
+<script module>
+// Module scope: Farm reads `hydrate` from the file as written.
+export const hydrate = true;
+export const metadata = { title: "Notes in a .leaf file" };
+</script>
+
+<script>
+// Runs on every render.
+import { useState } from "leaf";
+import Badge from "../../components/badge.leaf";
+
+const [notes, setNotes] = useState(0);
+</script>
+
+<section>
+  <h1>Notes</h1>
+  <Badge label="compiled by farm-leaf/vite" />
+  <button type="button" id="notes-counter" onClick={() => setNotes((n) => n + 1)}>Notes: {notes}</button>
+</section>

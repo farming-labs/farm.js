@@ -1,0 +1,48 @@
+{
+  "name": "farm-leaf",
+  "version": "0.0.0",
+  "private": true,
+  "description": "The Farm renderer for leaf: a descriptor, three modules, and hooks over Farm's client stores.",
+  "type": "module",
+  "sideEffects": false,
+  "exports": {
+    ".": {
+      "types": "./src/index.d.ts",
+      "default": "./src/index.js"
+    },
+    "./server": {
+      "types": "./src/server.d.ts",
+      "default": "./src/server.js"
+    },
+    "./client": {
+      "types": "./src/client.d.ts",
+      "default": "./src/client.js"
+    },
+    "./vite": {
+      "types": "./src/vite.d.ts",
+      "default": "./src/vite.js"
+    },
+    "./bindings": {
+      "types": "./src/bindings.d.ts",
+      "default": "./src/bindings.js"
+    }
+  },
+  "scripts": {
+    "test": "vitest run",
+    "type-check": "tsc --noEmit"
+  },
+  "devDependencies": {
+    "@farm.js/core": "workspace:*",
+    "@farm.js/renderer-tests": "workspace:*",
+    "jsdom": "^25.0.0",
+    "leaf": "workspace:*",
+    "typescript": "^5.3.3",
+    "vite": "8.3.4",
+    "vitest": "5.0.5"
+  },
+  "peerDependencies": {
+    "@farm.js/core": "*",
+    "leaf": "*",
+    "vite": "*"
+  }
+}
