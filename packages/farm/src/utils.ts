@@ -61,7 +61,9 @@ export function parseRoutePath(filePath: string): ParsedRoute {
 }
 
 function getRouteType(fileName: string): ParsedRoute["type"] {
-  const baseName = fileName.replace(/\.(tsx?|jsx?|vue|svelte|mdx?|markdown)$/, "");
+  // Any extension: a renderer can bring its own (`.leaf`), and an unknown one must not turn
+  // `layout.leaf` into a page.
+  const baseName = fileName.replace(/\.[^./]+$/, "");
 
   switch (baseName) {
     case "page":

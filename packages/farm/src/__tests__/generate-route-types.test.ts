@@ -93,6 +93,31 @@ describe("generateRouteTypes", () => {
     expect(readTypeAlias(content, "RoutePath")).toContain('"/dashboard"');
   });
 
+  it("types a third-party renderer's routes without its layouts or slots", async () => {
+    const appDir = path.join(tmpDir, "src", "app");
+    await fs.promises.mkdir(path.join(appDir, "blog", "[slug]"), { recursive: true });
+    await fs.promises.mkdir(path.join(appDir, "feed", "@modal"), { recursive: true });
+    await fs.promises.writeFile(path.join(appDir, "page.leaf"), "<main>Home</main>");
+    await fs.promises.writeFile(path.join(appDir, "blog", "layout.leaf"), "{props.children}");
+    await fs.promises.writeFile(path.join(appDir, "blog", "[slug]", "page.leaf"), "<article />");
+    await fs.promises.writeFile(path.join(appDir, "feed", "page.leaf"), "<main>Feed</main>");
+    await fs.promises.writeFile(path.join(appDir, "feed", "@modal", "page.leaf"), "<dialog />");
+
+    const outPath = await generateRouteTypes({
+      root: tmpDir,
+      srcDir: "src",
+      componentExtensions: [".leaf"],
+    });
+    const routes = readTypeAlias(fs.readFileSync(outPath, "utf8"), "RoutePath");
+
+    expect(routes).toContain('"/"');
+    expect(routes).toContain('"/feed"');
+    expect(routes).toContain("`/blog/${string}`");
+    // A layout is not a page, and a slot directory is not a URL segment.
+    expect(routes).not.toContain('"/blog"');
+    expect(routes).not.toContain("@modal");
+  });
+
   it("types route-slot targets without exposing slot directory syntax", async () => {
     const feedDir = path.join(tmpDir, "src", "app", "feed");
     const photoDir = path.join(feedDir, "photo", "[id]");
