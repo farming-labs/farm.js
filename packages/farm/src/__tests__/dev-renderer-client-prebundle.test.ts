@@ -46,9 +46,14 @@ export function createElement(type, props, ...children) {
 export function isValidElement(value) { return typeof value === "object" && value !== null; }
 `;
 
-async function createApp(): Promise<string> {
+/**
+ * An app whose renderer package is installed in node_modules, or, with `linked`, lives in the
+ * app's workspace and is linked into node_modules as a package manager links a workspace package.
+ */
+async function createApp({ linked = false } = {}): Promise<string> {
   const root = await fs.mkdtemp(path.join(packageRoot, ".tmp-dev-renderer-client-prebundle-"));
   roots.push(root);
+  const rendererDir = linked ? "packages/plain-renderer" : "node_modules/plain-renderer";
   const files: Record<string, string> = {
     "package.json": '{"type":"module","private":true}',
     "src/app/page.js": "export default function Page() {\n  return null;\n}\n",
@@ -67,24 +72,44 @@ export function hydrateRoot() { return createRoot(); }
       "export function createFarmRendererPlugin() { return []; }\n",
   };
   for (const [relativePath, source] of Object.entries(files)) {
-    await fs.mkdir(path.dirname(path.join(root, relativePath)), { recursive: true });
-    await fs.writeFile(path.join(root, relativePath), source);
+    const file = path.join(root, relativePath.replace("node_modules/plain-renderer", rendererDir));
+    await fs.mkdir(path.dirname(file), { recursive: true });
+    await fs.writeFile(file, source);
+  }
+  if (linked) {
+    await fs.mkdir(path.join(root, "node_modules"), { recursive: true });
+    await fs.symlink(
+      path.join(root, rendererDir),
+      path.join(root, "node_modules/plain-renderer"),
+      "junction",
+    );
   }
   return root;
 }
 
+async function discoveredDependencies(root: string): Promise<string[]> {
+  const server = await createServer({ root, renderer, images: { provider: "none" } });
+  servers.push(server);
+  const optimizer = server.environments.client.depsOptimizer;
+  if (!optimizer) throw new Error("The client environment has no dependency optimizer.");
+  await optimizer.init();
+  await optimizer.scanProcessing;
+  return Object.keys(optimizer.metadata.discovered);
+}
+
 describe("the development dependency optimizer", () => {
   it("pre-bundles the renderer's client module before the first request", async () => {
-    const root = await createApp();
-    const server = await createServer({ root, renderer, images: { provider: "none" } });
-    servers.push(server);
+    expect(await discoveredDependencies(await createApp())).toContain("plain-renderer/client");
+  }, 60_000);
 
-    const optimizer = server.environments.client.depsOptimizer;
-    if (!optimizer) throw new Error("The client environment has no dependency optimizer.");
-    await optimizer.init();
-    await optimizer.scanProcessing;
-
-    expect(Object.keys(optimizer.metadata.discovered)).toContain("plain-renderer/client");
+  // Vite serves a linked package as source. Pre-bundling the client module of a renderer linked
+  // from the workspace copied the renderer's own runtime into the bundle, while the app's
+  // components imported the source copy: a component's hook read a different copy than the one
+  // the renderer set, and the page never hydrated.
+  it("leaves a renderer linked from the workspace to be served as source", async () => {
+    expect(await discoveredDependencies(await createApp({ linked: true }))).not.toContain(
+      "plain-renderer/client",
+    );
   }, 60_000);
 
   it("leaves out a client module given as a file path", () => {
