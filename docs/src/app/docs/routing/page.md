@@ -306,6 +306,63 @@ fragments keep the current page mounted without loading route data. Native
 anchor scrolling and `hashchange` listeners still work. A different pathname,
 query string, or intercepted-route context still performs route navigation.
 
+#### Link in Solid, Vue, and Svelte
+
+Preact apps use the `Link` above through `preact/compat`. Solid, Vue, and Svelte each have their
+own `Link` with the same props: `href` or a route pattern with `params`, `query`, `hash`,
+`prefetch`, `prefetchDelay`, `replace`, `scroll`, `viewTransition`, `locale`, and
+`trailingSlash`. Other attributes and event handlers go on the `<a>`.
+
+```tsx
+// Solid
+import { Link } from "@farm.js/solid/bindings";
+
+<Link href="/products/[id]" params={{ id: product.id }} prefetch="intent">
+  {product.name}
+</Link>;
+```
+
+```vue
+<!-- Vue -->
+<script setup lang="ts">
+import { Link } from "@farm.js/vue/bindings";
+</script>
+
+<template>
+  <Link href="/products/[id]" :params="{ id: product.id }" prefetch="intent">
+    {{ product.name }}
+  </Link>
+</template>
+```
+
+```svelte
+<!-- Svelte -->
+<script lang="ts">
+  import Link from "@farm.js/svelte/link";
+</script>
+
+<Link href="/products/[id]" params={{ id: product.id }} prefetch="intent">{product.name}</Link>
+```
+
+All three render the same anchor as the React `Link`, and the router does the rest: a click
+navigates in place, and the anchor prefetches as `prefetch` says, in development and production.
+The Solid `Link` checks `params` against the route pattern, as the React one does. Vue and Svelte
+components are not generic over their props, so there `href` is typed and `params` is not checked
+against it. A `javascript:` href renders without an `href`, so a click on it does nothing.
+
+`@farm.js/svelte/link` is a `.svelte` file that your app's Svelte plugin compiles, so the package
+carries a `svelte` export condition. A custom renderer gets the same anchor from
+`resolveLinkAttributes`:
+
+```ts
+import { resolveLinkAttributes } from "@farm.js/core/renderer-client";
+
+resolveLinkAttributes({ href: "/products/[id]", params: { id: 42 }, replace: true });
+// { href: "/products/42", "data-farm-link": "", "data-replace": "", ... }
+```
+
+Spread the result onto an `<a>`. Values that are `undefined` mean the attribute is absent.
+
 ## Lightweight router helpers
 
 Use the lightweight router when client components, layouts, breadcrumbs, tabs, or tests need to match app routes without adding a separate routing library.
