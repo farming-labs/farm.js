@@ -223,8 +223,8 @@ before it (`main` at a8ce675d6), load average 4 to 9, medians of 9 rounds in ms:
 
 That is 150 ms at 1.6 Mbit/s with an 80 ms tap: 17 to 21 ms faster in every section, where an A/A
 run of one build against a copy of it differed by 6 ms at most (5 rounds). With 150 ms of latency
-and no bandwidth limit the two builds are within 4 ms (5 rounds). The `rsc` build does not
-compress its static files, so the proxy brotli-compresses its scripts at quality 5 here, as a CDN
-would; its Node server alone sends them uncompressed.
+and no bandwidth limit the two builds are within 4 ms (5 rounds). The `rsc` build did not
+compress its static files then, so the proxy brotli-compressed its scripts at quality 5, as a CDN
+would; its Node server alone sent them uncompressed until #3097.
 
 `results/latest.json` has the per-page numbers of the last run.
