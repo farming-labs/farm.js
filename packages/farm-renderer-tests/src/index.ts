@@ -20,6 +20,15 @@ export interface RendererDescriptorFixture {
   };
 }
 
+/**
+ * What a renderer's `renderToPipeableStream()` writes to: a Node writable stream in practice. Kept
+ * structural so the published types don't require `@types/node`.
+ */
+export interface RendererPipeDestination {
+  write(chunk: unknown): unknown;
+  end(): unknown;
+}
+
 export interface RendererServerFixture {
   name: string;
   Fragment: unknown;
@@ -41,7 +50,7 @@ export interface RendererServerFixture {
       onShellError(error: unknown): void;
       onError(error: unknown): void;
     },
-  ): { pipe(destination: NodeJS.WritableStream): void };
+  ): { pipe(destination: RendererPipeDestination): void };
   renderToReadableStream?(
     element: unknown,
   ): ReadableStream<Uint8Array> | Promise<ReadableStream<Uint8Array>>;

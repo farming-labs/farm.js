@@ -5,24 +5,36 @@ const path = require("node:path");
 const { test } = require("node:test");
 
 const { packPublicPackages } = require("./pack-public-packages");
-const { readPublicPackages } = require("./public-packages");
+const { findCoreDependencyProblems, readPublicPackages } = require("./public-packages");
 
-const independentRendererDirectories = [
-  "farm-react",
-  "farm-preact",
-  "farm-solid",
-  "farm-svelte",
-  "farm-vue",
-];
+test("public packages share the app's core and accept the next core minor", () => {
+  assert.deepEqual(findCoreDependencyProblems(readPublicPackages()), []);
+});
 
-test("independently released renderers require compatible stable core", () => {
-  for (const directory of independentRendererDirectories) {
-    const manifest = JSON.parse(
-      fs.readFileSync(path.resolve(__dirname, "..", "packages", directory, "package.json"), "utf8"),
-    );
+test("reports pinned cores and peer ranges that refuse the next minor", () => {
+  const core = { name: "@farm.js/core", version: "0.1.78", manifest: {} };
+  const pkg = (name, manifest) => ({ name, version: "0.1.0", manifest });
+  const dev = { devDependencies: { "@farm.js/core": "workspace:*" } };
 
-    assert.equal(manifest.peerDependencies["@farm.js/core"], ">=0.1.0 <0.2.0", directory);
-  }
+  assert.deepEqual(
+    findCoreDependencyProblems([
+      core,
+      pkg("@farm.js/cli", { dependencies: { "@farm.js/core": "workspace:*" } }),
+      pkg("@farm.js/ok", { ...dev, peerDependencies: { "@farm.js/core": ">=0.1.50 <0.3.0" } }),
+      pkg("@farm.js/pinned", { dependencies: { "@farm.js/core": "workspace:*" } }),
+      pkg("@farm.js/capped", { ...dev, peerDependencies: { "@farm.js/core": ">=0.1.0 <0.2.0" } }),
+      pkg("@farm.js/exact", { ...dev, peerDependencies: { "@farm.js/core": "workspace:*" } }),
+      pkg("@farm.js/ahead", { ...dev, peerDependencies: { "@farm.js/core": ">=0.1.79 <0.3.0" } }),
+      pkg("@farm.js/unlinked", { peerDependencies: { "@farm.js/core": ">=0.1.0 <0.3.0" } }),
+    ]),
+    [
+      "@farm.js/pinned: move @farm.js/core from `dependencies` to `peerDependencies` (with `workspace:*` in `devDependencies`).",
+      "@farm.js/capped: the @farm.js/core peer `>=0.1.0 <0.2.0` refuses core 0.2.0; raise its upper bound past 0.2.0.",
+      "@farm.js/exact: write the @farm.js/core peer as `>=<floor> <<ceiling>`, not `workspace:*`.",
+      "@farm.js/ahead: the @farm.js/core peer `>=0.1.79 <0.3.0` excludes the workspace core 0.1.78.",
+      '@farm.js/unlinked: add `"@farm.js/core": "workspace:*"` to `devDependencies`.',
+    ],
+  );
 });
 
 test("discovers every public package without consulting the registry", () => {

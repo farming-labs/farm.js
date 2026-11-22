@@ -27,7 +27,10 @@ export interface FarmRenderer {
   componentExtensions?: readonly string[];
   /** Packages that must share one module instance in a Farm application. */
   dedupe?: readonly string[];
-  /** Renderer packages seeded into Vite's dependency optimizer. */
+  /**
+   * Renderer packages seeded into Vite's dependency optimizer. Farm adds `client` itself when it
+   * names a package.
+   */
   optimizeDeps?: readonly string[];
   /**
    * Scheduling policy for the production client and SSR graphs.
@@ -396,7 +399,15 @@ export interface FarmServerRendererRuntime {
   /** WHATWG streaming primitive used by Web-stream-capable renderers. */
   renderToReadableStream?: (
     element: unknown,
-    options?: FarmRendererRenderOptions,
+    options?: FarmRendererRenderOptions & {
+      /**
+       * Reports a render error after output has started. The response can't change status by
+       * then, so report the error here and close the stream: erroring a stream that has sent
+       * output resets the connection. An error before any output should error the stream, so
+       * Farm answers with the error's status.
+       */
+      onError?(error: unknown): void;
+    },
   ) => ReadableStream<Uint8Array | string> | Promise<ReadableStream<Uint8Array | string>>;
 }
 

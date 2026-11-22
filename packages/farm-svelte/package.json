@@ -45,6 +45,11 @@
       "types": "./dist/vite.d.ts",
       "import": "./dist/vite.mjs",
       "require": "./dist/vite.cjs"
+    },
+    "./link": {
+      "types": "./dist/link.d.ts",
+      "svelte": "./dist/Link.svelte",
+      "default": "./dist/Link.svelte"
     }
   },
   "publishConfig": {
@@ -73,7 +78,7 @@
     "vitest": "5.0.5"
   },
   "peerDependencies": {
-    "@farm.js/core": ">=0.1.0 <0.2.0",
+    "@farm.js/core": ">=0.1.0 <0.3.0",
     "svelte": "^5.46.4"
   },
   "engines": {

@@ -288,12 +288,13 @@ describe("the islands web entry's renderer (RFC 0010)", () => {
       options.platform,
     );
   const staticRenderer =
-    /^import [^;]*from "(?:react-dom\/client|@farm\.js\/core\/internal\/islands-runtime)";/m;
+    /^import [^;]*from "(?:react|react-dom\/client|@farm\.js\/core\/internal\/islands-runtime)";/m;
 
-  it("imports React DOM and islx when it first renders or hydrates, so its router runs without them", () => {
+  it("imports React, React DOM and islx when it first renders or hydrates, so its router runs without them", () => {
     const { entry, router } = splitFarmClientRouter(generateFor());
     expect(entry).not.toMatch(staticRenderer);
     expect(router).not.toMatch(staticRenderer);
+    expect(entry).toContain('import("react")');
     expect(entry).toContain('import("react-dom/client")');
     expect(entry).toContain('import("@farm.js/core/internal/islands-runtime")');
     // A swap that streams in before they load hydrates its islands once they have.
@@ -310,7 +311,7 @@ describe("the islands web entry's renderer (RFC 0010)", () => {
     );
   });
 
-  it("keeps React DOM in the entry of the mobile client and of an app with client route slots", () => {
+  it("keeps React and React DOM in the entry of the mobile client and of an app with client route slots", () => {
     expect(generateFor({ platform: "mobile" })).toMatch(staticRenderer);
     expect(generateFor({ slots: [slot] })).toMatch(staticRenderer);
   });

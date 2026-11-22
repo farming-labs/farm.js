@@ -141,7 +141,7 @@ import {
 import { sendWebResponse } from "./response";
 import { createFarmNodeRequestAbortSignal, matchesFarmIfNoneMatch } from "../server-http";
 import { renderFarmFontDevHead } from "../font-vite";
-import { createFarmMetadataImageResponse } from "../metadata-image";
+import { createFarmMetadataImageResponse, resolveFarmMetadataImageValue } from "../metadata-image";
 import { createFarmMetadataRouteResponse } from "../metadata-route";
 import {
   collectFarmLlmsTxtPages,
@@ -227,6 +227,66 @@ import {
   resolveFarmSecurityConfig,
   type ResolvedFarmSecurityConfig,
 } from "../security";
+
+/**
+ * `renderToReadableStream()` in the shape of `renderToPipeableStream()`, for a renderer that
+ * streams only Web streams. Development streams pages through the Node shape, and production
+ * streams the Web stream itself, so without this such a renderer streamed only in production.
+ */
+function pipeFarmRendererWebStream(
+  runtime: FarmServerRendererRuntime,
+): NonNullable<FarmServerRendererRuntime["renderToPipeableStream"]> {
+  return (element, callbacks) => {
+    let source: Readable | undefined;
+    let destination: NodeJS.WritableStream | undefined;
+    let aborted = false;
+    let shellSettled = false;
+    const settleShell = (error?: unknown) => {
+      if (shellSettled) return false;
+      shellSettled = true;
+      if (error === undefined) callbacks.onShellReady();
+      else callbacks.onShellError(error);
+      return true;
+    };
+    Promise.resolve()
+      .then(() =>
+        runtime.renderToReadableStream!(element, {
+          ...(callbacks.nonce ? { nonce: callbacks.nonce } : {}),
+          onError: callbacks.onError,
+        }),
+      )
+      .then(
+        (stream) => {
+          source = Readable.fromWeb(stream as import("node:stream/web").ReadableStream);
+          if (aborted) {
+            source.destroy();
+            return;
+          }
+          // The shell is ready once the stream has output, or has ended without any.
+          source.once("readable", () => settleShell());
+          source.once("error", (error) => {
+            if (settleShell(error)) return;
+            // A stream should report a late error through `onError` and close instead. One that
+            // errors anyway still ends the response rather than leaving the request open.
+            callbacks.onError(error);
+            destination?.end();
+          });
+        },
+        (error) => settleShell(error),
+      );
+    return {
+      pipe(target) {
+        destination = target;
+        source?.pipe(target);
+      },
+      abort() {
+        aborted = true;
+        source?.destroy();
+        destination?.end();
+      },
+    };
+  };
+}
 
 // Islands mode renders on islx, which loads React: only an islands app loads it (`initialize`).
 let islands: typeof import("../client/islands-runtime") | undefined;
@@ -1129,6 +1189,26 @@ export class ServerRenderer {
   }
 
   /**
+   * The page's element. Only React renders an async component, so for any other renderer Farm
+   * awaits an async page itself and hands the renderer what it returned, as the production
+   * server does. A `page.md` page is one: it compiles its Markdown on first render.
+   */
+  private async createPageElement(PageComponent: unknown, pageProps: unknown): Promise<any> {
+    const runtime = this.rendererRuntime;
+    if (
+      isReactRenderer(this.config.renderer) ||
+      typeof PageComponent !== "function" ||
+      PageComponent.constructor?.name !== "AsyncFunction"
+    ) {
+      return runtime.createElement(PageComponent, pageProps);
+    }
+    const result = await (PageComponent as (props: unknown) => Promise<unknown>)(pageProps);
+    return runtime.isValidElement(result)
+      ? result
+      : runtime.createElement(runtime.Fragment, null, result);
+  }
+
+  /**
    * Render the route tree used by client navigation without producing a second
    * document response. Layout markers let the browser preserve the longest
    * common shell and replace only the first changed boundary.
@@ -1139,7 +1219,7 @@ export class ServerRenderer {
     setFarmBasePath(this.config.basePath);
     this.publishSearchPreserveRoutes();
     setFarmTrailingSlashPreference(this.config.trailingSlash);
-    let element = this.rendererRuntime.createElement(input.PageComponent, input.pageProps);
+    let element = await this.createPageElement(input.PageComponent, input.pageProps);
     if (input.LoadingComponent) {
       element = this.rendererRuntime.createElement(
         this.rendererRuntime.Suspense,
@@ -1627,7 +1707,7 @@ window.__FARM_I18N__ = ${i18nSnapshot ? serializeInlineValue(i18nSnapshot) : "nu
             path: page.urlPath,
           };
 
-          let pageElement: any = this.rendererRuntime.createElement(PageComponent, pageProps);
+          let pageElement: any = await this.createPageElement(PageComponent, pageProps);
           const pageMetadata = routeManifest.routes.find(
             (entry) => entry.pattern === route?.pattern,
           ) ?? {
@@ -2460,7 +2540,7 @@ window.__FARM_I18N__ = ${i18nSnapshot ? serializeInlineValue(i18nSnapshot) : "nu
       await _runWithMiddlewareData(middlewareDataForContext, async () => {
         await _runWithMiddlewareContext(middlewareContext, async () => {
           await _runWithCurrentRequest(currentRequest, async () => {
-            let pageElement: any = this.rendererRuntime.createElement(PageComponent, pageProps);
+            let pageElement: any = await this.createPageElement(PageComponent, pageProps);
 
             // An islands navigation is swapped into a page already on screen, where a fallback
             // would paint, so it arrives without loading.tsx, as on the production server.
@@ -3545,10 +3625,13 @@ window.__FARM_I18N__ = ${i18nSnapshot ? serializeInlineValue(i18nSnapshot) : "nu
       searchParams: createFarmSearchParams(options.searchParamsObject),
       path: options.pagePath,
     };
-    const handlerResult =
-      typeof imageModule.default === "function"
-        ? await (imageModule.default as any)(imageProps)
-        : imageModule.default;
+    const handlerResult = await resolveFarmMetadataImageValue(imageModule, imageProps, {
+      renderer: this.getMetadataImageRenderer(),
+      component: isRendererCompiledComponent(
+        options.image.modulePath,
+        this.config.renderer?.componentExtensions ?? [],
+      ),
+    });
 
     await this.writeMetadataImageResponse(req, res, handlerResult, imageModule);
   }
@@ -3563,9 +3646,14 @@ window.__FARM_I18N__ = ${i18nSnapshot ? serializeInlineValue(i18nSnapshot) : "nu
     const response = await createFarmMetadataImageResponse(value, imageModule, {
       method: req.method,
       ifNoneMatch: Array.isArray(ifNoneMatch) ? ifNoneMatch[0] : ifNoneMatch,
-      renderer: isReactRenderer(this.config.renderer) ? undefined : this.rendererRuntime,
+      renderer: this.getMetadataImageRenderer(),
     });
     await sendWebResponse(res as any, response);
+  }
+
+  /** The renderer that draws a metadata image: none for React, whose elements Satori reads directly. */
+  private getMetadataImageRenderer() {
+    return isReactRenderer(this.config.renderer) ? undefined : this.rendererRuntime;
   }
 
   private async writeStaticMetadataImageResponse(
@@ -3982,7 +4070,13 @@ window.__FARM_I18N__ = ${getFarmI18nClientSnapshot() ? serializeInlineValue(getF
       onSuspenseHoleDetected?: () => void;
     } = {},
   ): Promise<void> {
-    const renderToPipeableStream = this.rendererRuntime.renderToPipeableStream;
+    const runtime = this.rendererRuntime;
+    const renderToPipeableStream =
+      runtime.renderToPipeableStream ??
+      (getFarmRendererStreamingCapabilitiesForRuntime(this.config.renderer, "node").web &&
+      runtime.renderToReadableStream
+        ? pipeFarmRendererWebStream(runtime)
+        : undefined);
     const fullDocumentRouteKey =
       options.observabilityRoute || (req as any).__FARM_ROUTE__ || req.url || "/";
     // A route known to render a full-document layout streams that document: React's output is

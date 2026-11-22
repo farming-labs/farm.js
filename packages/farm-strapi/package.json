@@ -38,16 +38,17 @@
     "test": "vitest run"
   },
   "dependencies": {
-    "@farm.js/core": "workspace:*",
     "@farm.js/integration-utils": "workspace:*"
   },
   "devDependencies": {
+    "@farm.js/core": "workspace:*",
     "@strapi/client": "^1.6.2",
     "typescript": "^5.3.3",
     "vite": "8.3.4",
     "vitest": "5.0.5"
   },
   "peerDependencies": {
+    "@farm.js/core": ">=0.1.78 <0.3.0",
     "@strapi/client": "^1.6.2"
   }
 }

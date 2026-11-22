@@ -13,6 +13,7 @@ import { withoutFarmDeploymentCookie } from "./deployment";
 import { createFarmMarkdownViewResponse } from "./markdown-view";
 import { FARM_ANONYMOUS_CLIENT_ADDRESS } from "./anonymous-client-address";
 import type { FarmMdxComponents, FarmMdxResolvedConfig } from "./app-markdown-config";
+import type { FarmServerRendererRuntime } from "./renderer";
 
 // Preserve the existing entry points while keeping response-only imports
 // independent of the MDX compiler's dynamic dependency graph.
@@ -35,7 +36,17 @@ export interface FarmMarkdownPageModuleInput extends FarmMarkdownPageSource {
    */
   components?: FarmMdxComponents | (() => Promise<FarmMdxComponents>);
   config?: FarmMdxResolvedConfig;
+  /**
+   * The app's server renderer, when it isn't React. The page is built from its element
+   * primitives, so the renderer only gets elements it created.
+   */
+  renderer?: FarmMarkdownPageRenderer;
 }
+
+export type FarmMarkdownPageRenderer = Pick<
+  FarmServerRendererRuntime,
+  "createElement" | "Fragment" | "markFunctionComponent"
+>;
 
 export function isFarmMarkdownPageFile(filePath: string): boolean {
   return /(^|[/\\])page\.mdx?$/i.test(filePath);
@@ -139,9 +150,42 @@ const AsyncFunction = Object.getPrototypeOf(async () => {}).constructor as new (
 ) => (options: Record<string, unknown>) => Promise<{ default: ComponentType<any> }>;
 
 /** Runs compiled page code as `run` from @mdx-js/mdx does, without loading the compiler. */
-async function runFarmMarkdownPage(code: string, filePath: string) {
-  const { Fragment, jsx, jsxs } = await import("react/jsx-runtime");
-  return new AsyncFunction(code)({ Fragment, jsx, jsxs, baseUrl: pathToFileURL(filePath) });
+async function runFarmMarkdownPage(
+  code: string,
+  filePath: string,
+  renderer: FarmMarkdownPageRenderer | undefined,
+) {
+  const { Fragment, jsx, jsxs } = renderer
+    ? createFarmMarkdownJsxRuntime(renderer)
+    : await import("react/jsx-runtime");
+  const evaluated = await new AsyncFunction(code)({
+    Fragment,
+    jsx,
+    jsxs,
+    baseUrl: pathToFileURL(filePath),
+  });
+  // The page's content component is a plain function that returns the renderer's elements.
+  // Renderers that compile their own components (Vue, Svelte) call it only once it is marked.
+  renderer?.markFunctionComponent?.(evaluated.default);
+  return evaluated;
+}
+
+/**
+ * The automatic JSX runtime MDX compiles to, on a renderer's `createElement`. Children move from
+ * props to arguments, where `createElement` takes them; `jsxs` children are a static list, so each
+ * one is its own argument, as in a hand-written call.
+ */
+function createFarmMarkdownJsxRuntime(renderer: FarmMarkdownPageRenderer) {
+  const toElement =
+    (staticChildren: boolean) => (type: unknown, props: Record<string, unknown>, key?: unknown) => {
+      const { children, ...rest } = props;
+      if (key !== undefined) rest.key = key;
+      if (children === undefined) return renderer.createElement(type, rest);
+      return staticChildren && Array.isArray(children)
+        ? renderer.createElement(type, rest, ...children)
+        : renderer.createElement(type, rest, children);
+    };
+  return { Fragment: renderer.Fragment, jsx: toElement(false), jsxs: toElement(true) };
 }
 
 /**
@@ -157,9 +201,13 @@ function precompiledFarmMarkdownPage(body: string): string | undefined {
   return pages?.get(body);
 }
 
-async function evaluateMdxSource(body: string, filePath: string) {
+async function evaluateMdxSource(
+  body: string,
+  filePath: string,
+  renderer: FarmMarkdownPageRenderer | undefined,
+) {
   const code = precompiledFarmMarkdownPage(body) ?? (await compileFarmMarkdownPage(body));
-  return runFarmMarkdownPage(code, filePath);
+  return runFarmMarkdownPage(code, filePath, renderer);
 }
 
 type FarmMarkdownRouteConfig = Pick<RouteModule, "dynamic" | "revalidate" | "ssg">;
@@ -210,7 +258,7 @@ export function createFarmMarkdownRouteModule(
   let componentsPromise: Promise<FarmMdxComponents> | undefined;
 
   const loadContent = async () => {
-    evaluatedPromise ??= evaluateMdxSource(body, input.filePath) as Promise<{
+    evaluatedPromise ??= evaluateMdxSource(body, input.filePath, input.renderer) as Promise<{
       default: ComponentType<any>;
     }>;
     return evaluatedPromise;
@@ -228,7 +276,7 @@ export function createFarmMarkdownRouteModule(
   };
 
   async function FarmMarkdownPage(props: any) {
-    const { createElement } = await import("react");
+    const { createElement } = input.renderer ?? (await import("react"));
     const [evaluated, components] = await Promise.all([loadContent(), loadComponents()]);
     const MDXContent = evaluated.default;
     return createElement(

@@ -327,8 +327,11 @@ export interface GenerateProgrammaticClientRouteModuleOptions {
   routePath: string;
   routesFile: string;
   route: ProgrammaticClientRoute | undefined;
-  /** The renderer's server runtime, which provides createElement and Suspense. */
-  rendererServer: string;
+  /**
+   * The renderer's browser runtime, which provides createElement and Suspense: `react`, or the
+   * renderer's client module. Its server module would put server rendering in the browser bundle.
+   */
+  rendererClient: string;
   /** Turns an absolute file path into the import specifier the build resolves. */
   toImportSpecifier: (file: string) => string;
 }
@@ -387,7 +390,7 @@ export function generateProgrammaticClientRouteModule(
   ];
 
   return `
-import * as __farmRendererRuntime from ${JSON.stringify(options.rendererServer)};
+import * as __farmRendererRuntime from ${JSON.stringify(options.rendererClient)};
 import { createRouteModuleFromProgrammaticPage as __farmCreatePageRouteModule } from "@farm.js/core/routes";
 ${component}
 ${pending}

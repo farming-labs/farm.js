@@ -30,6 +30,14 @@ import {
 import type { FarmI18nClientSnapshot, FarmI18nLocale, FarmTranslator } from "./i18n/types";
 
 export type { FarmI18nClientSnapshot, FarmI18nLocale, FarmTranslator } from "./i18n/types";
+export { FARM_LINK_OPTION_KEYS, resolveLinkAttributes } from "./client/link-attributes";
+export type {
+  DefaultRouteHref,
+  FarmLinkAttributes,
+  FarmLinkOptions,
+  LinkDefaultRoute,
+} from "./client/link-attributes";
+export type { FarmViewTransitionMode } from "./client/spa-router";
 export { delegateNavigation } from "./client/navigation-delegate";
 export type {
   FarmNavigationDelegate,
@@ -42,10 +50,29 @@ import {
   stripFarmBasePath,
 } from "./base-path";
 
+/**
+ * The state contract every renderer binding reads: a snapshot, and a way to hear that it changed.
+ * Farm's router, action, query, theme, and i18n stores implement it, and so does `createStore`.
+ */
 export interface FarmClientStore<TSnapshot> {
+  /** Returns the current snapshot. It must return the same value until the state changes. */
   getSnapshot(): TSnapshot;
+  /** Calls `listener` after the snapshot changes. Returns a function that unsubscribes. */
   subscribe(listener: () => void): () => void;
 }
+
+export { createStore } from "./store-core";
+export type {
+  Store,
+  StoreApi,
+  StoreFields,
+  StoreKeyListener,
+  StoreKeysListener,
+  StoreListener,
+  StorePatch,
+  StoreState,
+  StoreValueUpdater,
+} from "./store-core";
 
 export interface FarmRendererRouterOptions {
   basePath?: string;

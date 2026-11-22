@@ -5,6 +5,7 @@ import { FARM_VERSION } from "@farm.js/core/version";
 import { existsSync, readFileSync } from "node:fs";
 import path from "node:path";
 import { agentSupportInvitation } from "./src/lib/agent-support";
+import { agentFeedbackPayloadSchema } from "./src/lib/agent-feedback-schema";
 import {
   siCloudflare,
   siConvex,
@@ -38,8 +39,11 @@ const brandSvg = (content: string, viewBox = "0 0 24 24") =>
 // The build reads this config from the docs app and embeds the fonts in the JSON copy that
 // renders social images. The production server also imports this module (for the adapter's
 // icons and components), where node_modules isn't on disk, so it goes without the fonts there
-// rather than failing every request.
+// rather than failing every request. The browser imports it as well, to restore the callbacks
+// the server's JSON copy of the config can't carry (agent feedback's `onFeedback`). It has no
+// filesystem and never renders social images, so it skips the lookup.
 const resolveGeistFontsDirectory = () => {
+  if (typeof process === "undefined") return undefined;
   const candidates = [
     path.join(process.cwd(), "node_modules", "geist", "dist", "fonts"),
     path.join(process.cwd(), "docs", "node_modules", "geist", "dist", "fonts"),
@@ -452,6 +456,19 @@ const config = {
   favicon: "/favicon.ico",
   // The docs MCP describes Farm.js, so it reports the Farm.js version, not this site's.
   mcp: { version: FARM_VERSION },
+  // Agent feedback (`/api/docs?feedback=agent` and the MCP `submit_feedback` tool) is stored in
+  // the `feedback` mount. The page feedback prompt stays off. The store loads on first use, so
+  // storage code never reaches a module graph that only needs this config.
+  feedback: {
+    enabled: false,
+    agent: {
+      schema: agentFeedbackPayloadSchema,
+      onFeedback: async (data) => {
+        const { saveAgentFeedback } = await import("./src/lib/agent-feedback");
+        await saveAgentFeedback(data);
+      },
+    },
+  },
   // List the hand-written /openapi.json (public APIs only) in /.well-known/api-catalog.
   agent: { apiCatalog: { openapi: "/openapi.json" } },
   socialImage: {

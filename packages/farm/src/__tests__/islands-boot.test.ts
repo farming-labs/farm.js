@@ -9,6 +9,12 @@ import {
   startFarmIslandsBoot,
 } from "../client/islands-boot";
 import { observeIslandVisibility } from "../client/island-triggers";
+import {
+  FARM_MAX_HELD_VALUES,
+  FARM_VALUE_SCRIPT_TYPE,
+  FARM_VALUES_HEADER,
+  getFarmIslandValueHeaders,
+} from "../client/island-value-protocol";
 
 type QueueWindow = Window & {
   __FARM_PREHYDRATION_CLICK_QUEUE__?: unknown[];
@@ -345,7 +351,8 @@ describe("the boot's request for a held link click", () => {
     const [url, init] = pageRequests.mock.calls[0]!;
     expect(url).toBe(new URL("/docs/b#top", document.baseURI).href);
     expect(init.redirect).toBe("manual");
-    // The layouts shown and flush markers, as a navigation the router streams; no held values.
+    // The layouts shown and flush markers, as a navigation the router streams; the page holds no
+    // island values to name.
     expect(init.headers).toEqual({
       accept: "text/html",
       "x-farm-deployment-id": "d1",
@@ -354,6 +361,23 @@ describe("the boot's request for a held link click", () => {
     });
     expect(early()).toMatchObject({ url, headers: init.headers });
     expect(early()!.response).toBe(pageRequests.mock.results[0]!.value);
+  });
+
+  it("names the island values the page holds, as the router does before islx loads", () => {
+    const key = (index: number) => `k${String(index).padStart(13, "0")}`;
+    const values = Array.from(
+      { length: FARM_MAX_HELD_VALUES + 2 },
+      (_, index) => `<script type="${FARM_VALUE_SCRIPT_TYPE}" name="${key(index)}">{}</script>`,
+    );
+    boot(`<div id="root">${values[1]}${values.join("")}<a href="/next">Next</a></div>`);
+    click(document.querySelector("a")!);
+    const named = pageRequests.mock.calls[0]![1].headers[
+      FARM_VALUES_HEADER.toLowerCase()
+    ] as string;
+    // The latest keys, each once, which is what the router names and its swap keeps.
+    expect(named).toBe(getFarmIslandValueHeaders(document.getElementById("root"))["F-Values"]);
+    expect(named.split(",")).toHaveLength(FARM_MAX_HELD_VALUES);
+    expect(named.split(",")[0]).toBe(key(2));
   });
 
   it("asks for the whole page when the page's layout hydrates as one root", () => {
