@@ -4,6 +4,7 @@ export {
   holdFarmIslandInteractions,
   replayFarmQueuedInteraction,
   scheduleFarmIslandHydration,
+  watchFarmIslandTriggers,
 } from "./island-runtime";
 export { createClientPluginManager } from "./plugin";
 export { createPluginlessClientRuntime } from "./pluginless-runtime";

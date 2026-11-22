@@ -291,6 +291,7 @@ import {
   FARM_CLIENT_SOURCEMAPS_DIR,
   resolveFarmClientSourcemap,
 } from "./client-sourcemaps";
+import { writeFarmClientBrotliAssets } from "./client-brotli-assets";
 import { resolveFarmInstrumentationFile } from "../instrumentation";
 import { getFarmPresetRuntime, resolveCloudflareProcessEnvFlags } from "../deployment";
 import { isFarmPreviewDeploymentEnvironment } from "../deployment-environment";
@@ -4186,7 +4187,7 @@ export function generateClientHydrationEntry(
     isReactRenderer(renderer) &&
     clientRouteSlots.length === 0;
   const rendererClientImports = lazyRenderer
-    ? `import { holdFarmIslandInteractions, restorePagePosition } from "@farm.js/core/internal/client-runtime";`
+    ? `import { holdFarmIslandInteractions, restorePagePosition, watchFarmIslandTriggers } from "@farm.js/core/internal/client-runtime";`
     : isReactRenderer(renderer)
       ? `import React from "react";\nimport { createRoot, hydrateRoot } from "react-dom/client";\nimport { restorePagePosition } from "@farm.js/core/internal/client-runtime";`
       : // Named exports only, as the server entry and the development client read them. A copy
@@ -4711,7 +4712,7 @@ function loadFarmRenderer() {
   ]).then(function(modules) {
     React = modules[0].default;
     createRoot = modules[1].createRoot;
-    hydrateRoot = modules[1].hydrateRoot;${isolatedHydrationEnabled ? "\n    startFarmIslandsRuntime(modules[2]);\n    releaseFarmIslandInteractions();" : ""}
+    hydrateRoot = modules[1].hydrateRoot;${isolatedHydrationEnabled ? "\n    startFarmIslandsRuntime(modules[2]);\n    releaseFarmIslandInteractions();\n    runFarmIslandsWaiting();" : ""}
     farmRendererLoaded = true;
   }, function(error) {${
     isolatedHydrationEnabled
@@ -4763,26 +4764,55 @@ function startFarmIslandsRuntime(islands) {
   // A hydrating layout keeps a non-hydrating page as server HTML; this wrapper runs its islands.
   FarmServerPage = islands.createFarmServerPageBoundary(React, farmIslandsRuntime);
 }
-// Nothing hydrates before islx loads. Until then, calls wait for it in the order they were made,
-// behind the hydration that loads it; one that fails reports itself to whoever awaited it.
-function whenFarmIslandsRuntime(call) {
+// islx loads with the first island that is due, as the boot decides on a first load: at once for
+// one that hydrates at load, else on its trigger. A page or navigation of islands that wait loads
+// none of it. Until it loads, calls wait here in the order they were made and run with it.
+const farmIslandsWaiting = [];
+function runFarmIslandsWaiting() {
+  for (const entry of farmIslandsWaiting.splice(0)) {
+    if (entry.stop) entry.stop();
+    entry.run(farmIslandsRuntime);
+  }
+}
+// Behind a load under way, calls wait for it; one that fails reports itself to whoever awaited it.
+function whenFarmIslandsRuntime(scope, call) {
   if (farmIslandsRuntime) call(farmIslandsRuntime);
   else if (farmRendererLoading) farmRendererLoading.then(function() { call(farmIslandsRuntime); }, function() {});
+  else farmIslandsWaiting.push({ scope: scope, run: call });
 }
 const farmIsolatedHydrationRuntime = {
   hydrate: function(scope, signal) {
     if (farmIslandsRuntime) return farmIslandsRuntime.hydrate(scope, signal);
-    return loadFarmRenderer().then(function() { return farmIslandsRuntime.hydrate(scope, signal); });
+    const stop = farmRendererLoading
+      ? null
+      : watchFarmIslandTriggers(scope, "f-island", function() { void loadFarmRenderer(); });
+    if (!stop) return loadFarmRenderer().then(function() { return farmIslandsRuntime.hydrate(scope, signal); });
+    farmIslandsWaiting.push({
+      scope: scope,
+      stop: stop,
+      run: function(runtime) {
+        if (!signal || !signal.aborted) void runtime.hydrate(scope, signal);
+      },
+    });
+    return Promise.resolve();
   },
   dispose: function(scope) {
-    whenFarmIslandsRuntime(function(runtime) { runtime.dispose(scope); });
+    if (farmIslandsRuntime) return farmIslandsRuntime.dispose(scope);
+    // Nothing has hydrated yet: what removed DOM waits for goes with it.
+    for (let index = farmIslandsWaiting.length - 1; index >= 0; index--) {
+      const entry = farmIslandsWaiting[index];
+      if (!scope.contains(entry.scope)) continue;
+      farmIslandsWaiting.splice(index, 1);
+      if (entry.stop) entry.stop();
+    }
+    if (farmRendererLoading) farmRendererLoading.then(function() { farmIslandsRuntime.dispose(scope); }, function() {});
   },
   // Only a hydrated island has state to carry over.
   carryOver: function(from, to) {
     if (farmIslandsRuntime) farmIslandsRuntime.carryOver(from, to);
   },
   endStream: function(root) {
-    whenFarmIslandsRuntime(function(runtime) { runtime.endStream(root); });
+    whenFarmIslandsRuntime(root, function(runtime) { runtime.endStream(root); });
   },
 };`
     : `const farmIsolatedHydrationRuntime = createFarmIsolatedHydrationRuntime({
@@ -14711,6 +14741,10 @@ function toFarmNodeResponse(request, response) {
     }),
   );
 
+  // The client output is final here: the hashed stylesheet copy and the farm-client.js shim are
+  // its last writes, so each brotli copy is of the bytes the server sends.
+  if (preset === "node-server") await writeFarmClientBrotliAssets(clientOutputDir);
+
   // Content-hashed client files never change, so they are cached for a year. Vercel gets the same
   // policy from the immutable route postProcessVercelOutput writes, which replaces Nitro's routes.
   const immutableAssets = isVercel
@@ -14751,8 +14785,10 @@ function toFarmNodeResponse(request, response) {
     publicAssets: [{ dir: clientOutputDir, baseURL: "/" }, ...immutableAssets.publicAssets],
     // A self-hosted Node or Bun server sends static files itself, so precompress
     // them with gzip and let Nitro serve that by Accept-Encoding. Brotli at Nitro's
-    // fixed top quality cost a docs app ~20 s of build CPU for a small further
-    // saving. Serverless and edge targets sit behind a CDN that compresses.
+    // fixed top quality on every file cost a docs app ~20 s of build CPU, so only
+    // client scripts and stylesheets get a brotli copy, on node-server
+    // (writeFarmClientBrotliAssets). Serverless and edge targets sit behind a CDN
+    // that compresses.
     ...(preset === "node-server" || preset === "bun"
       ? { compressPublicAssets: { gzip: true } }
       : {}),

@@ -554,7 +554,7 @@ export function GET() { return Response.json({ platform: platform() }); }`,
       );
       expect(added.length).toBeGreaterThan(0);
       for (const file of added) {
-        expect(mobileFiles.has(file.replace(/\.gz$/, "")), file).toBe(true);
+        expect(mobileFiles.has(file.replace(/\.(?:gz|br)$/, "")), file).toBe(true);
       }
       expect(await serverFilesContaining(serverDir, manifest.entry)).not.toEqual([]);
       expect(await serverFilesContaining(serverDir, "createFarmMobileSessionPlugin")).not.toEqual(
