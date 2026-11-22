@@ -2610,6 +2610,16 @@ async function buildClient(
                   path.join(clientEntryDir, "farm-client-router.tsx"),
                   path.join(clientEntryDir, `${FARM_CLIENT_ROUTE_TABLE_MODULE}.tsx`),
                 ],
+                // What the islands entry loads with its first render or hydration (RFC 0010).
+                ...(islandsMode && isReactRenderer(config.renderer)
+                  ? {
+                      rendererImports: [
+                        "react-dom/client",
+                        "@farm.js/core/internal/islands-runtime",
+                      ],
+                      rendererImporter: clientEntryPath,
+                    }
+                  : {}),
               }),
           ...(adapterOwnsDocsRuntime && platform === "web"
             ? [
@@ -4164,12 +4174,23 @@ export function generateClientHydrationEntry(
     platform,
   );
   const appSetupPath = resolveFarmRendererAppSetup(root, renderer);
-  const rendererClientImports = isReactRenderer(renderer)
-    ? `import React from "react";\nimport { createRoot, hydrateRoot } from "react-dom/client";\nimport { restorePagePosition } from "@farm.js/core/internal/client-runtime";`
-    : // Named exports only, as the server entry and the development client read them.
-      appSetupPath
-      ? `import * as React from ${JSON.stringify(renderer.client)};\nimport { createRoot, hydrateRoot, configureApp as __farmConfigureApp } from ${JSON.stringify(renderer.client)};\nimport __farmAppSetup from ${JSON.stringify(toPosixPath(appSetupPath))};\n__farmConfigureApp(__farmAppSetup);`
-      : `import * as React from ${JSON.stringify(renderer.client)};\nimport { createRoot, hydrateRoot } from ${JSON.stringify(renderer.client)};`;
+  // Islands mode's web client loads React DOM and islx with its first render or hydration (RFC
+  // 0010). Its router imports this entry, so a navigation that streams HTML swaps the page in while
+  // they download. Client route slots render with React DOM wherever a navigation shows them, so an
+  // app with them keeps it in the entry.
+  const lazyRenderer =
+    islandValues &&
+    platform !== "mobile" &&
+    isReactRenderer(renderer) &&
+    clientRouteSlots.length === 0;
+  const rendererClientImports = lazyRenderer
+    ? `import React from "react";\nimport { holdFarmIslandInteractions, restorePagePosition } from "@farm.js/core/internal/client-runtime";`
+    : isReactRenderer(renderer)
+      ? `import React from "react";\nimport { createRoot, hydrateRoot } from "react-dom/client";\nimport { restorePagePosition } from "@farm.js/core/internal/client-runtime";`
+      : // Named exports only, as the server entry and the development client read them.
+        appSetupPath
+        ? `import * as React from ${JSON.stringify(renderer.client)};\nimport { createRoot, hydrateRoot, configureApp as __farmConfigureApp } from ${JSON.stringify(renderer.client)};\nimport __farmAppSetup from ${JSON.stringify(toPosixPath(appSetupPath))};\n__farmConfigureApp(__farmAppSetup);`
+        : `import * as React from ${JSON.stringify(renderer.client)};\nimport { createRoot, hydrateRoot } from ${JSON.stringify(renderer.client)};`;
   const providerClientCode = generateFarmIntegrationProviderClientCode(
     integrationProviders,
     root,
@@ -4650,9 +4671,61 @@ installFarmLinkPrefetch();
   // Only an app with a server-tree page ships the code that rebuilds one.
   const serverTreeEnabled = isolatedHydrationEnabled && clientPages.some((page) => page.serverTree);
   // Islands mode runs on islx (internal/islands-runtime), under the same names.
-  const isolatedHydrationImport = isolatedHydrationEnabled
-    ? `${islandValues ? `import { createFarmIsolatedHydrationRuntime, createFarmServerPageBoundary, wrapFarmIsolatedClientGraph, createFarmServerTreeElement${hasServerTreeLayouts ? ", createFarmServerTreeLayout" : ""} } from "@farm.js/core/internal/islands-runtime";` : 'import { createFarmIsolatedHydrationRuntime, createFarmServerPageBoundary, wrapFarmIsolatedClientGraph } from "@farm.js/core/internal/isolated-boundary";'}${serverTreeEnabled && !islandValues ? '\nimport { createFarmServerTreeElement } from "@farm.js/core/internal/server-tree";' : ""}`
+  // The lazy renderer's loader (RFC 0010). It comes before the islands runtime, which waits on it.
+  const islandsRuntimeExports = [
+    "createFarmIsolatedHydrationRuntime",
+    "createFarmServerPageBoundary",
+    "wrapFarmIsolatedClientGraph",
+    ...(serverTreeEnabled ? ["createFarmServerTreeElement"] : []),
+    ...(hasServerTreeLayouts ? ["createFarmServerTreeLayout"] : []),
+  ].join(", ");
+  const lazyRendererRuntime = lazyRenderer
+    ? `// React DOM${isolatedHydrationEnabled ? " and islx" : ""} load with the first render or hydration (RFC 0010).
+let createRoot;
+let hydrateRoot;
+let farmRendererLoading = null;
+let farmRendererLoaded = false;${
+        isolatedHydrationEnabled
+          ? `
+// The boot stops holding interactions once this entry runs. Until islx loads, islands that have not
+// hydrated hold them here, for their schedulers to replay.
+const releaseFarmIslandInteractions = holdFarmIslandInteractions("f-island");`
+          : ""
+      }
+function loadFarmRenderer() {
+  return farmRendererLoading || (farmRendererLoading = Promise.all([
+    import("react-dom/client"),${
+      isolatedHydrationEnabled
+        ? `
+    // Named here, so the build keeps only these of islx's exports.
+    import("@farm.js/core/internal/islands-runtime").then(function({ ${islandsRuntimeExports} }) {
+      return { ${islandsRuntimeExports} };
+    }),`
+        : ""
+    }
+  ]).then(function(modules) {
+    createRoot = modules[0].createRoot;
+    hydrateRoot = modules[0].hydrateRoot;${isolatedHydrationEnabled ? "\n    startFarmIslandsRuntime(modules[1]);\n    releaseFarmIslandInteractions();" : ""}
+    farmRendererLoaded = true;
+  }, function(error) {${
+    isolatedHydrationEnabled
+      ? `
+    // Without islx a held click would never replay: the page acts natively again.
+    releaseFarmIslandInteractions();`
+      : ""
+  }
+    // A chunk that failed to load can load on a later call.
+    farmRendererLoading = null;
+    throw error;
+  }));
+}
+`
     : "";
+  const isolatedHydrationImport = lazyRenderer
+    ? ""
+    : isolatedHydrationEnabled
+      ? `${islandValues ? `import { createFarmIsolatedHydrationRuntime, createFarmServerPageBoundary, wrapFarmIsolatedClientGraph, createFarmServerTreeElement${hasServerTreeLayouts ? ", createFarmServerTreeLayout" : ""} } from "@farm.js/core/internal/islands-runtime";` : 'import { createFarmIsolatedHydrationRuntime, createFarmServerPageBoundary, wrapFarmIsolatedClientGraph } from "@farm.js/core/internal/isolated-boundary";'}${serverTreeEnabled && !islandValues ? '\nimport { createFarmServerTreeElement } from "@farm.js/core/internal/server-tree";' : ""}`
+      : "";
   const isolatedHydrationRuntime = isolatedHydrationEnabled
     ? `const farmIsolatedBoundaryLoaders = {
 ${Array.from(isolatedBoundaryModules.entries())
@@ -4667,7 +4740,46 @@ async function loadFarmIsolatedBoundary(reference) {
   if (!loader) throw new Error("isolated client boundary loader was not found: " + reference);
   return loader();
 }
-const farmIsolatedHydrationRuntime = createFarmIsolatedHydrationRuntime({
+${
+  lazyRenderer
+    ? `let farmIslandsRuntime = null;
+let FarmServerPage;
+let wrapFarmIsolatedClientGraph;${serverTreeEnabled ? "\nlet createFarmServerTreeElement;" : ""}${hasServerTreeLayouts ? "\nlet createFarmServerTreeLayout;" : ""}
+function startFarmIslandsRuntime(islands) {
+  wrapFarmIsolatedClientGraph = islands.wrapFarmIsolatedClientGraph;${serverTreeEnabled ? "\n  createFarmServerTreeElement = islands.createFarmServerTreeElement;" : ""}${hasServerTreeLayouts ? "\n  createFarmServerTreeLayout = islands.createFarmServerTreeLayout;" : ""}
+  farmIslandsRuntime = islands.createFarmIsolatedHydrationRuntime({
+    ReactRuntime: React,
+    hydrateRoot,
+    load: loadFarmIsolatedBoundary,
+    schedule: scheduleFarmIslandHydration,
+    wrap: wrapWithIntegrationProviders,
+  });
+  // A hydrating layout keeps a non-hydrating page as server HTML; this wrapper runs its islands.
+  FarmServerPage = islands.createFarmServerPageBoundary(React, farmIslandsRuntime);
+}
+// Nothing hydrates before islx loads. Until then, calls wait for it in the order they were made,
+// behind the hydration that loads it; one that fails reports itself to whoever awaited it.
+function whenFarmIslandsRuntime(call) {
+  if (farmIslandsRuntime) call(farmIslandsRuntime);
+  else if (farmRendererLoading) farmRendererLoading.then(function() { call(farmIslandsRuntime); }, function() {});
+}
+const farmIsolatedHydrationRuntime = {
+  hydrate: function(scope, signal) {
+    if (farmIslandsRuntime) return farmIslandsRuntime.hydrate(scope, signal);
+    return loadFarmRenderer().then(function() { return farmIslandsRuntime.hydrate(scope, signal); });
+  },
+  dispose: function(scope) {
+    whenFarmIslandsRuntime(function(runtime) { runtime.dispose(scope); });
+  },
+  // Only a hydrated island has state to carry over.
+  carryOver: function(from, to) {
+    if (farmIslandsRuntime) farmIslandsRuntime.carryOver(from, to);
+  },
+  endStream: function(root) {
+    whenFarmIslandsRuntime(function(runtime) { runtime.endStream(root); });
+  },
+};`
+    : `const farmIsolatedHydrationRuntime = createFarmIsolatedHydrationRuntime({
   ReactRuntime: React,
   hydrateRoot,
   load: loadFarmIsolatedBoundary,
@@ -4676,7 +4788,8 @@ const farmIsolatedHydrationRuntime = createFarmIsolatedHydrationRuntime({
 });
 
 // A hydrating layout keeps a non-hydrating page as server HTML; this wrapper runs its islands.
-const FarmServerPage = createFarmServerPageBoundary(React, farmIsolatedHydrationRuntime);
+const FarmServerPage = createFarmServerPageBoundary(React, farmIsolatedHydrationRuntime);`
+}
 
 function disposeFarmIsolatedClientBoundaries(scope) {
   farmIsolatedHydrationRuntime.dispose(scope);
@@ -4742,7 +4855,7 @@ ${docsNavigationRuntime}
 ${docsAdapterRuntime}
 
 ${imports.join("\n")}
-${generateFarmDocsSearchClientRuntime(docsSearchEnabled, docsSearchModuleId)}
+${generateFarmDocsSearchClientRuntime(docsSearchEnabled, docsSearchModuleId, undefined, lazyRenderer ? "loadFarmRenderer" : undefined)}
 
 ${providerClientCode.runtime}
 
@@ -4762,7 +4875,7 @@ ${generateFarmClientRouteTableRuntime({
 })}
 ${generateClientPageDirectorySource()}
 
-${isolatedHydrationRuntime}
+${lazyRendererRuntime}${isolatedHydrationRuntime}
 ${routeClientGraphRuntime}
 
 const clientRouteSlots = [
@@ -4890,10 +5003,19 @@ function matchRoute(pathname) {
 }
 
 async function loadRouteComponent(route) {
-  if (!route.load) return null;
+  if (!route.load) return null;${
+    lazyRenderer
+      ? `
+  // A page component renders with React DOM, which loads beside it (RFC 0010).
+  const renderer = loadFarmRenderer();
+  if (!route.Component) route.Component = await route.load();
+  await renderer;
+  return route.Component;`
+      : `
   if (route.Component) return route.Component;
   route.Component = await route.load();
-  return route.Component;
+  return route.Component;`
+  }
 }
 
 // The props the server rendered this document with, as the page receives them:
@@ -4909,7 +5031,13 @@ function reviveServerPageProps(serverProps) {
 async function createMatchedHydrationRoute(matched, pathname, searchParams, navigationPage, serverProps, layoutSource, hydrationContainer) {
   const hydrateLayouts = hasHydratableLayout(pathname);
   const params = matched.params;
-  let pageElement = null;
+  let pageElement = null;${
+    lazyRenderer
+      ? `
+  // Only a route that renders a page or its layouts needs React DOM; one of islands hydrates them.
+  if (hydrateLayouts || matched.route.pageShouldHydrate) await loadFarmRenderer();`
+      : ""
+  }
   // Layouts rendered as server trees rebuild from the HTML that carries them.
   if (hydrateLayouts && !(await prepareFarmTreeLayouts(pathname, params, layoutSource))) return null;
 
@@ -5291,7 +5419,13 @@ async function hydrate() {
   );
   window.__FARM_PROPS__ = initialPayload.page;
   window.__FARM_ROUTE_SLOTS__ = initialPayload.slots;
-
+${
+  lazyRenderer
+    ? `  // A navigation the runtime started for (a held link click) does not wait for this.
+  await loadFarmRenderer();
+`
+    : ""
+}
   if (await hydrateFarmDocsAdapterRuntime()) {
     return;
   }
@@ -6113,7 +6247,23 @@ ${
       }
       ${
         isolatedHydrationEnabled
-          ? `if (matched.route.hasIsolatedClientBoundaries && !hydrateLayouts) {
+          ? lazyRenderer
+            ? `if (matched.route.hasIsolatedClientBoundaries && !hydrateLayouts) {
+        if (farmRendererLoaded) {
+          await hydrateFarmIsolatedClientBoundaries(
+            isolatedHydrationScope,
+            navigation.controller.signal,
+          );
+          if (!isNavigationCurrent()) return false;
+        } else {
+          // React DOM and islx are still on their way (RFC 0010): the page shows now, and its
+          // islands hydrate once they arrive. A navigation that removes them first disposes them.
+          hydrateFarmIsolatedClientBoundaries(isolatedHydrationScope).catch(function(error) {
+            console.error("[Farm.js] Hydrating the page's islands failed:", error);
+          });
+        }
+      }`
+            : `if (matched.route.hasIsolatedClientBoundaries && !hydrateLayouts) {
         await hydrateFarmIsolatedClientBoundaries(
           isolatedHydrationScope,
           navigation.controller.signal,
@@ -9131,11 +9281,11 @@ function farmDocumentBootsClient(markup, hydratesAtLoad, routeSlots) {
 // The boot entry runs the client entry from the URL on its script, with the files listed for what
 // started it. A root that waits (the element a hydrating layout or client page hydrates) is named
 // with its strategy, for the boot to watch.
-function renderFarmClientBootScript(root, rootStrategy, markup, pageModule) {
+function renderFarmClientBootScript(root, rootStrategy, markup, pageModule, navigation) {
   return stampFarmCspNonce('<script type="module" src="${
     farmClientBoot ? FARM_CLIENT_BOOT_SRC_PLACEHOLDER : ""
   }" data-farm-runtime="/__farm_client_js_src__"' +
-    renderFarmClientBootPreloads(markup, pageModule, root, rootStrategy) +
+    renderFarmClientBootPreloads(markup, pageModule, root, rootStrategy, navigation) +
     (root ? ' data-farm-root="' + root + '" data-farm-root-strategy="' + rootStrategy + '"' : '') +
     '></script>');
 }
@@ -9925,6 +10075,11 @@ ${generateFarmClientBootRoutesServerSource(`"${FARM_CLIENT_ROUTE_TABLE_PLACEHOLD
 const farmClientEntryPreloadTags = farmClientModulePreloads
   ? farmClientModulePreloads.entry.map(renderFarmClientModulePreload).join("")
   : "";
+// A document that runs the entry at once (no boot) hydrates with the renderer it imports lazily
+// (RFC 0010). A client navigation's response runs neither, so it leaves them out.
+const farmClientRendererPreloadTags = farmClientModulePreloads
+  ? (farmClientModulePreloads.renderer || []).map(renderFarmClientModulePreload).join("")
+  : "";
 // The client modules a document's markup loads: its islands' boundaries and the
 // client references of its server tree. An island with a deferred strategy loads its
 // module on its own trigger, so it is not preloaded.
@@ -9959,14 +10114,14 @@ function collectFarmClientDocumentModules(markup, pageModule, listed) {
   return indexes;
 }
 
-// The modulepreload links for a document: the entry's static imports, then the
-// modules its hydrating page and its markup load.
-function renderFarmClientModulePreloads(markup, pageModule) {
+// The modulepreload links for a document: the entry's static imports and, unless it answers a
+// client navigation, the renderer, then the modules its hydrating page and its markup load.
+function renderFarmClientModulePreloads(markup, pageModule, navigation) {
   // A nonce policy blocks parser-inserted links without the nonce, and the
   // response filter manages nonces on script elements only, so CSP nonce mode
   // keeps the documents it had.
   if (!farmClientModulePreloads || (farmSecurityConfig.csp && farmSecurityConfig.csp.nonce)) return "";
-  return farmClientEntryPreloadTags +
+  return farmClientEntryPreloadTags + (navigation ? "" : farmClientRendererPreloadTags) +
     collectFarmClientDocumentModules(markup, pageModule, new Set())
       .map(renderFarmClientModulePreload)
       .join("");
@@ -9974,11 +10129,12 @@ function renderFarmClientModulePreloads(markup, pageModule) {
 
 // What a boot document's runtime fetches as it starts, for the boot to request with it rather
 // than each a round trip after the file that imports it: the entry's static imports, the router
-// and route table a link's intent loads, and the modules the root hydrates with. A root that
+// and route table a link's intent loads, the renderer the entry renders and hydrates with (RFC
+// 0010), and the modules the root hydrates with. A root that
 // waits for its time hydrates once the runtime runs, so its modules come with the entry's; one
 // that waits for a click hydrates on an interaction in it, and the boot fetches them then. The
 // boot adds the links itself with the script's nonce, so CSP nonce mode keeps them.
-function renderFarmClientBootPreloads(markup, pageModule, root, rootStrategy) {
+function renderFarmClientBootPreloads(markup, pageModule, root, rootStrategy, navigation) {
   if (!farmClientModulePreloads) return "";
   const files = farmClientModulePreloads.files;
   const attribute = function(name, indexes) {
@@ -9994,6 +10150,7 @@ function renderFarmClientBootPreloads(markup, pageModule, root, rootStrategy) {
   const waitsForClick = rootStrategy === "interaction";
   return attribute("data-farm-preload", waitsForClick ? entry : entry.concat(rootModules)) +
     attribute("data-farm-preload-router", farmClientModulePreloads.router || []) +
+    attribute("data-farm-preload-renderer", navigation ? [] : farmClientModulePreloads.renderer || []) +
     (waitsForClick ? attribute("data-farm-preload-root", rootModules) : "");
 }
 
@@ -12658,6 +12815,14 @@ ${
         // Set once the whole document is rendered: whether it starts with the boot entry, which
         // preloads nothing.
         let farmBootsClient = false;
+        // A client navigation swaps this document in without running its scripts. A route a
+        // shared cache stores renders the same for every request.
+        const farmNavigationRequest = ${
+          farmIslandsMode
+            ? `!farmSharedCacheableRoute &&
+          (request.headers.has("f-stream") || request.headers.has("f-render"))`
+            : "false"
+        };
         // A layout's own <html> document with Farm's head assets merged in and the #root the client
         // hydrates opening its body: the whole document, or a streamed one's opening.
         const composeFarmFullDocument = function(markup) {
@@ -12667,7 +12832,7 @@ ${
           );
           composed = composed
             // Inject CSS link after opening head tag or first meta tag
-            .replace(/<head([^>]*)>/i, function(match, attrs) { return '<head' + attrs + '>\\n  <link rel="stylesheet" href="/__farm_client_css_href__">' + (farmBootsClient ? "" : renderFarmClientModulePreloads(composed, route.clientModule)); })
+            .replace(/<head([^>]*)>/i, function(match, attrs) { return '<head' + attrs + '>\\n  <link rel="stylesheet" href="/__farm_client_css_href__">' + (farmBootsClient ? "" : renderFarmClientModulePreloads(composed, route.clientModule, farmNavigationRequest)); })
             .replace(/<\\/head>/i, () => renderFarmRendererHydrationScript() + '\\n</head>')
             // Explicit metadata wins over renderer and layout titles. Without
             // explicit metadata, a renderer title wins over the layout title.
@@ -12865,7 +13030,8 @@ ${
               farmHydratesRoot ? (shouldHydrateLayout ? "root" : "__farm_page__") : "",
               route.rootStrategy,
               html,
-              route.clientModule
+              route.clientModule,
+              farmNavigationRequest
             )
           : renderFarmClientEntryScript();
 
@@ -12896,7 +13062,7 @@ ${
   \${viewportTags}
   \${hasFavicon ? "" : '<link rel="icon" href="data:,">'}
   \${suppressDefaultTitle ? "" : "<title>" + title + "</title>"}\${metaTags}\${rendererHead ? "\\n  " + rendererHead : ""}
-  <link rel="stylesheet" href="/__farm_client_css_href__">\${farmBootsClient ? "" : renderFarmClientModulePreloads(html, route.clientModule)}
+  <link rel="stylesheet" href="/__farm_client_css_href__">\${farmBootsClient ? "" : renderFarmClientModulePreloads(html, route.clientModule, farmNavigationRequest)}
   \${renderFarmRendererHydrationScript()}
 </head>
 <body>

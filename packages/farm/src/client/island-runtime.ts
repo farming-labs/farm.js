@@ -134,6 +134,49 @@ export function replayFarmQueuedInteraction(target: Element, kind: unknown): voi
   replayInteraction({ target, kind: toReplayKind(kind) });
 }
 
+/**
+ * Holds clicks and submits on islands that have not hydrated in the pre-hydration queue, as the
+ * boot script does, until the returned function runs. Islands mode's entry holds them while islx
+ * loads (RFC 0010): the boot stops holding once the entry runs, and each island's scheduler starts
+ * it and replays them when it reaches it. `island` is the islands' element name.
+ */
+export function holdFarmIslandInteractions(island: string): () => void {
+  const scope = window as typeof window & { __FARM_PREHYDRATION_CLICK_QUEUE__?: FarmQueuedClick[] };
+  const queue = (scope.__FARM_PREHYDRATION_CLICK_QUEUE__ ??= []);
+  const pending = (node: Element) =>
+    !!node.closest(island) && !node.closest('[data-farm-island-hydrated="true"]');
+  const hold = (event: Event, target: Element, kind: FarmIslandReplayKind) => {
+    const interaction = { target, kind };
+    // Every click is replayed; a form is submitted once (as the scheduler's own hold).
+    if (!submitsForm(interaction) || !queue.some((item) => item?.target === target)) {
+      queue.push(interaction);
+      document.dispatchEvent(
+        new CustomEvent("farm:island-interaction", { detail: { target, kind } }),
+      );
+    }
+    event.preventDefault();
+    event.stopImmediatePropagation();
+  };
+  const onClick = (event: Event) => {
+    const click = event as MouseEvent;
+    if (click.defaultPrevented || click.button !== 0) return;
+    if (click.metaKey || click.altKey || click.ctrlKey || click.shiftKey) return;
+    const target = click.target instanceof Element ? heldClickTarget(click.target) : null;
+    if (target && pending(target)) hold(event, target, "click");
+  };
+  const onSubmit = (event: Event) => {
+    const form = event.target;
+    if (event.defaultPrevented || !(form instanceof Element) || form.nodeName !== "FORM") return;
+    if (pending(form)) hold(event, form, "submit");
+  };
+  document.addEventListener("click", onClick, true);
+  document.addEventListener("submit", onSubmit, true);
+  return () => {
+    document.removeEventListener("click", onClick, true);
+    document.removeEventListener("submit", onSubmit, true);
+  };
+}
+
 function finishIslandHydration(
   container: Element,
   held: readonly FarmQueuedInteraction[] = [],

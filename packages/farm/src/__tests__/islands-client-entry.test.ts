@@ -244,3 +244,74 @@ describe("Link navigation options without hydration", () => {
     },
   );
 });
+
+describe("the islands web entry's renderer (RFC 0010)", () => {
+  const islandPage = {
+    pattern: "/",
+    modulePath: "/app/src/app/page.tsx",
+    relativePath: "page.tsx",
+    pageShouldHydrate: false,
+    islandStrategy: "load" as const,
+    hasIsolatedClientBoundaries: true,
+    isolatedBoundaries: [{ modulePath: "/app/src/counter.tsx", islandStrategy: "load" as const }],
+  };
+  const slot = {
+    name: "modal",
+    ownerPattern: "/",
+    pattern: "/photo/[id]",
+    modulePath: "/app/src/app/@modal/photo/[id]/page.tsx",
+    containerId: "farm-slot-modal",
+    interception: true,
+    fallback: false,
+  };
+  const generateFor = (options: { platform?: "mobile"; slots?: (typeof slot)[] } = {}) =>
+    generateClientHydrationEntry(
+      [islandPage],
+      [],
+      options.slots ?? [],
+      "/app",
+      "src",
+      false,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      [],
+      undefined,
+      undefined,
+      false,
+      [],
+      "/",
+      undefined,
+      undefined,
+      true,
+      options.platform,
+    );
+  const staticRenderer =
+    /^import [^;]*from "(?:react-dom\/client|@farm\.js\/core\/internal\/islands-runtime)";/m;
+
+  it("imports React DOM and islx when it first renders or hydrates, so its router runs without them", () => {
+    const { entry, router } = splitFarmClientRouter(generateFor());
+    expect(entry).not.toMatch(staticRenderer);
+    expect(router).not.toMatch(staticRenderer);
+    expect(entry).toContain('import("react-dom/client")');
+    expect(entry).toContain('import("@farm.js/core/internal/islands-runtime")');
+    // A swap that streams in before they load hydrates its islands once they have.
+    expect(router).toMatch(
+      /import \{[^}]*\bfarmRendererLoaded\b[^}]*\} from "\.\/farm-client-entry";/,
+    );
+  });
+
+  // A module object that escapes (passed whole to a function) keeps every export of islx's
+  // runtime in the bundle, 11 KB more than the static import kept.
+  it("names the islx exports it uses where it imports them, so the build drops the rest", () => {
+    expect(generateFor()).toMatch(
+      /import\("@farm\.js\/core\/internal\/islands-runtime"\)\.then\(function\(\{ createFarmIsolatedHydrationRuntime, createFarmServerPageBoundary, wrapFarmIsolatedClientGraph \}\)/,
+    );
+  });
+
+  it("keeps React DOM in the entry of the mobile client and of an app with client route slots", () => {
+    expect(generateFor({ platform: "mobile" })).toMatch(staticRenderer);
+    expect(generateFor({ slots: [slot] })).toMatch(staticRenderer);
+  });
+});

@@ -78,7 +78,9 @@ lets the browser give `useId` the ids in the HTML. The full contract is islx's
   They arrive in one round trip instead of one after another. A link clicked before the runtime
   runs has its page requested with the click, so the page and the runtime travel together and the
   router renders the response once it runs. That first response carries every island value the
-  page needs, including ones the current page already has.
+  page needs, including ones the current page already has. A page that streams in renders before
+  React DOM and islx arrive: they load beside it and hydrate its islands, which hold a click until
+  then.
 - **Layouts.** A layout that needs one React root (a client provider around the pages) renders as
   an islx server tree: the browser rebuilds it from the HTML, so its module stays on the server,
   and a navigation keeps the provider's state. The pages below it, Markdown pages included, join
@@ -112,11 +114,11 @@ same or less everywhere else.** These are the numbers for one app built in both 
 | -------------------------- | --------------- | -------------- | -------------- | -------------- |
 | First-load JavaScript      | 71.0 to 2.2 KB  | 71.0 to 2.2 KB | 71.0 to 2.2 KB | 71.0 to 2.2 KB |
 | HTML document              | 16.3 to 16.1 KB | 5.5 to 5.9 KB  | 17.9 to 9.1 KB | 18.0 to 9.5 KB |
-| Data per navigation        | 12.0 to 2.6 KB  | 3.8 to 2.0 KB  | 10.8 to 9.1 KB | 10.9 to 9.5 KB |
+| Data per navigation        | 12.0 to 2.7 KB  | 3.8 to 2.0 KB  | 10.8 to 9.2 KB | 10.9 to 9.5 KB |
 | First-load main thread     | 168 to 87 ms    | 162 to 80 ms   | 216 to 106 ms  | 216 to 105 ms  |
 | First navigation           | 42 to 57 ms     | 40 to 106 ms   | 85 to 90 ms    | 84 to 120 ms   |
-| First tap, 150 ms latency  | 200 to 184 ms   | 201 to 215 ms  | 235 to 214 ms  | 232 to 241 ms  |
-| First tap, at 1.6 Mbit/s   | 264 to 698 ms   | 220 to 790 ms  | 286 to 773 ms  | 286 to 827 ms  |
+| First tap, 150 ms latency  | 214 to 191 ms   | 201 to 238 ms  | 247 to 222 ms  | 248 to 273 ms  |
+| First tap, at 1.6 Mbit/s   | 266 to 316 ms   | 225 to 776 ms  | 290 to 389 ms  | 307 to 826 ms  |
 | Navigation until painted   | 44 to 45 ms     | 43 to 44 ms    | 76 to 71 ms    | 73 to 77 ms    |
 | Server requests per second | 246 to 256      | 564 to 701     | 31 to 224      | 52 to 176      |
 
@@ -129,7 +131,7 @@ served over HTTP/2 and compressed as a CDN would (`first-navigation.mjs`).
 Requests per second are the median of 8 rounds alternating between the modes, on one Node process.
 Measured 2026-11-20 on an Apple M1 with other work running (load average 11 to 20): times at
 commit `33b402362` (Farm 0.1.77, islx 0.0.25), sizes and first taps on 2026-11-21, once the boot
-script requested a held click's page.
+script requested a held click's page and the client entry loaded React DOM lazily.
 
 - **First load.** 32 times less JavaScript and about half the main-thread work, because these pages'
   client components wait for a click.
@@ -146,7 +148,7 @@ script requested a held click's page.
 
 Where islands mode does not win:
 
-- **The runtime still has to arrive.** It is about 92 KB, and it loads on the first navigation or
+- **The runtime still has to arrive.** It is about 95 KB, and it loads on the first navigation or
   interaction, so a visitor who navigates has downloaded more JavaScript in total than with
   `"rsc"`. The savings are in what a visit pays before the page can be used.
 - **A client component that hydrates at load** starts the runtime at once, so that page sends more
@@ -158,10 +160,12 @@ Where islands mode does not win:
   pages and 5 ms on blog posts. Under a layout that hydrates as one root it is also the layout's
   first React render, which `"rsc"` does during the first load: 36 ms slower on guide posts and
   66 ms on shop pages. With 150 ms of latency and unlimited bandwidth the runtime and the page
-  travel together, and a first tap is within about 20 ms of `"rsc"` either way. On a slow connection
-  the runtime's download decides: at 1.6 Mbit/s a first tap is 434 to 570 ms slower than `"rsc"`
-  on every page. An instant tap (finger down and up at once) on a fast network (50 ms) is 33 to
-  81 ms slower, as the runtime has to start before the page renders.
+  travel together, and a first tap is within about 40 ms of `"rsc"` either way. On a slow
+  connection the download decides. At 1.6 Mbit/s a docs or blog page renders before React DOM
+  arrives, 50 to 100 ms after `"rsc"`; a page under a layout that hydrates as one root renders in
+  the layout's React root, so it waits for React DOM and is 520 to 550 ms slower. An instant tap
+  (finger down and up at once) on a fast network (50 ms) is 13 ms slower on docs pages and faster
+  on blog posts, and 24 to 95 ms slower under a hydrating layout.
 - **A small page's HTML is a little larger.** The shop page is 0.4 KB larger, for islx's island
   markers and props.
 

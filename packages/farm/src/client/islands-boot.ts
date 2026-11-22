@@ -125,10 +125,13 @@ export function startFarmIslandsBoot(load: () => Promise<unknown> = loadFarmClie
   const root = rootId ? document.getElementById(rootId) : null;
   // What the runtime imports as it starts, which the server lists relative to it, fetched with it
   // rather than each a round trip after the file that imports it: the entry's imports
-  // (data-farm-preload), the router a link's intent loads (-router), and the modules a root that
-  // waits for a click hydrates with (-root). A file listed twice is fetched once.
+  // (data-farm-preload), the router a link's intent loads (-router), the renderer the entry
+  // renders and hydrates with (-renderer), and the modules a root that waits for a click hydrates
+  // with (-root). A file listed twice is fetched once.
   const preloaded = new Set<string>();
-  const preload = (group: "farmPreload" | "farmPreloadRouter" | "farmPreloadRoot") => {
+  const preload = (
+    group: "farmPreload" | "farmPreloadRouter" | "farmPreloadRenderer" | "farmPreloadRoot",
+  ) => {
     const files = script?.dataset[group];
     if (!script || !files || preloaded.has(group)) return;
     preloaded.add(group);
@@ -148,8 +151,12 @@ export function startFarmIslandsBoot(load: () => Promise<unknown> = loadFarmClie
   const release = () => {
     for (const cleanup of cleanups.splice(0)) cleanup();
   };
-  const start = (): Promise<unknown> => {
+  // `renderer`: whether what starts it renders or hydrates at once. Only a link outside a root that
+  // hydrates does not: its page streams in before React DOM runs (RFC 0010), and the entry imports
+  // React DOM after the page and the router rather than beside them.
+  const start = (renderer = true): Promise<unknown> => {
     preload("farmPreload");
+    if (renderer) preload("farmPreloadRenderer");
     if (!loading) {
       loading = load().then(release, (error: unknown) => {
         release();
@@ -162,10 +169,14 @@ export function startFarmIslandsBoot(load: () => Promise<unknown> = loadFarmClie
     return loading;
   };
   // What an interaction on `target` needs besides the entry: the router for a link, and the
-  // modules of a root that waits around it, which hydrates on it (a link's hover included).
+  // modules of a root that waits around it, which hydrates on it (a link's hover included). A link
+  // whose navigation renders in a root (F-Render: tree) needs the renderer too.
   const forTarget = (target: Element) => {
-    if (routedLink(target)) preload("farmPreloadRouter");
-    if (root && pendingIsland(target, root) === root) preload("farmPreloadRoot");
+    const link = routedLink(target);
+    const inRoot = Boolean(root && pendingIsland(target, root) === root);
+    if (link) preload("farmPreloadRouter");
+    if (inRoot) preload("farmPreloadRoot");
+    if (!link || inRoot || rootId === "root") preload("farmPreloadRenderer");
   };
   const listen = (type: string, handler: (event: Event) => void, capture: boolean) => {
     document.addEventListener(type, handler, capture);
@@ -220,7 +231,7 @@ export function startFarmIslandsBoot(load: () => Promise<unknown> = loadFarmClie
       routedLink(target) ||
       (event.type !== "mouseover" && (pendingIsland(target, root) || target.closest("form")))
     ) {
-      void start();
+      void start(false);
       forTarget(target);
     }
   };
@@ -270,7 +281,7 @@ export function startFarmIslandsBoot(load: () => Promise<unknown> = loadFarmClie
       if (!anchor) return;
       click.preventDefault();
       requestPage(anchor.href);
-      start().then(
+      start(false).then(
         () => {
           if (anchor.isConnected) {
             anchor.dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true }));
