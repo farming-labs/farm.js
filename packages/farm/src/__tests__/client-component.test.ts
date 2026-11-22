@@ -135,6 +135,72 @@ describe("client component path resolution", () => {
     expect(hasHydrateExport("export { Widget };")).toBe(false);
   });
 
+  it("reads every literal way of writing the hydrate export", () => {
+    for (const source of [
+      "export const hydrate: boolean = true;",
+      "export let hydrate = true;",
+      "export var hydrate = true",
+      "export const hydrate = true as const;",
+      "export const hydrate = true satisfies boolean;",
+      "export const hydrate =\n  true;",
+      "export const hydrate = true; // ships the counter",
+    ]) {
+      expect(hasHydrateExport(source), source).toBe(true);
+    }
+  });
+
+  it("reads the value an export list points at, not just its name", () => {
+    expect(hasHydrateExport("const hydrate = false;\nexport { hydrate };")).toBe(false);
+    expect(hasHydrateExport("const flag: boolean = false;\nexport { flag as hydrate };")).toBe(
+      false,
+    );
+    expect(hasHydrateExport("export const hydrate = false;")).toBe(false);
+    // A commented-out opt-in is not an opt-in.
+    expect(hasHydrateExport("// export const hydrate = true;\nexport default 1;")).toBe(false);
+    // `hydrate` as some other kind of export in a component module is not the route opt-in.
+    expect(hasHydrateExport("function hydrate() {}\nexport { hydrate };")).toBe(false);
+    expect(hasHydrateExport("export const hydrate = (root) => root;")).toBe(false);
+  });
+
+  it("refuses a page whose hydrate export it cannot read from the file", () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), "farm-client-unreadable-hydrate-"));
+    tempDirs.push(root);
+    const pageFile = path.join(root, "src", "app", "page.tsx");
+    fs.mkdirSync(path.dirname(pageFile), { recursive: true });
+    const component = "export default function Page() { return null; }\n";
+
+    for (const [declaration, found] of [
+      ["export const hydrate = !0;", "`!0`"],
+      ['export const hydrate = process.env.HYDRATE === "1";', '`process.env.HYDRATE === "1"`'],
+      ['export { hydrate } from "./config";', 'a re-export from "./config"'],
+      ['import { hydrate } from "./config";\nexport { hydrate };', "`hydrate`, which"],
+      ["export function hydrate() { return true; }", "a function declaration"],
+    ]) {
+      fs.writeFileSync(pageFile, `${declaration}\n${component}`);
+      expect(() => getClientModuleMetadata(pageFile, root), declaration).toThrow(found);
+      expect(() => getClientModuleMetadata(pageFile, root), declaration).toThrow(pageFile);
+    }
+
+    // The same exports in a module the page imports are that module's business.
+    const helperFile = path.join(root, "src", "app", "helper.ts");
+    fs.writeFileSync(helperFile, "export const hydrate = (root) => root;\n");
+    fs.writeFileSync(pageFile, `import { hydrate } from "./helper";\n${component}`);
+    expect(getClientModuleMetadata(pageFile, root)).toEqual({
+      isClientComponent: false,
+      shouldHydrate: false,
+      islandStrategy: null,
+    });
+  });
+
+  it("never reads its own source as a module that opts into hydration", () => {
+    // The hydration planner reads the modules a page imports as text, and core's bundle includes
+    // this reader: an error message or comment spelling an opt-in would make pages hydrate.
+    for (const file of ["client-component.ts", "hydrate-export.ts"]) {
+      const source = fs.readFileSync(path.resolve(__dirname, "../utils", file), "utf8");
+      expect(hasHydrateExport(source), file).toBe(false);
+    }
+  });
+
   it("resolves project-relative /src module paths", () => {
     const root = fs.mkdtempSync(path.join(os.tmpdir(), "farm-client-path-"));
     tempDirs.push(root);

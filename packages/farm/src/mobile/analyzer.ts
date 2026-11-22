@@ -11,6 +11,7 @@ import { existsSync, readFileSync, statSync } from "node:fs";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import * as path from "node:path";
 
+import { readFarmHydrateExport } from "../utils/hydrate-export";
 import { FARM_VERSION } from "../version";
 import {
   inspectFarmNativeStylesheets,
@@ -35,7 +36,7 @@ import {
  * Cached facts are reused only by the same analyzer: bump when facts change shape or rules
  * change between releases; a new Farm version always starts fresh.
  */
-const ANALYZER_VERSION = `7:${FARM_VERSION}`;
+const ANALYZER_VERSION = `8:${FARM_VERSION}`;
 
 export type FarmUiNodeKind = "View" | "Text" | "Image" | "Pressable" | "TextInput" | "List";
 
@@ -1350,10 +1351,8 @@ function analyzeComponentSource(file: string, source: string, parseSync: ParseSy
     only: "react-native",
   });
   for (const script of farmComponentModuleScripts(blocks)) {
-    const hydrate = /\bexport\s+const\s+hydrate\s*=\s*true\b/.exec(
-      source.slice(script.start, script.end),
-    );
-    if (hydrate) {
+    const hydrate = readFarmHydrateExport(source.slice(script.start, script.end));
+    if (hydrate?.value === true) {
       block(
         script.start + hydrate.index,
         "client-logic",

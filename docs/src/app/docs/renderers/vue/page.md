@@ -88,6 +88,10 @@ const count = ref(0);
 </template>
 ```
 
+FARMJS reads `hydrate` from the file before Vue compiles it, so write the literal `true` or `false`. Any declaration works,
+including a type annotation or an export list. A value FARMJS can't read without running the code,
+such as an expression, an import, or a re-export, fails the build with an error that names the file.
+
 FARMJS server-renders the SFC with `createSSRApp` and Vue's native Node or WHATWG Web stream, then
 uses `createSSRApp` again to claim the existing browser markup.
 
