@@ -69,6 +69,7 @@ The higher-level framework features below use those adapter primitives:
 | Router state and programmatic navigation         | Available                | Through `preact/compat`         | Solid binding        | Vue binding          | Svelte store         |
 | Callable actions and server queries              | Available                | Through `preact/compat`         | Solid binding        | Vue binding          | Svelte store         |
 | Client theme and i18n state                      | Available                | Through `preact/compat`         | Solid binding        | Vue binding          | Svelte store         |
+| Shared client stores (`createStore`)             | Available                | Through `preact/compat`         | Solid binding        | Vue binding          | Svelte store         |
 | Renderer-specific `Link` and form components     | Available                | Through `preact/compat`         | Not yet              | Not yet              | Not yet              |
 | Programmatic UI routes                           | Available                | Compatibility surface           | React-oriented today | React-oriented today | React-oriented today |
 | Markdown/MDX visual routes and docs adapter      | Available                | Compatibility surface           | React-oriented today | React-oriented today | React-oriented today |
@@ -115,6 +116,40 @@ and reconnect behavior across all bindings. During server rendering a query bind
 idle snapshot and starts no read, matching React's `useServerQuery`; the browser loads it after
 hydration.
 
+### Shared client state
+
+`createStore` from `@farm.js/core/renderer-client` creates an in-memory store that works with every
+renderer. Define it once in a plain module:
+
+```ts
+// src/cart.ts
+import { createStore } from "@farm.js/core/renderer-client";
+
+export const cart = createStore({ items: [] as string[] }, (store) => ({
+  add(item: string) {
+    store.items.set((items) => [...items, item]);
+  },
+}));
+```
+
+Then bind it where a component reads it:
+
+| Renderer | Bind it with                                                        | You get                              |
+| -------- | ------------------------------------------------------------------- | ------------------------------------ |
+| React    | `cart.use("items")`, with `createStore` from `@farm.js/core/client` | The value, as a hook                 |
+| Preact   | The React version, through `preact/compat`                          | The value, as a hook                 |
+| Solid    | `useStore(cart)` from `@farm.js/solid/bindings`                     | An accessor: `state().items`         |
+| Vue      | `useStore(cart)` from `@farm.js/vue/bindings`                       | A read-only ref: `state.value.items` |
+| Svelte   | `createReadable(cart)` from `@farm.js/svelte/bindings`              | A readable store: `$state.items`     |
+
+`get()`, `set()`, `subscribe()`, `reset()`, and field accessors such as `cart.items.set()` work the
+same in every renderer. Outside React, calling a field accessor (`cart.items()`) reads the current
+value; in React it is a hook. The React entry adds `use()` and is otherwise the same store, as
+described in [React](/docs/renderers/react#shared-client-state).
+
+A store defined at module scope is shared by every request on the server. Keep request-specific
+data out of it.
+
 ## Renderer modules
 
 A renderer descriptor names three modules by package specifier. FARMJS resolves each one from the
@@ -158,6 +193,58 @@ export const viteContract: FarmRendererViteModule = vite;
 
 The official renderers also run the shared conformance suite in `packages/farm-renderer-tests`, which
 renders through these exports in Node and jsdom. It is not published to npm yet.
+
+## Client state in a custom renderer
+
+FARMJS keeps its client state in plain stores that any renderer can read. Each one implements
+`FarmClientStore` from `@farm.js/core/renderer-client`:
+
+```ts
+interface FarmClientStore<TSnapshot> {
+  getSnapshot(): TSnapshot;
+  subscribe(listener: () => void): () => void;
+}
+```
+
+| Function                            | The store holds                                                                                                                            |
+| ----------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------ |
+| `createRendererRouter()`            | Pathname, search and route params, page state, and navigation status, with `push`, `replace`, `refresh`, `prefetch`, `back`, and `forward` |
+| `createRendererAction(fn)`          | The status, data, and error of a server function call, with `submit` and `reset`                                                           |
+| `createRendererQuery(query, input)` | A server query's data from the shared browser cache, with `refetch` and `dispose`                                                          |
+| `createRendererTheme()`             | The theme preference and resolved theme, with `setTheme` and `toggleTheme`                                                                 |
+| `createRendererI18n()`              | The locale and a translator, with `setLocale`                                                                                              |
+| `createStore(state)`                | Your app's own state                                                                                                                       |
+
+The Solid, Vue, and Svelte bindings are one short function over this contract plus thin wrappers.
+A custom renderer needs the same function in its own reactivity. For a renderer with React-style
+hooks:
+
+```ts
+import { useEffect, useState } from "my-renderer";
+import { createRendererRouter, type FarmClientStore } from "@farm.js/core/renderer-client";
+
+export function useFarmStore<T>(store: FarmClientStore<T>): T {
+  const [snapshot, setSnapshot] = useState(() => store.getSnapshot());
+  useEffect(() => {
+    // Catch a change between the first render and the subscription.
+    setSnapshot(store.getSnapshot());
+    return store.subscribe(() => setSnapshot(store.getSnapshot()));
+  }, [store]);
+  return snapshot;
+}
+
+export function useRouter() {
+  const [router] = useState(() => createRendererRouter());
+  return { ...useFarmStore(router), push: router.push, replace: router.replace };
+}
+```
+
+- Create a store once per component, not on every render, and unsubscribe when it unmounts.
+- `getSnapshot()` returns the same value until the state changes, so an identity check is enough to
+  skip an update.
+- Call `dispose()` on a query store when its component unmounts.
+- During server rendering, a query store returns an idle snapshot and starts no request. The browser
+  loads it after hydration.
 
 ## Renderer capability contract
 

@@ -123,7 +123,9 @@ Use the Svelte-native bindings for router, action, server-query, theme, and i18n
 <button on:click={() => save({ name: "FARMJS" })} disabled={$save.pending}>Save</button>
 ```
 
-The returned values implement Svelte's readable-store contract. Renderer-specific `Link` and form
+The returned values implement Svelte's readable-store contract. `createReadable(store)` wraps
+your own state, a store from `createStore` in `@farm.js/core/renderer-client`, the same way; see
+[Shared client state](/docs/renderers#shared-client-state). Renderer-specific `Link` and form
 components, fetchers, integration providers, programmatic UI routes, Markdown/MDX visual pages,
 the docs adapter, and generated JSX metadata images remain React-oriented today.
 

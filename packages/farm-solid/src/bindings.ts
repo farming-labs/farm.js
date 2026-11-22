@@ -195,3 +195,12 @@ function createReactiveTranslator(
   };
   return translate;
 }
+
+/**
+ * Binds any `FarmClientStore`, such as a store from `createStore` in
+ * `@farm.js/core/renderer-client`, to an accessor that updates when the store changes. The
+ * subscription ends with the owning scope.
+ */
+export function useStore<T>(store: FarmClientStore<T>): Accessor<T> {
+  return bindFarmStore(store);
+}
