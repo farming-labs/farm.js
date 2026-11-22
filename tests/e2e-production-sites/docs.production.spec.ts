@@ -84,6 +84,20 @@ test("boots the emitted docs site and navigates into the guide", async ({ page }
 
   await expect(page).toHaveURL(/\/docs\/getting-started$/);
   await expect(page.getByRole("heading", { name: "Getting Started", level: 1 })).toBeVisible();
+  // The docs page imports its config module before it hydrates, so an error thrown there stops
+  // hydration. Wait for one or the other rather than checking errors before that module runs.
+  await expect
+    .poll(
+      async () =>
+        browserErrors.length > 0 ||
+        (await page.evaluate(() => {
+          const root = document.getElementById("farm-docs-root");
+          return (
+            root !== null && Object.keys(root).some((key) => key.startsWith("__reactContainer$"))
+          );
+        })),
+    )
+    .toBe(true);
   expect(browserErrors).toEqual([]);
 });
 
