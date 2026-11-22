@@ -14743,7 +14743,9 @@ function toFarmNodeResponse(request, response) {
 
   // The client output is final here: the hashed stylesheet copy and the farm-client.js shim are
   // its last writes, so each brotli copy is of the bytes the server sends.
-  if (preset === "node-server") await writeFarmClientBrotliAssets(clientOutputDir);
+  if (preset === "node-server" || preset === "bun") {
+    await writeFarmClientBrotliAssets(clientOutputDir);
+  }
 
   // Content-hashed client files never change, so they are cached for a year. Vercel gets the same
   // policy from the immutable route postProcessVercelOutput writes, which replaces Nitro's routes.
@@ -14786,9 +14788,8 @@ function toFarmNodeResponse(request, response) {
     // A self-hosted Node or Bun server sends static files itself, so precompress
     // them with gzip and let Nitro serve that by Accept-Encoding. Brotli at Nitro's
     // fixed top quality on every file cost a docs app ~20 s of build CPU, so only
-    // client scripts and stylesheets get a brotli copy, on node-server
-    // (writeFarmClientBrotliAssets). Serverless and edge targets sit behind a CDN
-    // that compresses.
+    // client scripts and stylesheets get a brotli copy (writeFarmClientBrotliAssets).
+    // Serverless and edge targets sit behind a CDN that compresses.
     ...(preset === "node-server" || preset === "bun"
       ? { compressPublicAssets: { gzip: true } }
       : {}),
