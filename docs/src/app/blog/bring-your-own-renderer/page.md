@@ -65,6 +65,8 @@ That's a small contract. Small enough that a weekend library should be able to m
 
 leaf has the parts you would expect. Elements are plain objects, components are functions, state lives in hooks, and the browser patches the live DOM in place. There are no keys and no scheduler, and nothing suspends, so `Suspense` just renders its children.
 
+You can read it and run it. A version of leaf and its adapter is in the repo at [`examples/custom-renderer`](https://github.com/farming-labs/farm.js/tree/main/examples/custom-renderer), with an app, the conformance suite, and browser tests that run it in development and in a production build. That version is plain JavaScript with type declarations, the shape a published package has, so its line counts and a few names differ from the snippets here.
+
 The library is 316 lines for the core, 49 for `renderToString`, and 20 for the JSX runtime. The Farm adapter is smaller. The server module is a re-export with a name:
 
 ```ts
@@ -212,19 +214,157 @@ There's one exception to Farm not reading your file. Farm decides whether a page
 
 The file format also turned up three bugs in how Farm handled a renderer's extensions. A new `page.leaf` wasn't served until you restarted `farm dev`, and new `.svelte` and `.vue` pages had the same bug. A parallel-route slot like `@modal/page.leaf` was served as a page. And `farm explain` didn't find `.leaf` routes. All three, and the silent `hydrate` failure, are fixed on `main` and ship in the next release.
 
+<span id="components-for-leaf" className="blog-heading-anchor" />
+
+## Components for leaf
+
+Sooner or later a UI library wants a component library, and component libraries ship one adapter per framework. Nobody else is going to write one for leaf.
+
+[ui-sdk](https://ui-sdk.dev) splits the work in a useful place. Its behaviors, from toggles and menus to dialogs and keyboard focus, live in a framework-free core. Each component there is a primitive: it holds the state and says which attributes and event handlers each part needs. ui-sdk's adapters for React, Vue, Svelte, and Solid build on that core, and one more build ships the same components as web components. That gives leaf two ways in.
+
+### The leaf way
+
+Write the adapter yourself, one component at a time. A leaf `Toggle` creates the primitive once, re-renders when it changes, and spreads its attributes and handlers onto a button:
+
+```tsx
+// src/ui/toggle.tsx
+import { useMemo, useStore } from "leaf";
+import { toggle } from "@ui-sdk/core/toggle";
+import { attrs, handlers } from "@ui-sdk/core/renderer";
+
+type ToggleProps = { id: string; defaultPressed?: boolean; children?: unknown };
+
+export function Toggle(props: ToggleProps) {
+  // One primitive per component, kept across renders.
+  const t = useMemo(() => toggle({ id: props.id, defaultPressed: props.defaultPressed }));
+  // Re-render when its state changes.
+  useStore(useMemo(() => ({ getSnapshot: t.get, subscribe: t.subscribe })));
+
+  const part = t.part("root");
+  const on = handlers(part);
+  return (
+    <button {...attrs(part)} onClick={on.click} onKeyDown={on.keydown} onKeyUp={on.keyup}>
+      {props.children}
+    </button>
+  );
+}
+```
+
+The primitive has `get()` and `subscribe()`, so it plugs into the same `useStore` hook leaf's bindings use for Farm's router. The page passes an `id` because ui-sdk needs one for every primitive and leaf has no `useId`. A fixed id also means the server and the browser agree on it:
+
+```tsx
+<Toggle id="bold" defaultPressed>
+  Bold
+</Toggle>
+```
+
+The primitive runs while Farm renders the page on the server, so the ARIA is in the first HTML, with no plugin and nothing written by hand:
+
+```html
+<button data-slot="toggle" type="button" aria-pressed="true" data-pressed="">Bold</button>
+```
+
+I ran it in a production build and in `farm dev`, in Chrome. Hydration keeps the button the server rendered, a click sets `aria-pressed` to `"false"`, a re-render of the page leaves it there, and Space and Enter each toggle it once.
+
+The catch is where `attrs` and `handlers` come from. `@ui-sdk/core/renderer` is the entry ui-sdk's own adapters build on, and its source says: "It isn't documented, it may change with any release, and nothing here is public API." The toggle is also the easy case. ui-sdk's adapters hand each primitive its DOM element, which the toggle uses for its `focus()` method, toggle groups, and disabled fieldsets. leaf has no refs yet, so this `Toggle` skips that, and a standalone button works without it. One component is 21 lines. A whole library is ui-sdk's adapter work done again for leaf, and yours to keep current.
+
+### Or ditch the adapter: web components
+
+The other way is to write no adapter at all. **A custom element is just a tag, so any renderer that can write HTML can use it.** The page writes the element and imports its module:
+
+```tsx
+// src/app/editor/page.tsx
+"use client";
+
+import "@ui-sdk/web/toggle";
+
+export const hydrate = true;
+
+export default function Editor() {
+  return (
+    <ui-toggle default-pressed>
+      <button type="button" aria-pressed="true">
+        Bold
+      </button>
+    </ui-toggle>
+  );
+}
+```
+
+Three things make it work:
+
+1. The renderer writes `<ui-toggle>` into the server HTML like any other tag.
+2. `export const hydrate = true` sends the page module to the browser. The import registers the tag there, and the browser upgrades the element that's already on the page.
+3. The same import also runs on the server while Farm renders the page. That's safe: every ui-sdk element registers through one helper that does nothing when `customElements` doesn't exist.
+
+The catch here is ARIA. The web component computes `aria-pressed` in the browser, after the upgrade. The HTML your server sends, which is what a screen reader or an agent reading the page gets first, only has what you wrote. That's why the example writes `aria-pressed="true"` to match `default-pressed`.
+
+Farm can write it for you. A plugin's `render.html` hook gets the finished HTML from any renderer, in development and in production:
+
+```ts
+// farm.config.ts
+import { defineConfig } from "@farm.js/core";
+import { definePlugin } from "@farm.js/core/plugin";
+import { leaf } from "farm-leaf";
+
+const toggleAria = definePlugin({
+  name: "demo:ui-toggle-aria",
+  render: {
+    html(html) {
+      // A demo. A real plugin parses the HTML and asks the primitive for its attributes.
+      return html.replace(
+        /(<ui-toggle[^>]*\bdefault-pressed\b[^>]*>\s*<button type="button")>/g,
+        '$1 aria-pressed="true">',
+      );
+    },
+  },
+});
+
+export default defineConfig({ renderer: leaf(), plugins: [toggleAria] });
+```
+
+I ran both versions on leaf and on Preact, in a production build in Chrome. I also ran the plugin version, in development and production, with the smallest renderer in Farm's own tests, which renders to a string and never touches the DOM in the browser. On leaf and Preact:
+
+```txt
+                   pressed  aria-pressed
+server HTML        -        "true"
+after upgrade      true     "true"
+after a click      false    "false"
+after a re-render  false    "false"
+```
+
+The last line matters. When the page re-renders, leaf and Preact compare their new props with their old ones, not with the DOM, so they leave the attribute ui-sdk changed alone.
+
+The plugin has a price. Farm holds the whole page before it can rewrite it, so with the plugin installed a streaming renderer stops streaming. leaf renders to a string anyway, so it pays nothing. And the regex is a demo. A real plugin has to ask the primitive for its attributes, and today the only way to ask is the same undocumented entry the leaf way uses. So for now I write simple ARIA by hand, and I'll build the plugin once ui-sdk makes that step public.
+
+ui-sdk's web build also ships its agent bridge, `@ui-sdk/web/agent`. I haven't tried that on Farm yet.
+
+### Which one
+
+|                         | The leaf way                           | Web components         |
+| ----------------------- | -------------------------------------- | ---------------------- |
+| Adapter code            | A component per primitive              | None                   |
+| ARIA in the server HTML | From the primitive                     | By hand, or a plugin   |
+| Depends on              | `@ui-sdk/core/renderer` (undocumented) | `@ui-sdk/web` (public) |
+
+Either way, ui-sdk is a beta (`0.1.0-beta.13`). Both ways get better the day it makes its renderer entry public: the leaf way stops depending on internals, and the plugin can ask the primitive instead of matching a regex.
+
 <span id="what-still-needs-work" className="blog-heading-anchor" />
 
 ## What still needs work
 
-"You can bring your own renderer" is true for the core path: routes, layouts, SSR, hydration, navigation, server functions, and production output. It is not true for everything Farm does, and I would rather say so here than in an issue later.
+"You can bring your own renderer" is true for the core path: routes, layouts, SSR, hydration, navigation, server functions called from server code, and production output. It is not true for everything Farm does, and I would rather say so here than in an issue later.
 
 - **Some features are still React-oriented.** React Server Components are React-only today. The [feature table](/docs/renderers#feature-support) says which features each official renderer gets, and a custom renderer gets the same as Solid, Vue, and Svelte. Markdown pages, generated metadata images, and programmatic UI routes were on this list when the post went up. All three now work with any renderer on `main`.
 - **The conformance suite isn't on npm yet.** It's `@farm.js/renderer-tests` on `main` and ships in the next release. Until then, the type-check below is how a third-party renderer checks itself.
+- **Browser code can't import a server function yet.** Importing a `createServerFn` or `createServerQuery` module into a client component needs Farm's server-actions transform, which today comes only with React Server Components or islands, and both are React-only. Until that changes, browser code calls an API route through the typed API client, the way the example's "Plant barley" button does.
 - **One renderer per app.** You choose a renderer; you can't mix leaf on one page and React on the next.
 
 <span id="write-your-own" className="blog-heading-anchor" />
 
 ## Write your own
+
+The quickest start is [`examples/custom-renderer`](https://github.com/farming-labs/farm.js/tree/main/examples/custom-renderer). Copy `farm-leaf/`, point it at your library instead of leaf, and keep its tests: they run the conformance suite and type-check each module against Farm's contract types.
 
 If your library can build an element tree, render it to a string, and patch or hydrate the DOM, it can be a Farm renderer. If it has its own file format, list the extensions in `componentExtensions` and compile those files in the Vite module. Write the descriptor, write the three modules, and check them against the types Farm imports:
 
