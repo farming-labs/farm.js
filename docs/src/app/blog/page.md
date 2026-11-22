@@ -7,6 +7,10 @@ description: "Releases, engineering notes, and ideas from the people building Fa
 
 Releases, engineering notes, and ideas.
 
+## [Bring your own renderer](/blog/bring-your-own-renderer)
+
+I wrote a 385-line React-like library to find out what Farm needs from a renderer. The answer is three modules and eleven named exports, plus two fixes it took to get there: a default export nobody documented, and a development entry that loaded React for every renderer.
+
 ## [I asked 105 developer sites for Markdown. A third answered with HTML.](/blog/agent-markdown-scan)
 
 What 105 developer-tool sites send an AI agent that asks for Markdown. A third answer with only HTML, the median docs page is 35 times bigger as HTML, and the frameworks and build tools developers use are furthest behind.
