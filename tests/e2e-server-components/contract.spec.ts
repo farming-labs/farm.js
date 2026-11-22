@@ -1309,7 +1309,7 @@ test("a streamed first navigation renders before the renderer loads, and its isl
   expect(errors).toEqual([]);
 });
 
-test("a first navigation that renders in a layout root waits for the renderer", async ({
+test("a first navigation out of a layout root that waits shows the next page before React DOM loads", async ({
   page,
   request,
   baseURL,
@@ -1327,19 +1327,17 @@ test("a first navigation that renders in a layout root waits for the renderer", 
   await page.goto("/context/wait/a");
   await page.waitForLoadState("networkidle");
   await page.evaluate(() => Object.assign(window, { __farmSameDocument: true }));
-  const navigation = page.waitForResponse(
-    (response) =>
-      new URL(response.url()).pathname === "/context/wait/b" &&
-      response.request().headers()["f-render"] === "tree",
-  );
   await page.locator("[data-next]").dispatchEvent("click");
-  // The response is the page's payload, not its HTML: only React DOM can show it.
-  await (await navigation).finished();
-  await expect.poll(() => renderer.requested.length).toBeGreaterThan(0);
-  await expect(page.locator("h1")).toHaveText("Waiting a");
-  renderer.release();
+  // The root never hydrated, so nothing in it ran: the next page's HTML swaps in, and React DOM
+  // is not even requested.
   await expect(page.locator("h1")).toHaveText("Waiting b");
+  expect(renderer.requested).toEqual([]);
+  await expect(page.locator("#root")).not.toHaveAttribute("data-farm-island-hydrated", "true");
+  // The root waits for a click on the next page, as a first load of that page would.
   await page.getByRole("button", { name: "Toggle theme" }).click();
+  await expect.poll(() => renderer.requested.length).toBeGreaterThan(0);
+  await expect(page.getByTestId("theme-label")).toHaveText("Theme: light");
+  renderer.release();
   await expect(page.getByTestId("theme-label")).toHaveText("Theme: dark");
   expect(await page.evaluate(() => "__farmSameDocument" in window)).toBe(true);
   expect(errors).toEqual([]);
@@ -1438,7 +1436,7 @@ test("a link still navigates when the client runtime fails to load", async ({ pa
   expect(blocked.length).toBeGreaterThan(0);
 });
 
-test("the first navigation from a layout that hydrates as one root, before it has, fetches only the next page's payload", async ({
+test("the first navigation from a layout that hydrates as one root, before it has, swaps the next page in and keeps the root waiting", async ({
   page,
 }) => {
   test.skip(mode !== "islands", "rsc hydrates every client component on load");
@@ -1449,19 +1447,19 @@ test("the first navigation from a layout that hydrates as one root, before it ha
   await expect(page.locator("script[data-farm-root-strategy=interaction]")).toHaveCount(1);
   const navigation = dev
     ? undefined
-    : page.waitForRequest(
-        (request) =>
-          new URL(request.url()).pathname === "/context/wait/b" &&
-          request.headers()["f-render"] === "tree",
-      );
+    : page.waitForRequest((request) => new URL(request.url()).pathname === "/context/wait/b");
+  // A real click: pressing and focusing the link does not hydrate the root it leaves either.
   await page.click("[data-next]");
   if (navigation) {
-    const html = await (await (await navigation).response())!.text();
-    expect(html).toContain('<script type="f/tree" partial');
-    expect(html).not.toContain("<h1>Waiting b</h1>");
+    const request = await navigation;
+    expect(request.headers()["f-render"]).toBeUndefined();
+    const html = await (await request.response())!.text();
+    expect(html).toContain("<h1>Waiting b</h1>");
+    expect(html).not.toContain('<script type="f/tree" partial');
   }
   await expect(page.locator("h1")).toHaveText("Waiting b");
-  // The layout lives in that root: its state carries into the next page.
+  await expect(page.locator("#root")).not.toHaveAttribute("data-farm-island-hydrated", "true");
+  // A click on the next page hydrates the root, and the layout's state carries into later pages.
   await page.getByRole("button", { name: "Toggle theme" }).click();
   await expect(page.getByTestId("theme-label")).toHaveText("Theme: dark");
   await page.click("[data-next]");
@@ -1470,34 +1468,20 @@ test("the first navigation from a layout that hydrates as one root, before it ha
   expect(errors).toEqual([]);
 });
 
-test("a layout root that waits for a click hydrates once a link in it is hovered, and the click updates it", async ({
-  page,
-}) => {
+test("a link hovered in a layout root that waits leaves the root waiting", async ({ page }) => {
   test.skip(mode !== "islands", "rsc hydrates every client component on load");
   const errors = collectErrors(page);
   await page.goto("/context/wait/a");
   await page.waitForLoadState("networkidle");
   const root = page.locator("#root");
-  await expect(root).not.toHaveAttribute("data-farm-island-hydrated", "true");
-  // The hover that loads the client runtime also hydrates the root: a navigation is on its way.
+  // The hover loads the client runtime, if the page has not yet. The link's click swaps the next
+  // page in without the root's code, so nothing hydrates the root for it.
   await page.hover("[data-next]");
-  await expect(root).toHaveAttribute("data-farm-island-hydrated", "true");
-  await page.evaluate(() => {
-    const toggle = () =>
-      Array.from(document.querySelectorAll("button")).find(
-        (button) => button.textContent === "Toggle theme",
-      );
-    Object.assign(window, { __toggle: toggle(), __findToggle: toggle });
-  });
+  await page.waitForFunction(() => "__FARM_SPA_ROUTER__" in window);
+  await page.waitForLoadState("networkidle");
+  await expect(root).not.toHaveAttribute("data-farm-island-hydrated", "true");
   await page.click("[data-next]");
   await expect(page.locator("h1")).toHaveText("Waiting b");
-  // The click updated the hydrated root, which kept the layout's nodes, instead of rendering a new one.
-  expect(
-    await page.evaluate(() => {
-      const state = window as unknown as { __toggle?: Element; __findToggle: () => Element };
-      return state.__toggle !== undefined && state.__toggle === state.__findToggle();
-    }),
-  ).toBe(true);
   await page.getByRole("button", { name: "Toggle theme" }).click();
   await expect(page.getByTestId("theme-label")).toHaveText("Theme: dark");
   expect(errors).toEqual([]);
@@ -1539,19 +1523,25 @@ test("the hover that loads the client runtime fetches what it imports alongside 
   await page.waitForLoadState("networkidle");
   const boot = page.locator("script[data-farm-runtime]");
   const runtime = (await boot.getAttribute("data-farm-runtime"))!;
-  // The entry's imports, the router and route table it imports on a link's intent, and the
-  // layout's modules: a link in the layout needs all three.
-  const listed: string[] = [];
-  for (const group of ["data-farm-preload", "data-farm-preload-router", "data-farm-preload-root"]) {
-    listed.push(...((await boot.getAttribute(group)) ?? "").split(" ").filter(Boolean));
-  }
+  // The entry's imports, and the router and route table it imports on a link's intent. The
+  // layout's modules are listed for an interaction in the root, which a link's is not: its page
+  // swaps in while the root waits.
+  const read = async (group: string) =>
+    ((await boot.getAttribute(group)) ?? "").split(" ").filter(Boolean);
+  const listed = [
+    ...(await read("data-farm-preload")),
+    ...(await read("data-farm-preload-router")),
+  ];
   expect(listed).toContainEqual(
     expect.stringMatching(/^chunks\/farm-client-router-h[0-9a-f]+\.js$/),
   );
   expect(listed).toContainEqual(
     expect.stringMatching(/^chunks\/farm-client-routes-h[0-9a-f]+\.js$/),
   );
-  expect(listed).toContainEqual(expect.stringMatching(/^chunks\/theme-h[0-9a-f]+\.js$/));
+  const rootModules = (await read("data-farm-preload-root")).filter(
+    (file) => !listed.includes(file),
+  );
+  expect(rootModules).toContainEqual(expect.stringMatching(/^chunks\/theme-h[0-9a-f]+\.js$/));
   const requested = new Set<string>();
   page.on("request", (request) => requested.add(new URL(request.url()).pathname));
   // While the runtime is held back none of its code runs, so whatever is fetched meanwhile, the
@@ -1568,8 +1558,12 @@ test("the hover that loads the client runtime fetches what it imports alongside 
   await page.hover("[data-next]");
   await expect.poll(() => listed.filter((file) => !requested.has(`/${file}`))).toEqual([]);
   release();
-  await expect(page.locator("#root")).toHaveAttribute("data-farm-island-hydrated", "true");
   await page.click("[data-next]");
   await expect(page.locator("h1")).toHaveText("Waiting b");
+  expect(rootModules.filter((file) => requested.has(`/${file}`))).toEqual([]);
+  // A click in the root needs its modules, and loads them.
+  await page.getByRole("button", { name: "Toggle theme" }).click();
+  await expect(page.getByTestId("theme-label")).toHaveText("Theme: dark");
+  expect(rootModules.filter((file) => !requested.has(`/${file}`))).toEqual([]);
   expect(errors).toEqual([]);
 });

@@ -42,14 +42,16 @@ a client navigation, and page errors are counted.
 2026-11-20, Apple M1, macOS 26.2, Node 24.21.0, Chrome 157. Times on `main` at 33b402362 (Farm
 0.1.77, islx 0.0.25); bytes and first navigations over a network measured 2026-11-21 on `main` at
 5e9dfcbd9 with the boot entry requesting a held click's page, and again later that day with the
-client entry loading React DOM lazily (RFC 0010). Averages; KB = 1024 bytes.
+client entry loading React DOM lazily (RFC 0010). Bytes and first navigations over a network
+again on 2026-11-22, with a layout root that waits kept waiting through a navigation (RFC 0011).
+Averages; KB = 1024 bytes.
 
 Four sections of the app:
 
 - **docs**: a server layout whose client components are islands. Segment navigation applies.
 - **shop**: a layout that hydrates as one root around a client cart provider; product pages pass
-  a shared 150-product catalog to a client list that reads the cart. Pages rebuild from a server
-  tree payload, and segments do not apply.
+  a shared 150-product catalog to a client list that reads the cart. Once the layout has hydrated,
+  pages rebuild from a server tree payload; segments do not apply.
 - **blog**: long posts, mostly server-rendered prose and highlighted code (a span per token, about
   2,400 per post), with one small client component. The shape of most content sites.
 - **guide**: the blog's posts under a layout that hydrates as one root around a client theme
@@ -63,11 +65,11 @@ Four sections of the app:
 | docs    | `rsc`     | 16.3 KB (76.4 KB)  | 71.0 KB           | 12.0 KB (37.5 KB)         | 0                 |
 | docs    | `islands` | 16.1 KB (70.1 KB)  | 2.2 KB            | 2.7 KB (7.6 KB)           | 9.6 KB            |
 | shop    | `rsc`     | 5.5 KB (33.2 KB)   | 71.0 KB           | 3.8 KB (13.2 KB)          | 0                 |
-| shop    | `islands` | 5.9 KB (30.9 KB)   | 2.2 KB            | 2.0 KB (5.2 KB)           | 9.7 KB            |
+| shop    | `islands` | 5.9 KB (30.9 KB)   | 2.2 KB            | 6.0 KB (30.9 KB)          | 2.7 KB            |
 | blog    | `rsc`     | 17.9 KB (379.5 KB) | 71.0 KB           | 10.8 KB (203.7 KB)        | 0                 |
 | blog    | `islands` | 9.1 KB (127.6 KB)  | 2.2 KB            | 9.2 KB (127.7 KB)         | 9.6 KB            |
 | guide   | `rsc`     | 18.0 KB (379.8 KB) | 71.0 KB           | 10.9 KB (203.9 KB)        | 0                 |
-| guide   | `islands` | 9.5 KB (129.1 KB)  | 2.2 KB            | 9.5 KB (129.2 KB)         | 9.7 KB            |
+| guide   | `islands` | 9.5 KB (129.1 KB)  | 2.2 KB            | 9.6 KB (129.3 KB)         | 2.7 KB            |
 
 An islands page whose client components only react to clicks starts with the boot entry (RFC 0003,
 sections 10 and 11). The client runtime, about 95 KB, arrives with the first navigation or click;
@@ -75,7 +77,8 @@ sections 10 and 11). The client runtime, about 95 KB, arrives with the first nav
 entry and router (about 27 KB), then React DOM and islx (about 69 KB), which a navigation that
 streams its page does not wait for. That made it 2.3 KB larger: about 0.4 KB of code that loads
 the renderer and holds clicks meanwhile, and the rest compression lost to three files instead of
-one.
+one. On shop and guide the ten navigations load only the entry and router: the layout's root keeps
+waiting for an interaction through them (RFC 0011), so React DOM and islx never load.
 
 ### Time (`timing.mjs`)
 
@@ -111,20 +114,25 @@ engines, so both see the same load. This run had other work on the machine (load
   sooner on blog posts and 4 ms later on guide posts, within this machine's noise.
 - From a server on the same machine, the first navigation is slower than RSC's: by 15 ms on docs,
   5 ms on blog, 36 ms on guide and 66 ms on shop. It loads what the first load left out, the
-  client runtime (81.5 KB br, with React DOM) and the router. On shop and guide the click is also
-  the layout's first React render, which RSC does during the first load. Over a network the
-  picture changes; see below.
+  client runtime (81.5 KB br, with React DOM) and the router. On shop and guide the click was also
+  the layout's first React render, which RSC does during the first load. Since RFC 0011 it swaps
+  the page in and the layout keeps waiting: in two later runs (2026-11-22, engines one after
+  another, load average 5 to 18) the first navigation there took 13 to 34 ms less than just before
+  it. Those runs moved every engine's numbers by up to a factor of two, so this table keeps the
+  earlier one. Over a network the picture changes; see below.
 - A docs navigation request takes 0.58 ms on the server against 0.66 to 0.69 ms for RSC's `.rsc`
   request (medians of 1,495 requests alternating between the engines, `accept-encoding: identity`
   for both, so neither pays for compression), and returns 7.3 KB instead of 37.3 KB.
 - docs: a navigation names the values the browser holds (`F-Values`) and the layouts on screen
   (`F-Layouts`, keyed by pattern and params); the server leaves both out.
-- shop: the catalog travels once, and a navigation leaves it out. The browser rebuilds a shop
-  page in the layout's React tree from its payload, so a navigation carries only that payload,
-  not the page's HTML (`F-Render: tree`). That holds from the first navigation, before the
-  layout has hydrated: the router creates the layout's root with the next page. A click made
-  before the runtime runs is the exception: its request goes out with the click, before the
-  browser holds the catalog, so that one response carries it again (the shop row's 2.0 KB).
+- shop: until the layout hydrates (an "Add" click, say), a navigation swaps the next page's HTML
+  in and the layout keeps waiting (RFC 0011), so it carries the page's HTML as well as its tree.
+  It carries the catalog again too: a navigation names the values the browser holds from islx's
+  store, which loads with the layout. That is 6.0 KB per navigation, where rendering the page in
+  the layout's React root took 2.0 KB, and 2.7 KB of JavaScript instead of 9.7, as React DOM, islx
+  and the layout's modules no longer load on the first hover. Once the layout has hydrated, the
+  browser rebuilds a page in its React tree from the payload alone (`F-Render: tree`) and the
+  catalog stays out.
 
 ### First navigation over a network (`first-navigation.mjs`)
 
@@ -141,37 +149,42 @@ The proxy brotli-compresses a text response the server left uncompressed, as a C
 `rsc` engine's Node server sends its pages and Flight responses uncompressed until #3053 (`islands`
 compresses them), which at 1.6 Mbit/s makes an RSC blog navigation take over a second.
 
-Measured 2026-11-21 with the client entry loading React DOM lazily (RFC 0010), interleaved with a
-build from before it, on a machine shared with other work (load average 8 to 55):
+Measured 2026-11-22 with a layout root that waits kept waiting through a navigation (RFC 0011),
+interleaved with `rsc` and a build from just before it (`main` at df6c467af), on a machine shared
+with other work (load average 7 to 71). The 150 ms, 80 ms tap column is a rerun at load 7 to 13:
+the first run stopped on one visit that loaded a document mid-measurement, in an engine it did not
+record, and 156 visits of reruns with per-visit logging, 48 of them at 12x CPU throttling, showed
+none.
 
-| Section | Engine    | 50 ms, hover | 50 ms, instant tap | 150 ms, hover | 150 ms, 80 ms tap | 150 ms at 1.6 Mbit/s, 80 ms tap |
-| ------- | --------- | ------------ | ------------------ | ------------- | ----------------- | ------------------------------- |
-| docs    | `rsc`     | 90           | 124                | 197           | 214               | 266                             |
-| docs    | `islands` | 44           | 137                | 160           | 191               | 316                             |
-| shop    | `rsc`     | 97           | 121                | 192           | 201               | 225                             |
-| shop    | `islands` | 70           | 216                | 139           | 238               | 776                             |
-| blog    | `rsc`     | 144          | 169                | 252           | 247               | 290                             |
-| blog    | `islands` | 78           | 162                | 210           | 222               | 389                             |
-| guide   | `rsc`     | 154          | 226                | 254           | 248               | 307                             |
-| guide   | `islands` | 99           | 250                | 194           | 273               | 826                             |
+| Section | Engine            | 50 ms, hover | 50 ms, instant tap | 150 ms, hover | 150 ms, 80 ms tap | 150 ms at 1.6 Mbit/s, 80 ms tap |
+| ------- | ----------------- | ------------ | ------------------ | ------------- | ----------------- | ------------------------------- |
+| docs    | `rsc`             | 85           | 124                | 199           | 246               | 267                             |
+| docs    | `islands`, before | 31           | 115                | 205           | 217               | 317                             |
+| docs    | `islands`         | 38           | 121                | 193           | 211               | 316                             |
+| shop    | `rsc`             | 87           | 111                | 197           | 247               | 223                             |
+| shop    | `islands`, before | 60           | 203                | 190           | 241               | 788                             |
+| shop    | `islands`         | 47           | 126                | 193           | 213               | 350                             |
+| blog    | `rsc`             | 139          | 162                | 231           | 269               | 303                             |
+| blog    | `islands`, before | 66           | 168                | 189           | 227               | 390                             |
+| blog    | `islands`         | 67           | 165                | 221           | 218               | 379                             |
+| guide   | `rsc`             | 134          | 158                | 232           | 273               | 306                             |
+| guide   | `islands`, before | 97           | 221                | 197           | 251               | 837                             |
+| guide   | `islands`         | 77           | 170                | 212           | 235               | 397                             |
 
 - RSC fetches the page after the click. With a 100 ms hover, islands has started the runtime and
-  the router and requested the page by then: a half to three quarters of RSC's time on a fast
-  network, and 37 to 60 ms sooner with 150 ms of latency.
+  the router and requested the page by then: about half of RSC's time on a fast network, and 4 to
+  20 ms less with 150 ms of latency, a noisy column where single samples fell far below the rest.
 - A click made before the runtime runs is held by the boot entry, which requests the page with
   the click. Since RFC 0010 the router renders a page that streams in (docs, blog) before React DOM
-  and islx arrive; they load beside it and hydrate its islands, which hold a click until then. A
-  page under a layout that hydrates as one root (shop, guide) renders in the layout's React root,
-  so it still waits for them.
-- On a slow connection that decides it. At 1.6 Mbit/s a first tap on docs and blog took 715 and
-  801 ms before RFC 0010 and takes 316 and 389 ms, against RSC's 266 and 290, whose first load
-  already brought its 71.0 KB. On shop and guide it is still 776 and 826 ms (819 and 871 before).
-- An instant tap on a fast network got 26 to 73 ms faster everywhere (from 163, 249, 213 and
-  323 ms). docs is 13 ms behind RSC and blog ahead; shop and guide are 24 to 95 ms behind, as the
-  click is also the layout's first React render, which RSC does during the first load.
-- With 150 ms of latency and unlimited bandwidth an 80 ms tap is faster than RSC's on docs and
-  blog and slower on shop and guide, about as before RFC 0010 (194, 241, 237 and 252 ms). guide
-  measured 21 to 29 ms slower than before in two runs; a 15-round rerun of shop and guide alone put
-  them at 246 to 240 and 269 to 255 ms, so that is within this machine's noise.
+  and islx arrive; they load beside it and hydrate its islands, which hold a click until then.
+  Since RFC 0011 a page under a layout that hydrates as one root (shop, guide) does the same while
+  the layout has not hydrated: the router swaps the page in and the layout keeps waiting.
+- On a slow connection that decides it. At 1.6 Mbit/s a first tap on shop and guide took 788 and
+  837 ms and takes 350 and 397, against RSC's 223 and 306, whose first load already brought its
+  71.0 KB. docs and blog are unchanged within noise, 49 and 76 ms behind RSC.
+- An instant tap on a fast network got 77 and 51 ms faster on shop and guide, 15 and 12 ms behind
+  RSC. docs and blog are within a few ms of RSC either way.
+- With 150 ms of latency and unlimited bandwidth an 80 ms tap is now faster than RSC's in all four
+  sections, by 34 to 51 ms; shop and guide gained 28 and 16 ms.
 
 `results/latest.json` has the per-page numbers of the last run.
