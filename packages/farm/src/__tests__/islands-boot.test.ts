@@ -295,6 +295,34 @@ describe("the boot's preloads", () => {
     for (const link of Array.from(document.querySelectorAll("a"))) hover(link);
     expect(preloaded()).toEqual([react, router, shared]);
   });
+
+  describe("of the renderer (RFC 0010)", () => {
+    const withRenderer = `${runtime} data-farm-preload-renderer="chunks/react-dom.js"`;
+    const reactDom = "/base/chunks/react-dom.js";
+
+    it("leaves it to the entry for a link whose page streams, and fetches it for an island", () => {
+      boot(
+        `${withRenderer}></script><f-island strategy="interaction"><button>+</button></f-island><a href="/next">Next</a>`,
+      );
+      hover(document.querySelector("a")!);
+      expect(preloaded()).toEqual([react, router, shared]);
+      click(document.querySelector("button")!);
+      expect(preloaded()).toEqual([react, router, shared, reactDom]);
+    });
+
+    it("fetches it with the entry when an island starts the runtime on its own trigger", () => {
+      boot(`${withRenderer}></script><f-island strategy="load"><button>+</button></f-island>`);
+      expect(preloaded()).toEqual([react, reactDom]);
+    });
+
+    it("fetches it for a link whose navigation renders in a root", () => {
+      boot(
+        `${withRenderer} data-farm-root="root" data-farm-root-strategy="interaction"></script><div id="root"><a href="/next">Next</a></div>`,
+      );
+      hover(document.querySelector("a")!);
+      expect(preloaded()).toContain(reactDom);
+    });
+  });
 });
 
 describe("the boot's request for a held link click", () => {

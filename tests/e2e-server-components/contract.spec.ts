@@ -1224,6 +1224,127 @@ test("a link followed before the client runtime loads requests its page with the
   expect(errors).toEqual([]);
 });
 
+// RFC 0010: the production islands entry loads React DOM and islx with its first render or
+// hydration. These are the chunks only they need, as `page`'s boot script lists them, held until
+// `release` runs; `requested` collects the requests for them.
+async function holdRenderer(page: Page, html: string, baseURL: string | undefined) {
+  const script = /<script[^>]*\sdata-farm-runtime="[^"]*"[^>]*>/.exec(html)?.[0] ?? "";
+  const list = (name: string) =>
+    new RegExp(`\\s${name}="([^"]+)"`).exec(script)?.[1]?.split(" ") ?? [];
+  const runtime = list("data-farm-runtime")[0];
+  expect(runtime).toBeTruthy();
+  // The entry and the router share some of their chunks.
+  const shared = new Set([...list("data-farm-preload"), ...list("data-farm-preload-router")]);
+  const renderer = list("data-farm-preload-renderer").filter((file) => !shared.has(file));
+  expect(renderer.length).toBeGreaterThan(0);
+  const base = new URL(runtime!, baseURL);
+  const held = new Set(renderer.map((file) => new URL(file, base).pathname));
+  const requested: string[] = [];
+  let release!: () => void;
+  const released = new Promise<void>((resolve) => (release = resolve));
+  await page.route(
+    (url) => held.has(url.pathname),
+    async (route) => {
+      requested.push(new URL(route.request().url()).pathname);
+      await released;
+      await route.continue();
+    },
+  );
+  return { requested, release };
+}
+
+test("a client navigation's response leaves out the renderer's chunks, which its document lists", async ({
+  request,
+}) => {
+  test.skip(
+    mode !== "islands" || dev,
+    "the production islands client entry loads React DOM lazily",
+  );
+  // /timing starts with the boot script; /window runs the entry at once, with modulepreload links.
+  for (const pathname of ["/timing", "/window"]) {
+    const document = await (await request.get(pathname)).text();
+    const navigation = await (
+      await request.get(pathname, { headers: { "f-stream": "flush" } })
+    ).text();
+    // islx's runtime chunk, which only the renderer's import loads.
+    const islandsRuntime = /chunks\/islands-runtime-h[0-9a-f]+\.js/;
+    expect(document, pathname).toMatch(islandsRuntime);
+    expect(navigation, pathname).not.toMatch(islandsRuntime);
+    expect(navigation).not.toContain("data-farm-preload-renderer");
+  }
+});
+
+test("a streamed first navigation renders before the renderer loads, and its islands keep a click", async ({
+  page,
+  request,
+  baseURL,
+}) => {
+  test.skip(
+    mode !== "islands" || dev,
+    "the production islands client entry loads React DOM lazily",
+  );
+  const errors = collectErrors(page);
+  const renderer = await holdRenderer(
+    page,
+    await (await request.get("/timing/later")).text(),
+    baseURL,
+  );
+  await page.goto("/timing/later");
+  await hydrated(page);
+  await page.evaluate(() => Object.assign(window, { __farmSameDocument: true }));
+  await page.getByRole("link", { name: "To timing" }).dispatchEvent("click");
+  await expect(page).toHaveURL(/\/timing$/);
+  await expect(page.getByRole("heading", { name: "Timing", exact: true })).toBeVisible();
+  // The entry has asked for React DOM and islx, and they have not arrived.
+  await expect.poll(() => renderer.requested.length).toBeGreaterThan(0);
+  const island = page.getByTestId("interaction");
+  await island.click();
+  await expect(island).toHaveAttribute("data-hydrated", "false");
+  await expect(island).toHaveText("Interaction: 0");
+  renderer.release();
+  await expect(island).toHaveAttribute("data-hydrated", "true");
+  await expect(island).toHaveText("Interaction: 1");
+  await expect(page.getByTestId("idle")).toHaveAttribute("data-hydrated", "true");
+  expect(await page.evaluate(() => "__farmSameDocument" in window)).toBe(true);
+  expect(errors).toEqual([]);
+});
+
+test("a first navigation that renders in a layout root waits for the renderer", async ({
+  page,
+  request,
+  baseURL,
+}) => {
+  test.skip(
+    mode !== "islands" || dev,
+    "the production islands client entry loads React DOM lazily",
+  );
+  const errors = collectErrors(page);
+  const renderer = await holdRenderer(
+    page,
+    await (await request.get("/context/wait/a")).text(),
+    baseURL,
+  );
+  await page.goto("/context/wait/a");
+  await page.waitForLoadState("networkidle");
+  await page.evaluate(() => Object.assign(window, { __farmSameDocument: true }));
+  const navigation = page.waitForResponse(
+    (response) =>
+      new URL(response.url()).pathname === "/context/wait/b" &&
+      response.request().headers()["f-render"] === "tree",
+  );
+  await page.locator("[data-next]").dispatchEvent("click");
+  // The response is the page's payload, not its HTML: only React DOM can show it.
+  await (await navigation).finished();
+  await expect.poll(() => renderer.requested.length).toBeGreaterThan(0);
+  await expect(page.locator("h1")).toHaveText("Waiting a");
+  renderer.release();
+  await expect(page.locator("h1")).toHaveText("Waiting b");
+  await page.getByRole("button", { name: "Toggle theme" }).click();
+  await expect(page.getByTestId("theme-label")).toHaveText("Theme: dark");
+  expect(await page.evaluate(() => "__farmSameDocument" in window)).toBe(true);
+  expect(errors).toEqual([]);
+});
+
 test("a page that hydrates loads the router only when a navigation needs it", async ({ page }) => {
   test.skip(mode !== "islands" || dev, "the production islands client entry splits its router");
   const errors = collectErrors(page);
