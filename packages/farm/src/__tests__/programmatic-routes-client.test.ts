@@ -322,7 +322,7 @@ describe("resolving programmatic route components, fail closed", () => {
 describe("generated client route modules", () => {
   const base = {
     routesFile: "/app/src/routes.tsx",
-    rendererServer: "@farm.js/core/renderer/react/server",
+    rendererClient: "@farm.js/solid/client",
     toImportSpecifier: (file: string) => file.replace("/app", ""),
   };
 
@@ -341,6 +341,7 @@ describe("generated client route modules", () => {
       },
     });
 
+    expect(code).toContain('import * as __farmRendererRuntime from "@farm.js/solid/client";');
     expect(code).toContain('import { AdminPage as __farmComponent } from "/src/admin.tsx";');
     expect(code).toContain('import __farmPending from "/src/pending.tsx";');
     expect(code).toContain('__farmServerHooks: ["guard","data"]');

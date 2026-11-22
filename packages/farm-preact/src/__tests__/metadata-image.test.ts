@@ -1,10 +1,14 @@
 // @vitest-environment node
 
+import { createRequire } from "node:module";
 import { describe, expect, it } from "vitest";
 import { createFarmMetadataImageResponse } from "../../../farm/src/metadata-image";
 import * as PreactServer from "../server";
 
 const { createElement } = PreactServer;
+
+// React draws the reference image. Required from core, past this package's preact/compat alias.
+const React = createRequire(new URL("../../../farm/package.json", import.meta.url))("react");
 
 // An `opengraph-image.tsx` default export, compiled with Preact's JSX.
 function Card({ title }: { title: string }) {
@@ -25,8 +29,17 @@ describe("preact metadata images", () => {
 
     expect(response.status).toBe(200);
     expect(response.headers.get("content-type")).toBe("image/png");
-    const bytes = new Uint8Array(await response.arrayBuffer());
-    expect(Array.from(bytes.subarray(0, 4))).toEqual([0x89, 0x50, 0x4e, 0x47]);
+    const reference = await createFarmMetadataImageResponse(
+      React.createElement(
+        "div",
+        { style: { display: "flex", width: "100%", height: "100%", background: "black" } },
+        React.createElement("span", { style: { color: "white", fontSize: 48 } }, "Farm.js"),
+      ),
+      { size: { width: 120, height: 63 } },
+    );
+    expect(Buffer.from(await response.arrayBuffer())).toEqual(
+      Buffer.from(await reference.arrayBuffer()),
+    );
   });
 
   it("renders an explicit SVG image with the Preact server renderer", async () => {

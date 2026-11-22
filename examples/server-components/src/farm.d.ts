@@ -104,6 +104,7 @@ export type RoutePath =
   | "/types"
   | "/values/a"
   | "/values/b"
+  | `/values/held/${string}`
   | "/values/slow"
   | "/window"
   | "/wire/circular"
@@ -206,6 +207,7 @@ export type RoutePattern =
   | "/types"
   | "/values/a"
   | "/values/b"
+  | "/values/held/[item]"
   | "/values/slow"
   | "/window"
   | "/wire/circular"
@@ -312,6 +314,7 @@ export type RouteModulePattern =
   | "/values"
   | "/values/a"
   | "/values/b"
+  | "/values/held/[item]"
   | "/values/slow"
   | "/window"
   | "/wire/circular"

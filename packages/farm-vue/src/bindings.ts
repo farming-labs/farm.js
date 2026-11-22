@@ -2,10 +2,13 @@
 
 import {
   computed,
+  defineComponent,
+  h,
   onScopeDispose,
   readonly,
   shallowRef,
   type ComputedRef,
+  type PropType,
   type ShallowRef,
 } from "vue";
 import {
@@ -14,10 +17,12 @@ import {
   createRendererQuery,
   createRendererRouter,
   createRendererTheme,
+  resolveLinkAttributes,
   type FarmActionOptions,
   type FarmActionSnapshot,
   type FarmActionSubmit,
   type FarmClientStore,
+  type FarmLinkOptions,
   type FarmRendererQueryOptions,
   type FarmRendererQuerySnapshot,
   type FarmRendererRouter,
@@ -215,3 +220,43 @@ function createReactiveTranslator(
 export function useStore<T>(store: FarmClientStore<T>): Readonly<ShallowRef<T>> {
   return bindFarmStore(store);
 }
+
+type VueLinkOptions = FarmLinkOptions;
+
+/**
+ * An anchor that navigates and prefetches through the FARMJS router, with the same props as the
+ * React `Link`: a typed `href` or route pattern with `params`, `query`, `hash`, `prefetch`,
+ * `replace`, `scroll`, `viewTransition`, and `locale`. Other attributes and listeners go on the
+ * `<a>`, and the default slot is its content.
+ */
+export const Link = defineComponent({
+  name: "FarmLink",
+  inheritAttrs: false,
+  props: {
+    href: { type: String as PropType<VueLinkOptions["href"]>, required: true },
+    params: { type: Object as PropType<VueLinkOptions["params"]>, default: undefined },
+    query: {
+      type: [Object, URLSearchParams] as PropType<VueLinkOptions["query"]>,
+      default: undefined,
+    },
+    hash: { type: String, default: undefined },
+    trailingSlash: { type: Boolean, default: undefined },
+    // Boolean first, so a bare `prefetch` attribute is `true`, as in the React `Link`.
+    prefetch: {
+      type: [Boolean, String] as PropType<VueLinkOptions["prefetch"]>,
+      default: undefined,
+    },
+    prefetchDelay: { type: Number, default: undefined },
+    replace: { type: Boolean, default: undefined },
+    scroll: { type: Boolean, default: undefined },
+    viewTransition: {
+      type: [Boolean, String] as PropType<VueLinkOptions["viewTransition"]>,
+      default: undefined,
+    },
+    locale: { type: String as PropType<VueLinkOptions["locale"]>, default: undefined },
+  },
+  setup(props, { attrs, slots }) {
+    return () =>
+      h("a", { ...attrs, ...resolveLinkAttributes(props as VueLinkOptions) }, slots.default?.());
+  },
+});
