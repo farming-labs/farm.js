@@ -1,8 +1,10 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { PluginManager } from "../plugin";
 import {
+  _withFarmToolCallPayload,
   emitFarmEvent,
   configureFarmObservability,
+  onFarmEvent,
   resetFarmObservability,
 } from "../observability";
 import { _runWithCurrentRequest } from "../server/request";
@@ -160,6 +162,8 @@ describe("Farm Infra link from the environment", () => {
         { FARMJS_API_KEY: apiKey, FARMJS_PROJECT_ID: projectId, FARMJS_ENVIRONMENT: "qa" },
         /FARMJS_ENVIRONMENT/,
       ],
+      // A switch for what leaves the app sends nothing until it reads on or off.
+      [{ FARMJS_API_KEY: ingestionKey, FARMJS_TOOL_PAYLOADS: "false" }, /FARMJS_TOOL_PAYLOADS/],
     ] as const) {
       const warn = vi.fn();
       expect(createFarmInfraAnalyticsPlugin(env, warn)).toBeNull();
@@ -862,6 +866,118 @@ describe("recorder for servers without a plugin runtime", () => {
   });
 });
 
+describe("tool call payloads", () => {
+  afterEach(() => {
+    resetFarmObservability();
+  });
+  const call = (tool: string, payload: { arguments?: unknown; result?: unknown }) =>
+    emitFarmEvent(
+      _withFarmToolCallPayload(
+        {
+          type: "mcp.tool.complete",
+          route: "/api/mcp",
+          server: "store",
+          tool,
+          outcome: "success",
+          durationMs: 4,
+        },
+        payload,
+      ),
+    );
+  const run = async (env: Record<string, string>, calls: () => void) => {
+    const send = vi.fn<typeof fetch>().mockResolvedValue(new Response(null, { status: 202 }));
+    const resolved = resolveFarmInfraAnalytics({ FARMJS_API_KEY: ingestionKey, ...env });
+    if (!("options" in resolved)) throw new Error("expected a link");
+    const recorder = farmInfraAnalyticsRecorder({ ...resolved.options, endpoint }, send);
+    const work: Promise<unknown>[] = [];
+    await recorder.record(
+      new Request("https://app.example/api/mcp", { method: "POST" }),
+      { route: { pattern: "/api/mcp" } },
+      (job) => work.push(job),
+      async () => {
+        calls();
+        return new Response("{}");
+      },
+    );
+    await Promise.all(work);
+    await recorder.close();
+    return sentEvents(send).filter(({ kind }) => kind === "mcp.tool");
+  };
+
+  it("sends a call's arguments and result, with secret-looking keys redacted", async () => {
+    const result = { content: [{ type: "text", text: "Signed in." }], isError: false };
+    const [sent] = await run({}, () =>
+      call("sign_in", {
+        arguments: {
+          email: "ada@example.com",
+          password: "hunter2",
+          nested: [{ apiKey: "k-1", "x-session-token": "s-1", tokens: 3 }],
+          when: new Date("2026-01-01T00:00:00Z"),
+        },
+        result,
+      }),
+    );
+    expect(sent).toMatchObject({
+      tool: "sign_in",
+      arguments: {
+        email: "ada@example.com",
+        password: "[redacted]",
+        nested: [{ apiKey: "[redacted]", "x-session-token": "[redacted]", tokens: "[redacted]" }],
+        when: "2026-01-01T00:00:00.000Z",
+      },
+      result,
+    });
+    expect(sent).not.toHaveProperty("omitted");
+  });
+
+  it("leaves out a payload larger or deeper than Farm Infra keeps, and one that isn't JSON", async () => {
+    const deep = JSON.parse("[".repeat(40) + "]".repeat(40));
+    const cyclic: Record<string, unknown> = {};
+    cyclic.self = cyclic;
+    const sent = await run({}, () => {
+      call("large", { arguments: { text: "x".repeat(8 * 1024) }, result: "ok" });
+      call("deep", { arguments: {}, result: deep });
+      call("cyclic", { arguments: cyclic });
+      call("thrown", { arguments: { id: 1 } });
+    });
+    expect(sent.map(({ tool, ...event }) => [tool, event])).toEqual([
+      ["large", expect.objectContaining({ result: "ok", omitted: ["arguments"] })],
+      ["deep", expect.objectContaining({ arguments: {}, omitted: ["result"] })],
+      ["cyclic", expect.not.objectContaining({ arguments: expect.anything() })],
+      ["thrown", expect.not.objectContaining({ result: expect.anything() })],
+    ]);
+    expect(sent[0]).not.toHaveProperty("arguments");
+    expect(sent[1]).not.toHaveProperty("result");
+  });
+
+  it("sends none with FARMJS_TOOL_PAYLOADS=off", async () => {
+    const [sent] = await run({ FARMJS_TOOL_PAYLOADS: "off" }, () =>
+      call("search", { arguments: { query: "boots" }, result: "2 products" }),
+    );
+    expect(Object.keys(sent!).sort()).toEqual(
+      ["agent", "durationMs", "id", "kind", "outcome", "path", "requestId", "route", "timestamp", "tool"].sort(),
+    );
+    expect(resolveFarmInfraAnalytics({ FARMJS_API_KEY: ingestionKey, FARMJS_TOOL_PAYLOADS: "on" })).toEqual({
+      options: { endpoint: expect.any(String), key: ingestionKey },
+    });
+  });
+
+  it("never shows the payload to logs or onEvent handlers", async () => {
+    const log = vi.spyOn(console, "log").mockImplementation(() => {});
+    configureFarmObservability({ logs: true });
+    const seen: unknown[] = [];
+    const unsubscribe = onFarmEvent((event) => {
+      seen.push(JSON.stringify(event), { ...event }, Object.keys(event));
+    });
+    await run({}, () => call("search", { arguments: { query: "private-query" }, result: "private-result" }));
+    unsubscribe();
+    expect(JSON.stringify(seen)).not.toContain("private-");
+    expect(log.mock.calls.flat().join(" ")).toContain("mcp.tool.complete");
+    expect(log.mock.calls.flat().join(" ")).not.toContain("private-");
+    log.mockRestore();
+  });
+});
+
 describe("recorder: MCP clients", () => {
   it("names an MCP client in a session ID on its initialize, and its tool calls after it", async () => {
     const send = vi.fn<typeof fetch>().mockResolvedValue(new Response(null, { status: 202 }));
@@ -928,6 +1044,32 @@ describe("bounded sender", () => {
     exporter.enqueue(event());
     await exporter.flush();
     expect(send).toHaveBeenCalledTimes(10);
+  });
+
+  it("fits batches of uneven events into one request body each, dropping none", async () => {
+    const send = vi.fn<typeof fetch>().mockResolvedValue(new Response(null, { status: 202 }));
+    const onDiagnostic = vi.fn();
+    const exporter = createFarmInfraAnalyticsExporter({ ...options, onDiagnostic }, send);
+    // Each tool event carries two payloads close to Farm Infra's 8 KiB limit.
+    const text = "x".repeat(8 * 1024 - 32);
+    for (let i = 0; i < 50; i++)
+      exporter.enqueue({
+        ...event(),
+        kind: "mcp.tool",
+        tool: "large",
+        outcome: "success",
+        arguments: { text },
+        result: { text },
+      } as never);
+    const flushed = exporter.flush();
+    await vi.runAllTimersAsync();
+    await flushed;
+    const bodies = send.mock.calls.map(([, init]) => init!.body as string);
+    expect(bodies.length).toBeGreaterThan(1);
+    for (const body of bodies) expect(new TextEncoder().encode(body).length).toBeLessThanOrEqual(128 * 1024);
+    expect(sentEvents(send)).toHaveLength(50);
+    expect(onDiagnostic).not.toHaveBeenCalledWith(expect.objectContaining({ code: "dropped" }));
+    await exporter.close();
   });
 
   it("names only the environment for an API key without a project ID", async () => {

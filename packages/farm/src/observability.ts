@@ -215,6 +215,32 @@ export type FarmMCPEvent = FarmEventBase & {
 };
 
 /**
+ * @internal Where an `mcp.tool.complete` event carries its call's arguments and result, for Farm
+ * Infra analytics. A non-enumerable symbol property, so logs, traces, `onEvent` handlers and
+ * anything that spreads or serializes an event never see the payload. Registered with
+ * `Symbol.for`, so `@farm.js/mcp` reaches it without importing it.
+ */
+export const FARM_TOOL_CALL_PAYLOAD: unique symbol = Symbol.for("farm.mcp.toolCallPayload");
+
+/** @internal A tool call's arguments and its result; either is absent when there was none. */
+export interface FarmToolCallPayload {
+  arguments?: unknown;
+  result?: unknown;
+}
+
+/** @internal An event's tool call payload, if it carries one. */
+export function _farmToolCallPayload(event: unknown): FarmToolCallPayload | undefined {
+  if (!event || typeof event !== "object") return undefined;
+  const payload = (event as Record<symbol, unknown>)[FARM_TOOL_CALL_PAYLOAD];
+  return payload && typeof payload === "object" ? (payload as FarmToolCallPayload) : undefined;
+}
+
+/** @internal Attaches a tool call payload to an event input, out of its enumerable fields. */
+export function _withFarmToolCallPayload<T extends object>(input: T, payload: FarmToolCallPayload): T {
+  return Object.defineProperty(input, FARM_TOOL_CALL_PAYLOAD, { value: payload });
+}
+
+/**
  * An agent surface answered a request: a Markdown mirror or `page.md`, llms.txt,
  * llms-full.txt, the API catalog, the AI catalog (`ai-catalog.json` or `ard.json`),
  * or an MCP server card. `agent` is what the User-Agent declares,
@@ -423,6 +449,9 @@ export function emitFarmEvent(input: FarmEventInput): FarmEvent {
   // A redirect target's query can carry tokens or personal data (`/verify?token=`); logs,
   // traces and handlers get the path only.
   if (event.type === "route.redirect") event.to = event.to.replace(/[?#][\s\S]*$/, "");
+  // The spread above leaves a tool call payload behind; only Farm Infra analytics reads it.
+  const payload = _farmToolCallPayload(input);
+  if (payload) _withFarmToolCallPayload(event, payload);
 
   const traceContext = recordFarmEventTrace(event);
   if (traceContext) {

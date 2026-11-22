@@ -9,7 +9,11 @@
  * that was requested below the base path, method, status, duration, registered MCP tool
  * outcomes and the client the request declares (see classifyFarmClient: a category and a name
  * from Farm's own list, never the header itself). No query strings, fragments, origins,
- * headers, cookies, bodies, IPs or errors.
+ * headers, cookies, request bodies, IPs or errors.
+ *
+ * A registered MCP tool call also sends its arguments and result, unless
+ * `FARMJS_TOOL_PAYLOADS=off`: values under secret-looking keys are replaced first (see
+ * toolPayload), and one larger than Farm Infra keeps is left out.
  */
 import { AsyncLocalStorage } from "node:async_hooks";
 import type { FarmPlugin, FarmPluginRuntimeAfterEvent } from "../plugin";
@@ -22,7 +26,7 @@ import {
   type FarmAgentIdentity,
   type FarmClientIdentity,
 } from "../agent-identity";
-import { onFarmEvent } from "../observability";
+import { _farmToolCallPayload, onFarmEvent } from "../observability";
 import { getCurrentRequestOrNull } from "../server/request";
 import { getFarmRouteLabel } from "../route-label";
 import { stripFarmBasePath } from "../base-path";
@@ -47,6 +51,8 @@ export interface FarmInfraAnalyticsExporterOptions {
   /** Needed only for an API key reaching several projects; one project's key names it. */
   projectId?: string;
   environment?: FarmInfraAnalyticsEnvironment;
+  /** Send each MCP tool call's arguments and result. On unless `false`. */
+  toolPayloads?: boolean;
   onDiagnostic?: (event: FarmInfraAnalyticsDiagnostic) => void | Promise<void>;
 }
 
@@ -67,7 +73,16 @@ interface EventBase {
 export type FarmInfraAnalyticsEvent = EventBase &
   (
     | { kind: "request"; method: string; status: number }
-    | { kind: "mcp.tool"; tool: string; outcome: "success" | "error" }
+    | {
+        kind: "mcp.tool";
+        tool: string;
+        outcome: "success" | "error";
+        /** The call's arguments and result, with secret-looking keys redacted. */
+        arguments?: unknown;
+        result?: unknown;
+        /** The payloads left out because they were larger than Farm Infra keeps. */
+        omitted?: ("arguments" | "result")[];
+      }
   );
 
 type Env = Record<string, string | undefined>;
@@ -84,6 +99,13 @@ const ENVIRONMENTS: FarmInfraAnalyticsEnvironment[] = ["production", "staging", 
 const METHODS = new Set(["GET", "HEAD", "POST", "PUT", "PATCH", "DELETE", "OPTIONS", "QUERY"]);
 
 const MAX_QUEUE = 500;
+/** Farm Infra's limits for one request body, and for one tool call argument or result. */
+const MAX_BODY_BYTES = 128 * 1024;
+const MAX_PAYLOAD_BYTES = 8 * 1024;
+const MAX_PAYLOAD_DEPTH = 32;
+/** Keys whose values a tool call payload never sends: `password`, `apiKey`, `x-session-token`. */
+const SECRET_KEY = /pass(?:word|wd|phrase)|secret|token|api[-_]?key|authori[sz]ation|cookie|credential|private[-_]?key|session/i;
+const REDACTED = "[redacted]";
 const MAX_AGE = 300_000;
 const MAX_ATTEMPTS = 5;
 const FLUSH_BUDGET = 5_000;
@@ -131,6 +153,10 @@ export function resolveFarmInfraAnalytics(
   if (env.FARMJS_ENVIRONMENT && !ENVIRONMENTS.includes(env.FARMJS_ENVIRONMENT as never)) {
     return { off: "FARMJS_ENVIRONMENT must be production, staging or development" };
   }
+  const toolPayloads = env.FARMJS_TOOL_PAYLOADS?.trim();
+  if (toolPayloads && toolPayloads !== "on" && toolPayloads !== "off") {
+    return { off: "FARMJS_TOOL_PAYLOADS must be on or off" };
+  }
   let endpoint: URL;
   try {
     endpoint = new URL(EVENTS_PATH, env.FARMJS_API_URL?.trim() || DEFAULT_URL);
@@ -149,6 +175,7 @@ export function resolveFarmInfraAnalytics(
     options: {
       endpoint: endpoint.href,
       key,
+      ...(toolPayloads === "off" ? { toolPayloads: false } : {}),
       ...(ingestionKey
         ? {}
         : { ...(projectId ? { projectId } : {}), environment: defaultFarmInfraEnvironment(env) }),
@@ -310,9 +337,17 @@ export function createFarmInfraAnalyticsExporter(
       if (!queue.length || notBefore >= deadline) break;
       if (notBefore > Date.now()) await sleep(notBefore - Date.now());
       if (stopped || Date.now() >= deadline) break;
-      const batch = queue.slice(0, 50);
+      // Tool call payloads make events uneven, so a batch takes as many as fit in one body.
+      const batch: Item[] = [];
+      let bytes = 64;
+      for (const item of queue) {
+        const size = encoder.encode(JSON.stringify(item.event)).length + 1;
+        if (batch.length === 50 || (batch.length && bytes + size > MAX_BODY_BYTES)) break;
+        batch.push(item);
+        bytes += size;
+      }
       const body = JSON.stringify({ schemaVersion: 1, events: batch.map(({ event }) => event) });
-      if (encoder.encode(body).length > 128 * 1024) {
+      if (encoder.encode(body).length > MAX_BODY_BYTES) {
         queue.splice(0, batch.length);
         diagnostic({ code: "dropped", count: batch.length });
         continue;
@@ -517,9 +552,57 @@ function requestEvent(
   };
 }
 
+/**
+ * A tool call argument or result as Farm Infra keeps it: JSON, with each value under a
+ * secret-looking key replaced by `[redacted]`. `"omitted"` when it's larger or deeper than
+ * Farm Infra keeps, and `undefined` when there's nothing to send or it isn't JSON.
+ */
+function toolPayload(value: unknown): { value: unknown } | "omitted" | undefined {
+  let json: unknown;
+  try {
+    const text = JSON.stringify(value);
+    if (text === undefined) return undefined;
+    json = JSON.parse(text);
+  } catch {
+    return undefined;
+  }
+  let deep = false;
+  const redact = (node: unknown, depth: number): unknown => {
+    if (depth > MAX_PAYLOAD_DEPTH) deep = true;
+    if (deep || !node || typeof node !== "object") return node;
+    if (Array.isArray(node)) return node.map((item) => redact(item, depth + 1));
+    return Object.fromEntries(
+      Object.entries(node).map(([key, item]) => [
+        key,
+        SECRET_KEY.test(key) ? REDACTED : redact(item, depth + 1),
+      ]),
+    );
+  };
+  const redacted = redact(json, 0);
+  if (deep || encoder.encode(JSON.stringify(redacted)).length > MAX_PAYLOAD_BYTES) {
+    return "omitted";
+  }
+  return { value: redacted };
+}
+
+function toolPayloadFields(event: unknown) {
+  const payload = _farmToolCallPayload(event);
+  if (!payload) return {};
+  const fields: { arguments?: unknown; result?: unknown; omitted?: ("arguments" | "result")[] } =
+    {};
+  for (const key of ["arguments", "result"] as const) {
+    if (!(key in payload)) continue;
+    const kept = toolPayload(payload[key]);
+    if (kept === "omitted") (fields.omitted ??= []).push(key);
+    else if (kept) fields[key] = kept.value;
+  }
+  return fields;
+}
+
 function toolEvent(
   metadata: RequestMetadata,
   event: { tool: string; outcome: "success" | "error"; durationMs: number },
+  payloads: boolean,
 ): FarmInfraAnalyticsEvent {
   return {
     id: uuid(),
@@ -532,6 +615,7 @@ function toolEvent(
     tool: event.tool,
     outcome: event.outcome,
     durationMs: duration(event.durationMs),
+    ...(payloads ? toolPayloadFields(event) : {}),
   };
 }
 
@@ -566,7 +650,7 @@ export function farmInfraAnalyticsPlugin(
             const metadata = context.requestContext.get<RequestMetadata>(request, contextKey);
             // Streaming MCP transports can return their HTTP Response before the tool finishes.
             if (!metadata) return;
-            exporter.enqueue(toolEvent(metadata, event));
+            exporter.enqueue(toolEvent(metadata, event, options.toolPayloads !== false));
             metadata.waitUntil(exporter.flush());
           },
           { unfiltered: true },
@@ -637,7 +721,7 @@ export function farmInfraAnalyticsRecorder(
       if (!isToolEvent(event)) return;
       const metadata = requests.getStore();
       if (!metadata) return;
-      exporter.enqueue(toolEvent(metadata, event));
+      exporter.enqueue(toolEvent(metadata, event, options.toolPayloads !== false));
       metadata.waitUntil(exporter.flush());
     },
     { unfiltered: true },

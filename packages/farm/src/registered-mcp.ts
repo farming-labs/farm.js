@@ -9,7 +9,7 @@
 import type { FarmAppManifestServer, FarmAppManifestTool } from "./app-manifest";
 import { applyFarmBasePath, stripFarmBasePath } from "./base-path";
 import { _listFarmRegisteredMCPServers, type FarmRegisteredMCPServer } from "./mcp-catalog";
-import { emitFarmEvent } from "./observability";
+import { _withFarmToolCallPayload, emitFarmEvent } from "./observability";
 
 type Handle = (request: Request) => Promise<Response | null>;
 type JSONObject = Record<string, unknown>;
@@ -104,7 +104,11 @@ const isEventStream = (response: Response) =>
 /** The tools/call requests in one POST to a registered MCP server, and when it arrived. */
 export interface FarmRegisteredMCPCalls {
   readonly server: ServedServer;
-  readonly calls: readonly { readonly id: RequestId; readonly tool: string }[];
+  readonly calls: readonly {
+    readonly id: RequestId;
+    readonly tool: string;
+    readonly arguments: unknown;
+  }[];
   readonly startedAt: number;
 }
 
@@ -134,8 +138,11 @@ export async function _readFarmRegisteredMCPCalls(
     if (!isObject(message) || message.method !== "tools/call" || !isRequestId(message.id)) {
       return [];
     }
-    const tool = isObject(message.params) ? message.params.name : undefined;
-    return typeof tool === "string" && TOOL_NAME.test(tool) ? [{ id: message.id, tool }] : [];
+    const params = isObject(message.params) ? message.params : undefined;
+    const tool = params?.name;
+    return typeof tool === "string" && TOOL_NAME.test(tool)
+      ? [{ id: message.id, tool, arguments: params?.arguments }]
+      : [];
   });
   return calls.length ? { server, calls, startedAt } : undefined;
 }
@@ -172,22 +179,31 @@ async function reportOutcomes(
   eventStream: boolean,
   { server, calls, startedAt }: FarmRegisteredMCPCalls,
 ): Promise<void> {
-  const pending = new Map(calls.map((call) => [call.id, call.tool]));
+  const pending = new Map(calls.map((call) => [call.id, call]));
   const answer = (message: unknown) => {
     if (!isObject(message) || !isRequestId(message.id) || !isObject(message.result)) return;
-    const tool = pending.get(message.id);
-    if (tool === undefined) return;
+    const call = pending.get(message.id);
+    if (call === undefined) return;
     pending.delete(message.id);
     const outcome = message.result.isError === true ? "error" : "success";
-    emitFarmEvent({
-      type: "mcp.tool.complete",
-      level: outcome === "error" ? "error" : "info",
-      route: server.path,
-      server: server.name,
-      tool,
-      outcome,
-      durationMs: Math.max(0, performance.now() - startedAt),
-    });
+    emitFarmEvent(
+      // Only Farm Infra analytics reads the arguments and result, never logs or traces.
+      _withFarmToolCallPayload(
+        {
+          type: "mcp.tool.complete",
+          level: outcome === "error" ? "error" : "info",
+          route: server.path,
+          server: server.name,
+          tool: call.tool,
+          outcome,
+          durationMs: Math.max(0, performance.now() - startedAt),
+        },
+        {
+          ...(call.arguments === undefined ? {} : { arguments: call.arguments }),
+          result: message.result,
+        },
+      ),
+    );
   };
   const reader = body.getReader();
   const decoder = new TextDecoder();
