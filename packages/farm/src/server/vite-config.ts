@@ -1,6 +1,7 @@
 import path from "node:path";
 import type { UserConfig as ViteUserConfig } from "vite";
-import { isFarmRendererDisabled, type FarmRenderer } from "../renderer";
+import { isPackageSpecifier } from "../build/node-module-bundle";
+import { isFarmRendererDisabled, isReactRenderer, type FarmRenderer } from "../renderer";
 
 const FARM_CLIENT_ENTRY_PATTERN =
   "**/{page,layout,loading,error,not-found,default}.{js,jsx,ts,tsx}";
@@ -32,7 +33,16 @@ export const FARM_CLIENT_OPTIMIZE_DEPS_INCLUDE = [
 
 export function getFarmClientOptimizeDepsInclude(renderer?: FarmRenderer): string[] {
   return Array.from(
-    new Set([...FARM_CLIENT_OPTIMIZE_DEPS_INCLUDE, ...(renderer?.optimizeDeps || [])]),
+    new Set([
+      ...FARM_CLIENT_OPTIMIZE_DEPS_INCLUDE,
+      ...(renderer?.optimizeDeps || []),
+      // Farm's browser entry imports a renderer's client module, and no app file does, so Vite's
+      // scan never sees it and finds it only on the first page request, then bundles again. The
+      // React entry imports `react-dom/client` instead, which is already listed.
+      ...(renderer && !isReactRenderer(renderer) && isPackageSpecifier(renderer.client)
+        ? [renderer.client]
+        : []),
+    ]),
   );
 }
 

@@ -22,7 +22,7 @@ export interface BundleNodeModuleOptions {
 // Relative, absolute (POSIX or Windows), subpath (`#x`) and virtual ids.
 const NON_PACKAGE_SPECIFIER_RE = /^(?:[./\\#]|[A-Za-z]:[\\/])/;
 
-function isPackageSpecifier(specifier: string): boolean {
+export function isPackageSpecifier(specifier: string): boolean {
   return (
     !specifier.startsWith("\0") &&
     !NON_PACKAGE_SPECIFIER_RE.test(specifier) &&

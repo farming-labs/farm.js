@@ -27,7 +27,10 @@ export interface FarmRenderer {
   componentExtensions?: readonly string[];
   /** Packages that must share one module instance in a Farm application. */
   dedupe?: readonly string[];
-  /** Renderer packages seeded into Vite's dependency optimizer. */
+  /**
+   * Renderer packages seeded into Vite's dependency optimizer. Farm adds `client` itself when it
+   * names a package.
+   */
   optimizeDeps?: readonly string[];
   /**
    * Scheduling policy for the production client and SSR graphs.
