@@ -152,6 +152,7 @@ const {
   resolveFarmLlmsTxtConfig,
   resolveFarmAgentSitemap,
   resolveFarmAgentCrawlers,
+  resolveFarmInstrumentationRuntime,
 } = require_(
   "@farm.js/core/internal/production-runtime",
 ) as typeof import("@farm.js/core/internal/production-runtime");
@@ -1131,6 +1132,7 @@ export default function farmRsc(options: FarmRscPluginOptions = {}): Plugin[] {
           redirects?: RscConfigRouteList<RedirectConfig>;
           rewrites?: RscConfigRouteList<RewriteConfig>;
           headers?: RscConfigRouteList<HeaderConfig>;
+          compress?: boolean;
         };
         // Check if user enabled RSC in their config
         const serverComponents = c.experimental?.serverComponents;
@@ -1497,6 +1499,13 @@ export default function farmRsc(options: FarmRscPluginOptions = {}): Plugin[] {
           pluginsConfigPaths,
           debug,
           development: env.command === "serve",
+          // Core's `compress` (on unless the app turns it off): the production server compresses
+          // what it answers, on Node targets only, as core's servers do.
+          ...(env.command === "build" &&
+          c.compress !== false &&
+          resolveFarmInstrumentationRuntime(nitroPreset) === "nodejs"
+            ? { compress: true }
+            : {}),
           clientCachePersistence: generateClientCachePersistenceCode(
             resolveFarmClientCacheAdapterEntry(root, c.cache),
           ),

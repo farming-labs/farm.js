@@ -63,7 +63,14 @@ const FARM_RSC_CONFIG_KEYS = [
 ] as const;
 
 /** Read by the RSC pipeline's own config hook, which `defineConfig` does not copy. */
-const FARM_RSC_PASSTHROUGH_KEYS = ["i18n", "cache", "redirects", "rewrites", "headers"] as const;
+const FARM_RSC_PASSTHROUGH_KEYS = [
+  "i18n",
+  "cache",
+  "redirects",
+  "rewrites",
+  "headers",
+  "compress",
+] as const;
 
 function pickImportTarget(entry: unknown): string | undefined {
   if (typeof entry === "string") return entry;

@@ -104,6 +104,37 @@ describe("RSC core runtime bundling", () => {
   );
 
   it.each([
+    ["a build for Node", "build", {}, undefined, true],
+    ["a build for Node with compress off", "build", { compress: false }, undefined, false],
+    ["a build for Cloudflare", "build", {}, "cloudflare-pages", false],
+    ["the dev server", "serve", {}, undefined, false],
+  ] as const)(
+    "compresses the production server's responses as core does: %s",
+    async (_name, command, config, preset, compressed) => {
+      const root = mkdtempSync(path.join(tmpdir(), "farm-rsc-compress-config-"));
+      try {
+        linkRscFixtureDependencies(root);
+        const plugin = farmRsc(preset ? { preset } : {}).find(
+          (candidate) => candidate.name === "@farm.js/plugin/rsc:config",
+        );
+        const configHook = plugin!.config as (
+          config: Record<string, unknown>,
+          env: { command: "serve" | "build"; mode: string },
+        ) => Promise<unknown>;
+        await configHook(
+          { root, experimental: { serverComponents: true }, ...config },
+          { command, mode: command === "build" ? "production" : "development" },
+        );
+        const entry = readFileSync(path.join(root, ".farm/rsc-entries/entry.rsc.tsx"), "utf8");
+        expect(entry.includes("@farm.js/core/internal/compression-runtime")).toBe(compressed);
+        expect(entry.includes("export default { fetch: handler };")).toBe(!compressed);
+      } finally {
+        rmSync(root, { recursive: true, force: true });
+      }
+    },
+  );
+
+  it.each([
     ["Rolldown Vite", { rolldownVersion: "1.0.0" }, undefined],
     ["esbuild Vite", {}, { jsx: "automatic", jsxImportSource: "react" }],
   ])("sets esbuild JSX options only when needed (%s)", async (_name, meta, esbuild) => {
@@ -1303,9 +1334,8 @@ export const echo = createEndpoint("/api/echo", { method: "POST" }, async ({ bod
             expect(page.headers.get("x-farm-deployment-id")).toBeTruthy();
             expect(page.headers.getSetCookie()).toEqual([]);
             const fields = page.headers.get("vary")?.toLowerCase().split(/,\s*/);
-            // Nitro only adds Accept-Encoding when it actually negotiates a
-            // compressed representation; these are the app-owned variants.
-            expect(fields).toEqual(expect.arrayContaining(["accept", "origin"]));
+            // The app-owned variants, and the encoding the server negotiated.
+            expect(fields).toEqual(expect.arrayContaining(["accept", "origin", "accept-encoding"]));
             expect(fields?.filter((value) => value === "accept")).toHaveLength(1);
             const wildcard = await fetch(origin + "/?wildcard", {
               headers: { accept },
@@ -1314,6 +1344,25 @@ export const echo = createEndpoint("/api/echo", { method: "POST" }, async ({ bod
             expect(await wildcard.text(), logs).toContain("RSC root runtime fixture");
             expect(wildcard.headers.get("vary")).toBe("*");
           }
+          // Pages and payloads go out compressed, as core's servers send them; fetch decodes the
+          // body and keeps the header that says how it was sent.
+          for (const [accept, encoding] of [
+            ["text/html", "br"],
+            ["text/x-component", "gzip"],
+          ] as const) {
+            const compressed = await fetch(origin + "/", {
+              headers: { accept, "accept-encoding": encoding },
+              signal: AbortSignal.timeout(10_000),
+            });
+            expect(compressed.headers.get("content-encoding"), logs).toBe(encoding);
+            expect(await compressed.text(), logs).toContain("RSC root runtime fixture");
+          }
+          const identity = await fetch(origin + "/", {
+            headers: { accept: "text/html", "accept-encoding": "identity" },
+            signal: AbortSignal.timeout(10_000),
+          });
+          expect(identity.headers.has("content-encoding")).toBe(false);
+          expect(await identity.text(), logs).toContain("RSC root runtime fixture");
         }
         if (name === "nested-layouts") {
           for (const [pathname, markers] of [
