@@ -342,6 +342,15 @@ describe("experimental.serverComponents from farm.config", () => {
     ).rejects.toThrow("does not run `routeRules` yet");
   });
 
+  it("hands the app's compress setting to the RSC pipeline", async () => {
+    const config = (await createFarmRscViteConfig(
+      { experimental: { serverComponents: { mode: "rsc" as const } }, compress: false },
+      { root: createApp(), command: "build", preset: "node-server" },
+    )) as Record<string, any>;
+    // The pipeline's config hook leaves the production server's responses uncompressed.
+    expect(config.compress).toBe(false);
+  });
+
   it("hands config redirects(), rewrites() and headers() to the RSC pipeline", async () => {
     const redirects = () => [{ source: "/old", destination: "/new" }];
     const rewrites = () => [{ source: "/alias", destination: "/about" }];

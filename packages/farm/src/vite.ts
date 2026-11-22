@@ -6923,9 +6923,10 @@ function generateClientCode(
   const appSetupPath = resolveFarmRendererAppSetup(root, renderer);
   const rendererClientImports = isReactRenderer(renderer)
     ? `import React from 'react'\nimport { hydrateRoot, createRoot } from 'react-dom/client'\nimport { restorePagePosition } from '@farm.js/core/internal/client-runtime'`
-    : appSetupPath
-      ? `import React, { hydrateRoot, createRoot, configureApp as __farmConfigureApp } from ${JSON.stringify(renderer.client)}\nimport __farmAppSetup from ${JSON.stringify(toViteModuleId(appSetupPath, root))}\n__farmConfigureApp(__farmAppSetup)`
-      : `import React, { hydrateRoot, createRoot } from ${JSON.stringify(renderer.client)}`;
+    : // Named exports only: a renderer's client module needs no default export.
+      appSetupPath
+      ? `import * as React from ${JSON.stringify(renderer.client)}\nimport { hydrateRoot, createRoot, configureApp as __farmConfigureApp } from ${JSON.stringify(renderer.client)}\nimport __farmAppSetup from ${JSON.stringify(toViteModuleId(appSetupPath, root))}\n__farmConfigureApp(__farmAppSetup)`
+      : `import * as React from ${JSON.stringify(renderer.client)}\nimport { hydrateRoot, createRoot } from ${JSON.stringify(renderer.client)}`;
   // Islands mode runs on islx (internal/islands-runtime), under the same names.
   const isolatedHydrationImport = isolatedHydrationEnabled
     ? `${islandValues ? "import { createFarmIsolatedHydrationRuntime, createFarmServerPageBoundary, wrapFarmIsolatedClientGraph, createFarmServerTreeElement, createFarmServerTreeLayout } from '@farm.js/core/internal/islands-runtime'" : "import { createFarmIsolatedHydrationRuntime, createFarmServerPageBoundary, wrapFarmIsolatedClientGraph } from '@farm.js/core/internal/isolated-boundary'\nimport { createFarmServerTreeElement } from '@farm.js/core/internal/server-tree'"}`

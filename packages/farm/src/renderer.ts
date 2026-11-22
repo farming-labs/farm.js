@@ -153,8 +153,15 @@ export interface FarmRendererClientRoot {
   unmount(): void;
 }
 
-/** Browser entry exported by a renderer client module. */
+/**
+ * Named exports of a renderer client module. Farm's development and production client entries
+ * import them by name, so the module needs no default export.
+ */
 export interface FarmRendererClientRuntime {
+  /** Builds the route tree in the browser, as the server module's createElement() does. */
+  createElement(type: unknown, props?: unknown, ...children: unknown[]): unknown;
+  /** Wraps a page that has a loading file while the browser navigates to it. */
+  readonly Suspense: unknown;
   createRoot(container: Element): FarmRendererClientRoot;
   /**
    * Non-React renderers receive route state as the optional third argument so
@@ -166,6 +173,8 @@ export interface FarmRendererClientRuntime {
     element: unknown,
     routeState?: FarmRendererRouteState,
   ): FarmRendererClientRoot;
+  /** Receives the descriptor's `appSetup` module. Required when the descriptor sets `appSetup`. */
+  configureApp?(setup: unknown): void;
 }
 
 const DEFAULT_RENDERER_CAPABILITIES: Readonly<FarmRendererCapabilities> = Object.freeze({
@@ -298,6 +307,10 @@ export interface FarmRendererRenderOptions {
   nonce?: string;
 }
 
+/**
+ * Named exports of a renderer server module. Farm's development server and its production SSR
+ * entry import them by name, so the module needs no default export.
+ */
 export interface FarmServerRendererRuntime {
   readonly name: string;
   readonly Fragment: unknown;
@@ -346,6 +359,8 @@ export interface FarmServerRendererRuntime {
   readonly capabilities?: FarmRendererCapabilitiesInput;
   /** Optional bootstrap required before this renderer hydrates server markup. */
   generateHydrationScript?: () => string;
+  /** Receives the descriptor's `appSetup` module. Required when the descriptor sets `appSetup`. */
+  configureApp?(setup: unknown): void;
   /** Optional component used to render route-level failures. */
   ErrorBoundary?: unknown;
   /** Optional streaming primitive. Renderers without one use buffered SSR. */
