@@ -212,15 +212,63 @@ There's one exception to Farm not reading your file. Farm decides whether a page
 
 The file format also turned up three bugs in how Farm handled a renderer's extensions. A new `page.leaf` wasn't served until you restarted `farm dev`, and new `.svelte` and `.vue` pages had the same bug. A parallel-route slot like `@modal/page.leaf` was served as a page. And `farm explain` didn't find `.leaf` routes. All three are fixed on `main` and ship in the next release.
 
-<span id="components-without-an-adapter" className="blog-heading-anchor" />
+<span id="components-for-leaf" className="blog-heading-anchor" />
 
-## Components without an adapter
+## Components for leaf
 
-Sooner or later a UI library wants a component library, and component libraries ship one adapter per framework. leaf will never get one.
+Sooner or later a UI library wants a component library, and component libraries ship one adapter per framework. Nobody else is going to write one for leaf.
 
-[ui-sdk](https://ui-sdk.dev) has a way around that. Its behaviors, from toggles and menus to dialogs and keyboard focus, live in a framework-free core. It has adapters for React, Vue, Svelte, and Solid, and one more build as web components. **A custom element is just a tag, so any renderer that can write HTML can use it.** That includes leaf, with no adapter.
+[ui-sdk](https://ui-sdk.dev) splits the work in a useful place. Its behaviors, from toggles and menus to dialogs and keyboard focus, live in a framework-free core. Each component there is a primitive: it holds the state and says which attributes and event handlers each part needs. ui-sdk's adapters for React, Vue, Svelte, and Solid build on that core, and one more build ships the same components as web components. That gives leaf two ways in.
 
-The page writes the element and imports its module:
+### The leaf way
+
+Write the adapter yourself, one component at a time. A leaf `Toggle` creates the primitive once, re-renders when it changes, and spreads its attributes and handlers onto a button:
+
+```tsx
+// src/ui/toggle.tsx
+import { useMemo, useStore } from "leaf";
+import { toggle } from "@ui-sdk/core/toggle";
+import { attrs, handlers } from "@ui-sdk/core/renderer";
+
+type ToggleProps = { id: string; defaultPressed?: boolean; children?: unknown };
+
+export function Toggle(props: ToggleProps) {
+  // One primitive per component, kept across renders.
+  const t = useMemo(() => toggle({ id: props.id, defaultPressed: props.defaultPressed }));
+  // Re-render when its state changes.
+  useStore(useMemo(() => ({ getSnapshot: t.get, subscribe: t.subscribe })));
+
+  const part = t.part("root");
+  const on = handlers(part);
+  return (
+    <button {...attrs(part)} onClick={on.click} onKeyDown={on.keydown} onKeyUp={on.keyup}>
+      {props.children}
+    </button>
+  );
+}
+```
+
+The primitive has `get()` and `subscribe()`, so it plugs into the same `useStore` hook leaf's bindings use for Farm's router. The page passes an `id` because ui-sdk needs one for every primitive and leaf has no `useId`. A fixed id also means the server and the browser agree on it:
+
+```tsx
+<Toggle id="bold" defaultPressed>
+  Bold
+</Toggle>
+```
+
+The primitive runs while Farm renders the page on the server, so the ARIA is in the first HTML, with no plugin and nothing written by hand:
+
+```html
+<button data-slot="toggle" type="button" aria-pressed="true" data-pressed="">Bold</button>
+```
+
+I ran it in a production build and in `farm dev`, in Chrome. Hydration keeps the button the server rendered, a click sets `aria-pressed` to `"false"`, a re-render of the page leaves it there, and Space and Enter each toggle it once.
+
+The catch is where `attrs` and `handlers` come from. `@ui-sdk/core/renderer` is the entry ui-sdk's own adapters build on, and its source says: "It isn't documented, it may change with any release, and nothing here is public API." The toggle is also the easy case. ui-sdk's adapters hand each primitive its DOM element, which the toggle uses for its `focus()` method, toggle groups, and disabled fieldsets. leaf has no refs yet, so this `Toggle` skips that, and a standalone button works without it. One component is 21 lines. A whole library is ui-sdk's adapter work done again for leaf, and yours to keep current.
+
+### Or ditch the adapter: web components
+
+The other way is to write no adapter at all. **A custom element is just a tag, so any renderer that can write HTML can use it.** The page writes the element and imports its module:
 
 ```tsx
 // src/app/editor/page.tsx
@@ -247,7 +295,7 @@ Three things make it work:
 2. `export const hydrate = true` sends the page module to the browser. The import registers the tag there, and the browser upgrades the element that's already on the page.
 3. The same import also runs on the server while Farm renders the page. That's safe: every ui-sdk element registers through one helper that does nothing when `customElements` doesn't exist.
 
-The catch is ARIA. ui-sdk computes the toggle's `aria-pressed` in the browser, after the upgrade. The HTML your server sends, which is what a screen reader or an agent reading the page gets first, only has what you wrote. That's why the example writes `aria-pressed="true"` to match `default-pressed`.
+The catch here is ARIA. The web component computes `aria-pressed` in the browser, after the upgrade. The HTML your server sends, which is what a screen reader or an agent reading the page gets first, only has what you wrote. That's why the example writes `aria-pressed="true"` to match `default-pressed`.
 
 Farm can write it for you. A plugin's `render.html` hook gets the finished HTML from any renderer, in development and in production:
 
@@ -285,9 +333,19 @@ after a re-render  false    "false"
 
 The last line matters. When the page re-renders, Preact compares its new props with its old ones, not with the DOM, so it leaves the attribute ui-sdk changed alone.
 
-The plugin has a price. Farm holds the whole page before it can rewrite it, so with the plugin installed a streaming renderer stops streaming. leaf renders to a string anyway, so it pays nothing. And the regex is a demo. A real plugin needs ui-sdk to say which attributes a primitive has, and ui-sdk doesn't offer that publicly yet. The toggle's API is `isPressed`, `setPressed`, `toggle`, and `focus`, and the attribute logic lives in the undocumented `@ui-sdk/core/renderer`. The library is also a beta (`0.1.0-beta.13`). So for now I write simple ARIA by hand, and I'll build the plugin once ui-sdk publishes that step.
+The plugin has a price. Farm holds the whole page before it can rewrite it, so with the plugin installed a streaming renderer stops streaming. leaf renders to a string anyway, so it pays nothing. And the regex is a demo. A real plugin has to ask the primitive for its attributes, and today the only way to ask is the same undocumented entry the leaf way uses. So for now I write simple ARIA by hand, and I'll build the plugin once ui-sdk makes that step public.
 
 ui-sdk's web build also ships its agent bridge, `@ui-sdk/web/agent`. I haven't tried that on Farm yet.
+
+### Which one
+
+|                         | The leaf way                           | Web components         |
+| ----------------------- | -------------------------------------- | ---------------------- |
+| Adapter code            | A component per primitive              | None                   |
+| ARIA in the server HTML | From the primitive                     | By hand, or a plugin   |
+| Depends on              | `@ui-sdk/core/renderer` (undocumented) | `@ui-sdk/web` (public) |
+
+Either way, ui-sdk is a beta (`0.1.0-beta.13`). Both ways get better the day it makes its renderer entry public: the leaf way stops depending on internals, and the plugin can ask the primitive instead of matching a regex.
 
 <span id="what-still-needs-work" className="blog-heading-anchor" />
 

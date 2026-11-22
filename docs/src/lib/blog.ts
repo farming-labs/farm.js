@@ -168,7 +168,7 @@ export const rendererSections = [
   ["the-second-break-react-in-the-dev-entry", "React in the dev entry"],
   ["what-the-fixes-cost", "What the fixes cost"],
   ["your-own-file-format", "Your own file format"],
-  ["components-without-an-adapter", "Components, no adapter"],
+  ["components-for-leaf", "Components for leaf"],
   ["what-still-needs-work", "What still needs work"],
   ["write-your-own", "Write your own"],
 ] as const satisfies BlogSections;
