@@ -60,7 +60,7 @@ export const db = createOrm({
 });
 ```
 
-Application server code can now import `db` and query its own tables. Farm config is not required for this direct pattern.
+Application server code can now import `db` and query its own tables. Farm config is not required for this direct pattern. For SQLite and MySQL drivers, the full query API, and a database hosted by Farm.js Infra, see [SQL databases and models](/docs/storage#sql-databases-and-models).
 
 ## Schema-backed Farm integrations
 
