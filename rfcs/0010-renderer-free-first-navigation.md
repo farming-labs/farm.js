@@ -1,6 +1,7 @@
 # A first navigation that does not wait for the renderer
 
-Status: Draft (islands mode, web). Implementation: #3061, open.
+Status: Implemented (islands mode, web) in #3061. React joined the renderer it loads later (see
+Results).
 
 ## Problem
 
@@ -61,17 +62,17 @@ React DOM.
 ## Decision
 
 A navigation that streams HTML no longer waits for the renderer. In an islands web build, the
-client entry loads React DOM and islx with its first render or hydration instead of importing
-them. The router still imports the entry, but the entry's own imports are now small, so the router
-swaps the new page in as soon as its response arrives, and the renderer loads alongside to hydrate
-what the page holds.
+client entry loads React, React DOM and islx with its first render or hydration instead of
+importing them. The router still imports the entry, but the entry's own imports are now small, so
+the router swaps the new page in as soon as its response arrives, and the renderer loads alongside
+to hydrate what the page holds.
 
 1. **The entry loads the renderer when it first needs it.** The generated entry
-   (`generateClientHydrationEntry` in `packages/farm/src/nitro/universal-build.ts`) imports React
-   but not React DOM or islx. `loadFarmRenderer()` imports `react-dom/client` and
-   `@farm.js/core/internal/islands-runtime` together, once, and sets `createRoot`, `hydrateRoot`
-   and the islands runtime. Whatever renders or hydrates awaits it first: the entry's first
-   hydration, a route that renders its page component or its hydrating layouts
+   (`generateClientHydrationEntry` in `packages/farm/src/nitro/universal-build.ts`) imports none of
+   React, React DOM or islx. `loadFarmRenderer()` imports `react`, `react-dom/client` and
+   `@farm.js/core/internal/islands-runtime` together, once, and sets `React`, `createRoot`,
+   `hydrateRoot` and the islands runtime. Whatever renders or hydrates awaits it first: the entry's
+   first hydration, a route that renders its page component or its hydrating layouts
    (`loadRouteComponent`, `createMatchedHydrationRoute`), and docs search. Once it has settled, an
    await costs a microtask. A chunk that fails to load is requested again on the next call.
 2. **The streamed path renders first.** The router swaps the markup, reconciles the head, writes
@@ -104,8 +105,8 @@ The entry loads the renderer lazily when the app:
   app with slots keeps the static import.
 
 Every other build keeps today's entry. Client plugins keep working: the entry still imports them
-statically, so a plugin that imports React DOM brings it back into the entry's closure, and that
-app keeps today's timing.
+statically, so a plugin that imports React or React DOM brings it back into the entry's closure,
+and that app keeps today's timing.
 
 ### Why the contract holds
 
@@ -190,3 +191,27 @@ work). Medians of 5 rounds in ms, `rsc` / before / after:
   closure goes from 93.1 to 26.8 KB br. The runtime as a whole goes from 93.2 to 95.5 KB br: about
   0.4 KB of code, the rest compression lost to three files instead of one. A navigation's response
   leaves the renderer list out, so navigation data stays within 0.1 KB.
+
+### React with the renderer
+
+The entry first imported React itself, though nothing it runs before rendering uses React: 2.9 KB
+br on every first tap's path. Since 2026-11-22 React loads with React DOM and islx. The files a
+first tap waits for (the entry, the router, the route table and their chunks) go from 27.2 to
+24.6 KB br. The runtime as a whole grows by 0.2 KB br, and each document by about 20 B, for the
+boot's longer preload lists.
+
+Measured with `first-navigation.mjs`, interleaved with `rsc` and `main` at f28cc9ce0 (load average
+3 to 5). Medians of 9 rounds in ms, `rsc` / before / after, 150 ms latency at 1.6 Mbit/s, 80 ms
+tap:
+
+| Section | First tap       |
+| ------- | --------------- |
+| docs    | 263 / 312 / 300 |
+| shop    | 217 / 333 / 321 |
+| blog    | 291 / 375 / 361 |
+| guide   | 298 / 381 / 360 |
+
+- Every section's first tap at 1.6 Mbit/s is 12 to 21 ms faster, a quarter of the gap to `rsc` on
+  guide and docs.
+- At 50 ms latency an instant tap and a 100 ms hover are unchanged within noise (7 rounds; a
+  21-round rerun of docs and shop taps: 116 to 116 ms and 131 to 128 ms).
