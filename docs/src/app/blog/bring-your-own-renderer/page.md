@@ -221,7 +221,6 @@ The file format also turned up three bugs in how Farm handled a renderer's exten
 - **37 places in core still check for React.** Programmatic UI routes, Markdown visual routes, generated JSX metadata images, and React Server Components are React-oriented today. The [feature table](/docs/renderers#feature-support) says which features each official renderer gets, and a custom renderer gets the same as Solid, Vue, and Svelte.
 - **The conformance suite isn't published.** The official renderers run it from `packages/farm-renderer-tests` in the monorepo. Until it ships on npm, the type-check below is how a third-party renderer checks itself.
 - **One renderer per app.** You choose a renderer; you can't mix leaf on one page and React on the next.
-- **I only tested a buffered renderer.** leaf renders to a string. Farm's streaming paths are proven by the official renderers, not by a third-party one.
 
 <span id="write-your-own" className="blog-heading-anchor" />
 
@@ -244,5 +243,7 @@ export const serverContract: FarmServerRendererRuntime = server;
 export const clientContract: FarmRendererClientRuntime = client;
 export const viteContract: FarmRendererViteModule = vite;
 ```
+
+To stream, export `renderToPipeableStream()` or `renderToReadableStream()` from the server module and turn on `node` or `web` under `capabilities.streaming`. leaf doesn't stream, so after this post went up I added a test renderer that is nothing but the contract. It stops halfway through a page until the test lets it continue, and the test checks that the first half reaches the browser first. It streams through both primitives, in development and in production builds. Writing it turned up one more bug: with only `renderToReadableStream()`, development buffered the whole page. That's fixed on `main` too.
 
 The full contract, including the optional exports and how route updates reach an existing root, is in [Renderer modules](/docs/renderers#renderer-modules) and the [renderer capability contract](/docs/renderers#renderer-capability-contract). If you build one and something breaks, that's exactly the bug report I want.

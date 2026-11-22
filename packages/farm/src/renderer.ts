@@ -396,7 +396,15 @@ export interface FarmServerRendererRuntime {
   /** WHATWG streaming primitive used by Web-stream-capable renderers. */
   renderToReadableStream?: (
     element: unknown,
-    options?: FarmRendererRenderOptions,
+    options?: FarmRendererRenderOptions & {
+      /**
+       * Reports a render error after output has started. The response can't change status by
+       * then, so report the error here and close the stream: erroring a stream that has sent
+       * output resets the connection. An error before any output should error the stream, so
+       * Farm answers with the error's status.
+       */
+      onError?(error: unknown): void;
+    },
   ) => ReadableStream<Uint8Array | string> | Promise<ReadableStream<Uint8Array | string>>;
 }
 
