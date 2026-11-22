@@ -291,6 +291,7 @@ import {
   FARM_CLIENT_SOURCEMAPS_DIR,
   resolveFarmClientSourcemap,
 } from "./client-sourcemaps";
+import { writeFarmClientBrotliAssets } from "./client-brotli-assets";
 import { resolveFarmInstrumentationFile } from "../instrumentation";
 import { getFarmPresetRuntime, resolveCloudflareProcessEnvFlags } from "../deployment";
 import { isFarmPreviewDeploymentEnvironment } from "../deployment-environment";
@@ -14705,6 +14706,10 @@ function toFarmNodeResponse(request, response) {
     }),
   );
 
+  // The client output is final here: the hashed stylesheet copy and the farm-client.js shim are
+  // its last writes, so each brotli copy is of the bytes the server sends.
+  if (preset === "node-server") await writeFarmClientBrotliAssets(clientOutputDir);
+
   // Content-hashed client files never change, so they are cached for a year. Vercel gets the same
   // policy from the immutable route postProcessVercelOutput writes, which replaces Nitro's routes.
   const immutableAssets = isVercel
@@ -14745,8 +14750,9 @@ function toFarmNodeResponse(request, response) {
     publicAssets: [{ dir: clientOutputDir, baseURL: "/" }, ...immutableAssets.publicAssets],
     // A self-hosted Node server sends static files itself, so precompress them
     // with gzip and let Nitro serve that by Accept-Encoding. Brotli at Nitro's
-    // fixed top quality cost a docs app ~20 s of build CPU for a small further
-    // saving. Serverless and edge targets sit behind a CDN that compresses.
+    // fixed top quality on every file cost a docs app ~20 s of build CPU, so only
+    // client scripts and stylesheets get a brotli copy (writeFarmClientBrotliAssets).
+    // Serverless and edge targets sit behind a CDN that compresses.
     ...(preset === "node-server" ? { compressPublicAssets: { gzip: true } } : {}),
     // Nitro gzips every server output file at level 9, node_modules included, to
     // print sizes after the build. A self-hosted server is never shipped compressed,
