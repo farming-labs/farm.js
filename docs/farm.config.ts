@@ -113,8 +113,8 @@ export default defineConfig({
   // `databases:connect` key in FARMJS_API_KEY.
   storage: {
     mounts: {
-      stats: farmStorage(),
-      feedback: farmStorage({ schema: feedbackSchema }),
+      stats: farmStorage({ type: "kv" }),
+      feedback: farmStorage({ type: "sql", schema: feedbackSchema }),
     },
   },
   deploy: {
