@@ -6992,10 +6992,11 @@ function rerenderFarmTreeLayouts() {}`;
   return `
 ${rendererClientImports}
 ${isolatedHydrationImport}
-import { installChunkErrorRecovery, SPARouter } from '@farm.js/core/client'
 import { createClientPluginManager } from '@farm.js/core/plugin/client'
+// Not @farm.js/core/client: that module's graph imports react, which other renderers' apps lack.
+import { SPARouter } from '@farm.js/core/internal/spa-router'
 import { isFarmRouteActive } from '@farm.js/core/router'
-import { installFarmLinkPrefetch, isFarmBlockedNavigationURL, readFarmLinkNavigateOptions, rememberFarmLinkLocale, replayFarmQueuedInteraction, scheduleFarmIslandHydration, createFarmSearchParams, searchParamsToObject, setFarmBasePath, setFarmTrailingSlashPreference, stripFarmBasePath } from '@farm.js/core/internal/client-runtime'
+import { installChunkErrorRecovery, installFarmLinkPrefetch, isFarmBlockedNavigationURL, readFarmLinkNavigateOptions, rememberFarmLinkLocale, replayFarmQueuedInteraction, scheduleFarmIslandHydration, createFarmSearchParams, searchParamsToObject, setFarmBasePath, setFarmTrailingSlashPreference, stripFarmBasePath } from '@farm.js/core/internal/client-runtime'
 import { reviveDeferredData } from '@farm.js/core/deferred'
 import {
   createFarmDeploymentMismatchError,

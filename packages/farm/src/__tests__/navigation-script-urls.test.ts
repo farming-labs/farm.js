@@ -187,9 +187,8 @@ describe("generated dev client", () => {
   const viteSource = readFileSync(new URL("../vite.ts", import.meta.url), "utf8");
 
   it("routes navigation through the guarded core SPARouter", () => {
-    expect(viteSource).toContain(
-      "import { installChunkErrorRecovery, SPARouter } from '@farm.js/core/client'",
-    );
+    // The same class @farm.js/core/client exports, from an entry whose graph has no react.
+    expect(viteSource).toContain("import { SPARouter } from '@farm.js/core/internal/spa-router'");
     expect(viteSource).toContain("const spaRouter = new SPARouter({");
   });
 
