@@ -2573,25 +2573,26 @@ importers:
 
   packages/farm-ai:
     dependencies:
-      '@farm.js/core':
-        specifier: workspace:*
-        version: link:../farm
       ai:
         specifier: ^7.0.11
         version: 7.0.30(zod@4.6.7)
-
-  packages/farm-analyzer:
-    dependencies:
-      parse5:
-        specifier: 7.3.0
-        version: 7.3.0
+    devDependencies:
       '@farm.js/core':
         specifier: workspace:*
         version: link:../farm
+
+  packages/farm-analyzer:
+    dependencies:
       es-module-lexer:
         specifier: 2.0.0
         version: 2.0.0
+      parse5:
+        specifier: 7.3.0
+        version: 7.3.0
     devDependencies:
+      '@farm.js/core':
+        specifier: workspace:*
+        version: link:../farm
       '@types/node':
         specifier: ^22.20.5
         version: 22.20.5
@@ -2645,27 +2646,26 @@ importers:
 
   packages/farm-auth0:
     dependencies:
-      '@farm.js/core':
-        specifier: workspace:*
-        version: link:../farm
       '@farm.js/integration-utils':
         specifier: workspace:*
         version: link:../farm-integration-utils
+    devDependencies:
+      '@farm.js/core':
+        specifier: workspace:*
+        version: link:../farm
 
   packages/farm-authjs:
     dependencies:
-      '@farm.js/core':
-        specifier: workspace:*
-        version: link:../farm
       '@farm.js/integration-utils':
         specifier: workspace:*
         version: link:../farm-integration-utils
-
-  packages/farm-autumn:
-    dependencies:
+    devDependencies:
       '@farm.js/core':
         specifier: workspace:*
         version: link:../farm
+
+  packages/farm-autumn:
+    dependencies:
       '@farm.js/integration-utils':
         specifier: workspace:*
         version: link:../farm-integration-utils
@@ -2675,22 +2675,26 @@ importers:
       standardwebhooks:
         specifier: ^1.0.0
         version: 1.0.0
+    devDependencies:
+      '@farm.js/core':
+        specifier: workspace:*
+        version: link:../farm
 
   packages/farm-better-auth:
     dependencies:
-      '@farm.js/core':
-        specifier: workspace:*
-        version: link:../farm
       '@farm.js/integration-utils':
         specifier: workspace:*
         version: link:../farm-integration-utils
-
-  packages/farm-bot:
-    dependencies:
+    devDependencies:
       '@farm.js/core':
         specifier: workspace:*
         version: link:../farm
+
+  packages/farm-bot:
     devDependencies:
+      '@farm.js/core':
+        specifier: workspace:*
+        version: link:../farm
       '@types/node':
         specifier: ^22.20.5
         version: 22.20.5
@@ -2726,11 +2730,10 @@ importers:
         version: 3.5.44(typescript@5.9.3)
 
   packages/farm-cache-redis:
-    dependencies:
+    devDependencies:
       '@farm.js/core':
         specifier: workspace:*
         version: link:../farm
-    devDependencies:
       typescript:
         specifier: ^5.3.3
         version: 5.9.3
@@ -2743,13 +2746,13 @@ importers:
 
   packages/farm-cf-agent:
     dependencies:
-      '@farm.js/core':
-        specifier: workspace:*
-        version: link:../farm
       jsonc-parser:
         specifier: ^3.3.1
         version: 3.3.1
     devDependencies:
+      '@farm.js/core':
+        specifier: workspace:*
+        version: link:../farm
       '@types/node':
         specifier: ^22.20.5
         version: 22.20.5
@@ -2780,15 +2783,16 @@ importers:
       '@clerk/react':
         specifier: ^6.4.3
         version: 6.17.4(react-dom@19.2.8)(react@19.2.4)
-      '@farm.js/core':
-        specifier: workspace:*
-        version: link:../farm
       '@farm.js/integration-utils':
         specifier: workspace:*
         version: link:../farm-integration-utils
       react:
         specifier: ^18.2.0 || ^19.0.0
         version: 19.2.4
+    devDependencies:
+      '@farm.js/core':
+        specifier: workspace:*
+        version: link:../farm
 
   packages/farm-cli:
     dependencies:
@@ -2826,9 +2830,6 @@ importers:
 
   packages/farm-content:
     dependencies:
-      '@farm.js/core':
-        specifier: workspace:*
-        version: link:../farm
       fast-glob:
         specifier: ^3.3.2
         version: 3.3.3
@@ -2851,6 +2852,9 @@ importers:
         specifier: ^2.8.0
         version: 2.9.0
     devDependencies:
+      '@farm.js/core':
+        specifier: workspace:*
+        version: link:../farm
       '@types/node':
         specifier: ^22.20.5
         version: 22.20.5
@@ -2884,9 +2888,6 @@ importers:
 
   packages/farm-convex:
     dependencies:
-      '@farm.js/core':
-        specifier: workspace:*
-        version: link:../farm
       '@farm.js/integration-utils':
         specifier: workspace:*
         version: link:../farm-integration-utils
@@ -2894,6 +2895,9 @@ importers:
         specifier: 2.0.0-alpha.10
         version: 2.0.0-alpha.10
     devDependencies:
+      '@farm.js/core':
+        specifier: workspace:*
+        version: link:../farm
       '@types/node':
         specifier: ^22.20.5
         version: 22.20.5
@@ -2973,9 +2977,6 @@ importers:
 
   packages/farm-email:
     dependencies:
-      '@farm.js/core':
-        specifier: workspace:*
-        version: link:../farm
       '@farm.js/integration-utils':
         specifier: workspace:*
         version: link:../farm-integration-utils
@@ -2989,16 +2990,18 @@ importers:
         specifier: 6.10.0
         version: 6.10.0(@react-email/render@2.0.6)
     devDependencies:
+      '@farm.js/core':
+        specifier: workspace:*
+        version: link:../farm
       '@types/react':
         specifier: 19.2.13
         version: 19.2.13
 
   packages/farm-eve:
-    dependencies:
+    devDependencies:
       '@farm.js/core':
         specifier: workspace:*
         version: link:../farm
-    devDependencies:
       '@types/node':
         specifier: ^22.20.5
         version: 22.20.5
@@ -3020,9 +3023,6 @@ importers:
 
   packages/farm-federation:
     dependencies:
-      '@farm.js/core':
-        specifier: workspace:*
-        version: link:../farm
       '@module-federation/runtime':
         specifier: ^2.9.2
         version: 2.9.2
@@ -3030,6 +3030,9 @@ importers:
         specifier: ^1.23.7
         version: 1.23.7(typescript@5.9.3)(vite@8.3.4)
     devDependencies:
+      '@farm.js/core':
+        specifier: workspace:*
+        version: link:../farm
       '@types/node':
         specifier: ^22.20.5
         version: 22.20.5
@@ -3044,11 +3047,10 @@ importers:
         version: 5.0.5(@opentelemetry/api@1.9.1)(@types/node@22.20.5)(@vitest/coverage-v8@5.0.5)(jsdom@25.0.1)(vite@8.3.4)
 
   packages/farm-health:
-    dependencies:
+    devDependencies:
       '@farm.js/core':
         specifier: workspace:*
         version: link:../farm
-    devDependencies:
       '@types/node':
         specifier: ^22.20.5
         version: 22.20.5
@@ -3064,9 +3066,6 @@ importers:
 
   packages/farm-hints:
     dependencies:
-      '@farm.js/core':
-        specifier: workspace:*
-        version: link:../farm
       '@fontsource-variable/geist-mono':
         specifier: 5.3.0
         version: 5.3.0
@@ -3077,6 +3076,9 @@ importers:
         specifier: ^6.2.1
         version: 6.2.1
     devDependencies:
+      '@farm.js/core':
+        specifier: workspace:*
+        version: link:../farm
       '@types/node':
         specifier: ^22.20.5
         version: 22.20.5
@@ -3094,7 +3096,7 @@ importers:
         version: 5.0.5(@opentelemetry/api@1.9.1)(@types/node@22.20.5)(jsdom@25.0.1)(vite@8.3.4)
 
   packages/farm-integration-utils:
-    dependencies:
+    devDependencies:
       '@farm.js/core':
         specifier: workspace:*
         version: link:../farm
@@ -3119,9 +3121,6 @@ importers:
       '@farm.js/clerk':
         specifier: workspace:*
         version: link:../farm-clerk
-      '@farm.js/core':
-        specifier: workspace:*
-        version: link:../farm
       '@farm.js/email':
         specifier: workspace:*
         version: link:../farm-email
@@ -3152,21 +3151,23 @@ importers:
       '@farm.js/workos':
         specifier: workspace:*
         version: link:../farm-workos
+    devDependencies:
+      '@farm.js/core':
+        specifier: workspace:*
+        version: link:../farm
 
   packages/farm-jobs:
     dependencies:
-      '@farm.js/core':
-        specifier: workspace:*
-        version: link:../farm
       '@farm.js/integration-utils':
         specifier: workspace:*
         version: link:../farm-integration-utils
-
-  packages/farm-mcp:
-    dependencies:
+    devDependencies:
       '@farm.js/core':
         specifier: workspace:*
         version: link:../farm
+
+  packages/farm-mcp:
+    dependencies:
       '@modelcontextprotocol/server':
         specifier: ^2.3.0
         version: 2.3.0
@@ -3174,6 +3175,9 @@ importers:
         specifier: ^4.6.7
         version: 4.6.7
     devDependencies:
+      '@farm.js/core':
+        specifier: workspace:*
+        version: link:../farm
       '@types/node':
         specifier: ^22.20.5
         version: 22.20.5
@@ -3207,13 +3211,13 @@ importers:
 
   packages/farm-msw:
     dependencies:
-      '@farm.js/core':
-        specifier: workspace:*
-        version: link:../farm
       msw:
         specifier: ^2.15.0
         version: 2.15.0(@types/node@22.20.5)(typescript@5.9.3)
     devDependencies:
+      '@farm.js/core':
+        specifier: workspace:*
+        version: link:../farm
       '@types/node':
         specifier: ^22.20.5
         version: 22.20.5
@@ -3257,9 +3261,6 @@ importers:
 
   packages/farm-otel:
     dependencies:
-      '@farm.js/core':
-        specifier: workspace:*
-        version: link:../farm
       '@opentelemetry/api':
         specifier: 1.9.1
         version: 1.9.1
@@ -3285,6 +3286,9 @@ importers:
         specifier: 1.43.0
         version: 1.43.0
     devDependencies:
+      '@farm.js/core':
+        specifier: workspace:*
+        version: link:../farm
       '@types/node':
         specifier: ^20.10.5
         version: 20.19.21
@@ -3294,13 +3298,13 @@ importers:
 
   packages/farm-partytown:
     dependencies:
-      '@farm.js/core':
-        specifier: workspace:*
-        version: link:../farm
       '@qwik.dev/partytown':
         specifier: ^0.14.4
         version: 0.14.4
     devDependencies:
+      '@farm.js/core':
+        specifier: workspace:*
+        version: link:../farm
       '@types/node':
         specifier: ^22.20.5
         version: 22.20.5
@@ -3316,15 +3320,16 @@ importers:
 
   packages/farm-polar:
     dependencies:
-      '@farm.js/core':
-        specifier: workspace:*
-        version: link:../farm
       '@farm.js/integration-utils':
         specifier: workspace:*
         version: link:../farm-integration-utils
       '@polar-sh/sdk':
         specifier: ^0.47.0
         version: 0.47.0
+    devDependencies:
+      '@farm.js/core':
+        specifier: workspace:*
+        version: link:../farm
 
   packages/farm-preact:
     dependencies:
@@ -3370,11 +3375,10 @@ importers:
         version: 5.0.5(@opentelemetry/api@1.9.1)(@types/node@22.20.5)(jsdom@25.0.1)(vite@8.3.4)
 
   packages/farm-prefetch:
-    dependencies:
+    devDependencies:
       '@farm.js/core':
         specifier: workspace:*
         version: link:../farm
-    devDependencies:
       '@types/node':
         specifier: ^22.20.5
         version: 22.20.5
@@ -3423,11 +3427,10 @@ importers:
         version: 5.9.3
 
   packages/farm-progress:
-    dependencies:
+    devDependencies:
       '@farm.js/core':
         specifier: workspace:*
         version: link:../farm
-    devDependencies:
       '@types/node':
         specifier: ^22.20.5
         version: 22.20.5
@@ -3445,11 +3448,10 @@ importers:
         version: 5.0.5(@opentelemetry/api@1.9.1)(@types/node@22.20.5)(jsdom@25.0.1)(vite@8.3.4)
 
   packages/farm-pwa:
-    dependencies:
+    devDependencies:
       '@farm.js/core':
         specifier: workspace:*
         version: link:../farm
-    devDependencies:
       '@types/node':
         specifier: ^22.20.5
         version: 22.20.5
@@ -3514,9 +3516,6 @@ importers:
 
   packages/farm-sanity:
     dependencies:
-      '@farm.js/core':
-        specifier: workspace:*
-        version: link:../farm
       '@farm.js/integration-utils':
         specifier: workspace:*
         version: link:../farm-integration-utils
@@ -3530,6 +3529,9 @@ importers:
       '@farm.js/content':
         specifier: workspace:*
         version: link:../farm-content
+      '@farm.js/core':
+        specifier: workspace:*
+        version: link:../farm
       '@sanity/client':
         specifier: ^8.4.0
         version: 8.7.0(vitest@5.0.5)
@@ -3544,11 +3546,10 @@ importers:
         version: 5.0.5(@opentelemetry/api@1.9.1)(@types/node@22.20.5)(@vitest/coverage-v8@5.0.5)(jsdom@25.0.1)(vite@8.3.4)
 
   packages/farm-scripts:
-    dependencies:
+    devDependencies:
       '@farm.js/core':
         specifier: workspace:*
         version: link:../farm
-    devDependencies:
       '@types/node':
         specifier: ^22.20.5
         version: 22.20.5
@@ -3566,11 +3567,10 @@ importers:
         version: 5.0.5(@opentelemetry/api@1.9.1)(@types/node@22.20.5)(jsdom@25.0.1)(vite@8.3.4)
 
   packages/farm-scroll-restoration:
-    dependencies:
+    devDependencies:
       '@farm.js/core':
         specifier: workspace:*
         version: link:../farm
-    devDependencies:
       '@types/node':
         specifier: ^22.20.5
         version: 22.20.5
@@ -3589,13 +3589,13 @@ importers:
 
   packages/farm-search:
     dependencies:
-      '@farm.js/core':
-        specifier: workspace:*
-        version: link:../farm
       pagefind:
         specifier: ^1.5.2
         version: 1.5.2
     devDependencies:
+      '@farm.js/core':
+        specifier: workspace:*
+        version: link:../farm
       '@types/node':
         specifier: ^22.20.5
         version: 22.20.5
@@ -3610,11 +3610,10 @@ importers:
         version: 5.0.5(@opentelemetry/api@1.9.1)(@types/node@22.20.5)(@vitest/coverage-v8@5.0.5)(jsdom@25.0.1)(vite@8.3.4)
 
   packages/farm-sentry:
-    dependencies:
+    devDependencies:
       '@farm.js/core':
         specifier: workspace:*
         version: link:../farm
-    devDependencies:
       '@sentry/node':
         specifier: ^10.71.0
         version: 10.71.0(@opentelemetry/core@2.12.0)(supports-color@10.2.2)
@@ -3664,13 +3663,13 @@ importers:
 
   packages/farm-strapi:
     dependencies:
-      '@farm.js/core':
-        specifier: workspace:*
-        version: link:../farm
       '@farm.js/integration-utils':
         specifier: workspace:*
         version: link:../farm-integration-utils
     devDependencies:
+      '@farm.js/core':
+        specifier: workspace:*
+        version: link:../farm
       '@strapi/client':
         specifier: ^1.6.2
         version: 1.6.2(supports-color@10.2.2)
@@ -3686,21 +3685,19 @@ importers:
 
   packages/farm-stripe:
     dependencies:
-      '@farm.js/core':
-        specifier: workspace:*
-        version: link:../farm
       '@farm.js/integration-utils':
         specifier: workspace:*
         version: link:../farm-integration-utils
       stripe:
         specifier: ^20.4.1
         version: 20.4.1(@types/node@22.20.5)
-
-  packages/farm-stylex:
-    dependencies:
+    devDependencies:
       '@farm.js/core':
         specifier: workspace:*
         version: link:../farm
+
+  packages/farm-stylex:
+    dependencies:
       '@stylexjs/unplugin':
         specifier: ^0.19.0
         version: 0.19.0(supports-color@10.2.2)(unplugin@2.3.11)
@@ -3708,6 +3705,9 @@ importers:
         specifier: ^2.3.11
         version: 2.3.11
     devDependencies:
+      '@farm.js/core':
+        specifier: workspace:*
+        version: link:../farm
       '@stylexjs/stylex':
         specifier: ^0.19.0
         version: 0.19.0
@@ -3726,9 +3726,6 @@ importers:
 
   packages/farm-supabase:
     dependencies:
-      '@farm.js/core':
-        specifier: workspace:*
-        version: link:../farm
       '@farm.js/integration-utils':
         specifier: workspace:*
         version: link:../farm-integration-utils
@@ -3738,6 +3735,10 @@ importers:
       '@supabase/supabase-js':
         specifier: ^2.99.2
         version: 2.99.2
+    devDependencies:
+      '@farm.js/core':
+        specifier: workspace:*
+        version: link:../farm
 
   packages/farm-svelte:
     dependencies:
@@ -3774,11 +3775,10 @@ importers:
         version: 5.0.5(@opentelemetry/api@1.9.1)(@types/node@22.20.5)(jsdom@25.0.1)(vite@8.3.4)
 
   packages/farm-sync:
-    dependencies:
+    devDependencies:
       '@farm.js/core':
         specifier: workspace:*
         version: link:../farm
-    devDependencies:
       '@farming-labs/orm':
         specifier: 0.0.66
         version: 0.0.66
@@ -3845,12 +3845,13 @@ importers:
 
   packages/farm-unkey:
     dependencies:
-      '@farm.js/core':
-        specifier: workspace:*
-        version: link:../farm
       '@farm.js/integration-utils':
         specifier: workspace:*
         version: link:../farm-integration-utils
+    devDependencies:
+      '@farm.js/core':
+        specifier: workspace:*
+        version: link:../farm
 
   packages/farm-vue:
     dependencies:
@@ -3891,9 +3892,6 @@ importers:
 
   packages/farm-wasm:
     dependencies:
-      '@farm.js/core':
-        specifier: workspace:*
-        version: link:../farm
       esbuild:
         specifier: ^0.28.0
         version: 0.28.1
@@ -3901,6 +3899,9 @@ importers:
         specifier: ^3.6.0
         version: 3.6.0(vite@8.3.4)
     devDependencies:
+      '@farm.js/core':
+        specifier: workspace:*
+        version: link:../farm
       '@types/node':
         specifier: ^22.20.5
         version: 22.20.5
@@ -3919,13 +3920,13 @@ importers:
 
   packages/farm-webhook:
     dependencies:
-      '@farm.js/core':
-        specifier: workspace:*
-        version: link:../farm
       '@farm.js/webhooks':
         specifier: workspace:*
         version: link:../farm-webhooks
     devDependencies:
+      '@farm.js/core':
+        specifier: workspace:*
+        version: link:../farm
       '@types/node':
         specifier: ^22.20.5
         version: 22.20.5
@@ -3961,11 +3962,10 @@ importers:
         version: 4.6.7
 
   packages/farm-webmcp:
-    dependencies:
+    devDependencies:
       '@farm.js/core':
         specifier: workspace:*
         version: link:../farm
-    devDependencies:
       '@types/node':
         specifier: ^22.20.5
         version: 22.20.5
@@ -3981,21 +3981,19 @@ importers:
 
   packages/farm-workos:
     dependencies:
-      '@farm.js/core':
-        specifier: workspace:*
-        version: link:../farm
       '@farm.js/integration-utils':
         specifier: workspace:*
         version: link:../farm-integration-utils
       '@workos-inc/node':
         specifier: ^8.9.0
         version: 8.9.0
-
-  packages/farmjs-plugin:
-    dependencies:
+    devDependencies:
       '@farm.js/core':
         specifier: workspace:*
         version: link:../farm
+
+  packages/farmjs-plugin:
+    dependencies:
       '@farming-labs/strata':
         specifier: 0.1.2
         version: 0.1.2(react@19.2.8)
@@ -4021,6 +4019,9 @@ importers:
         specifier: ^0.0.4
         version: 0.0.4
     devDependencies:
+      '@farm.js/core':
+        specifier: workspace:*
+        version: link:../farm
       '@types/node':
         specifier: ^22.20.5
         version: 22.20.5

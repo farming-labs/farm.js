@@ -35,9 +35,14 @@
     "test": "echo 'No tests in this package'"
   },
   "dependencies": {
-    "@farm.js/core": "workspace:*",
     "@farm.js/integration-utils": "workspace:*",
     "autumn-js": "^1.2.7",
     "standardwebhooks": "^1.0.0"
+  },
+  "devDependencies": {
+    "@farm.js/core": "workspace:*"
+  },
+  "peerDependencies": {
+    "@farm.js/core": ">=0.1.78 <0.3.0"
   }
 }
