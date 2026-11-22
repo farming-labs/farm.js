@@ -194,8 +194,25 @@ export const clientContract: FarmRendererClientRuntime = client;
 export const viteContract: FarmRendererViteModule = vite;
 ```
 
-The official renderers also run the shared conformance suite in `packages/farm-renderer-tests`, which
-renders through these exports in Node and jsdom. It is not published to npm yet.
+The official renderers also run a shared conformance suite, published as `@farm.js/renderer-tests`.
+It calls these exports in Node and jsdom and fails where a renderer behaves differently from the
+official ones:
+
+```bash
+pnpm add -D @farm.js/renderer-tests vitest
+```
+
+```ts
+// @vitest-environment node
+import { defineRendererServerConformance } from "@farm.js/renderer-tests";
+import * as server from "./server";
+
+defineRendererServerConformance(server);
+```
+
+`defineRendererClientConformance()` checks the client module and needs a jsdom environment. The
+[package README](https://github.com/farming-labs/farm.js/tree/main/packages/farm-renderer-tests)
+lists every suite and what it checks.
 
 ## Client state in a custom renderer
 
