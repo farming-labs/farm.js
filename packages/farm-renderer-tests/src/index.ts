@@ -54,6 +54,7 @@ export interface RendererRootFixture {
 
 export interface RendererClientFixture {
   createElement(type: unknown, props?: unknown, ...children: unknown[]): unknown;
+  Suspense: unknown;
   createRoot(container: Element): RendererRootFixture;
   hydrateRoot(container: Element, element: unknown): RendererRootFixture;
 }
@@ -355,6 +356,14 @@ export function defineRendererClientConformance(options: {
   reconcilesRerenders: boolean;
 }): void {
   describe(`${options.name} client conformance`, () => {
+    it("exports by name what Farm's client entries import", () => {
+      // The generated entries import these by name; a renderer needs no default export.
+      expect(typeof options.client.createElement).toBe("function");
+      expect(options.client.Suspense).toBeTruthy();
+      expect(typeof options.client.createRoot).toBe("function");
+      expect(typeof options.client.hydrateRoot).toBe("function");
+    });
+
     it(
       options.reconcilesRerenders
         ? "keeps matching DOM and its state when an existing root re-renders"

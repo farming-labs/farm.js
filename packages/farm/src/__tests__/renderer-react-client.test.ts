@@ -10,6 +10,7 @@ defineRendererClientConformance({
   client: {
     ...clientRoots,
     createElement: serverRuntime.createElement,
+    Suspense: serverRuntime.Suspense,
   },
   server: serverRuntime,
 });
