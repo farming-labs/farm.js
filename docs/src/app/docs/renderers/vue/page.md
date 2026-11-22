@@ -98,17 +98,17 @@ uses `createSSRApp` again to claim the existing browser markup.
 ## Call FARMJS server code
 
 API routes, endpoint schemas, server functions, middleware, cache, storage, and observability are
-renderer-neutral. Use the generated typed API client from the SFC:
+renderer-neutral. Call them from the SFC with `apiClient`, created once in `src/lib/api.ts` as shown in [API Client](/docs/api-client#create-both-callers-once):
 
 ```vue
 <script setup lang="ts">
 import { ref } from "vue";
-import { api } from "../lib/api.generated";
+import { apiClient } from "../lib/api";
 
 const message = ref("Ready");
 
 async function callServer() {
-  const result = await api.greeting.post({ body: { name: "Vue" } });
+  const result = await apiClient.greeting.post({ body: { name: "Vue" } });
   if (result.data) message.value = result.data.message;
 }
 </script>
@@ -119,7 +119,8 @@ async function callServer() {
 ```
 
 The endpoint can call a validated `createServerFn`; its handler, database access, and secrets remain
-in the server bundle.
+in the server bundle. Browser code can't import the server function itself yet: only React's server-function
+transform turns that import into a call to the server, so other renderers go through an API route.
 
 ## Install Vue plugins
 
@@ -156,19 +157,20 @@ module apply on the next request.
 
 ## Current boundaries
 
-Use the Vue-native composables for reactive router, action, server-query, theme, and i18n state:
+Use the Vue-native composables for reactive router, theme, and i18n state:
 
 ```ts
-import { useAction, useRouter, useTheme } from "@farm.js/vue/bindings";
+import { useRouter, useTheme } from "@farm.js/vue/bindings";
 
 const router = useRouter();
-const save = useAction(saveProduct);
 const theme = useTheme();
 
-await save({ name: "FARMJS" });
 await router.push("/products");
 theme.toggleTheme();
 ```
+
+`useAction` and `useServerQuery` take a server function or server query, which browser code can't
+import outside React's server-function transform yet, so call server code through `apiClient`.
 
 The composables return Vue refs and computed values. `useStore(store)` binds your own state, a
 store from `createStore` in `@farm.js/core/renderer-client`, to a read-only ref; see

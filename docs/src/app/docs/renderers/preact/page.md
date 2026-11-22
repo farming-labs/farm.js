@@ -73,19 +73,19 @@ behavior.
 ## Call FARMJS server code
 
 API routes, endpoint schemas, server functions, middleware, cache, storage, and observability are
-renderer-neutral. Use the generated API client from Preact UI:
+renderer-neutral. Call them from Preact UI with `apiClient`, created once in `src/lib/api.ts` as shown in [API Client](/docs/api-client#create-both-callers-once):
 
 ```tsx
 "use client";
 
 import { useState } from "preact/hooks";
-import { api } from "../lib/api.generated";
+import { apiClient } from "../lib/api";
 
 export function Greeting() {
   const [message, setMessage] = useState("Ready");
 
   const callServer = async () => {
-    const result = await api.greeting.post({ body: { name: "Preact" } });
+    const result = await apiClient.greeting.post({ body: { name: "Preact" } });
     if (result.data) setMessage(result.data.message);
   };
 
@@ -94,7 +94,8 @@ export function Greeting() {
 ```
 
 The endpoint can call a validated `createServerFn`; its handler, database access, and secrets stay
-in the server bundle.
+in the server bundle. Browser code can't import the server function itself yet: only React's server-function
+transform turns that import into a call to the server, so other renderers go through an API route.
 
 ## React compatibility
 

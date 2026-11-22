@@ -67,7 +67,7 @@ The higher-level framework features below use those adapter primitives:
 | Basic create-app starter                         | Available                | Available                       | Available            | Available            | Available            |
 | Better Auth create-app starter                   | Available                | Native                          | Native               | Native               | Native               |
 | Router state and programmatic navigation         | Available                | Through `preact/compat`         | Solid binding        | Vue binding          | Svelte store         |
-| Callable actions and server queries              | Available                | Through `preact/compat`         | Solid binding        | Vue binding          | Svelte store         |
+| Callable actions and server queries              | Available                | Not yet                         | Not yet              | Not yet              | Not yet              |
 | Client theme and i18n state                      | Available                | Through `preact/compat`         | Solid binding        | Vue binding          | Svelte store         |
 | Shared client stores (`createStore`)             | Available                | Through `preact/compat`         | Solid binding        | Vue binding          | Svelte store         |
 | Typed `Link` components                          | Available                | Through `preact/compat`         | Solid component      | Vue component        | Svelte component     |
@@ -117,6 +117,13 @@ share FARMJS's existing browser cache, invalidation, deduplication, stale-while-
 and reconnect behavior across all bindings. During server rendering a query binding returns an
 idle snapshot and starts no read, matching React's `useServerQuery`; the browser loads it after
 hydration.
+
+These bindings take a server function or server query, and browser code can only import one through
+React's server-function transform today (`experimental.serverActions` with `@farm.js/plugin/rsc` or
+with islands mode). In Preact, Solid, Vue, Svelte, and custom renderers that import stops the build with
+`CLIENT_SERVER_FUNCTION`. Until a renderer-neutral transport lands, call server code through an API
+route and `apiClient`, as the
+[Solid example](https://github.com/farming-labs/farm.js/tree/main/examples/solid-renderer) does.
 
 ### Shared client state
 
