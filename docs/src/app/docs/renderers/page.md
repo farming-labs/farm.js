@@ -72,7 +72,8 @@ The higher-level framework features below use those adapter primitives:
 | Shared client stores (`createStore`)             | Available                | Through `preact/compat`         | Solid binding        | Vue binding          | Svelte store         |
 | Renderer-specific `Link` and form components     | Available                | Through `preact/compat`         | Not yet              | Not yet              | Not yet              |
 | Programmatic UI routes                           | Available                | Compatibility surface           | React-oriented today | React-oriented today | React-oriented today |
-| Markdown/MDX visual routes and docs adapter      | Available                | Compatibility surface           | React-oriented today | React-oriented today | React-oriented today |
+| Markdown and MDX pages (`page.md`)               | Available                | Available                       | Available            | Available            | Available            |
+| Docs adapter                                     | Available                | Compatibility surface           | React-oriented today | React-oriented today | React-oriented today |
 | Generated JSX metadata images                    | Available                | Compatibility surface           | React-oriented today | React-oriented today | React-oriented today |
 | React Server Components and optimized boundaries | Available experimentally | Not applicable                  | Not applicable       | Not applicable       | Not applicable       |
 | Other integration UI providers and starters      | Available                | Provider-specific compatibility | React-oriented today | React-oriented today | React-oriented today |
@@ -376,6 +377,9 @@ instantiating them.
 Async plain function components are not part of this contract. Official adapters reject them with
 an actionable error instead of rendering a promise, an empty string, or `[object Object]`. Resolve
 the data before creating the element tree or use the renderer's native asynchronous primitives.
+A page is the exception: with any renderer but React, Farm awaits an async page component itself,
+in development and in production builds, and hands the renderer the elements it returns. That's
+how `page.md` pages render with every renderer.
 
 The field defaults to `false`, so a renderer whose adapter has not been taught to handle function
 components fails with a clear error naming the renderer rather than rendering something broken.

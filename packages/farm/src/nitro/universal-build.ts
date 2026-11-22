@@ -7840,7 +7840,7 @@ function renderFarmServerTreeLayout(Layout, props, outlets) {
       source: ${JSON.stringify(route.source ?? "")},
       filePath: ${JSON.stringify(toBakedMarkdownSourcePath(config.root, route.modulePath))},
       components: farmMdxComponents,
-      config: farmMdxConfig,
+      config: farmMdxConfig,${isReactRenderer(config.renderer) ? "" : "\n      renderer: React,"}
     }),
     markdownSource: {
       source: ${JSON.stringify(route.source ?? "")},
