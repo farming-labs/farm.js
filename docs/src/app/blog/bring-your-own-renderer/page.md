@@ -65,6 +65,8 @@ That's a small contract. Small enough that a weekend library should be able to m
 
 leaf has the parts you would expect. Elements are plain objects, components are functions, state lives in hooks, and the browser patches the live DOM in place. There are no keys and no scheduler, and nothing suspends, so `Suspense` just renders its children.
 
+You can read it and run it. A version of leaf and its adapter is in the repo at [`examples/custom-renderer`](https://github.com/farming-labs/farm.js/tree/main/examples/custom-renderer), with an app, the conformance suite, and browser tests that run it in development and in a production build. That version is plain JavaScript with type declarations, the shape a published package has, so its line counts and a few names differ from the snippets here.
+
 The library is 316 lines for the core, 49 for `renderToString`, and 20 for the JSX runtime. The Farm adapter is smaller. The server module is a re-export with a name:
 
 ```ts
@@ -351,15 +353,18 @@ Either way, ui-sdk is a beta (`0.1.0-beta.13`). Both ways get better the day it 
 
 ## What still needs work
 
-"You can bring your own renderer" is true for the core path: routes, layouts, SSR, hydration, navigation, server functions, and production output. It is not true for everything Farm does, and I would rather say so here than in an issue later.
+"You can bring your own renderer" is true for the core path: routes, layouts, SSR, hydration, navigation, server functions called from server code, and production output. It is not true for everything Farm does, and I would rather say so here than in an issue later.
 
 - **Some features are still React-oriented.** React Server Components are React-only today. The [feature table](/docs/renderers#feature-support) says which features each official renderer gets, and a custom renderer gets the same as Solid, Vue, and Svelte. Markdown pages, generated metadata images, and programmatic UI routes were on this list when the post went up. All three now work with any renderer on `main`.
 - **The conformance suite isn't on npm yet.** It's `@farm.js/renderer-tests` on `main` and ships in the next release. Until then, the type-check below is how a third-party renderer checks itself.
+- **Browser code can't import a server function yet.** Importing a `createServerFn` or `createServerQuery` module into a client component needs Farm's server-actions transform, which today comes only with React Server Components or islands, and both are React-only. Until that changes, browser code calls an API route through the typed API client, the way the example's "Plant barley" button does.
 - **One renderer per app.** You choose a renderer; you can't mix leaf on one page and React on the next.
 
 <span id="write-your-own" className="blog-heading-anchor" />
 
 ## Write your own
+
+The quickest start is [`examples/custom-renderer`](https://github.com/farming-labs/farm.js/tree/main/examples/custom-renderer). Copy `farm-leaf/`, point it at your library instead of leaf, and keep its tests: they run the conformance suite and type-check each module against Farm's contract types.
 
 If your library can build an element tree, render it to a string, and patch or hydrate the DOM, it can be a Farm renderer. If it has its own file format, list the extensions in `componentExtensions` and compile those files in the Vite module. Write the descriptor, write the three modules, and check them against the types Farm imports:
 
