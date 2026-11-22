@@ -45,7 +45,8 @@ a client navigation, and page errors are counted.
 client entry loading React DOM lazily (RFC 0010). Bytes and first navigations over a network
 again on 2026-11-22, with a layout root that waits kept waiting through a navigation (RFC 0011),
 and bytes once more that day, with a navigation before islx loads naming the values the page holds,
-and again with React loading beside React DOM. Averages; KB = 1024 bytes.
+again with React loading beside React DOM, and again with React DOM and islx waiting for an island
+that is due. Averages; KB = 1024 bytes.
 
 Four sections of the app:
 
@@ -64,11 +65,11 @@ Four sections of the app:
 | Section | Engine    | Document, br (raw) | First-load JS, br | Navigation data, br (raw) | Navigation JS, br |
 | ------- | --------- | ------------------ | ----------------- | ------------------------- | ----------------- |
 | docs    | `rsc`     | 16.3 KB (76.4 KB)  | 71.0 KB           | 12.0 KB (37.5 KB)         | 0                 |
-| docs    | `islands` | 16.2 KB (70.1 KB)  | 2.2 KB            | 2.7 KB (7.6 KB)           | 9.6 KB            |
+| docs    | `islands` | 16.2 KB (70.1 KB)  | 2.2 KB            | 2.7 KB (7.6 KB)           | 2.5 KB            |
 | shop    | `rsc`     | 5.5 KB (33.2 KB)   | 71.0 KB           | 3.8 KB (13.2 KB)          | 0                 |
 | shop    | `islands` | 5.9 KB (31.0 KB)   | 2.2 KB            | 4.4 KB (20.0 KB)          | 2.5 KB            |
 | blog    | `rsc`     | 17.9 KB (379.5 KB) | 71.0 KB           | 10.8 KB (203.7 KB)        | 0                 |
-| blog    | `islands` | 9.1 KB (127.6 KB)  | 2.2 KB            | 9.2 KB (127.7 KB)         | 9.6 KB            |
+| blog    | `islands` | 9.1 KB (127.6 KB)  | 2.2 KB            | 9.2 KB (127.7 KB)         | 2.5 KB            |
 | guide   | `rsc`     | 18.0 KB (379.8 KB) | 71.0 KB           | 10.9 KB (203.9 KB)        | 0                 |
 | guide   | `islands` | 9.5 KB (129.2 KB)  | 2.2 KB            | 9.6 KB (129.4 KB)         | 2.5 KB            |
 
@@ -78,8 +79,10 @@ sections 10 and 11). The client runtime, about 95 KB, arrives with the first nav
 entry and router (about 25 KB), then React, React DOM and islx (about 71 KB), which a navigation
 that swaps its page in does not wait for. That made it 2.5 KB larger: about 0.4 KB of code that
 loads the renderer and holds clicks meanwhile, and the rest compression lost to four files instead
-of one. On shop and guide the ten navigations load only the entry and router: the layout's root
-keeps waiting for an interaction through them (RFC 0011), so React, React DOM and islx never load.
+of one. In every section the ten navigations load only the entry and router: React, React DOM and
+islx load with the first island that is due, and the islands of these pages wait for a click (on
+shop and guide so does the layout's root, RFC 0011), so they never load. Until 2026-11-22 they
+loaded with the entry on docs and blog, 9.6 KB per navigation, more in total than `rsc`'s 71 KB.
 
 ### Time (`timing.mjs`)
 

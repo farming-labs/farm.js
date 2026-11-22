@@ -1,7 +1,7 @@
 # A first navigation that does not wait for the renderer
 
-Status: Implemented (islands mode, web) in #3061. React joined the renderer it loads later (see
-Results).
+Status: Implemented (islands mode, web) in #3061. React joined the renderer it loads later, and
+islands that wait for their triggers no longer load it (see Results).
 
 ## Problem
 
@@ -71,8 +71,8 @@ to hydrate what the page holds.
    (`generateClientHydrationEntry` in `packages/farm/src/nitro/universal-build.ts`) imports none of
    React, React DOM or islx. `loadFarmRenderer()` imports `react`, `react-dom/client` and
    `@farm.js/core/internal/islands-runtime` together, once, and sets `React`, `createRoot`,
-   `hydrateRoot` and the islands runtime. Whatever renders or hydrates awaits it first: the entry's
-   first hydration, a route that renders its page component or its hydrating layouts
+   `hydrateRoot` and the islands runtime. Whatever renders or hydrates awaits it first: the first
+   island that is due (item 2), a route that renders its page component or its hydrating layouts
    (`loadRouteComponent`, `createMatchedHydrationRoute`), and docs search. Once it has settled, an
    await costs a microtask. A chunk that fails to load is requested again on the next call.
 2. **The streamed path renders first.** The router swaps the markup, reconciles the head, writes
@@ -80,7 +80,12 @@ to hydrate what the page holds.
    runtime without waiting. Until islx loads, that runtime is a stand-in: `hydrate`, `dispose`
    and `endStream` wait for islx in the order they were called, and `carryOver` applies only to an
    island that has hydrated. A navigation that replaces the page before islx arrives disposes its
-   islands in order. Islands hydrate by their strategies, as on a first load.
+   islands in order. Islands hydrate by their strategies, as on a first load, and the stand-in
+   loads islx with the first that is due, by the rules the boot follows (`watchFarmIslandTriggers`):
+   at once for an island that hydrates at load, holds a click, or sits in a Suspense boundary the
+   browser must finish, else on an island's idle, visible or interaction trigger, or on a press or
+   focus in a form, which islx posts without a page load. A page whose islands all wait loads none
+   of it, whether the entry ran for a link or a navigation brought the page.
 3. **Islands keep a click.** The boot holds clicks on islands until the entry runs. From then
    until islx loads, the entry holds clicks and submits on islands that have not hydrated, in the
    same queue (`holdFarmIslandInteractions`), and each island's scheduler replays what it finds
@@ -215,3 +220,24 @@ tap:
   guide and docs.
 - At 50 ms latency an instant tap and a 100 ms hover are unchanged within noise (7 rounds; a
   21-round rerun of docs and shop taps: 116 to 116 ms and 131 to 128 ms).
+
+### Islands that wait
+
+The stand-in first loaded islx with any hydration, so the entry's own start loaded it on a page
+whose islands all wait for a click, as did every navigation to one: about 71 KB br the visit never
+ran, downloading alongside the page a second tap asks for. Since 2026-11-22 it loads with the
+first island that is due. Measured with `measure.mjs` against `main` at f7ec6b9cb (ten navigations
+after a cold visit, averaged; KB br):
+
+| Section | JavaScript per navigation, before / after |
+| ------- | ----------------------------------------- |
+| docs    | 9.6 / 2.5                                 |
+| blog    | 9.6 / 2.5                                 |
+| shop    | 2.5 / 2.5                                 |
+| guide   | 2.5 / 2.5                                 |
+
+- A docs or blog visit that navigates ten times loads 27 KB of JavaScript instead of 98, against
+  71 KB with `rsc`. Documents and navigation data are unchanged.
+- A first tap does not change: at 1.6 Mbit/s the renderer started after the page had mostly
+  arrived (9 interleaved rounds, `rsc` / before / after: docs 265 / 291 / 285 ms, shop 218 / 316 /
+  313, blog 286 / 346 / 344, guide 284 / 351 / 354; load average 12 to 30).
