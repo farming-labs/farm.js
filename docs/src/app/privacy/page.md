@@ -5,7 +5,7 @@ description: "What farmjs.dev collects, where it goes, and how to reach Farming 
 
 # Privacy
 
-This page describes what farmjs.dev, the Farm.js website and documentation run by [Farming Labs](https://farming-labs.dev), collects when you visit it and when you use its tools. It is written from the site's source code, which is public in the [`docs/`](https://github.com/farming-labs/farm.js/tree/main/docs) folder of the Farm.js repository. Last updated November 13, 2026.
+This page describes what farmjs.dev, the Farm.js website and documentation run by [Farming Labs](https://farming-labs.dev), collects when you visit it and when you use its tools. It is written from the site's source code, which is public in the [`docs/`](https://github.com/farming-labs/farm.js/tree/main/docs) folder of the Farm.js repository. Last updated November 21, 2026.
 
 ## In short
 
@@ -35,7 +35,7 @@ farmjs.dev is hosted on [Vercel](https://vercel.com). Like any web server, Verce
 
 **Open in AI.** The docs page menu links to ChatGPT, Claude, Cursor, and other assistants with a prompt that includes the page address. Nothing is sent to them unless you click, and then their own policies apply.
 
-**Agent feedback.** Agents can post feedback about the docs to `/api/docs?feedback=agent` or through the docs MCP server. The site checks the shape of the feedback and does not store it.
+**Agent feedback.** Agents can post feedback about the docs to `/api/docs?feedback=agent` or through the docs MCP server. The site stores what the agent sends (the task, the outcome, the issues it lists, and the docs page and locale it names) with the time, in a database hosted on Farm.js Infrastructure at `app.farmjs.dev`. It stores no IP address, user agent, or other identifier of the caller. Farming Labs reads the feedback to fix the docs.
 
 The blog shows its author's avatar from `avatars.githubusercontent.com`, and the site's fonts, images, and videos are served from farmjs.dev.
 
