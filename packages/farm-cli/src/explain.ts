@@ -6,6 +6,7 @@ import {
   loadConfig,
   mergeFarmRouteRuntimeConfigs,
   resolveConfig,
+  resolveFarmComponentExtensions,
   resolveFarmRouteRuleRuntimeConfig,
   resolveFarmRouteRuntimeConfig,
   resolveRouteRenderingConfig,
@@ -16,7 +17,6 @@ import { existsSync, readFileSync, readdirSync, realpathSync } from "node:fs";
 import path from "node:path";
 import pc from "picocolors";
 
-const ROUTE_EXTENSIONS = ["tsx", "ts", "jsx", "js", "vue", "mdx", "md"] as const;
 const MIDDLEWARE_EXTENSIONS = ["ts", "tsx", "js", "jsx", "mjs", "cjs"] as const;
 const SOCIAL_IMAGE_EXTENSIONS = [
   "tsx",
@@ -109,7 +109,7 @@ export async function explainFarmRoute(
     config,
     normalizedPathname,
     "layout",
-    ROUTE_EXTENSIONS,
+    routeExtensions(config),
   );
   const middleware = collectMiddleware(
     root,
@@ -228,11 +228,13 @@ function discoverMatchingPages(
   pathname: string,
 ) {
   const candidates: PageCandidate[] = [];
+  const extensions = new Set(routeExtensions(config));
   for (const [priority, source] of getFarmSourceRoots(config).entries()) {
     const appDirectory = path.join(source.root, source.srcDir, "app");
     if (existsSync(appDirectory)) {
       for (const filePath of walkFiles(appDirectory)) {
-        if (!/^page\.(?:tsx?|jsx?|vue|svelte|mdx?)$/.test(path.basename(filePath))) continue;
+        const page = /^page\.([^./]+)$/.exec(path.basename(filePath));
+        if (!page || !extensions.has(page[1]!.toLowerCase())) continue;
         const relativeDirectory = path.relative(appDirectory, path.dirname(filePath));
         if (
           relativeDirectory.split(path.sep).includes("api") ||
@@ -348,6 +350,17 @@ function matchRoutePattern(pattern: string, pathname: string) {
   }
 
   return pathIndex === pathSegments.length ? { params, score } : null;
+}
+
+/** Page and layout extensions, without the dot: the renderer's component extensions and Markdown. */
+function routeExtensions(config: Awaited<ReturnType<typeof resolveConfig>>): string[] {
+  return [
+    ...resolveFarmComponentExtensions(config.renderer.componentExtensions).map((extension) =>
+      extension.slice(1),
+    ),
+    "mdx",
+    "md",
+  ];
 }
 
 function collectInheritedRouteFiles(
