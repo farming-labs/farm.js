@@ -1379,6 +1379,7 @@ export class RouteManager {
                 : undefined,
             }),
           config: mdxConfig,
+          renderer: isReactRenderer(this.config.renderer) ? undefined : this.rendererRuntime,
         });
       }
 

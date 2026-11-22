@@ -3079,7 +3079,7 @@ Choose React when the application needs the complete built-in client layer:
 - `useAction`, fetcher forms, mutations, and server-query hooks;
 - `useTheme`, `useLocale`, translations, and the built-in auth hook;
 - integration providers and generated integration UI;
-- Markdown/MDX visual routes and the docs adapter;
+- interactive islands inside Markdown pages, and the docs adapter;
 - generated JSX metadata images;
 - experimental React Server Components and optimized Strata boundaries.
 

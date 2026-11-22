@@ -23,7 +23,7 @@ export {
 
 export async function createFarmMarkdownRouteModuleFromFile(
   filePath: string,
-  options: Pick<FarmMarkdownPageModuleInput, "components" | "config"> = {},
+  options: Pick<FarmMarkdownPageModuleInput, "components" | "config" | "renderer"> = {},
 ) {
   const source = await readFile(filePath, "utf8");
   return createFarmMarkdownRouteModule({
@@ -31,6 +31,7 @@ export async function createFarmMarkdownRouteModuleFromFile(
     filePath,
     components: options.components,
     config: options.config,
+    renderer: options.renderer,
   } satisfies FarmMarkdownPageModuleInput);
 }
 
