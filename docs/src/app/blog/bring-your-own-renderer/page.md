@@ -212,6 +212,83 @@ There's one exception to Farm not reading your file. Farm decides whether a page
 
 The file format also turned up three bugs in how Farm handled a renderer's extensions. A new `page.leaf` wasn't served until you restarted `farm dev`, and new `.svelte` and `.vue` pages had the same bug. A parallel-route slot like `@modal/page.leaf` was served as a page. And `farm explain` didn't find `.leaf` routes. All three are fixed on `main` and ship in the next release.
 
+<span id="components-without-an-adapter" className="blog-heading-anchor" />
+
+## Components without an adapter
+
+Sooner or later a UI library wants a component library, and component libraries ship one adapter per framework. leaf will never get one.
+
+[ui-sdk](https://ui-sdk.dev) has a way around that. Its behaviors, from toggles and menus to dialogs and keyboard focus, live in a framework-free core. It has adapters for React, Vue, Svelte, and Solid, and one more build as web components. **A custom element is just a tag, so any renderer that can write HTML can use it.** That includes leaf, with no adapter.
+
+The page writes the element and imports its module:
+
+```tsx
+// src/app/editor/page.tsx
+"use client";
+
+import "@ui-sdk/web/toggle";
+
+export const hydrate = true;
+
+export default function Editor() {
+  return (
+    <ui-toggle default-pressed>
+      <button type="button" aria-pressed="true">
+        Bold
+      </button>
+    </ui-toggle>
+  );
+}
+```
+
+Three things make it work:
+
+1. The renderer writes `<ui-toggle>` into the server HTML like any other tag.
+2. `export const hydrate = true` sends the page module to the browser. The import registers the tag there, and the browser upgrades the element that's already on the page.
+3. The same import also runs on the server while Farm renders the page. That's safe: every ui-sdk element registers through one helper that does nothing when `customElements` doesn't exist.
+
+The catch is ARIA. ui-sdk computes the toggle's `aria-pressed` in the browser, after the upgrade. The HTML your server sends, which is what a screen reader or an agent reading the page gets first, only has what you wrote. That's why the example writes `aria-pressed="true"` to match `default-pressed`.
+
+Farm can write it for you. A plugin's `render.html` hook gets the finished HTML from any renderer, in development and in production:
+
+```ts
+// farm.config.ts
+import { defineConfig } from "@farm.js/core";
+import { definePlugin } from "@farm.js/core/plugin";
+import { leaf } from "farm-leaf";
+
+const toggleAria = definePlugin({
+  name: "demo:ui-toggle-aria",
+  render: {
+    html(html) {
+      // A demo. A real plugin parses the HTML and asks the primitive for its attributes.
+      return html.replace(
+        /(<ui-toggle[^>]*\bdefault-pressed\b[^>]*>\s*<button type="button")>/g,
+        '$1 aria-pressed="true">',
+      );
+    },
+  },
+});
+
+export default defineConfig({ renderer: leaf(), plugins: [toggleAria] });
+```
+
+I ran the plugin version with the smallest renderer in Farm's own tests, which renders to a string and never touches the DOM in the browser, in development and production. Then I ran both versions with Preact, which hydrates and re-renders in place the way leaf does. Production build, Chrome:
+
+```txt
+                   pressed  aria-pressed
+server HTML        -        "true"
+after upgrade      true     "true"
+after a click      false    "false"
+after a re-render  false    "false"
+```
+
+The last line matters. When the page re-renders, Preact compares its new props with its old ones, not with the DOM, so it leaves the attribute ui-sdk changed alone.
+
+The plugin has a price. Farm holds the whole page before it can rewrite it, so with the plugin installed a streaming renderer stops streaming. leaf renders to a string anyway, so it pays nothing. And the regex is a demo. A real plugin needs ui-sdk to say which attributes a primitive has, and ui-sdk doesn't offer that publicly yet. The toggle's API is `isPressed`, `setPressed`, `toggle`, and `focus`, and the attribute logic lives in the undocumented `@ui-sdk/core/renderer`. The library is also a beta (`0.1.0-beta.13`). So for now I write simple ARIA by hand, and I'll build the plugin once ui-sdk publishes that step.
+
+ui-sdk's web build also ships its agent bridge, `@ui-sdk/web/agent`. I haven't tried that on Farm yet.
+
 <span id="what-still-needs-work" className="blog-heading-anchor" />
 
 ## What still needs work
