@@ -5,6 +5,7 @@ import { createFarmDiagnostic, createFarmSourceLocator, formatFarmDiagnostic } f
 import type { FarmEnvironment } from "./environment";
 import { findFarmClientOnlyImport } from "./islands-react-server-exports";
 import { getFarmSourceRoots, type ResolvedFarmLayer } from "./layers";
+import { getFarmRendererComponentExtensions, type FarmRenderer } from "./renderer";
 import {
   findClientNodeBuiltinChain,
   isProgrammaticRouteActionProxy,
@@ -39,6 +40,11 @@ export interface TransformEnvironmentFunctionsOptions {
   id: string;
   environment: FarmEnvironment;
   parse: (code: string) => AstNode;
+  /**
+   * The renderer's component extensions, such as `.svelte` or `.vue`. Its Vite plugin has
+   * compiled these files to JavaScript by the time this transform runs.
+   */
+  componentExtensions?: ReadonlySet<string>;
 }
 
 export interface TransformEnvironmentFunctionsResult {
@@ -60,7 +66,10 @@ const MODULE_EXTENSION_RE = /\.[cm]?[jt]sx?$/;
 export function transformEnvironmentFunctions(
   options: TransformEnvironmentFunctionsOptions,
 ): TransformEnvironmentFunctionsResult | null {
-  if (!isTransformableModule(options.id) || !containsEnvironmentFunction(options.code)) {
+  if (
+    !isTransformableModule(options.id, options.componentExtensions) ||
+    !containsEnvironmentFunction(options.code)
+  ) {
     return null;
   }
 
@@ -109,6 +118,8 @@ export interface FarmEnvironmentFunctionsPluginOptions {
   srcDir?: string;
   layers?: readonly ResolvedFarmLayer[];
   experimental?: { serverComponents?: unknown };
+  /** The app's renderer: modules with its component extensions get the same transform. */
+  renderer?: Pick<FarmRenderer, "componentExtensions"> | false;
 }
 
 export function farmEnvironmentFunctionsPlugin(
@@ -118,6 +129,9 @@ export function farmEnvironmentFunctionsPlugin(
   // whatever they import. The browser copy of a route imports only its component module, so
   // none of them, nor the modules that export route definitions, may reach the client.
   let routesFiles = new Set<string>();
+  const componentExtensions = new Set(
+    getFarmRendererComponentExtensions(options.renderer || undefined),
+  );
   let farmApi: FarmProgrammaticRoutesPluginApi | undefined;
   let isBuild = false;
   let projectRoot = process.cwd();
@@ -177,7 +191,13 @@ export function farmEnvironmentFunctionsPlugin(
         transformOptions?.ssr,
       );
       const parse = (source: string) => this.parse(source) as unknown as AstNode;
-      const result = transformEnvironmentFunctions({ code, id, environment, parse });
+      const result = transformEnvironmentFunctions({
+        code,
+        id,
+        environment,
+        parse,
+        componentExtensions,
+      });
       // Development serves modules one by one, so check each as the browser asks for it.
       // A build checks the finished bundle instead, where only shipped modules count.
       if (
@@ -676,9 +696,18 @@ function containsEnvironmentFunction(code: string): boolean {
   return Array.from(ENVIRONMENT_FUNCTIONS).some((name) => code.includes(name));
 }
 
-function isTransformableModule(id: string): boolean {
-  const cleanId = id.split("?", 1)[0];
-  return MODULE_EXTENSION_RE.test(cleanId) && !/\.d\.[cm]?ts$/.test(cleanId);
+function isTransformableModule(
+  id: string,
+  componentExtensions: ReadonlySet<string> = new Set(),
+): boolean {
+  const [cleanId = id, query = ""] = id.split("?", 2);
+  if (/\.d\.[cm]?ts$/.test(cleanId)) return false;
+  if (MODULE_EXTENSION_RE.test(cleanId)) return true;
+  // A `.svelte` or `.vue` style block is a sub-request of the same file, and it is CSS.
+  return (
+    componentExtensions.has(path.extname(cleanId).toLowerCase()) &&
+    !/(?:^|&)type=style\b/.test(query)
+  );
 }
 
 function transformError(id: string, message: string): Error {
