@@ -457,7 +457,9 @@ pages load 2.2 KB of JavaScript (`"rsc"`: 71.0 KB). See
 
 The app's `vite` options and plugins apply as in other Farm apps, and so does built-in Tailwind.
 The build goes to the deploy target's
-output directory, so `farm start` and platform deploys work unchanged.
+output directory, so `farm start` and platform deploys work unchanged. On the `node` target the
+build writes gzip copies of its static files, as other Farm apps' builds do, and the server sends
+them to browsers that accept gzip.
 
 The RSC pipeline (`serverComponents: { mode: "rsc" }`) does not run every Farm feature
 yet:
