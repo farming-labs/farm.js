@@ -21,7 +21,11 @@ export interface FarmRenderer {
   server: string;
   /** Module exporting Farm's browser-renderer compatibility contract. */
   client: string;
-  /** JSX import source written to generated TypeScript configuration. */
+  /**
+   * The package the renderer's JSX imports its runtime from, such as `"preact"`. Development
+   * passes it to Vite's dependency scan, so `<source>/jsx-dev-runtime` is pre-bundled before the
+   * first page load.
+   */
   jsxImportSource?: string;
   /** Additional file extensions used for renderer-owned route components. */
   componentExtensions?: readonly string[];
