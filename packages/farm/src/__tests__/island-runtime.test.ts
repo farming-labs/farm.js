@@ -1,5 +1,9 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { holdFarmIslandInteractions, scheduleFarmIslandHydration } from "../client/island-runtime";
+import {
+  holdFarmIslandInteractions,
+  scheduleFarmIslandHydration,
+  watchFarmIslandTriggers,
+} from "../client/island-runtime";
 
 describe("scheduleFarmIslandHydration", () => {
   beforeEach(() => {
@@ -563,5 +567,178 @@ describe("holdFarmIslandInteractions", () => {
     const queue = (window as typeof window & { __FARM_PREHYDRATION_CLICK_QUEUE__?: unknown[] })
       .__FARM_PREHYDRATION_CLICK_QUEUE__;
     expect(queue).toEqual([{ target: form, kind: "submit" }]);
+  });
+});
+
+describe("watchFarmIslandTriggers", () => {
+  const queue = () =>
+    ((
+      window as typeof window & { __FARM_PREHYDRATION_CLICK_QUEUE__?: unknown[] }
+    ).__FARM_PREHYDRATION_CLICK_QUEUE__ ??= []);
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    delete (window as typeof window & { __FARM_PREHYDRATION_CLICK_QUEUE__?: unknown })
+      .__FARM_PREHYDRATION_CLICK_QUEUE__;
+    document.body.innerHTML = "";
+  });
+
+  it("finds an island due at once when it hydrates at load, or has no strategy", () => {
+    for (const attribute of ['strategy="load"', ""]) {
+      document.body.innerHTML = `<f-island strategy="interaction"></f-island><f-island ${attribute}><button>A</button></f-island>`;
+      const due = vi.fn();
+      expect(watchFarmIslandTriggers(document, "f-island", due)).toBeNull();
+      expect(due).not.toHaveBeenCalled();
+    }
+  });
+
+  it("finds an island due at once when it holds a click", () => {
+    document.body.innerHTML = '<f-island strategy="interaction"><button>A</button></f-island>';
+    queue().push({ target: document.querySelector("button"), kind: "click" });
+    expect(watchFarmIslandTriggers(document, "f-island", vi.fn())).toBeNull();
+  });
+
+  it("finds islands due at once while a Suspense boundary waits for the browser", () => {
+    for (const marker of ["$?", "$!"]) {
+      document.body.innerHTML = `<!--${marker}--><f-island strategy="interaction"></f-island>`;
+      expect(watchFarmIslandTriggers(document, "f-island", vi.fn())).toBeNull();
+    }
+  });
+
+  it("follows an outer island's strategy, not one inside it", () => {
+    document.body.innerHTML =
+      '<f-island strategy="interaction"><f-island strategy="load"></f-island></f-island>';
+    expect(watchFarmIslandTriggers(document, "f-island", vi.fn())).toBeTypeOf("function");
+  });
+
+  it("calls `due` once on a press or focus inside a waiting island, and stops watching", () => {
+    document.body.innerHTML =
+      '<f-island strategy="interaction"><button>A</button></f-island><button id="outside">B</button>';
+    const due = vi.fn();
+    const stop = watchFarmIslandTriggers(document, "f-island", due);
+    expect(stop).toBeTypeOf("function");
+    document.getElementById("outside")!.dispatchEvent(new Event("pointerdown", { bubbles: true }));
+    expect(due).not.toHaveBeenCalled();
+    const button = document.querySelector("f-island button")!;
+    button.dispatchEvent(new Event("pointerdown", { bubbles: true }));
+    button.dispatchEvent(new FocusEvent("focusin", { bubbles: true }));
+    expect(due).toHaveBeenCalledOnce();
+  });
+
+  it("calls `due` on a held click it is told about", () => {
+    document.body.innerHTML = '<f-island strategy="interaction"><button>A</button></f-island>';
+    const due = vi.fn();
+    watchFarmIslandTriggers(document, "f-island", due);
+    document.dispatchEvent(
+      new CustomEvent("farm:island-interaction", {
+        detail: { target: document.querySelector("button"), kind: "click" },
+      }),
+    );
+    expect(due).toHaveBeenCalledOnce();
+  });
+
+  it("leaves a press on a link that navigates alone, as the scheduler does", () => {
+    document.body.innerHTML =
+      '<f-island strategy="interaction"><a href="/next">Next</a><a href="#part">Part</a></f-island>';
+    const due = vi.fn();
+    watchFarmIslandTriggers(document, "f-island", due);
+    document
+      .querySelector('a[href="/next"]')!
+      .dispatchEvent(new Event("pointerdown", { bubbles: true }));
+    expect(due).not.toHaveBeenCalled();
+    document
+      .querySelector('a[href="#part"]')!
+      .dispatchEvent(new Event("pointerdown", { bubbles: true }));
+    expect(due).toHaveBeenCalledOnce();
+  });
+
+  it("calls `due` when a form is touched, which islx posts without a page load", () => {
+    document.body.innerHTML =
+      '<f-island strategy="interaction"></f-island><form><input name="q" /></form>';
+    const due = vi.fn();
+    watchFarmIslandTriggers(document, "f-island", due);
+    document.querySelector("input")!.dispatchEvent(new FocusEvent("focusin", { bubbles: true }));
+    expect(due).toHaveBeenCalledOnce();
+  });
+
+  it("watches only its scope", () => {
+    document.body.innerHTML =
+      '<main><f-island strategy="interaction"><button>A</button></f-island></main><f-island strategy="interaction"><button>B</button></f-island>';
+    const due = vi.fn();
+    watchFarmIslandTriggers(document.querySelector("main")!, "f-island", due);
+    document
+      .querySelectorAll("button")[1]!
+      .dispatchEvent(new Event("pointerdown", { bubbles: true }));
+    expect(due).not.toHaveBeenCalled();
+    document
+      .querySelectorAll("button")[0]!
+      .dispatchEvent(new Event("pointerdown", { bubbles: true }));
+    expect(due).toHaveBeenCalledOnce();
+  });
+
+  it("calls `due` when an idle island's idle callback runs", () => {
+    let idle: (() => void) | undefined;
+    vi.stubGlobal("requestIdleCallback", (callback: () => void) => ((idle = callback), 1));
+    vi.stubGlobal("cancelIdleCallback", vi.fn());
+    document.body.innerHTML =
+      '<f-island strategy="idle"></f-island><f-island strategy="idle"></f-island>';
+    const due = vi.fn();
+    expect(watchFarmIslandTriggers(document, "f-island", due)).toBeTypeOf("function");
+    expect(due).not.toHaveBeenCalled();
+    idle?.();
+    expect(due).toHaveBeenCalledOnce();
+  });
+
+  it("calls `due` when a visible island's children come into view", () => {
+    const observed: Element[] = [];
+    let notify: IntersectionObserverCallback | undefined;
+    vi.stubGlobal(
+      "IntersectionObserver",
+      class {
+        constructor(callback: IntersectionObserverCallback) {
+          notify = callback;
+        }
+        observe(target: Element) {
+          observed.push(target);
+        }
+        unobserve() {}
+        disconnect() {}
+      },
+    );
+    document.body.innerHTML = '<f-island strategy="visible"><p>Below</p></f-island>';
+    const due = vi.fn();
+    expect(watchFarmIslandTriggers(document, "f-island", due)).toBeTypeOf("function");
+    expect(observed).toEqual([document.querySelector("p")]);
+    notify?.(
+      [{ isIntersecting: true, target: observed[0] } as IntersectionObserverEntry],
+      {} as IntersectionObserver,
+    );
+    expect(due).toHaveBeenCalledOnce();
+  });
+
+  it("finds a visible island with nothing to observe due at once", () => {
+    vi.stubGlobal(
+      "IntersectionObserver",
+      class {
+        observe() {}
+        unobserve() {}
+        disconnect() {}
+      },
+    );
+    document.body.innerHTML = '<f-island strategy="visible"></f-island>';
+    expect(watchFarmIslandTriggers(document, "f-island", vi.fn())).toBeNull();
+  });
+
+  it("stops every trigger when stopped", () => {
+    const cancelIdleCallback = vi.fn();
+    vi.stubGlobal("requestIdleCallback", () => 7);
+    vi.stubGlobal("cancelIdleCallback", cancelIdleCallback);
+    document.body.innerHTML =
+      '<f-island strategy="idle"></f-island><f-island strategy="interaction"><button>A</button></f-island>';
+    const due = vi.fn();
+    watchFarmIslandTriggers(document, "f-island", due)!();
+    expect(cancelIdleCallback).toHaveBeenCalledWith(7);
+    document.querySelector("button")!.dispatchEvent(new Event("pointerdown", { bubbles: true }));
+    expect(due).not.toHaveBeenCalled();
   });
 });

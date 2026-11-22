@@ -241,16 +241,22 @@ describe("production responses Farm owns", () => {
     expect(identity.status).toBe(200);
     expect(identity.headers["content-encoding"]).toBeUndefined();
 
-    const gzip = await rawGet(`${base}${script}`, { headers: { "accept-encoding": "gzip, br" } });
+    // A client script has a brotli copy and a gzip copy; brotli wins when both are accepted.
+    const brotli = await rawGet(`${base}${script}`, { headers: { "accept-encoding": "gzip, br" } });
+    expect(brotli.status).toBe(200);
+    expect(brotli.headers["content-encoding"]).toBe("br");
+    expect(brotli.headers.vary).toBe("Accept-Encoding");
+    expect(brotliDecompressSync(brotli.body).equals(identity.body)).toBe(true);
+
+    const gzip = await rawGet(`${base}${script}`, { headers: { "accept-encoding": "gzip" } });
     expect(gzip.status).toBe(200);
     expect(gzip.headers["content-encoding"]).toBe("gzip");
-    expect(gzip.body.byteLength).toBeLessThan(identity.body.byteLength);
     expect(gunzipSync(gzip.body).equals(identity.body)).toBe(true);
+    expect(brotli.body.byteLength).toBeLessThan(gzip.body.byteLength);
 
-    // Only gzip is precompressed; a brotli-only client gets the plain file.
     const brotliOnly = await rawGet(`${base}${script}`, { headers: { "accept-encoding": "br" } });
-    expect(brotliOnly.headers["content-encoding"]).toBeUndefined();
-    expect(brotliOnly.body.equals(identity.body)).toBe(true);
+    expect(brotliOnly.headers["content-encoding"]).toBe("br");
+    expect(brotliOnly.body.equals(brotli.body)).toBe(true);
   });
 
   it("decodes a brotli page body that matches the identity body", async () => {

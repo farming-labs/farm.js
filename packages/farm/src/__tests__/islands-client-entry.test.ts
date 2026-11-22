@@ -303,6 +303,16 @@ describe("the islands web entry's renderer (RFC 0010)", () => {
     );
   });
 
+  it("loads React DOM and islx with the first island that is due, not with every hydration", () => {
+    const entry = generateFor();
+    expect(entry).toMatch(
+      /import \{[^}]*\bwatchFarmIslandTriggers\b[^}]*\} from "@farm\.js\/core\/internal\/client-runtime";/,
+    );
+    expect(entry).toContain('watchFarmIslandTriggers(scope, "f-island"');
+    // Whatever loads them, what waited for them runs with them, in order.
+    expect(entry).toMatch(/releaseFarmIslandInteractions\(\);\s*runFarmIslandsWaiting\(\);/);
+  });
+
   // A module object that escapes (passed whole to a function) keeps every export of islx's
   // runtime in the bundle, 11 KB more than the static import kept.
   it("names the islx exports it uses where it imports them, so the build drops the rest", () => {

@@ -177,6 +177,89 @@ export function holdFarmIslandInteractions(island: string): () => void {
   };
 }
 
+/**
+ * Calls `due` once an island under `scope` reaches its trigger, by the rules the boot script and
+ * the scheduler follow, without holding or replaying anything. Islands mode's entry loads islx then
+ * (RFC 0010), and islx's schedulers take over: a held interaction is in the queue they read, and a
+ * trigger that fired fires again for them. A form counts as the boot counts it, as islx is what
+ * posts it without a page load. Returns null when an island is due already (it hydrates at load,
+ * holds an interaction, or is not observable) or a Suspense boundary waits for the browser, else a
+ * function that stops watching.
+ */
+export function watchFarmIslandTriggers(
+  scope: Document | Element,
+  island: string,
+  due: () => void,
+): (() => void) | null {
+  const document = scope.nodeType === 9 ? (scope as Document) : (scope as Element).ownerDocument;
+  // A document still parsing adds islands later, which islx's stream watcher finds.
+  if (document.readyState === "loading") return null;
+  const comments = document.createTreeWalker(scope, NodeFilter.SHOW_COMMENT);
+  while (comments.nextNode()) {
+    const data = (comments.currentNode as Comment).data;
+    if (data === "$?" || data === "$!") return null;
+  }
+  const islands = Array.from(scope.querySelectorAll(island));
+  if (scope.nodeType === 1 && (scope as Element).matches(island)) islands.unshift(scope as Element);
+  // An island inside another hydrates with it, as islx decides.
+  const outermost = islands.filter((element) => {
+    const outer = element.parentElement?.closest(island);
+    return !outer || !scope.contains(outer);
+  });
+  const isDue = (element: Element) => {
+    const strategy = element.getAttribute("strategy");
+    if (hasQueuedTarget(element)) return true;
+    if (strategy === "interaction" || strategy === "idle") return false;
+    if (strategy !== "visible" || typeof IntersectionObserver !== "function") return true;
+    // Islands render with display:contents: the scheduler observes their children instead.
+    return element.getClientRects().length === 0 && element.children.length === 0;
+  };
+  if (outermost.some(isDue)) return null;
+
+  const cleanups: Array<() => void> = [];
+  const stop = () => {
+    for (const cleanup of cleanups.splice(0)) cleanup();
+  };
+  const fire = () => {
+    stop();
+    due();
+  };
+  if (outermost.some((element) => element.getAttribute("strategy") === "idle")) {
+    cleanups.push(runWhenIdle(fire));
+  }
+  for (const element of outermost) {
+    if (element.getAttribute("strategy") !== "visible") continue;
+    const targets = element.getClientRects().length > 0 ? [element] : Array.from(element.children);
+    cleanups.push(observeIslandVisibility(document, targets, fire));
+  }
+
+  const pending = (target: EventTarget | null | undefined) =>
+    target instanceof Element &&
+    scope.contains(target) &&
+    !!target.closest(island) &&
+    !target.closest('[data-farm-island-hydrated="true"]');
+  // A press or focus starts an island, not on a link that navigates (the scheduler's
+  // observeActivation); clicks and submits reach here as the hold's announcements.
+  const activate = (event: Event) => {
+    const target = event.target;
+    if (!(target instanceof Element) || !scope.contains(target)) return;
+    const link = target.closest("a[href]");
+    if (link && !link.getAttribute("href")?.startsWith("#")) return;
+    if (pending(target) || target.closest("form")) fire();
+  };
+  const announced = (event: Event) => {
+    if (pending((event as CustomEvent<{ target?: EventTarget | null }>).detail?.target)) fire();
+  };
+  const listen = (type: string, handler: (event: Event) => void, capture: boolean) => {
+    document.addEventListener(type, handler, capture);
+    cleanups.push(() => document.removeEventListener(type, handler, capture));
+  };
+  listen("pointerdown", activate, true);
+  listen("focusin", activate, true);
+  listen("farm:island-interaction", announced, false);
+  return stop;
+}
+
 function finishIslandHydration(
   container: Element,
   held: readonly FarmQueuedInteraction[] = [],

@@ -136,7 +136,8 @@ commit `33b402362` (Farm 0.1.77, islx 0.0.25), sizes, first navigations and firs
 2026-11-22 (load average 7 to 71), once a layout that hydrates as one root kept waiting through a
 navigation, and sizes again that day once a navigation named the island values the page holds
 before islx loads. Sizes and first taps at 1.6 Mbit/s once more that day (load average 3 to 5),
-once React loaded with React DOM.
+once React loaded with React DOM, and the JavaScript of ten navigations once React DOM and islx
+waited for an island that is due.
 
 - **First load.** 32 times less JavaScript and about half the main-thread work, because these pages'
   client components wait for a click.
@@ -156,8 +157,10 @@ Where islands mode does not win:
 
 - **The runtime still has to arrive.** It is about 95 KB. The entry and router load on the first
   navigation or interaction, and React, React DOM and islx, three quarters of it, once a client
-  component renders or hydrates, so a visitor who interacts has downloaded more JavaScript in total
-  than with `"rsc"`. The savings are in what a visit pays before the page can be used.
+  component renders or hydrates: an island when its trigger fires, not a navigation to it. A visit
+  that only navigates loads about 27 KB in ten pages, but a visitor who interacts has downloaded
+  more JavaScript in total than with `"rsc"`. The savings are in what a visit pays before the page
+  can be used.
 - **A client component that hydrates at load** starts the runtime at once, so that page sends more
   JavaScript than `"rsc"`, not less: about 77 to 80 KB against 69.5 KB on a small app. The
   production build keeps navigation code in a separate 8 KB chunk, loaded on the first link hover,

@@ -1312,6 +1312,41 @@ test("a streamed first navigation renders before the renderer loads, and its isl
   expect(errors).toEqual([]);
 });
 
+test("islands that wait for a click load React DOM with it, not with the client runtime or a navigation", async ({
+  page,
+  request,
+  baseURL,
+}) => {
+  test.skip(
+    mode !== "islands" || dev,
+    "the production islands client entry loads React DOM lazily",
+  );
+  const errors = collectErrors(page);
+  const renderer = await holdRenderer(
+    page,
+    await (await request.get("/timing/quiet")).text(),
+    baseURL,
+  );
+  await page.goto("/timing/quiet");
+  await page.waitForLoadState("networkidle");
+  await page.evaluate(() => Object.assign(window, { __farmSameDocument: true }));
+  // The link starts the client runtime and the router; the next page's islands wait too (its
+  // visible one is below the fold).
+  await page.getByRole("link", { name: "To timing later" }).click();
+  await expect(page.getByRole("heading", { name: "Timing later" })).toBeVisible();
+  await page.waitForLoadState("networkidle");
+  expect(renderer.requested).toEqual([]);
+  const island = page.getByTestId("interaction");
+  await island.click();
+  await expect.poll(() => renderer.requested.length).toBeGreaterThan(0);
+  await expect(island).toHaveAttribute("data-hydrated", "false");
+  renderer.release();
+  await expect(island).toHaveAttribute("data-hydrated", "true");
+  await expect(island).toHaveText("Interaction: 1");
+  expect(await page.evaluate(() => "__farmSameDocument" in window)).toBe(true);
+  expect(errors).toEqual([]);
+});
+
 test("a first navigation out of a layout root that waits shows the next page before React DOM loads", async ({
   page,
   request,

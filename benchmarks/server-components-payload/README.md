@@ -45,7 +45,8 @@ a client navigation, and page errors are counted.
 client entry loading React DOM lazily (RFC 0010). Bytes and first navigations over a network
 again on 2026-11-22, with a layout root that waits kept waiting through a navigation (RFC 0011),
 and bytes once more that day, with a navigation before islx loads naming the values the page holds,
-and again with React loading beside React DOM. Averages; KB = 1024 bytes.
+again with React loading beside React DOM, and again with React DOM and islx waiting for an island
+that is due. Averages; KB = 1024 bytes.
 
 Four sections of the app:
 
@@ -64,11 +65,11 @@ Four sections of the app:
 | Section | Engine    | Document, br (raw) | First-load JS, br | Navigation data, br (raw) | Navigation JS, br |
 | ------- | --------- | ------------------ | ----------------- | ------------------------- | ----------------- |
 | docs    | `rsc`     | 16.3 KB (76.4 KB)  | 71.0 KB           | 12.0 KB (37.5 KB)         | 0                 |
-| docs    | `islands` | 16.2 KB (70.1 KB)  | 2.2 KB            | 2.7 KB (7.6 KB)           | 9.6 KB            |
+| docs    | `islands` | 16.2 KB (70.1 KB)  | 2.2 KB            | 2.7 KB (7.6 KB)           | 2.5 KB            |
 | shop    | `rsc`     | 5.5 KB (33.2 KB)   | 71.0 KB           | 3.8 KB (13.2 KB)          | 0                 |
 | shop    | `islands` | 5.9 KB (31.0 KB)   | 2.2 KB            | 4.4 KB (20.0 KB)          | 2.5 KB            |
 | blog    | `rsc`     | 17.9 KB (379.5 KB) | 71.0 KB           | 10.8 KB (203.7 KB)        | 0                 |
-| blog    | `islands` | 9.1 KB (127.6 KB)  | 2.2 KB            | 9.2 KB (127.7 KB)         | 9.6 KB            |
+| blog    | `islands` | 9.1 KB (127.6 KB)  | 2.2 KB            | 9.2 KB (127.7 KB)         | 2.5 KB            |
 | guide   | `rsc`     | 18.0 KB (379.8 KB) | 71.0 KB           | 10.9 KB (203.9 KB)        | 0                 |
 | guide   | `islands` | 9.5 KB (129.2 KB)  | 2.2 KB            | 9.6 KB (129.4 KB)         | 2.5 KB            |
 
@@ -78,8 +79,10 @@ sections 10 and 11). The client runtime, about 95 KB, arrives with the first nav
 entry and router (about 25 KB), then React, React DOM and islx (about 71 KB), which a navigation
 that swaps its page in does not wait for. That made it 2.5 KB larger: about 0.4 KB of code that
 loads the renderer and holds clicks meanwhile, and the rest compression lost to four files instead
-of one. On shop and guide the ten navigations load only the entry and router: the layout's root
-keeps waiting for an interaction through them (RFC 0011), so React, React DOM and islx never load.
+of one. In every section the ten navigations load only the entry and router: React, React DOM and
+islx load with the first island that is due, and the islands of these pages wait for a click (on
+shop and guide so does the layout's root, RFC 0011), so they never load. Until 2026-11-22 they
+loaded with the entry on docs and blog, 9.6 KB per navigation, more in total than `rsc`'s 71 KB.
 
 ### Time (`timing.mjs`)
 
@@ -204,5 +207,24 @@ just before it (`main` at f28cc9ce0), load average 3 to 5, medians of 9 rounds i
 That is 150 ms at 1.6 Mbit/s with an 80 ms tap: 12 to 21 ms faster in every section. An instant
 tap and a 100 ms hover at 50 ms latency are unchanged within noise (7 rounds; a 21-round rerun of
 docs and shop taps: 116 to 116 ms and 131 to 128 ms).
+
+Measured again 2026-11-22 once a `node-server` build sent client scripts and stylesheets with
+brotli at top quality instead of gzip. The proxy passes a response the server compressed through
+as it is, so this is what a browser receives from the Node server: the app's seven scripts over
+1 KB went from 102.2 KB of gzip to 90.2 KB of brotli. Interleaved with `rsc` and a build from just
+before it (`main` at a8ce675d6), load average 4 to 9, medians of 9 rounds in ms:
+
+| Section | `rsc` | `islands`, before | `islands` |
+| ------- | ----- | ----------------- | --------- |
+| docs    | 261   | 297               | 277       |
+| shop    | 216   | 321               | 304       |
+| blog    | 290   | 352               | 331       |
+| guide   | 291   | 355               | 336       |
+
+That is 150 ms at 1.6 Mbit/s with an 80 ms tap: 17 to 21 ms faster in every section, where an A/A
+run of one build against a copy of it differed by 6 ms at most (5 rounds). With 150 ms of latency
+and no bandwidth limit the two builds are within 4 ms (5 rounds). The `rsc` build does not
+compress its static files, so the proxy brotli-compresses its scripts at quality 5 here, as a CDN
+would; its Node server alone sends them uncompressed.
 
 `results/latest.json` has the per-page numbers of the last run.
