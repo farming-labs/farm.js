@@ -43,7 +43,8 @@ a client navigation, and page errors are counted.
 0.1.77, islx 0.0.25); bytes and first navigations over a network measured 2026-11-21 on `main` at
 5e9dfcbd9 with the boot entry requesting a held click's page, and again later that day with the
 client entry loading React DOM lazily (RFC 0010). Bytes and first navigations over a network
-again on 2026-11-22, with a layout root that waits kept waiting through a navigation (RFC 0011).
+again on 2026-11-22, with a layout root that waits kept waiting through a navigation (RFC 0011),
+and bytes once more that day, with a navigation before islx loads naming the values the page holds.
 Averages; KB = 1024 bytes.
 
 Four sections of the app:
@@ -65,7 +66,7 @@ Four sections of the app:
 | docs    | `rsc`     | 16.3 KB (76.4 KB)  | 71.0 KB           | 12.0 KB (37.5 KB)         | 0                 |
 | docs    | `islands` | 16.1 KB (70.1 KB)  | 2.2 KB            | 2.7 KB (7.6 KB)           | 9.6 KB            |
 | shop    | `rsc`     | 5.5 KB (33.2 KB)   | 71.0 KB           | 3.8 KB (13.2 KB)          | 0                 |
-| shop    | `islands` | 5.9 KB (30.9 KB)   | 2.2 KB            | 6.0 KB (30.9 KB)          | 2.7 KB            |
+| shop    | `islands` | 5.9 KB (30.9 KB)   | 2.2 KB            | 4.4 KB (19.9 KB)          | 2.7 KB            |
 | blog    | `rsc`     | 17.9 KB (379.5 KB) | 71.0 KB           | 10.8 KB (203.7 KB)        | 0                 |
 | blog    | `islands` | 9.1 KB (127.6 KB)  | 2.2 KB            | 9.2 KB (127.7 KB)         | 9.6 KB            |
 | guide   | `rsc`     | 18.0 KB (379.8 KB) | 71.0 KB           | 10.9 KB (203.9 KB)        | 0                 |
@@ -124,15 +125,17 @@ engines, so both see the same load. This run had other work on the machine (load
   request (medians of 1,495 requests alternating between the engines, `accept-encoding: identity`
   for both, so neither pays for compression), and returns 7.3 KB instead of 37.3 KB.
 - docs: a navigation names the values the browser holds (`F-Values`) and the layouts on screen
-  (`F-Layouts`, keyed by pattern and params); the server leaves both out.
+  (`F-Layouts`, keyed by pattern and params); the server leaves both out. Before islx loads, the
+  values it names are the value scripts the page holds, which the router's swap keeps.
 - shop: until the layout hydrates (an "Add" click, say), a navigation swaps the next page's HTML
   in and the layout keeps waiting (RFC 0011), so it carries the page's HTML as well as its tree.
-  It carries the catalog again too: a navigation names the values the browser holds from islx's
-  store, which loads with the layout. That is 6.0 KB per navigation, where rendering the page in
-  the layout's React root took 2.0 KB, and 2.7 KB of JavaScript instead of 9.7, as React DOM, islx
-  and the layout's modules no longer load on the first hover. Once the layout has hydrated, the
-  browser rebuilds a page in its React tree from the payload alone (`F-Render: tree`) and the
-  catalog stays out.
+  The catalog stays out: islx has not loaded, so a navigation names the value scripts the page
+  holds, and the swap keeps the ones the next page leaves out. That is 4.4 KB per navigation (6.0
+  KB while it named only what islx held, and 2.0 KB when it rendered the page in the layout's React
+  root), three quarters of it the page's HTML, and 2.7 KB of JavaScript instead of 9.7, as React
+  DOM, islx and the layout's modules no longer load on the first hover. Once the layout has
+  hydrated, the browser rebuilds a page in its React tree from the payload alone (`F-Render: tree`)
+  and the catalog stays out.
 
 ### First navigation over a network (`first-navigation.mjs`)
 
