@@ -350,13 +350,24 @@ export default function Home() { return <main>home</main>; }`,
       }),
       expect.objectContaining({ route: "/mcp", tool: "broken", outcome: "error" }),
     ]);
-    // Each call belongs to its request, and neither carries the arguments.
+    // Each call belongs to its request.
     const requests = events.filter(({ kind, method }) => kind === "request" && method === "POST");
     expect(requests).toHaveLength(2);
     expect(calls.map(({ requestId }) => requestId).sort()).toEqual(
       requests.map(({ requestId }) => requestId).sort(),
     );
-    expect(JSON.stringify(events)).not.toContain("private-argument");
+    // A tool call carries its arguments and result; the request carrying it doesn't.
+    expect(calls).toEqual([
+      expect.objectContaining({
+        arguments: { query: "private-argument" },
+        result: expect.any(Object),
+      }),
+      expect.objectContaining({
+        arguments: { query: "private-argument" },
+        result: expect.any(Object),
+      }),
+    ]);
+    expect(JSON.stringify(requests)).not.toContain("private-argument");
   }, 30_000);
 
   it("sends nothing when the config sets analytics to false", async () => {

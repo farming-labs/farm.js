@@ -39,7 +39,7 @@ import {
   isServerFnFailure,
   type ServerFunctionDescriptor,
 } from "@farm.js/core/server-fn";
-import { emitFarmEvent } from "@farm.js/core/observability";
+import { _withFarmToolCallPayload, emitFarmEvent } from "@farm.js/core/observability";
 import {
   bindPrompts,
   registerResourcesAndPrompts,
@@ -273,6 +273,7 @@ function createHandler(
           const request = context.http?.req ?? requestInfo;
           const startedAt = performance.now();
           let outcome: "success" | "error" = "error";
+          let answered: unknown;
           try {
             const authorization = authInfo?.extra?.farmAuthorization as
               | FarmMCPAuthorization
@@ -292,17 +293,24 @@ function createHandler(
                         signal: AbortSignal.any([request.signal, context.mcpReq.signal]),
                       });
             outcome = "isError" in result && result.isError ? "error" : "success";
+            answered = result;
             return result;
           } finally {
-            emitFarmEvent({
-              type: "mcp.tool.complete",
-              level: outcome === "error" ? "error" : "info",
-              route: options.path,
-              server: options.name,
-              tool: tool.config.name,
-              outcome,
-              durationMs: Math.max(0, performance.now() - startedAt),
-            });
+            emitFarmEvent(
+              // Only Farm Infra analytics reads the arguments and result, never logs or traces.
+              _withFarmToolCallPayload(
+                {
+                  type: "mcp.tool.complete",
+                  level: outcome === "error" ? "error" : "info",
+                  route: options.path,
+                  server: options.name,
+                  tool: tool.config.name,
+                  outcome,
+                  durationMs: Math.max(0, performance.now() - startedAt),
+                },
+                { arguments: input, ...(answered === undefined ? {} : { result: answered }) },
+              ),
+            );
           }
         },
       );

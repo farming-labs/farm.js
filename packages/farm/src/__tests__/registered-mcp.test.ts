@@ -5,7 +5,7 @@ import {
   type FarmAppManifestServer,
 } from "../app-manifest";
 import { _publishFarmMCPCatalog, registerFarmMCPServer } from "../mcp-catalog";
-import { onFarmEvent } from "../observability";
+import { _farmToolCallPayload, onFarmEvent } from "../observability";
 import {
   _listFarmRegisteredMCPServerTools,
   _observeFarmRegisteredMCPResponse,
@@ -122,7 +122,13 @@ describe("tool calls to a docs runtime's MCP server", () => {
         // `missing` never ran: the server refused it with a JSON-RPC error.
         expect.objectContaining({ tool: "x.y", outcome: "success" }),
       ]);
-      // Arguments and results never leave the server.
+      // Each call's arguments and result ride along for Farm Infra analytics only: logs,
+      // traces and handlers that serialize the event never see them.
+      expect(toolEvents().map(_farmToolCallPayload)).toEqual([
+        { arguments: { query: "private" }, result: { content: [] } },
+        { arguments: { query: "private" }, result: { content: [], isError: true } },
+        { arguments: { query: "private" }, result: { content: [] } },
+      ]);
       expect(JSON.stringify(events)).not.toContain("private");
     });
   }
