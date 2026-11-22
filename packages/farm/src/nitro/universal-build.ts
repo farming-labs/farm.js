@@ -4187,10 +4187,11 @@ export function generateClientHydrationEntry(
     ? `import React from "react";\nimport { holdFarmIslandInteractions, restorePagePosition } from "@farm.js/core/internal/client-runtime";`
     : isReactRenderer(renderer)
       ? `import React from "react";\nimport { createRoot, hydrateRoot } from "react-dom/client";\nimport { restorePagePosition } from "@farm.js/core/internal/client-runtime";`
-      : // Named exports only, as the server entry and the development client read them.
+      : // Named exports only, as the server entry and the development client read them. A copy
+        // of the namespace, so feature checks of optional exports don't make Rolldown warn.
         appSetupPath
-        ? `import * as React from ${JSON.stringify(renderer.client)};\nimport { createRoot, hydrateRoot, configureApp as __farmConfigureApp } from ${JSON.stringify(renderer.client)};\nimport __farmAppSetup from ${JSON.stringify(toPosixPath(appSetupPath))};\n__farmConfigureApp(__farmAppSetup);`
-        : `import * as React from ${JSON.stringify(renderer.client)};\nimport { createRoot, hydrateRoot } from ${JSON.stringify(renderer.client)};`;
+        ? `import * as __farmRendererClient from ${JSON.stringify(renderer.client)};\nimport { createRoot, hydrateRoot, configureApp as __farmConfigureApp } from ${JSON.stringify(renderer.client)};\nimport __farmAppSetup from ${JSON.stringify(toPosixPath(appSetupPath))};\nconst React = { ...__farmRendererClient };\n__farmConfigureApp(__farmAppSetup);`
+        : `import * as __farmRendererClient from ${JSON.stringify(renderer.client)};\nimport { createRoot, hydrateRoot } from ${JSON.stringify(renderer.client)};\nconst React = { ...__farmRendererClient };`;
   const providerClientCode = generateFarmIntegrationProviderClientCode(
     integrationProviders,
     root,
@@ -7658,8 +7659,10 @@ function generateVirtualEntryCode(
           : ""
       }`
     : // The renderer contract is the server module's named exports, which the development
-      // server reads too; a renderer needs no default export.
-      `import * as ReactDOMServer from ${JSON.stringify(config.renderer.server)};\nconst React = ReactDOMServer;${generateFarmRendererAppSetupServerCode(config)}`;
+      // server reads too; a renderer needs no default export. The entry feature-checks optional
+      // exports (streaming, `capabilities`, `generateHydrationScript`) on a copy of the
+      // namespace, because Rolldown warns about each such read off the namespace itself.
+      `import * as __farmRendererServer from ${JSON.stringify(config.renderer.server)};\nconst ReactDOMServer = { ...__farmRendererServer };\nconst React = ReactDOMServer;${generateFarmRendererAppSetupServerCode(config)}`;
   const routeClientGraphServerRuntime = hasIsolatedClientGraphRuntime
     ? `function wrapFarmRouteClientGraph(element) {
   return wrapFarmIsolatedClientGraph(React, element);
