@@ -3504,7 +3504,7 @@ importers:
         version: 5.0.5(@opentelemetry/api@1.9.1)(@types/node@22.20.5)(jsdom@25.0.1)(vite@8.3.4)
 
   packages/farm-renderer-tests:
-    dependencies:
+    devDependencies:
       vite:
         specifier: 8.3.4
         version: 8.3.4(@types/node@22.20.5)(yaml@2.9.0)
