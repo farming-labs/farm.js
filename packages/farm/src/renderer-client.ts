@@ -30,6 +30,14 @@ import {
 import type { FarmI18nClientSnapshot, FarmI18nLocale, FarmTranslator } from "./i18n/types";
 
 export type { FarmI18nClientSnapshot, FarmI18nLocale, FarmTranslator } from "./i18n/types";
+export { FARM_LINK_OPTION_KEYS, resolveLinkAttributes } from "./client/link-attributes";
+export type {
+  DefaultRouteHref,
+  FarmLinkAttributes,
+  FarmLinkOptions,
+  LinkDefaultRoute,
+} from "./client/link-attributes";
+export type { FarmViewTransitionMode } from "./client/spa-router";
 export { delegateNavigation } from "./client/navigation-delegate";
 export type {
   FarmNavigationDelegate,

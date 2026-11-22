@@ -70,7 +70,8 @@ The higher-level framework features below use those adapter primitives:
 | Callable actions and server queries              | Available                | Through `preact/compat`         | Solid binding        | Vue binding          | Svelte store         |
 | Client theme and i18n state                      | Available                | Through `preact/compat`         | Solid binding        | Vue binding          | Svelte store         |
 | Shared client stores (`createStore`)             | Available                | Through `preact/compat`         | Solid binding        | Vue binding          | Svelte store         |
-| Renderer-specific `Link` and form components     | Available                | Through `preact/compat`         | Not yet              | Not yet              | Not yet              |
+| Typed `Link` components                          | Available                | Through `preact/compat`         | Solid component      | Vue component        | Svelte component     |
+| Action form components (`useAction().Form`)      | Available                | Through `preact/compat`         | Not yet              | Not yet              | Not yet              |
 | Programmatic UI routes                           | Available                | Available                       | Available            | Available            | Available            |
 | Markdown and MDX pages (`page.md`)               | Available                | Available                       | Available            | Available            | Available            |
 | Docs adapter                                     | Available                | Compatibility surface           | React-oriented today | React-oriented today | React-oriented today |

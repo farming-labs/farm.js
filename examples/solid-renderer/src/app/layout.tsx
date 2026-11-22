@@ -1,6 +1,7 @@
 "use client";
 
 import type { LayoutProps, Metadata } from "@farm.js/core";
+import { Link } from "@farm.js/solid/bindings";
 import { createSignal } from "solid-js";
 import "./globals.css";
 
@@ -22,8 +23,8 @@ export default function RootLayout(props: LayoutProps) {
           Layout count: {count()}
         </button>
         <nav aria-label="Example pages">
-          <a href="/">Home</a>
-          <a href="/about">About</a>
+          <Link href="/">Home</Link>
+          <Link href="/about">About</Link>
         </nav>
       </header>
       {props.children}
