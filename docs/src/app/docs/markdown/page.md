@@ -118,6 +118,9 @@ export const components = {
 };
 ```
 
+Markdown pages render with the app's renderer, so the map holds that renderer's components: under
+Vue, `Callout` can be a `.vue` component, and its slot gets the Markdown inside it.
+
 Set `mdx.markdownRoutes` to `false` when source-authored pages should render as HTML only.
 
 ### Interactive components

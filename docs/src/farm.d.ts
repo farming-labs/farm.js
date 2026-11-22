@@ -469,6 +469,16 @@ declare module "@farm.js/core" {
   }
 }
 
+type FarmMountsOf<C> = C extends { storage: { mounts: infer M } } ? M : {};
+type FarmStorageMounts0 = FarmMountsOf<typeof import("../farm.config.js").default>;
+declare global {
+  namespace FarmJS {
+    interface StorageRegistry {
+      mounts: FarmStorageMounts0;
+    }
+  }
+}
+
 /**
  * Auto-generated content collection types from Farm layers and farm.config.
  * Regenerated on dev start, build, and farm generate.

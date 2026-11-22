@@ -242,14 +242,21 @@ export function startFarmIslandsBoot(load: () => Promise<unknown> = loadFarmClie
   // a round trip after it runs. The headers are the ones the router sends for that navigation from
   // this document: the layouts it shows, and flush markers for a page that streams. From under a
   // layout that hydrates as one root it asks for the page whole, as the router does for a page
-  // under it, and the router takes a whole page for one it would stream too. The island values the
-  // router holds (F-Values) are left out, so the server sends every value the page needs.
+  // under it, and the router takes a whole page for one it would stream too. It names the island
+  // values the page holds, as the router does before islx loads (getFarmIslandValueHeaders): the
+  // router's swap keeps them, so the server leaves them out.
   const requestPage = (href: string) => {
     const headers: Record<string, string> = { accept: "text/html" };
-    const layouts = Array.from(
-      (document.getElementById("root") ?? document.body).querySelectorAll(
-        '[data-farm-layout-boundary="true"]',
+    const content = document.getElementById("root") ?? document.body;
+    // The keys, script type, header and limit getFarmIslandValueHeaders uses; a test compares them.
+    const held = new Set(
+      Array.from(content.querySelectorAll('script[type="f/value"][name]'), (value) =>
+        value.getAttribute("name"),
       ),
+    );
+    if (held.size) headers["f-values"] = [...held].slice(-128).join(",");
+    const layouts = Array.from(
+      content.querySelectorAll('[data-farm-layout-boundary="true"]'),
       (boundary) =>
         boundary.getAttribute("data-farm-layout-key") ||
         boundary.getAttribute("data-farm-layout-pattern"),

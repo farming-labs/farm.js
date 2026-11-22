@@ -218,8 +218,8 @@ The file format also turned up three bugs in how Farm handled a renderer's exten
 
 "You can bring your own renderer" is true for the core path: routes, layouts, SSR, hydration, navigation, server functions, and production output. It is not true for everything Farm does, and I would rather say so here than in an issue later.
 
-- **37 places in core still check for React.** Programmatic UI routes, Markdown visual routes, generated JSX metadata images, and React Server Components are React-oriented today. The [feature table](/docs/renderers#feature-support) says which features each official renderer gets, and a custom renderer gets the same as Solid, Vue, and Svelte.
-- **The conformance suite isn't published.** The official renderers run it from `packages/farm-renderer-tests` in the monorepo. Until it ships on npm, the type-check below is how a third-party renderer checks itself.
+- **Some features are still React-oriented.** Programmatic UI routes, generated JSX metadata images, and React Server Components are React-oriented today. The [feature table](/docs/renderers#feature-support) says which features each official renderer gets, and a custom renderer gets the same as Solid, Vue, and Svelte. Markdown pages were on this list when the post went up. They now render with any renderer on `main`.
+- **The conformance suite isn't on npm yet.** It's `@farm.js/renderer-tests` on `main` and ships in the next release. Until then, the type-check below is how a third-party renderer checks itself.
 - **One renderer per app.** You choose a renderer; you can't mix leaf on one page and React on the next.
 
 <span id="write-your-own" className="blog-heading-anchor" />

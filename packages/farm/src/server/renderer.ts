@@ -1189,6 +1189,26 @@ export class ServerRenderer {
   }
 
   /**
+   * The page's element. Only React renders an async component, so for any other renderer Farm
+   * awaits an async page itself and hands the renderer what it returned, as the production
+   * server does. A `page.md` page is one: it compiles its Markdown on first render.
+   */
+  private async createPageElement(PageComponent: unknown, pageProps: unknown): Promise<any> {
+    const runtime = this.rendererRuntime;
+    if (
+      isReactRenderer(this.config.renderer) ||
+      typeof PageComponent !== "function" ||
+      PageComponent.constructor?.name !== "AsyncFunction"
+    ) {
+      return runtime.createElement(PageComponent, pageProps);
+    }
+    const result = await (PageComponent as (props: unknown) => Promise<unknown>)(pageProps);
+    return runtime.isValidElement(result)
+      ? result
+      : runtime.createElement(runtime.Fragment, null, result);
+  }
+
+  /**
    * Render the route tree used by client navigation without producing a second
    * document response. Layout markers let the browser preserve the longest
    * common shell and replace only the first changed boundary.
@@ -1199,7 +1219,7 @@ export class ServerRenderer {
     setFarmBasePath(this.config.basePath);
     this.publishSearchPreserveRoutes();
     setFarmTrailingSlashPreference(this.config.trailingSlash);
-    let element = this.rendererRuntime.createElement(input.PageComponent, input.pageProps);
+    let element = await this.createPageElement(input.PageComponent, input.pageProps);
     if (input.LoadingComponent) {
       element = this.rendererRuntime.createElement(
         this.rendererRuntime.Suspense,
@@ -1687,7 +1707,7 @@ window.__FARM_I18N__ = ${i18nSnapshot ? serializeInlineValue(i18nSnapshot) : "nu
             path: page.urlPath,
           };
 
-          let pageElement: any = this.rendererRuntime.createElement(PageComponent, pageProps);
+          let pageElement: any = await this.createPageElement(PageComponent, pageProps);
           const pageMetadata = routeManifest.routes.find(
             (entry) => entry.pattern === route?.pattern,
           ) ?? {
@@ -2520,7 +2540,7 @@ window.__FARM_I18N__ = ${i18nSnapshot ? serializeInlineValue(i18nSnapshot) : "nu
       await _runWithMiddlewareData(middlewareDataForContext, async () => {
         await _runWithMiddlewareContext(middlewareContext, async () => {
           await _runWithCurrentRequest(currentRequest, async () => {
-            let pageElement: any = this.rendererRuntime.createElement(PageComponent, pageProps);
+            let pageElement: any = await this.createPageElement(PageComponent, pageProps);
 
             // An islands navigation is swapped into a page already on screen, where a fallback
             // would paint, so it arrives without loading.tsx, as on the production server.

@@ -3663,9 +3663,9 @@ ${
       const response = await fetchFarmNavigationDocument(url, {
         "Accept": "text/html",
         ...(interceptFrom ? { "X-Farm-Intercept-From": interceptFrom } : {}),
-        // Islands mode: the server leaves out island values this browser holds, and the
-        // layouts it shows.
-        ...getFarmIslandValueHeaders(),
+        // Islands mode: the server leaves out island values this browser holds (the swap keeps
+        // the ones only the page holds, keepFarmIslandValues), and the layouts it shows.
+        ...getFarmIslandValueHeaders(${streamNavigations ? 'document.getElementById("root") || document.body' : ""}),
         ...partialHeaders,
         ...(streamShell ? { "F-Stream": "flush" } : {}),
       }, recover, signal);
@@ -4846,7 +4846,7 @@ ${layoutImports}
 ${rendererClientImports}
 ${isolatedHydrationImport}
 ${providerClientCode.imports}
-import { createClientCancellation, createClientPluginManager, createPluginlessClientRuntime, getFarmIslandValueHeaders, getHashTargetElement, installChunkErrorRecovery, installFarmLinkPrefetch, isFarmBlockedNavigationURL, isFarmExternalNavigationURL, readFarmLinkNavigateOptions, rememberFarmLinkLocale, reconcileFarmDocumentHead, runFarmNavigationDelegates, scheduleFarmIslandHydration, createFarmSearchParams, searchParamsToObject, setFarmBasePath, setFarmTrailingSlashPreference, stripFarmBasePath } from "@farm.js/core/internal/client-runtime";
+import { createClientCancellation, createClientPluginManager, createPluginlessClientRuntime, getFarmIslandValueHeaders, getHashTargetElement, keepFarmIslandValues, installChunkErrorRecovery, installFarmLinkPrefetch, isFarmBlockedNavigationURL, isFarmExternalNavigationURL, readFarmLinkNavigateOptions, rememberFarmLinkLocale, reconcileFarmDocumentHead, runFarmNavigationDelegates, scheduleFarmIslandHydration, createFarmSearchParams, searchParamsToObject, setFarmBasePath, setFarmTrailingSlashPreference, stripFarmBasePath } from "@farm.js/core/internal/client-runtime";
 import { createFarmDeploymentMismatchError, createFarmDeploymentRequestHeaders, isFarmDeploymentMismatchResponse } from "@farm.js/core/deployment";
 import { createFarmRouter, isFarmRouteActive, matchFarmRoute } from "@farm.js/core/router";
 ${clientPluginEntry.imports}
@@ -6155,6 +6155,7 @@ ${
     if (nextPage?.querySelector('script[type="f/tree"][partial]')) return "segment-mismatch";`
         : ""
     }
+    ${islandValues ? "const keepValues = keepFarmIslandValues(currentRoot);" : ""}
     const rootWasReactOwned = reactRootContainer === currentRoot;
     resetReactRoot();
     resetRouteSlotRoots();
@@ -6171,6 +6172,7 @@ ${
       activateNavigationScripts(currentRoot);
       isolatedHydrationScope = currentRoot;
     }
+    ${islandValues ? "keepValues();" : ""}
     window.__FARM_ROUTE_SLOTS__ = nextRouteSlots;
     hydrateInitialRouteSlots();
 
@@ -7840,7 +7842,7 @@ function renderFarmServerTreeLayout(Layout, props, outlets) {
       source: ${JSON.stringify(route.source ?? "")},
       filePath: ${JSON.stringify(toBakedMarkdownSourcePath(config.root, route.modulePath))},
       components: farmMdxComponents,
-      config: farmMdxConfig,
+      config: farmMdxConfig,${isReactRenderer(config.renderer) ? "" : "\n      renderer: React,"}
     }),
     markdownSource: {
       source: ${JSON.stringify(route.source ?? "")},

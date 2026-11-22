@@ -7016,7 +7016,7 @@ import {
   createFarmDeploymentRequestHeaders,
   isFarmDeploymentMismatchResponse,
 } from '@farm.js/core/deployment'
-${islandValues ? "import { getFarmIslandValueHeaders } from '@farm.js/core/internal/client-runtime'" : ""}
+${islandValues ? "import { getFarmIslandValueHeaders, keepFarmIslandValues } from '@farm.js/core/internal/client-runtime'" : ""}
 ${providerClientCode.imports}
 ${clientPluginEntry.imports}
 
@@ -8356,7 +8356,8 @@ async function fetchFarmNavigationDocument(path, context) {
       Accept: 'text/html',
       // A refresh arrives whole, like a transition: the islands it keeps are all in it.
       ...(context.prefetch || context.refresh ? {} : { 'F-Stream': 'flush' }),
-      ...getFarmIslandValueHeaders(),
+      // The swap keeps the values only the page holds (keepFarmIslandValues).
+      ...getFarmIslandValueHeaders(container),
       // A prefetch names its layouts even when it keeps none: that marks it as a navigation,
       // which the server answers without loading.tsx.
       ...(identities.length || context.prefetch ? { 'F-Layouts': JSON.stringify(identities) } : {}),
@@ -8610,6 +8611,7 @@ async function renderPage(pageData, info) {
       );
     } else {
       ${isolatedHydrationEnabled ? "let isolatedHydrationScope = container;" : ""}
+      ${islandValues ? "const keepValues = keepFarmIslandValues(container);" : ""}
       // A route whose layouts hydrate renders them for its own root (inline client components,
       // islands mode's layout trees), so the HTML of shared layouts is replaced too.
       if (activeLayoutShouldHydrate || layoutShouldHydrate) {
@@ -8632,6 +8634,7 @@ async function renderPage(pageData, info) {
               : "replaceNavigationBoundary(container, fragment, activeLayoutPatterns, layoutPatterns);"
         }
       }
+      ${islandValues ? "keepValues();" : ""}
 
       const hydrationController = new AbortController();
       if (

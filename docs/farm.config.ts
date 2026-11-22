@@ -1,9 +1,11 @@
 import { defineConfig } from "@farm.js/core";
 import { devtools } from "@farm.js/devtools";
+import { farmStorage } from "@farm.js/core/storage";
 import { webmcp } from "@farm.js/webmcp";
 import { farmDocsRuntimeAdapter } from "@farming-labs/farmjs/runtime";
 import { farmjsAPIPaths } from "./src/lib/openapi";
 import { agentSupportInvitation } from "./src/lib/agent-support";
+import { feedbackSchema } from "./src/lib/agent-feedback-schema";
 
 const siteDescription =
   "Farm.js is the full-stack framework for the web and agents: apps are agent-ready by default and run any agent runtime you bring. Built on Vite and Nitro.";
@@ -104,6 +106,16 @@ export default defineConfig({
         ],
       },
     ];
+  },
+  // Both databases are hosted by Farm.js Infra. `stats` is used as KV (the last GitHub star
+  // count) and `feedback` as SQL (agent feedback about the docs). Create them with
+  // `farm storage apply` and a `databases:provision` key; the server reads them with a
+  // `databases:connect` key in FARMJS_API_KEY.
+  storage: {
+    mounts: {
+      stats: farmStorage({ type: "kv" }),
+      feedback: farmStorage({ type: "sql", schema: feedbackSchema }),
+    },
   },
   deploy: {
     target: "vercel",

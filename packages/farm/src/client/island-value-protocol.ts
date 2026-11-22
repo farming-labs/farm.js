@@ -27,6 +27,8 @@ export const FARM_ISLAND_ELEMENT = "f-island";
 export const FARM_PROPS_SCRIPT_TYPE = "f/props";
 /** The script type of a value sent once; its `name` attribute is the value's key. */
 export const FARM_VALUE_SCRIPT_TYPE = "f/value";
+/** The script type of a server tree's payload: a page's, or a layout's when it has a `name`. */
+export const FARM_SERVER_TREE_SCRIPT_TYPE = "f/tree";
 /** The element that keeps server output passed to an island as children. */
 export const FARM_SLOT_ELEMENT = "f-slot";
 /** The reserved JSON key whose value is a tag. */
@@ -93,9 +95,63 @@ export interface FarmIslandValueStore {
   heldHeader(): string | undefined;
 }
 
-/** Headers a navigation sends so the server can leave out values the browser holds. */
-export function getFarmIslandValueHeaders(): Record<string, string> {
-  const scope = globalThis as typeof globalThis & Record<symbol, FarmIslandValueStore | undefined>;
-  const held = scope[FARM_ISLAND_VALUE_STORE_KEY]?.heldHeader();
+function getValueStore(): FarmIslandValueStore | undefined {
+  return (globalThis as typeof globalThis & Record<symbol, FarmIslandValueStore | undefined>)[
+    FARM_ISLAND_VALUE_STORE_KEY
+  ];
+}
+
+/** The value scripts under `root` by key: the latest keys, as many as a navigation names. */
+function readValueScripts(root: ParentNode): Map<string, Element> {
+  const scripts = new Map<string, Element>();
+  for (const script of root.querySelectorAll(`script[type="${FARM_VALUE_SCRIPT_TYPE}"]`)) {
+    const key = script.getAttribute("name") ?? "";
+    if (FARM_VALUE_KEY_PATTERN.test(key) && !scripts.has(key)) scripts.set(key, script);
+  }
+  return new Map([...scripts].slice(-FARM_MAX_HELD_VALUES));
+}
+
+/**
+ * Headers a navigation sends so the server can leave out values the browser holds: the ones in
+ * islx's store, or, before islx has loaded, the value scripts in `root`. A router that passes
+ * `root` keeps those scripts through its swap (`keepFarmIslandValues`).
+ */
+export function getFarmIslandValueHeaders(root?: ParentNode | null): Record<string, string> {
+  const held =
+    getValueStore()?.heldHeader() ??
+    (root ? [...readValueScripts(root).keys()].join(",") || undefined : undefined);
   return held ? { [FARM_VALUES_HEADER]: held } : {};
+}
+
+/**
+ * Keeps the island values `root` holds through a navigation that replaces its content, so the
+ * values a request named as held (`getFarmIslandValueHeaders(root)`) and the server left out are
+ * still there when the new content hydrates. Call it before the swap and the function it returns
+ * after. islx's store, once loaded, reads them before the swap. Before then the page's value
+ * scripts are their only copy: the ones the new content lacks go back into it, where hydration
+ * reads them without seeing markup it did not render.
+ */
+export function keepFarmIslandValues(root: ParentNode): () => void {
+  const store = getValueStore();
+  if (store) {
+    store.ingest(root);
+    return () => {};
+  }
+  const held = readValueScripts(root);
+  return () => {
+    for (const script of root.querySelectorAll(`script[type="${FARM_VALUE_SCRIPT_TYPE}"]`)) {
+      held.delete(script.getAttribute("name") ?? "");
+    }
+    if (held.size === 0) return;
+    // A tree renders the value scripts right before its payload again (server-tree.ts), so the
+    // last tree takes them. Without one, a page that is not a client component is server HTML
+    // React does not hydrate node by node; a client page's go in the body, outside any React root.
+    const trees = root.querySelectorAll(`script[type="${FARM_SERVER_TREE_SCRIPT_TYPE}"]`);
+    const tree = trees[trees.length - 1];
+    if (tree) return tree.before(...held.values());
+    const page = root.querySelector("#__farm_page__");
+    (page && page.getAttribute("data-farm-client") !== "true" ? page : document.body).append(
+      ...held.values(),
+    );
+  };
 }

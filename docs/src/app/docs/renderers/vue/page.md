@@ -173,8 +173,8 @@ theme.toggleTheme();
 The composables return Vue refs and computed values. `useStore(store)` binds your own state, a
 store from `createStore` in `@farm.js/core/renderer-client`, to a read-only ref; see
 [Shared client state](/docs/renderers#shared-client-state). Renderer-specific `Link` and form components,
-fetchers, integration providers, programmatic UI routes, Markdown/MDX visual pages, the docs
-adapter, and generated JSX metadata images remain React-oriented today.
+fetchers, integration providers, programmatic UI routes, the docs adapter, and generated JSX
+metadata images remain React-oriented today. Markdown and MDX pages render with Vue.
 
 The Better Auth starter includes native Vue SFC routes, composables, and forms:
 

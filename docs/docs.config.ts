@@ -5,6 +5,7 @@ import { FARM_VERSION } from "@farm.js/core/version";
 import { existsSync, readFileSync } from "node:fs";
 import path from "node:path";
 import { agentSupportInvitation } from "./src/lib/agent-support";
+import { agentFeedbackPayloadSchema } from "./src/lib/agent-feedback-schema";
 import {
   siCloudflare,
   siConvex,
@@ -452,6 +453,19 @@ const config = {
   favicon: "/favicon.ico",
   // The docs MCP describes Farm.js, so it reports the Farm.js version, not this site's.
   mcp: { version: FARM_VERSION },
+  // Agent feedback (`/api/docs?feedback=agent` and the MCP `submit_feedback` tool) is stored in
+  // the `feedback` mount. The page feedback prompt stays off. The store loads on first use, so
+  // storage code never reaches a module graph that only needs this config.
+  feedback: {
+    enabled: false,
+    agent: {
+      schema: agentFeedbackPayloadSchema,
+      onFeedback: async (data) => {
+        const { saveAgentFeedback } = await import("./src/lib/agent-feedback");
+        await saveAgentFeedback(data);
+      },
+    },
+  },
   // List the hand-written /openapi.json (public APIs only) in /.well-known/api-catalog.
   agent: { apiCatalog: { openapi: "/openapi.json" } },
   socialImage: {
