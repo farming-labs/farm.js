@@ -355,10 +355,14 @@ export function scheduleFarmIslandHydration<T>({
     // Observed, not held. These start hydration early so a controlled input has
     // its handlers attached before the value diverges, while letting the native
     // interaction through: swallowing a keystroke or a toggle would be worse
-    // than hydrating late.
+    // than hydrating late. A link that navigates is left alone, as its click
+    // is (heldClickTarget): pressing or focusing it would only load the code of
+    // the page it leaves, and race the navigation for the network.
     const observeActivation = (event: Event) => {
       const target = event.target;
       if (!(target instanceof Element) || !container.contains(target)) return;
+      const link = target.closest("a[href]");
+      if (link && !link.getAttribute("href")?.startsWith("#")) return;
       start();
     };
 

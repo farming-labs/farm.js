@@ -77,23 +77,44 @@ describe("a navigation request and the boot's request for a held click", () => {
     expect(window.__FARM_EARLY_NAVIGATION__).toBeUndefined();
   });
 
+  it("takes a whole page for a navigation that would stream it", async () => {
+    // From under a layout that hydrates as one root, the boot asks for the next page whole.
+    const { abort, fetch, fetchFarmNavigationDocument } = setup({
+      headers: { accept: "text/html", "x-farm-deployment-id": "d1", "f-layouts": '["/docs"]' },
+    });
+    const response = await fetchFarmNavigationDocument("/docs/b", navigation);
+    expect(await response.text()).toBe("<main>early</main>");
+    expect(fetch).not.toHaveBeenCalled();
+    expect(abort).not.toHaveBeenCalled();
+  });
+
   it("aborts a request that differs, and sends its own", async () => {
-    for (const early of [
-      { url: "https://app.test/docs/c" },
-      { headers: { accept: "text/html", "x-farm-deployment-id": "d1", "f-stream": "flush" } },
-      {
-        headers: {
-          accept: "text/html",
-          "x-farm-deployment-id": "d1",
-          "f-layouts": '["/docs"]',
-          "f-render": "tree",
+    const { "F-Stream": _stream, ...whole } = navigation;
+    const cases: Array<[Parameters<typeof setup>[0], Record<string, string>]> = [
+      [{ url: "https://app.test/docs/c" }, navigation],
+      [
+        { headers: { accept: "text/html", "x-farm-deployment-id": "d1", "f-stream": "flush" } },
+        navigation,
+      ],
+      // A streamed response does not answer a request for the whole page.
+      [{}, whole],
+      [
+        {
+          headers: {
+            accept: "text/html",
+            "x-farm-deployment-id": "d1",
+            "f-layouts": '["/docs"]',
+            "f-render": "tree",
+          },
         },
-      },
+        navigation,
+      ],
       // Sent over 30 seconds ago, like a prefetched page that went stale.
-      { at: Date.now() - 31_000 },
-    ]) {
+      [{ at: Date.now() - 31_000 }, navigation],
+    ];
+    for (const [early, request] of cases) {
       const { window, abort, fetch, fetchFarmNavigationDocument } = setup(early);
-      const response = await fetchFarmNavigationDocument("/docs/b", navigation);
+      const response = await fetchFarmNavigationDocument("/docs/b", request);
       expect(await response.text()).toBe("<main>own</main>");
       expect(fetch).toHaveBeenCalledTimes(1);
       expect(abort).toHaveBeenCalledTimes(1);
