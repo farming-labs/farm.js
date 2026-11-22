@@ -36,13 +36,13 @@ Routes, rendering, layouts, and request flow.
 
 ### Data and APIs
 
-Typed params, API routes, API callers, KV storage, and database access.
+Typed params, API routes, API callers, KV storage, SQL databases, and hosted storage.
 
 - [Query and Params](/docs/query): Parse search params and route params with typed helpers on the server and synchronized state on the client.
 - [API Routes](/docs/api-routes): Expose HTTP handlers from src/app/api and validate input with schemas before handler code runs.
 - [API Client](/docs/api-client): Define one shared `{ api, apiClient }` pair for typed local server calls and HTTP calls, with cache policies, invalidation, retries, callbacks, and optimistic updates.
 - [Server Queries](/docs/server-queries): Define typed server reads once, deduplicate requests, prefetch browser data, use SWR, and share invalidation keys with routes and APIs.
-- [KV Storage](/docs/storage): Use `getStorage()` for caches, settings, counters, idempotency records, and object-backed values.
+- [Storage](/docs/storage): Store key/value data with `getStorage()`, query SQL models with `@farming-labs/orm` on PostgreSQL, MySQL, or SQLite, and let Farm.js Infra host the database.
 
 ### Integrations
 
