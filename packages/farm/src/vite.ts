@@ -9250,6 +9250,7 @@ export async function defineConfig(config: FarmVitePluginOptions = {}): Promise<
           getFarmAppDirectories({ ...config, root: appRoot }),
         ),
         config.renderer,
+        appRoot,
       ),
       // Pre-bundle every framework client-runtime entry with the renderer. Without
       // this, Vite can discover a linked Farm entry after the page has loaded,

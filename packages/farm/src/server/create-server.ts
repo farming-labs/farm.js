@@ -428,6 +428,7 @@ export async function createServer(
             ...createFarmClientOptimizeDepsConfig(
               createFarmClientOptimizeDepsEntries(projectRoot, getFarmAppDirectories(finalConfig)),
               finalConfig.renderer,
+              projectRoot,
             ),
             exclude: [
               "@farm.js/core/server",
