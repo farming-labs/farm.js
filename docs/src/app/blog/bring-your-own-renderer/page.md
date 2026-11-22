@@ -321,7 +321,7 @@ const toggleAria = definePlugin({
 export default defineConfig({ renderer: leaf(), plugins: [toggleAria] });
 ```
 
-I ran the plugin version with the smallest renderer in Farm's own tests, which renders to a string and never touches the DOM in the browser, in development and production. Then I ran both versions with Preact, which hydrates and re-renders in place the way leaf does. Production build, Chrome:
+I ran both versions on leaf and on Preact, in a production build in Chrome. I also ran the plugin version, in development and production, with the smallest renderer in Farm's own tests, which renders to a string and never touches the DOM in the browser. On leaf and Preact:
 
 ```txt
                    pressed  aria-pressed
@@ -331,7 +331,7 @@ after a click      false    "false"
 after a re-render  false    "false"
 ```
 
-The last line matters. When the page re-renders, Preact compares its new props with its old ones, not with the DOM, so it leaves the attribute ui-sdk changed alone.
+The last line matters. When the page re-renders, leaf and Preact compare their new props with their old ones, not with the DOM, so they leave the attribute ui-sdk changed alone.
 
 The plugin has a price. Farm holds the whole page before it can rewrite it, so with the plugin installed a streaming renderer stops streaming. leaf renders to a string anyway, so it pays nothing. And the regex is a demo. A real plugin has to ask the primitive for its attributes, and today the only way to ask is the same undocumented entry the leaf way uses. So for now I write simple ARIA by hand, and I'll build the plugin once ui-sdk makes that step public.
 
