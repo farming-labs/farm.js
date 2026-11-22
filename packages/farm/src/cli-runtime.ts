@@ -14,6 +14,7 @@ export {
   resolveDeployOutputPath,
 } from "./config";
 export { getFarmSourceRoots } from "./layers";
+export { resolveFarmComponentExtensions } from "./renderer";
 export { resolveRouteRenderingConfig } from "./ssg";
 export { getFarmPresetRuntime } from "./deployment";
 export { getFarmDocsRouteTypeEntries } from "./docs/handler";
