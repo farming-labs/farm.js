@@ -9,7 +9,7 @@ CREATE TABLE IF NOT EXISTS `orgs` (
 -- Owner "alpha" model "members"
 CREATE TABLE IF NOT EXISTS `members` (
   `id` VARCHAR(255) PRIMARY KEY,
-  `org_id` VARCHAR(255) NOT NULL REFERENCES `orgs` (`id`) ON DELETE CASCADE,
+  `org_id` VARCHAR(255) NOT NULL,
   `role` VARCHAR(255) NOT NULL DEFAULT 'member',
   `seat_count` INT NOT NULL DEFAULT 1,
   `spend_cap` DOUBLE,
@@ -19,7 +19,8 @@ CREATE TABLE IF NOT EXISTS `members` (
   `joined_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
   `offsite_ref` VARCHAR(255) /* references elsewhere.id */,
   KEY `members_org_id_idx` (`org_id`),
-  UNIQUE KEY `members_org_id_role_unique` (`org_id`, `role`)
+  UNIQUE KEY `members_org_id_role_unique` (`org_id`, `role`),
+  FOREIGN KEY (`org_id`) REFERENCES `orgs` (`id`) ON DELETE CASCADE
 );
 
 -- Owner "beta" model "tickets"
@@ -32,9 +33,10 @@ CREATE TABLE IF NOT EXISTS `tickets` (
 CREATE TABLE IF NOT EXISTS `projects` (
   `id` VARCHAR(255) PRIMARY KEY,
   `projectTitle` VARCHAR(255) NOT NULL,
-  `ownerId` VARCHAR(255) NOT NULL REFERENCES `tickets` (`id`),
+  `ownerId` VARCHAR(255) NOT NULL,
   `createdAt` DATETIME NOT NULL,
-  KEY `projects_ownerId_idx` (`ownerId`)
+  KEY `projects_ownerId_idx` (`ownerId`),
+  FOREIGN KEY (`ownerId`) REFERENCES `tickets` (`id`)
 );
 
 -- Owner "widgets" model "widgets"

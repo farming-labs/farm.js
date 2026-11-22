@@ -62,6 +62,9 @@ lets the browser give `useId` the ids in the HTML. The full contract is islx's
   components hydrated. A value that refers to itself arrives with the same cycle, through a
   promise or stream too. A plain function fails the render with an error that names the component
   and the prop.
+- **MDX.** The client components an MDX file imports are islands too, whether a page imports the
+  file or loads it with `import()`, as a content collection does. Farm reads the file's `import`
+  and `export` blocks for them, not its frontmatter or its fenced code examples.
 - **Tables, selects, SVG and lists.** A client component that renders a row, an option, a shape or
   a list item directly inside its parent makes that parent (the whole `<table>`, `<select>`,
   `<svg>` or `<ul>`) the island, since `<f-island>` cannot sit between them. The parent's server

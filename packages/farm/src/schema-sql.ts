@@ -180,6 +180,7 @@ function renderSqlTable(
   const tableName = quoteSqlIdentifier(dialect, model.modelName);
   const lines = [`CREATE TABLE IF NOT EXISTS ${tableName} (`];
   const columns: string[] = [];
+  const foreignKeys: string[] = [];
   const internalReferences = createInternalReferenceLookup(model, dialect, modelLookup);
 
   for (const [fieldKey, field] of Object.entries(model.model.fields)) {
@@ -215,7 +216,11 @@ function renderSqlTable(
       (crossOwner
         ? `REFERENCES ${quoteSqlIdentifier(dialect, crossOwner.table)} (${quoteSqlIdentifier(dialect, crossOwner.column)})${crossOwner.onDelete !== "noAction" ? ` ON DELETE ${SQL_ON_DELETE_ACTIONS[crossOwner.onDelete]}` : ""}`
         : undefined);
-    if (reference) {
+    if (reference && dialect === "mysql") {
+      // MySQL before 9.0 parses a REFERENCES clause on a column and ignores it, so the key is
+      // declared as a table constraint, which every version enforces.
+      foreignKeys.push(`  FOREIGN KEY (${quoteSqlIdentifier(dialect, field.name)}) ${reference}`);
+    } else if (reference) {
       parts.push(reference);
     } else if (field.reference) {
       parts.push(
@@ -232,6 +237,7 @@ function renderSqlTable(
         `  ${definition.unique ? "UNIQUE KEY" : "KEY"} ${quoteSqlIdentifier(dialect, definition.name)} (${definition.columns.join(", ")})`,
       );
     }
+    columns.push(...foreignKeys);
   }
 
   lines.push(columns.join(",\n"));
