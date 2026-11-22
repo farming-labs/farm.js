@@ -106,9 +106,9 @@ theme.toggleTheme();
 The binding properties are backed by Solid signals. `useStore(store)` binds your own state, a
 store from `createStore` in `@farm.js/core/renderer-client`, to an accessor; see
 [Shared client state](/docs/renderers#shared-client-state). Renderer-specific `Link` and form components,
-fetchers, integration providers, the docs adapter, and generated JSX metadata images remain
-React-oriented today. Markdown and MDX pages and
-[programmatic UI routes](/docs/routing#programmatic-routes) render with Solid.
+fetchers, integration providers, and the docs adapter remain React-oriented today. Markdown and
+MDX pages and [programmatic UI routes](/docs/routing#programmatic-routes) render with Solid, and so
+do [generated metadata images](/docs/routing#generated-metadata-images) written in Solid JSX.
 
 The Better Auth starter includes native Solid routes, signals, and forms:
 

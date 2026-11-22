@@ -267,6 +267,7 @@ import {
 import {
   generateFarmIntegrationProviderClientCode,
   generateFarmIntegrationProviderServerModules,
+  isRendererCompiledComponent,
 } from "../integration-provider-build";
 import { loadFarmProductionVite, type FarmProductionViteRuntime } from "../build/production-vite";
 import {
@@ -8023,12 +8024,16 @@ function renderFarmServerTreeLayout(Layout, props, outlets) {
       metadataImageImports.push(
         `import * as ${varName} from ${toVirtualEntryImportSpecifier(image.modulePath)};`,
       );
+      // An `opengraph-image.vue` default-exports a component, not a function to call.
+      const component =
+        !isReactRenderer(config.renderer) &&
+        isRendererCompiledComponent(image.modulePath, config.renderer?.componentExtensions ?? []);
       metadataImageRegistrations.push(`
   {
     pattern: ${JSON.stringify(image.pattern)},
     kind: ${JSON.stringify(image.kind)},
     fileName: ${JSON.stringify(image.fileName)},
-    sourceType: "module",
+    sourceType: "module",${component ? "\n    component: true," : ""}
     module: ${varName},
   }`);
       return;
@@ -8264,7 +8269,7 @@ function resolveFarmMobileShellRender(request, route, routePathname) {
     ? `import { createFarmProductionSiteReporter } from "@farm.js/core/internal/product-telemetry-runtime";`
     : "";
   const metadataImageRuntimeImport = hasGeneratedMetadataImages
-    ? `import { createFarmMetadataImageResponse } from "@farm.js/core/internal/metadata-image-runtime";`
+    ? `import { createFarmMetadataImageResponse, resolveFarmMetadataImageValue } from "@farm.js/core/internal/metadata-image-runtime";`
     : "";
   const pluginRuntimeImport = hasPluginRuntime
     ? `import { PluginManager } from "@farm.js/core/plugin";`
@@ -10367,13 +10372,15 @@ async function handleMetadataImageRequest(request, routePathname) {
       searchParams: createFarmSearchParams(searchParams),
       path: match.pagePath,
     };
-    const value = typeof imageModule.default === "function"
-      ? await imageModule.default(props)
-      : imageModule.default;
 
     ${
       hasGeneratedMetadataImages
-        ? `return createFarmMetadataImageResponse(value, imageModule, {
+        ? `const value = await resolveFarmMetadataImageValue(imageModule, props${
+            isReactRenderer(config.renderer)
+              ? ""
+              : ", {\n      renderer: ReactDOMServer,\n      component: image.component === true,\n    }"
+          });
+    return createFarmMetadataImageResponse(value, imageModule, {
       method,
       ifNoneMatch: request.headers.get("if-none-match"),${
         isReactRenderer(config.renderer) ? "" : "\n      renderer: ReactDOMServer,"
