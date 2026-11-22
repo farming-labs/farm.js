@@ -115,7 +115,7 @@ same or less everywhere else.** These are the numbers for one app built in both 
 | -------------------------- | --------------- | -------------- | -------------- | -------------- |
 | First-load JavaScript      | 71.0 to 2.2 KB  | 71.0 to 2.2 KB | 71.0 to 2.2 KB | 71.0 to 2.2 KB |
 | HTML document              | 16.3 to 16.1 KB | 5.5 to 5.9 KB  | 17.9 to 9.1 KB | 18.0 to 9.5 KB |
-| Data per navigation        | 12.0 to 2.7 KB  | 3.8 to 6.0 KB  | 10.8 to 9.2 KB | 10.9 to 9.6 KB |
+| Data per navigation        | 12.0 to 2.7 KB  | 3.8 to 4.4 KB  | 10.8 to 9.2 KB | 10.9 to 9.6 KB |
 | First-load main thread     | 168 to 87 ms    | 162 to 80 ms   | 216 to 106 ms  | 216 to 105 ms  |
 | First navigation           | 85 to 38 ms     | 87 to 47 ms    | 139 to 67 ms   | 134 to 77 ms   |
 | First tap, 150 ms latency  | 246 to 211 ms   | 247 to 213 ms  | 269 to 218 ms  | 273 to 235 ms  |
@@ -134,7 +134,8 @@ Requests per second are the median of 8 rounds alternating between the modes, on
 Measured 2026-11-20 on an Apple M1 with other work running (load average 11 to 20): times at
 commit `33b402362` (Farm 0.1.77, islx 0.0.25), sizes, first navigations and first taps on
 2026-11-22 (load average 7 to 71), once a layout that hydrates as one root kept waiting through a
-navigation.
+navigation, and sizes again that day once a navigation named the island values the page holds
+before islx loads.
 
 - **First load.** 32 times less JavaScript and about half the main-thread work, because these pages'
   client components wait for a click.
@@ -170,9 +171,8 @@ Where islands mode does not win:
   hydrates as one root.
 - **Until a layout that hydrates as one root does, its navigations carry more data.** The router
   swaps the next page's HTML in, so the layout keeps waiting, and the response carries that HTML as
-  well as the page's server tree. It carries island values the browser already holds too: the
-  browser names them from islx's store, which loads with the layout. That is 6.0 KB per navigation
-  on shop pages against 3.8 KB with `"rsc"`. React DOM and islx stay unloaded meanwhile, which
+  well as the page's server tree. That is 4.4 KB per navigation on shop pages against 3.8 KB with
+  `"rsc"`, three quarters of it the page's HTML. React DOM and islx stay unloaded meanwhile, which
   saves more: 2.7 KB of JavaScript per navigation instead of 9.7, averaged over ten.
 - **A small page's HTML is a little larger.** The shop page is 0.4 KB larger, for islx's island
   markers and props.

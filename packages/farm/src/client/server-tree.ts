@@ -2,6 +2,7 @@ import type React from "react";
 import { getFarmActionId } from "./action-reference";
 import {
   FARM_REFERENCE_TAG,
+  FARM_SERVER_TREE_SCRIPT_TYPE,
   FARM_TAG,
   FARM_VALUE_SCRIPT_TYPE,
   getFarmIslandValuesServer,
@@ -36,8 +37,7 @@ const SERVER_HTML_TAG = "f-html";
  * did not render, named after the first one.
  */
 const SERVER_HTML_TEMPLATE_TAG = "template";
-/** The script type of a page's tree. */
-export const FARM_SERVER_TREE_SCRIPT_TYPE = "f/tree";
+export { FARM_SERVER_TREE_SCRIPT_TYPE };
 // `NOT_A_FARM_MARKER` in island-codec.ts, without importing the codec into every bundle.
 const FARM_NOT_A_MARKER = Symbol.for("farm.codec.not-a-marker");
 /** The script type of a chunk a Suspense boundary streamed later; its `name` is the chunk id. */

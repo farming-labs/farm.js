@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { existsSync } from "node:fs";
 import path from "node:path";
+import type { Request } from "@playwright/test";
 import { expect, test, type Page } from "./fixtures";
 
 // The server components contract. Every test runs against the same app built with
@@ -1465,6 +1466,72 @@ test("the first navigation from a layout that hydrates as one root, before it ha
   await page.click("[data-next]");
   await expect(page.locator("h1")).toHaveText("Waiting a");
   await expect(page.getByTestId("theme-label")).toHaveText("Theme: dark");
+  expect(errors).toEqual([]);
+});
+
+/** The requests for `pathname` that finish: the boot's for a held click, or the router's. */
+function finishedRequests(page: Page, pathname: string): Request[] {
+  const finished: Request[] = [];
+  page.on("requestfinished", (request) => {
+    if (new URL(request.url()).pathname === pathname) finished.push(request);
+  });
+  return finished;
+}
+
+/** Checks that each request named the `held` island values and its response left them out. */
+async function expectValuesLeftOut(requests: Request[], held: string[]) {
+  await expect.poll(() => requests.length).toBeGreaterThan(0);
+  for (const request of requests) {
+    expect((request.headers()["f-values"] ?? "").split(",")).toEqual(expect.arrayContaining(held));
+    const html = await (await request.response())!.text();
+    for (const key of held) expect(html).not.toContain(`name="${key}"`);
+  }
+}
+
+test("a navigation before islx loads leaves out the island values the page holds, and the next page's islands read them", async ({
+  page,
+}) => {
+  test.skip(mode !== "islands", "rsc sends props in its payload, not as island values");
+  const errors = collectErrors(page);
+  await page.goto("/values/held/a");
+  await page.waitForLoadState("networkidle");
+  // The list is sent once, by key, and every island here waits: nothing has loaded islx to hold it.
+  const held = await page
+    .locator('#__farm_page__ script[type="f/value"]')
+    .evaluateAll((scripts) => scripts.map((script) => script.getAttribute("name")!));
+  expect(held.length).toBeGreaterThan(0);
+  expect(await page.evaluate(() => Symbol.for("islx.values") in globalThis)).toBe(false);
+  const requests = finishedRequests(page, "/values/held/b");
+  await page.click("[data-next]");
+  await expect(page.locator("h1")).toHaveText("Held b");
+  await expectValuesLeftOut(requests, held);
+  // The swap kept the values the server left out, where the island reads them when it hydrates.
+  await page.getByTestId("wait-list").click();
+  await expect(page.getByTestId("wait-list")).toHaveText(/^Waiting entry 0, .*Waiting entry 39$/);
+  expect(errors).toEqual([]);
+});
+
+test("a navigation before islx loads out of a layout root that waits leaves out the island values the page holds, and the root hydrates with them", async ({
+  page,
+}) => {
+  test.skip(mode !== "islands", "rsc sends props in its payload, not as island values");
+  const errors = collectErrors(page);
+  await page.goto("/context/wait/a");
+  await page.waitForLoadState("networkidle");
+  const held = await page
+    .locator('#root script[type="f/value"]')
+    .evaluateAll((scripts) => scripts.map((script) => script.getAttribute("name")!));
+  expect(held.length).toBeGreaterThan(0);
+  expect(await page.evaluate(() => Symbol.for("islx.values") in globalThis)).toBe(false);
+  const requests = finishedRequests(page, "/context/wait/b");
+  await page.click("[data-next]");
+  await expect(page.locator("h1")).toHaveText("Waiting b");
+  // farm dev asks for this page's data first, and that request names only what islx holds.
+  if (!dev) await expectValuesLeftOut(requests, held);
+  // The swap kept the values the server left out in the page's tree, which the root hydrates.
+  await page.getByTestId("wait-list").click();
+  await expect(page.getByTestId("wait-list")).toHaveText(/^Waiting entry 0, .*Waiting entry 39$/);
+  await expect(page.locator("#root")).toHaveAttribute("data-farm-island-hydrated", "true");
   expect(errors).toEqual([]);
 });
 
