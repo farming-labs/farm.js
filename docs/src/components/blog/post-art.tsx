@@ -27,7 +27,7 @@ export const POST_ART: Record<string, PostArt> = {
   [rendererPost.href]: {
     heading: (
       <>
-        Bring your own renderer. <span>Three modules, eleven exports.</span>
+        Bring your own renderer, <span>build your own React.</span>
       </>
     ),
     header: (
