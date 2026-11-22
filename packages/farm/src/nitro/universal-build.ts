@@ -9178,7 +9178,10 @@ function serializeFarmInlineValue(value) {
     .replace(/\\u2029/g, "\\\\u2029");
 }
 
-function renderFarmClientBootstrapScript(canonicalPath, selectedRouteSlots, pageProps, routePathname) {
+// \`statusDocument\`: the not-found or error page, which renders without the route's layout
+// boundaries and page segment. It names no route for its URL, so the client hydrates none over it
+// (development writes no hydration flags for it either); its links still navigate.
+function renderFarmClientBootstrapScript(canonicalPath, selectedRouteSlots, pageProps, routePathname, statusDocument) {
   const integrationManifest = ${
     hasRuntimeIntegrationConfig ? "getRegisteredIntegrationAPIManifest()" : "{}"
   };
@@ -9195,11 +9198,13 @@ function renderFarmClientBootstrapScript(canonicalPath, selectedRouteSlots, page
         : ""
     };
   // The client boots at the canonical path when the script below moves it there.
-  const bootRoutes = getFarmClientBootRoutes(
-    typeof canonicalPath === "string" && canonicalPath.startsWith("/")
-      ? getFarmRoutePathname(canonicalPath.split(/[?#]/)[0])
-      : routePathname
-  );
+  const bootRoutes = statusDocument
+    ? typeof routePathname === "string" ? { path: routePathname, routes: [] } : undefined
+    : getFarmClientBootRoutes(
+        typeof canonicalPath === "string" && canonicalPath.startsWith("/")
+          ? getFarmRoutePathname(canonicalPath.split(/[?#]/)[0])
+          : routePathname
+      );
   if (bootRoutes) source += 'window.__FARM_CLIENT_ROUTES__=' + serializeFarmInlineValue(bootRoutes) + ';';
   if (typeof canonicalPath === "string" && canonicalPath.startsWith("/")) {
     const serializedPath = serializeFarmInlineValue(canonicalPath);
@@ -9989,7 +9994,7 @@ function addFarmFallbackIcon(markup, hasFavicon) {
   return markup.replace(/<\\/head>/i, function() { return '  <link rel="icon" href="data:,">\\n</head>'; });
 }
 
-function createFarmErrorDocument(html, title) {
+function createFarmErrorDocument(html, title, routePathname) {
   const escapedTitle = escapeFarmHtmlAttribute(title || "Application Error");
   const fullDocument = extractFarmFullDocument(html);
   const hasFullDocument = fullDocument !== null;
@@ -10004,7 +10009,7 @@ function createFarmErrorDocument(html, title) {
       renderFarmRendererHydrationScript() + '\\n' +
       '</head>\\n<body>\\n' +
       '  <div id="root">' + html + '</div>\\n' +
-      '  ' + renderFarmClientBootstrapScript() + '\\n' +
+      '  ' + renderFarmClientBootstrapScript(undefined, undefined, undefined, routePathname, true) + '\\n' +
       '  ' + renderFarmClientEntryScript() + '\\n' +
       '</body>\\n</html>';
   }
@@ -10023,7 +10028,7 @@ function createFarmErrorDocument(html, title) {
     .replace(
       /<\\/body>/i,
       function() {
-        return '  ' + renderFarmClientBootstrapScript() + '\\n' +
+        return '  ' + renderFarmClientBootstrapScript(undefined, undefined, undefined, routePathname, true) + '\\n' +
           '  ' + renderFarmClientEntryScript() + '\\n</body>';
       },
     );
@@ -13246,7 +13251,7 @@ ${
         };
         const errorDocument = applyFarmThemeDocument(
           applyFarmI18nDocument(
-            createFarmErrorDocument(errorHtml, "Application Error"),
+            createFarmErrorDocument(errorHtml, "Application Error", routePathname),
             pathname,
             getFarmI18nSnapshot(),
             request
@@ -13287,7 +13292,8 @@ ${
       applyFarmI18nDocument(
         createFarmErrorDocument(
           fallbackHtml,
-          errorStatus + " - " + errorStatusText
+          errorStatus + " - " + errorStatusText,
+          routePathname
         ),
         pathname,
         getFarmI18nSnapshot(),
@@ -13418,7 +13424,7 @@ ${
         .replace(/<\\/head>/i, () => renderFarmRendererHydrationScript() + '\\n</head>')
         .replace(
           /<\\/body>/i,
-          () => '  ' + renderFarmClientBootstrapScript(undefined, undefined, undefined, routePathname) + '\\n' +
+          () => '  ' + renderFarmClientBootstrapScript(undefined, undefined, undefined, routePathname, true) + '\\n' +
             '  ' + renderFarmClientEntryScript() + '\\n</body>',
         );
       fullHtml = ensureFarmDocumentMeta(fullHtml, notFoundMetadata.viewport);
@@ -13438,7 +13444,7 @@ ${
 </head>
 <body>
   <div id="root">\${html}</div>
-  \${renderFarmClientBootstrapScript(undefined, undefined, undefined, routePathname)}
+  \${renderFarmClientBootstrapScript(undefined, undefined, undefined, routePathname, true)}
   \${renderFarmClientEntryScript()}
 </body>
 </html>\`;
