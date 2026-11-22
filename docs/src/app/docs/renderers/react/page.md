@@ -91,7 +91,12 @@ Use `store.use([0, selected])` to select multiple fields. Subscriptions only not
 selected values, including updates through patches, `replace`, or `reset`. Numeric keys follow
 normal object semantics (`0` names the same property as `"0"`); symbols retain their identity,
 even when their descriptions match. State contains own enumerable properties, including symbols.
-String names used by the store API, such as `use` and `set`, remain reserved.
+String names used by the store API, such as `use`, `set`, and `getSnapshot`, remain reserved.
+
+The store is also a `FarmClientStore`: `getSnapshot()` returns the whole state and `subscribe()`
+reports changes, so code outside React can read it. Solid, Vue, Svelte, and custom renderers import
+the same store without `use()` from `@farm.js/core/renderer-client`; see
+[Shared client state](/docs/renderers#shared-client-state).
 
 The example creates one store per mounted component; share that instance through context when
 needed. Do not put request-specific server data in a process-global store. This store does not

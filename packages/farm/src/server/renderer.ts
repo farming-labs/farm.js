@@ -228,6 +228,66 @@ import {
   type ResolvedFarmSecurityConfig,
 } from "../security";
 
+/**
+ * `renderToReadableStream()` in the shape of `renderToPipeableStream()`, for a renderer that
+ * streams only Web streams. Development streams pages through the Node shape, and production
+ * streams the Web stream itself, so without this such a renderer streamed only in production.
+ */
+function pipeFarmRendererWebStream(
+  runtime: FarmServerRendererRuntime,
+): NonNullable<FarmServerRendererRuntime["renderToPipeableStream"]> {
+  return (element, callbacks) => {
+    let source: Readable | undefined;
+    let destination: NodeJS.WritableStream | undefined;
+    let aborted = false;
+    let shellSettled = false;
+    const settleShell = (error?: unknown) => {
+      if (shellSettled) return false;
+      shellSettled = true;
+      if (error === undefined) callbacks.onShellReady();
+      else callbacks.onShellError(error);
+      return true;
+    };
+    Promise.resolve()
+      .then(() =>
+        runtime.renderToReadableStream!(element, {
+          ...(callbacks.nonce ? { nonce: callbacks.nonce } : {}),
+          onError: callbacks.onError,
+        }),
+      )
+      .then(
+        (stream) => {
+          source = Readable.fromWeb(stream as import("node:stream/web").ReadableStream);
+          if (aborted) {
+            source.destroy();
+            return;
+          }
+          // The shell is ready once the stream has output, or has ended without any.
+          source.once("readable", () => settleShell());
+          source.once("error", (error) => {
+            if (settleShell(error)) return;
+            // A stream should report a late error through `onError` and close instead. One that
+            // errors anyway still ends the response rather than leaving the request open.
+            callbacks.onError(error);
+            destination?.end();
+          });
+        },
+        (error) => settleShell(error),
+      );
+    return {
+      pipe(target) {
+        destination = target;
+        source?.pipe(target);
+      },
+      abort() {
+        aborted = true;
+        source?.destroy();
+        destination?.end();
+      },
+    };
+  };
+}
+
 // Islands mode renders on islx, which loads React: only an islands app loads it (`initialize`).
 let islands: typeof import("../client/islands-runtime") | undefined;
 
@@ -3982,7 +4042,13 @@ window.__FARM_I18N__ = ${getFarmI18nClientSnapshot() ? serializeInlineValue(getF
       onSuspenseHoleDetected?: () => void;
     } = {},
   ): Promise<void> {
-    const renderToPipeableStream = this.rendererRuntime.renderToPipeableStream;
+    const runtime = this.rendererRuntime;
+    const renderToPipeableStream =
+      runtime.renderToPipeableStream ??
+      (getFarmRendererStreamingCapabilitiesForRuntime(this.config.renderer, "node").web &&
+      runtime.renderToReadableStream
+        ? pipeFarmRendererWebStream(runtime)
+        : undefined);
     const fullDocumentRouteKey =
       options.observabilityRoute || (req as any).__FARM_ROUTE__ || req.url || "/";
     // A route known to render a full-document layout streams that document: React's output is

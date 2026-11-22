@@ -121,3 +121,12 @@ export function createI18n(): FarmSvelteI18n {
     setLocale: i18n.setLocale,
   });
 }
+
+/**
+ * Wraps any `FarmClientStore`, such as a store from `createStore` in
+ * `@farm.js/core/renderer-client`, in a Svelte readable store, so components can read it as
+ * `$store`. It subscribes while the readable has subscribers.
+ */
+export function createReadable<T>(store: FarmClientStore<T>): Readable<T> {
+  return readableFarmStore(store);
+}

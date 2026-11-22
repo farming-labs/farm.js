@@ -30,6 +30,7 @@ import {
   getPackageClientBoundaryCache,
   PackageInspectionTrace,
 } from "./package-client-boundary-cache";
+import { formatFarmHydrateExportError, readFarmHydrateExport } from "./hydrate-export";
 import { getFarmProjectSourceDir } from "./source-dir";
 import {
   farmSourceSnapshotPathKey,
@@ -345,25 +346,9 @@ export function hasUseClientDirective(content: string | null): boolean {
   return false;
 }
 
+/** Whether the module exports `hydrate` as the literal `true`. */
 export function hasHydrateExport(content: string | null): boolean {
-  if (!content) {
-    return false;
-  }
-  if (/\bexport\s+const\s+hydrate\s*=\s*true\b/.test(content)) {
-    return true;
-  }
-  // Export lists may carry several specifiers and as-renames; the module
-  // opts in when any specifier's *exported* name is hydrate.
-  for (const match of content.matchAll(/\bexport\s*\{([^}]*)\}/g)) {
-    for (const specifier of match[1].split(",")) {
-      const parts = specifier.trim().split(/\s+as\s+/);
-      const exportedName = (parts[1] ?? parts[0])?.trim();
-      if (exportedName === "hydrate") {
-        return true;
-      }
-    }
-  }
-  return false;
+  return readFarmHydrateExport(content)?.value === true;
 }
 
 interface ModuleSourceToken {
@@ -698,9 +683,11 @@ function isAsyncLocalDeclaration(tokens: readonly ModuleSourceToken[], name: str
   return false;
 }
 
+/** `inspectIslandExport` is true for the route's own page or layout, at `sourcePath`. */
 function parseClientModuleMetadata(
   content: string | null,
   inspectIslandExport: boolean,
+  sourcePath?: string,
 ): ParsedClientModuleMetadata {
   if (!content) {
     return {
@@ -711,7 +698,13 @@ function parseClientModuleMetadata(
   }
 
   const isClientComponent = hasUseClientDirective(content);
-  const hasHydrate = hasHydrateExport(content);
+  const hydrate = readFarmHydrateExport(content);
+  // A route module's `hydrate` decides whether the route ships JavaScript. Any other module may
+  // export something else by that name.
+  if (inspectIslandExport && hydrate && hydrate.value === null) {
+    throw new Error(formatFarmHydrateExportError(hydrate, sourcePath));
+  }
+  const hasHydrate = hydrate?.value === true;
   return {
     isClientComponent,
     hasHydrateExport: hasHydrate,
@@ -867,7 +860,11 @@ export function getClientModuleHydrationPlan(
     return plan;
   }
   const resolvedPath = resolveOwnerSourcePath(resolveModuleSourcePath(modulePath, root), root);
-  const owner = parseClientModuleMetadata(readIfExists(resolvedPath ?? ""), true);
+  const owner = parseClientModuleMetadata(
+    readIfExists(resolvedPath ?? ""),
+    true,
+    resolvedPath ?? undefined,
+  );
   // An owner that is a client component, or opts into hydrating whole, keeps its root.
   if (!resolvedPath || owner.isClientComponent || owner.hasHydrateExport) return plan;
   const layout = collectIsolatedClientBoundaries(resolvedPath, root, {
@@ -944,7 +941,7 @@ function planClientModuleHydration(
   // analysis is needed, including async-owner islands with the experiment off.
   const resolvedPath = resolveOwnerSourcePath(resolveModuleSourcePath(modulePath, root), root);
   const content = readIfExists(resolvedPath ?? "");
-  const parsed = parseClientModuleMetadata(content, true);
+  const parsed = parseClientModuleMetadata(content, true, resolvedPath ?? undefined);
   if (!resolvedPath) return emptyPlan("the owner source could not be resolved");
   if (parsed.isClientComponent) {
     return emptyPlan("the owner is already a client component");
@@ -1969,7 +1966,7 @@ function inspectClientModuleMetadata(
     const target = resolveDefaultReexport(resolvedPath, content, root);
     if (target) return inspectClientModuleMetadata(target, root, visited, true);
   }
-  const parsed = parseClientModuleMetadata(content, inspectIslandExport);
+  const parsed = parseClientModuleMetadata(content, inspectIslandExport, resolvedPath);
   if (parsed.isClientComponent) {
     return {
       isClientComponent: true,

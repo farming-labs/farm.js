@@ -208,9 +208,9 @@ export default function Page(props) {
 
 leaf's compiler is 24 lines of string handling. It pulls out the two script blocks and wraps the markup in a function component. A template language, Markdown, or a syntax nobody has invented yet would work the same way, as long as it compiles to that shape. With it, `.leaf` files work as pages, layouts, dynamic segments, statically generated routes, and error and not-found pages, next to `.tsx` routes in the same app.
 
-There's one exception to Farm not reading your file. Farm decides whether a page hydrates by reading the file as written, before your compiler runs, and looking for the text `export const hydrate = true`. Write the same value as `export const hydrate = !0` and the page renders on the server and never hydrates. I checked that with the official Svelte renderer, so it isn't a leaf quirk. Whatever your syntax, that one line has to appear in the file as written.
+There's one exception to Farm not reading your file. Farm decides whether a page hydrates before your compiler runs, by reading the `hydrate` export from the file as written. Any declaration with a literal `true` or `false` works: `const`, `let`, or `var`, with or without a type annotation, or through an export list. A value Farm can't read without running your code, like `!0` or an import, fails the build with an error that names the file. When I first wrote this post, `!0` made the page render on the server and silently never hydrate, with the official Svelte renderer as well as leaf.
 
-The file format also turned up three bugs in how Farm handled a renderer's extensions. A new `page.leaf` wasn't served until you restarted `farm dev`, and new `.svelte` and `.vue` pages had the same bug. A parallel-route slot like `@modal/page.leaf` was served as a page. And `farm explain` didn't find `.leaf` routes. All three are fixed on `main` and ship in the next release.
+The file format also turned up three bugs in how Farm handled a renderer's extensions. A new `page.leaf` wasn't served until you restarted `farm dev`, and new `.svelte` and `.vue` pages had the same bug. A parallel-route slot like `@modal/page.leaf` was served as a page. And `farm explain` didn't find `.leaf` routes. All three, and the silent `hydrate` failure, are fixed on `main` and ship in the next release.
 
 <span id="what-still-needs-work" className="blog-heading-anchor" />
 
@@ -219,10 +219,8 @@ The file format also turned up three bugs in how Farm handled a renderer's exten
 "You can bring your own renderer" is true for the core path: routes, layouts, SSR, hydration, navigation, server functions, and production output. It is not true for everything Farm does, and I would rather say so here than in an issue later.
 
 - **37 places in core still check for React.** Programmatic UI routes, Markdown visual routes, generated JSX metadata images, and React Server Components are React-oriented today. The [feature table](/docs/renderers#feature-support) says which features each official renderer gets, and a custom renderer gets the same as Solid, Vue, and Svelte.
-- **Hydration reads your file as written.** A custom format has to contain the literal `export const hydrate = true` line described above, because Farm decides hydration before your compiler runs.
 - **The conformance suite isn't published.** The official renderers run it from `packages/farm-renderer-tests` in the monorepo. Until it ships on npm, the type-check below is how a third-party renderer checks itself.
 - **One renderer per app.** You choose a renderer; you can't mix leaf on one page and React on the next.
-- **I only tested a buffered renderer.** leaf renders to a string. Farm's streaming paths are proven by the official renderers, not by a third-party one.
 
 <span id="write-your-own" className="blog-heading-anchor" />
 
@@ -245,5 +243,7 @@ export const serverContract: FarmServerRendererRuntime = server;
 export const clientContract: FarmRendererClientRuntime = client;
 export const viteContract: FarmRendererViteModule = vite;
 ```
+
+To stream, export `renderToPipeableStream()` or `renderToReadableStream()` from the server module and turn on `node` or `web` under `capabilities.streaming`. leaf doesn't stream, so after this post went up I added a test renderer that is nothing but the contract. It stops halfway through a page until the test lets it continue, and the test checks that the first half reaches the browser first. It streams through both primitives, in development and in production builds. Writing it turned up one more bug: with only `renderToReadableStream()`, development buffered the whole page. That's fixed on `main` too.
 
 The full contract, including the optional exports and how route updates reach an existing root, is in [Renderer modules](/docs/renderers#renderer-modules) and the [renderer capability contract](/docs/renderers#renderer-capability-contract). If you build one and something breaks, that's exactly the bug report I want.

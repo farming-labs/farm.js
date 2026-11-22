@@ -81,6 +81,10 @@ Export `hydrate = true` from the module script, then use Svelte runes and events
 <button type="button" onclick={() => (count += 1)}>Count: {count}</button>
 ```
 
+FARMJS reads `hydrate` from the file before Svelte compiles it, so write the literal `true` or `false`. Any declaration works,
+including a type annotation or an export list. A value FARMJS can't read without running the code,
+such as an expression, an import, or a re-export, fails the build with an error that names the file.
+
 FARMJS server-renders the component with Svelte's server runtime and claims the existing markup with
 Svelte hydration in the browser.
 
@@ -123,7 +127,9 @@ Use the Svelte-native bindings for router, action, server-query, theme, and i18n
 <button on:click={() => save({ name: "FARMJS" })} disabled={$save.pending}>Save</button>
 ```
 
-The returned values implement Svelte's readable-store contract. Renderer-specific `Link` and form
+The returned values implement Svelte's readable-store contract. `createReadable(store)` wraps
+your own state, a store from `createStore` in `@farm.js/core/renderer-client`, the same way; see
+[Shared client state](/docs/renderers#shared-client-state). Renderer-specific `Link` and form
 components, fetchers, integration providers, programmatic UI routes, Markdown/MDX visual pages,
 the docs adapter, and generated JSX metadata images remain React-oriented today.
 

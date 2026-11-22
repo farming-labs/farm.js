@@ -88,6 +88,10 @@ const count = ref(0);
 </template>
 ```
 
+FARMJS reads `hydrate` from the file before Vue compiles it, so write the literal `true` or `false`. Any declaration works,
+including a type annotation or an export list. A value FARMJS can't read without running the code,
+such as an expression, an import, or a re-export, fails the build with an error that names the file.
+
 FARMJS server-renders the SFC with `createSSRApp` and Vue's native Node or WHATWG Web stream, then
 uses `createSSRApp` again to claim the existing browser markup.
 
@@ -166,7 +170,9 @@ await router.push("/products");
 theme.toggleTheme();
 ```
 
-The composables return Vue refs and computed values. Renderer-specific `Link` and form components,
+The composables return Vue refs and computed values. `useStore(store)` binds your own state, a
+store from `createStore` in `@farm.js/core/renderer-client`, to a read-only ref; see
+[Shared client state](/docs/renderers#shared-client-state). Renderer-specific `Link` and form components,
 fetchers, integration providers, programmatic UI routes, Markdown/MDX visual pages, the docs
 adapter, and generated JSX metadata images remain React-oriented today.
 
