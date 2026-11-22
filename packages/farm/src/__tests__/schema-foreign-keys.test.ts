@@ -5,7 +5,7 @@ import { definePlugin } from "../plugin";
 import { defineSchema, type FarmSchemaReference } from "../schema";
 import { checkSchema } from "../schema-check";
 import { renameSchema } from "../schema-rename";
-import type { FarmSqlDialect } from "../schema-sql";
+import { collectSchemaModels, generateSqlStatements, type FarmSqlDialect } from "../schema-sql";
 import { findSchemaTableOwners, migrateSchemaTables } from "../schema-tables";
 
 const requireModule = createRequire(import.meta.url);
@@ -14,6 +14,10 @@ const mysqlTestUrl = process.env.FARM_TEST_MYSQL_URL;
 
 if (process.env.FARM_REQUIRE_TEST_POSTGRES === "1" && !postgresTestUrl) {
   throw new Error("FARM_TEST_POSTGRES_URL is required when FARM_REQUIRE_TEST_POSTGRES=1.");
+}
+
+if (process.env.FARM_REQUIRE_TEST_MYSQL === "1" && !mysqlTestUrl) {
+  throw new Error("FARM_TEST_MYSQL_URL is required when FARM_REQUIRE_TEST_MYSQL=1.");
 }
 
 type TestDatabase = {
@@ -363,5 +367,43 @@ describe("references that never get a cross-plugin foreign key", () => {
       "the column types differ.",
     ]);
     database.close();
+  });
+});
+
+describe("how the foreign key is declared", () => {
+  const schema = defineSchema({
+    models: {
+      organization: { fields: { id: { type: "string", primaryKey: true } } },
+      member: {
+        fields: {
+          id: { type: "string", primaryKey: true },
+          organizationId: {
+            type: "string",
+            required: true,
+            reference: { model: "organization", field: "id", onDelete: "cascade" },
+          },
+        },
+      },
+    },
+  });
+  const memberTable = (dialect: FarmSqlDialect) =>
+    generateSqlStatements(collectSchemaModels([["teams", schema]]), dialect)
+      .map((statement) => statement.sql)
+      .find((sql) => /CREATE TABLE IF NOT EXISTS ["`]member["`]/u.test(sql))!;
+
+  it("is a table constraint on mysql, which ignores a column's REFERENCES before 9.0", () => {
+    const sql = memberTable("mysql");
+    expect(sql).toContain(
+      "FOREIGN KEY (`organizationId`) REFERENCES `organization` (`id`) ON DELETE CASCADE",
+    );
+    expect(sql).toContain("`organizationId` VARCHAR(255) NOT NULL,");
+  });
+
+  it("stays on the column for postgres and sqlite", () => {
+    for (const dialect of ["postgres", "sqlite"] as FarmSqlDialect[]) {
+      expect(memberTable(dialect)).toContain(
+        '"organizationId" TEXT NOT NULL REFERENCES "organization" ("id") ON DELETE CASCADE',
+      );
+    }
   });
 });

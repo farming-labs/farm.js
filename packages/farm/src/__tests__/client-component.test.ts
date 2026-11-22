@@ -525,6 +525,24 @@ describe("client component path resolution", () => {
         hasIsolatedClientBoundaries: true,
       });
     }
+
+    // A type argument names an element as a string, not as a tag, so a module
+    // typed with ComponentProps<"table"> still isolates what it renders later.
+    fs.writeFileSync(
+      pageFile,
+      [
+        `import type { ComponentProps, ComponentPropsWithoutRef } from "react";`,
+        `import Widget from "../components/widget";`,
+        `const Table = (props: ComponentProps<"table">) => <table {...props} />;`,
+        `const Select = (props: ComponentPropsWithoutRef<'select'>) => <select {...props} />;`,
+        `export default function Page() { return <div><Table /><Select /><Widget /></div>; }`,
+        ``,
+      ].join("\n"),
+    );
+    expect(getClientModuleHydrationPlan(pageFile, root, "enabled")).toMatchObject({
+      shouldHydrate: false,
+      hasIsolatedClientBoundaries: true,
+    });
   });
 
   it("keeps boundaries handed React elements route-wide", () => {
@@ -2059,7 +2077,12 @@ export function Chart() {}
     );
 
     expect(source).toContain("async function fetchFarmNavigationDocument(");
-    expect(source).toContain("headers: createFarmDeploymentRequestHeaders(deploymentId, headers)");
+    // The request, and a click's request the boot script sent first, carry the deployment id.
+    expect(source).toContain(
+      "const requestHeaders = createFarmDeploymentRequestHeaders(deploymentId, headers);",
+    );
+    expect(source).toContain("takeFarmEarlyNavigation(url, requestHeaders, signal)");
+    expect(source).toContain("headers: requestHeaders,");
     expect(source).toContain("isFarmDeploymentMismatchResponse(response, deploymentId)");
     expect(source).toContain(
       'window.dispatchEvent(new CustomEvent("farm:deployment-mismatch", { detail: error }))',

@@ -1,6 +1,6 @@
 {
   "name": "@farm.js/core",
-  "version": "0.1.77",
+  "version": "0.1.78",
   "description": "The core of Farm.js, the framework for the web and agents",
   "keywords": [
     "@farm.js/core",
@@ -719,6 +719,11 @@
       "import": "./dist/internal/client-runtime.mjs",
       "require": "./dist/internal/client-runtime.cjs"
     },
+    "./internal/spa-router": {
+      "types": "./dist/internal/spa-router.d.ts",
+      "import": "./dist/internal/spa-router.mjs",
+      "require": "./dist/internal/spa-router.cjs"
+    },
     "./internal/client-error-overlay": {
       "types": "./dist/internal/client-error-overlay.d.ts",
       "import": "./dist/internal/client-error-overlay.mjs",
@@ -902,6 +907,7 @@
     "hono": "4.13.14",
     "jsdom": "^25.0.0",
     "koa": "3.2.1",
+    "mysql2": "3.24.6",
     "react": "19.2.8",
     "react-dom": "19.2.8",
     "reflect-metadata": "0.2.2",

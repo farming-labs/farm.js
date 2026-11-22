@@ -446,13 +446,13 @@ qualify; anything else hydrates at load, and an explicit `island` export always 
 provider around the pages) waits the same way when every client component inside it, on the page
 too, passes; it hydrates when the pointer reaches one of its links, so the click's navigation
 updates it. A page whose client components all wait, or
-that has none, starts with a 1.6 KB script, and loads the runtime when one is clicked, pressed or
+that has none, starts with a 2.2 KB script, and loads the runtime when one is clicked, pressed or
 focused, when one that waits for `"visible"` or `"idle"` is due, when the pointer reaches a link,
 or when a form gets focus. A click made before then is held and replayed once the component has
 hydrated, and a `<form>` written in a server component posts natively until the runtime runs. An
 app with client plugins, a `src/client.ts`, or `docs` loads the runtime on every page. On
 `benchmarks/server-components-payload`, with no change to the app, docs, blog, guide and shop
-pages load 1.7 KB of JavaScript (`"rsc"`: 71.0 KB). See
+pages load 2.2 KB of JavaScript (`"rsc"`: 71.0 KB). See
 [how the two modes compare](/docs/server-rendering/islands#how-it-compares-with-react-server-components).
 
 The app's `vite` options and plugins apply as in other Farm apps, and so does built-in Tailwind.

@@ -148,7 +148,10 @@ import {
   FARM_SERVER_TREE_LAYOUT_CLIENT_SOURCE,
 } from "./document-layout-client";
 import { FARM_NAVIGATION_SCRIPT_SOURCE } from "./client/navigation-scripts";
-import { FARM_NAVIGATION_STREAM_READER_SOURCE } from "./client/navigation-stream-client";
+import {
+  FARM_EARLY_NAVIGATION_SOURCE,
+  FARM_NAVIGATION_STREAM_READER_SOURCE,
+} from "./client/navigation-stream-client";
 import { FARM_REFRESH_FIELDS_SOURCE } from "./client/refresh-fields";
 import {
   getClientModuleMetadata,
@@ -1871,6 +1874,24 @@ async function warnClientBoundaryOnce(
 }
 
 /**
+ * Whether adding or removing this file changes the routes `farm dev` serves. Route modules
+ * count with any of `routeModuleExtensions`: the renderer's component extensions and Markdown.
+ */
+export function isFarmAppRuntimeFile(
+  file: string,
+  appDirs: readonly string[],
+  routeModuleExtensions: ReadonlySet<string>,
+): boolean {
+  const normalized = file.replace(/\\/g, "/");
+  if (!appDirs.some((appDir) => normalized.startsWith(`${appDir}/`))) return false;
+  const routeModule = /\/(?:page|default|layout|loading|error)(\.[^./]+)$/.exec(normalized);
+  if (routeModule) return routeModuleExtensions.has(routeModule[1]!.toLowerCase());
+  return /\/(?:middleware|route)\.(?:ts|tsx|js|jsx|md|mdx)$|\/(?:sitemap|robots|manifest)\.(?:ts|js)$|\/(?:opengraph-image|twitter-image)(?:\.(?:ts|tsx|js|jsx|png|jpg|jpeg|gif|webp)|\.alt\.txt)$/.test(
+    normalized,
+  );
+}
+
+/**
  * Whether Farm should append its own client-root HMR handler to a
  * `"use client"` module.
  *
@@ -2361,15 +2382,8 @@ export function farmPlugin(
           isPotentialProgrammaticRouteSourceFile(normalized, srcDir),
         );
       };
-      const isAppRuntimeFile = (file: string) => {
-        const normalized = file.replace(/\\/g, "/");
-        return (
-          appDirSlugs.some((appDir) => normalized.startsWith(`${appDir}/`)) &&
-          /\/(?:page|default|layout|loading|error|middleware|route)\.(?:ts|tsx|js|jsx|md|mdx)$|\/(?:sitemap|robots|manifest)\.(?:ts|js)$|\/(?:opengraph-image|twitter-image)(?:\.(?:ts|tsx|js|jsx|png|jpg|jpeg|gif|webp)|\.alt\.txt)$/.test(
-            normalized,
-          )
-        );
-      };
+      const isAppRuntimeFile = (file: string) =>
+        isFarmAppRuntimeFile(file, appDirSlugs, routeModuleExtensions);
       const isStaticMetadataImageFile = (file: string) =>
         /\/(?:opengraph-image|twitter-image)(?:\.(?:png|jpg|jpeg|gif|webp)|\.alt\.txt)$/.test(
           file.replace(/\\/g, "/"),
@@ -6920,9 +6934,12 @@ function generateClientCode(
   const appSetupPath = resolveFarmRendererAppSetup(root, renderer);
   const rendererClientImports = isReactRenderer(renderer)
     ? `import React from 'react'\nimport { hydrateRoot, createRoot } from 'react-dom/client'\nimport { restorePagePosition } from '@farm.js/core/internal/client-runtime'`
-    : appSetupPath
-      ? `import React, { hydrateRoot, createRoot, configureApp as __farmConfigureApp } from ${JSON.stringify(renderer.client)}\nimport __farmAppSetup from ${JSON.stringify(toViteModuleId(appSetupPath, root))}\n__farmConfigureApp(__farmAppSetup)`
-      : `import React, { hydrateRoot, createRoot } from ${JSON.stringify(renderer.client)}`;
+    : // Named exports only: a renderer's client module needs no default export. `React` is a
+      // copy of the namespace, as in the production entry, where Rolldown warns about each
+      // optional export (`Children`, `markFunctionComponent`) feature-checked on the namespace.
+      appSetupPath
+      ? `import * as __farmRendererClient from ${JSON.stringify(renderer.client)}\nimport { hydrateRoot, createRoot, configureApp as __farmConfigureApp } from ${JSON.stringify(renderer.client)}\nimport __farmAppSetup from ${JSON.stringify(toViteModuleId(appSetupPath, root))}\nconst React = { ...__farmRendererClient }\n__farmConfigureApp(__farmAppSetup)`
+      : `import * as __farmRendererClient from ${JSON.stringify(renderer.client)}\nimport { hydrateRoot, createRoot } from ${JSON.stringify(renderer.client)}\nconst React = { ...__farmRendererClient }`;
   // Islands mode runs on islx (internal/islands-runtime), under the same names.
   const isolatedHydrationImport = isolatedHydrationEnabled
     ? `${islandValues ? "import { createFarmIsolatedHydrationRuntime, createFarmServerPageBoundary, wrapFarmIsolatedClientGraph, createFarmServerTreeElement, createFarmServerTreeLayout } from '@farm.js/core/internal/islands-runtime'" : "import { createFarmIsolatedHydrationRuntime, createFarmServerPageBoundary, wrapFarmIsolatedClientGraph } from '@farm.js/core/internal/isolated-boundary'\nimport { createFarmServerTreeElement } from '@farm.js/core/internal/server-tree'"}`
@@ -6988,10 +7005,11 @@ function rerenderFarmTreeLayouts() {}`;
   return `
 ${rendererClientImports}
 ${isolatedHydrationImport}
-import { installChunkErrorRecovery, SPARouter } from '@farm.js/core/client'
 import { createClientPluginManager } from '@farm.js/core/plugin/client'
+// Not @farm.js/core/client: that module's graph imports react, which other renderers' apps lack.
+import { SPARouter } from '@farm.js/core/internal/spa-router'
 import { isFarmRouteActive } from '@farm.js/core/router'
-import { installFarmLinkPrefetch, isFarmBlockedNavigationURL, readFarmLinkNavigateOptions, rememberFarmLinkLocale, replayFarmQueuedInteraction, scheduleFarmIslandHydration, createFarmSearchParams, searchParamsToObject, setFarmBasePath, setFarmTrailingSlashPreference, stripFarmBasePath } from '@farm.js/core/internal/client-runtime'
+import { installChunkErrorRecovery, installFarmLinkPrefetch, isFarmBlockedNavigationURL, readFarmLinkNavigateOptions, rememberFarmLinkLocale, replayFarmQueuedInteraction, scheduleFarmIslandHydration, createFarmSearchParams, searchParamsToObject, setFarmBasePath, setFarmTrailingSlashPreference, stripFarmBasePath } from '@farm.js/core/internal/client-runtime'
 import { reviveDeferredData } from '@farm.js/core/deferred'
 import {
   createFarmDeploymentMismatchError,
@@ -8261,6 +8279,8 @@ ${
   islandValues
     ? `${FARM_NAVIGATION_STREAM_READER_SOURCE}
 
+${FARM_EARLY_NAVIGATION_SOURCE}
+
 // Islands mode navigates as the production client does: it fetches the page itself, names the
 // layouts it shows by key (F-Layouts), and asks for flush markers (F-Stream), so the shell arrives
 // before slow Suspense content. Other pages (a client page, a layout that hydrates, route slots)
@@ -8332,19 +8352,20 @@ async function fetchFarmNavigationDocument(path, context) {
       keepLayouts && !context.refresh && !activeLayoutShouldHydrate
         ? readLayoutIdentities(container)
         : [];
-    const response = await fetch(url.pathname + url.search, {
-      signal: context.signal,
-      redirect: 'manual',
-      headers: createFarmDeploymentRequestHeaders(deploymentId, {
-        Accept: 'text/html',
-        // A refresh arrives whole, like a transition: the islands it keeps are all in it.
-        ...(context.prefetch || context.refresh ? {} : { 'F-Stream': 'flush' }),
-        ...getFarmIslandValueHeaders(),
-        // A prefetch names its layouts even when it keeps none: that marks it as a navigation,
-        // which the server answers without loading.tsx.
-        ...(identities.length || context.prefetch ? { 'F-Layouts': JSON.stringify(identities) } : {}),
-      }),
+    const headers = createFarmDeploymentRequestHeaders(deploymentId, {
+      Accept: 'text/html',
+      // A refresh arrives whole, like a transition: the islands it keeps are all in it.
+      ...(context.prefetch || context.refresh ? {} : { 'F-Stream': 'flush' }),
+      ...getFarmIslandValueHeaders(),
+      // A prefetch names its layouts even when it keeps none: that marks it as a navigation,
+      // which the server answers without loading.tsx.
+      ...(identities.length || context.prefetch ? { 'F-Layouts': JSON.stringify(identities) } : {}),
     });
+    const target = url.pathname + url.search;
+    const response = await (
+      (!context.prefetch && takeFarmEarlyNavigation(target, headers, context.signal)) ||
+      fetch(target, { signal: context.signal, redirect: 'manual', headers })
+    );
     if (isFarmDeploymentMismatchResponse(response, deploymentId)) {
       const error = createFarmDeploymentMismatchError(response, deploymentId || 'unknown');
       window.dispatchEvent(new CustomEvent('farm:deployment-mismatch', { detail: error }));

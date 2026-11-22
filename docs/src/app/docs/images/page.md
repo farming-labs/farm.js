@@ -6,11 +6,11 @@ section: "Core"
 
 # Images
 
-Farm turns local raster imports into typed image metadata and serves responsive variants through one secure optimizer URL.
+Farm turns local image imports into typed image metadata and serves responsive variants through one secure optimizer URL.
 
 ## Static images
 
-Import PNG, JPEG, GIF, WebP, or AVIF files and pass the import directly to `Image`. Farm reads the dimensions at build time, emits the original file as a public asset, and generates a small blur placeholder.
+Import PNG, JPEG, GIF, WebP, AVIF, or SVG files and pass the import directly to `Image`. Farm reads the dimensions at build time, emits the original file as a public asset, and generates a small blur placeholder. An SVG takes its size from its `width` and `height` attributes, or its `viewBox`, and is served as it is, with no placeholder and no optimized variants.
 
 **src/app/products/page.tsx**
 
@@ -30,10 +30,11 @@ export default function ProductsPage() {
 }
 ```
 
-Farm provides static image declarations directly from `@farm.js/core`, so image imports are typed as `StaticImageData` without generating an application file. The metadata includes `src`, `width`, `height`, and `blurDataURL`. Import with `?url` when a library needs only the original asset URL:
+Farm provides static image declarations directly from `@farm.js/core`, so image imports are typed as `StaticImageData` without generating an application file. The metadata includes `src`, `width`, `height`, and `blurDataURL`. Import with `?url` when a library needs only the original asset URL, such as an `<img>` or a CSS `url()`:
 
 ```ts
 import jacketUrl from "./jacket.png?url";
+import logoUrl from "./logo.svg?url";
 ```
 
 ## Files and remote URLs

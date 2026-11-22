@@ -20,6 +20,18 @@ export interface FarmClientModulePreloadManifest {
   /** The entry's static imports, directly or through another chunk. Every page loads them. */
   entry: number[];
   /**
+   * The chunks of the modules the entry imports by itself to navigate (islands mode's router and
+   * route table), and their static imports outside `entry`. Islands mode's boot fetches them with
+   * the entry when a link starts it.
+   */
+  router: number[];
+  /**
+   * The chunks of the renderer modules the entry imports when it first renders or hydrates
+   * (islands mode's React DOM and islx, RFC 0010), and their static imports outside `entry`.
+   * Islands mode's boot fetches them with the entry unless a link that streams its page started it.
+   */
+  renderer?: number[];
+  /**
    * Each dynamically imported module's chunk and that chunk's static imports outside
    * `entry`, by the module id the client loads it with (`/src/app/page.tsx`).
    */
@@ -47,7 +59,12 @@ interface ClientBundleChunk {
  */
 export function collectFarmClientModulePreloads(
   bundle: Record<string, { type: string }>,
-  options: { root: string; entryName: string },
+  options: {
+    root: string;
+    entryName: string;
+    routerModules?: string[];
+    rendererModules?: string[];
+  },
 ): FarmClientModulePreloadManifest | null {
   const chunks = Object.values(bundle).filter(
     (output): output is ClientBundleChunk => output.type === "chunk",
@@ -94,7 +111,33 @@ export function collectFarmClientModulePreloads(
     ].map(index);
   }
 
-  return { files, entry: entryFiles.map(index), modules };
+  // The chunks of these dynamically imported modules, and their static imports outside `entry`.
+  const dynamicFiles = (moduleIds: string[] | undefined) => {
+    const into: string[] = [];
+    const loaded = new Set(entryLoaded);
+    for (const moduleId of moduleIds ?? []) {
+      const chunk = chunks.find(
+        (candidate) =>
+          candidate.isDynamicEntry &&
+          candidate.facadeModuleId &&
+          path.resolve(candidate.facadeModuleId.split("?")[0]!) === path.resolve(moduleId),
+      );
+      if (!chunk || loaded.has(chunk.fileName)) continue;
+      loaded.add(chunk.fileName);
+      into.push(chunk.fileName);
+      staticImports(chunk, loaded, into);
+    }
+    return into;
+  };
+  const rendererFiles = dynamicFiles(options.rendererModules);
+
+  return {
+    files,
+    entry: entryFiles.map(index),
+    router: dynamicFiles(options.routerModules).map(index),
+    ...(rendererFiles.length > 0 ? { renderer: rendererFiles.map(index) } : {}),
+    modules,
+  };
 }
 
 /**
@@ -111,15 +154,31 @@ export function createFarmClientModulePreloadPlugin(options: {
   root: string;
   buildDir: string;
   entryName: string;
+  routerModules?: string[];
+  /** Specifiers the entry imports its renderer with, resolved from `rendererImporter`. */
+  rendererImports?: string[];
+  rendererImporter?: string;
 }) {
   return {
     name: "farm-client-module-preloads",
     enforce: "post" as const,
-    async generateBundle(_output: unknown, bundle: Record<string, { type: string }>) {
+    async generateBundle(
+      this: {
+        resolve(source: string, importer?: string): Promise<{ id: string } | null>;
+      },
+      _output: unknown,
+      bundle: Record<string, { type: string }>,
+    ) {
+      // Resolved as the build resolved them, so they name the same files as the chunks' modules.
+      const rendererModules: string[] = [];
+      for (const specifier of options.rendererImports ?? []) {
+        const resolved = await this.resolve(specifier, options.rendererImporter);
+        if (resolved) rendererModules.push(resolved.id);
+      }
       await fs.mkdir(options.buildDir, { recursive: true });
       await fs.writeFile(
         path.join(options.buildDir, FARM_CLIENT_MODULE_PRELOADS_FILE),
-        JSON.stringify(collectFarmClientModulePreloads(bundle, options)),
+        JSON.stringify(collectFarmClientModulePreloads(bundle, { ...options, rendererModules })),
       );
     },
   };

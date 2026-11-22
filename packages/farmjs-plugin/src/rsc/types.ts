@@ -264,6 +264,12 @@ export interface EntryContext {
   /** True only for the Vite serve command, never for a production build. */
   development?: boolean;
 
+  /**
+   * Compress responses with Brotli or gzip, as core's production servers do: set for a build on a
+   * Node target unless the app's `compress` is false.
+   */
+  compress?: boolean;
+
   /** Generated import/init fragments for `cache.client.adapter` persistence. */
   clientCachePersistence?: { imports: string; init: string };
 

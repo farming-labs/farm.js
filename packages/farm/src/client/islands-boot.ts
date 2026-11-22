@@ -23,6 +23,26 @@ interface FarmQueuedInteraction {
   createdAt: number;
 }
 
+/**
+ * @internal The request for a link clicked before the runtime ran, which the boot sends with the
+ * click (`window.__FARM_EARLY_NAVIGATION__`). The router's next navigation request takes the
+ * response when it would send the same request, and drops it otherwise.
+ */
+export interface FarmEarlyNavigation {
+  /** The absolute URL requested. */
+  url: string;
+  /** The request's headers, names in lower case. */
+  headers: Record<string, string>;
+  response: Promise<Response>;
+  /** When the request was sent (`Date.now()`). */
+  at: number;
+  /** Aborts the request. */
+  controller: AbortController;
+}
+
+/** Kept equal to the routers' deployment header (FARM_DEPLOYMENT_ID_HEADER); a test compares them. */
+export const FARM_ISLANDS_BOOT_DEPLOYMENT_HEADER = "x-farm-deployment-id";
+
 const ISLAND = "f-island";
 const HYDRATED_ISLAND = '[data-farm-island-hydrated="true"]';
 
@@ -103,6 +123,27 @@ export function startFarmIslandsBoot(load: () => Promise<unknown> = loadFarmClie
   const script = document.querySelector<HTMLScriptElement>("script[data-farm-runtime]");
   const rootId = script?.dataset.farmRoot;
   const root = rootId ? document.getElementById(rootId) : null;
+  // What the runtime imports as it starts, which the server lists relative to it, fetched with it
+  // rather than each a round trip after the file that imports it: the entry's imports
+  // (data-farm-preload), the router a link's intent loads (-router), the renderer the entry
+  // renders and hydrates with (-renderer), and the modules a root that waits for a click hydrates
+  // with (-root). A file listed twice is fetched once.
+  const preloaded = new Set<string>();
+  const preload = (
+    group: "farmPreload" | "farmPreloadRouter" | "farmPreloadRenderer" | "farmPreloadRoot",
+  ) => {
+    const files = script?.dataset[group];
+    if (!script || !files || preloaded.has(group)) return;
+    preloaded.add(group);
+    const base = new URL(script.dataset.farmRuntime ?? "", document.baseURI);
+    for (const file of files.split(" ")) {
+      const link = document.createElement("link");
+      link.rel = "modulepreload";
+      link.href = new URL(file, base).href;
+      if (script.nonce) link.nonce = script.nonce;
+      document.head.append(link);
+    }
+  };
 
   // The runtime holds and replays from here on: its scheduler for islands, its router for links.
   // A capture left in place would hold clicks it never replays, and one left after a failed load
@@ -110,7 +151,12 @@ export function startFarmIslandsBoot(load: () => Promise<unknown> = loadFarmClie
   const release = () => {
     for (const cleanup of cleanups.splice(0)) cleanup();
   };
-  const start = (): Promise<unknown> => {
+  // `renderer`: whether what starts it renders or hydrates at once. Only a link outside a root that
+  // hydrates does not: its page streams in before React DOM runs (RFC 0010), and the entry imports
+  // React DOM after the page and the router rather than beside them.
+  const start = (renderer = true): Promise<unknown> => {
+    preload("farmPreload");
+    if (renderer) preload("farmPreloadRenderer");
     if (!loading) {
       loading = load().then(release, (error: unknown) => {
         release();
@@ -121,6 +167,16 @@ export function startFarmIslandsBoot(load: () => Promise<unknown> = loadFarmClie
       });
     }
     return loading;
+  };
+  // What an interaction on `target` needs besides the entry: the router for a link, and the
+  // modules of a root that waits around it, which hydrates on it (a link's hover included). A link
+  // whose navigation renders in a root (F-Render: tree) needs the renderer too.
+  const forTarget = (target: Element) => {
+    const link = routedLink(target);
+    const inRoot = Boolean(root && pendingIsland(target, root) === root);
+    if (link) preload("farmPreloadRouter");
+    if (inRoot) preload("farmPreloadRoot");
+    if (!link || inRoot || rootId === "root") preload("farmPreloadRenderer");
   };
   const listen = (type: string, handler: (event: Event) => void, capture: boolean) => {
     document.addEventListener(type, handler, capture);
@@ -140,6 +196,7 @@ export function startFarmIslandsBoot(load: () => Promise<unknown> = loadFarmClie
       );
     }
     void start();
+    forTarget(target);
   };
 
   listen(
@@ -170,15 +227,47 @@ export function startFarmIslandsBoot(load: () => Promise<unknown> = loadFarmClie
   const observe = (event: Event) => {
     const target = event.target;
     if (!(target instanceof Element)) return;
-    if (routedLink(target)) void start();
-    else if (
-      event.type !== "mouseover" &&
-      (pendingIsland(target, root) || target.closest("form"))
+    if (
+      routedLink(target) ||
+      (event.type !== "mouseover" && (pendingIsland(target, root) || target.closest("form")))
     ) {
-      void start();
+      void start(false);
+      forTarget(target);
     }
   };
   for (const type of ["pointerdown", "focusin", "mouseover"]) listen(type, observe, true);
+
+  // The page a held click goes to is requested with the click, alongside the runtime, rather than
+  // a round trip after it runs. The headers are the ones the router sends for that navigation from
+  // this document: the layouts it shows, and the tree a root that hydrates renders the next page
+  // into, or else flush markers for a page that streams. The island values the router holds
+  // (F-Values) are left out, so the server sends every value the page needs.
+  const requestPage = (href: string) => {
+    const headers: Record<string, string> = { accept: "text/html" };
+    const layouts = Array.from(
+      (document.getElementById("root") ?? document.body).querySelectorAll(
+        '[data-farm-layout-boundary="true"]',
+      ),
+      (boundary) =>
+        boundary.getAttribute("data-farm-layout-key") ||
+        boundary.getAttribute("data-farm-layout-pattern"),
+    ).filter(Boolean);
+    if (layouts.length) headers["f-layouts"] = JSON.stringify(layouts);
+    if (rootId === "root") headers["f-render"] = "tree";
+    else headers["f-stream"] = "flush";
+    const scope = window as Window & {
+      __FARM_DEPLOYMENT_ID__?: string;
+      __FARM_EARLY_NAVIGATION__?: FarmEarlyNavigation;
+    };
+    if (scope.__FARM_DEPLOYMENT_ID__) {
+      headers[FARM_ISLANDS_BOOT_DEPLOYMENT_HEADER] = scope.__FARM_DEPLOYMENT_ID__;
+    }
+    const controller = new AbortController();
+    const response = fetch(href, { headers, redirect: "manual", signal: controller.signal });
+    // A request the router does not take is aborted, which is not an error.
+    response.catch(() => {});
+    scope.__FARM_EARLY_NAVIGATION__ = { url: href, headers, response, at: Date.now(), controller };
+  };
 
   // A link clicked before the runtime runs: held, then clicked again once the router listens, so
   // it decides as for any click. Bubble phase, like the router, so a handler that prevents the
@@ -191,7 +280,8 @@ export function startFarmIslandsBoot(load: () => Promise<unknown> = loadFarmClie
       const anchor = routedLink(click.target);
       if (!anchor) return;
       click.preventDefault();
-      start().then(
+      requestPage(anchor.href);
+      start(false).then(
         () => {
           if (anchor.isConnected) {
             anchor.dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true }));
@@ -199,6 +289,7 @@ export function startFarmIslandsBoot(load: () => Promise<unknown> = loadFarmClie
         },
         () => location.assign(anchor.href),
       );
+      forTarget(anchor);
     },
     false,
   );

@@ -209,6 +209,67 @@ describe("islands mode", () => {
     ]);
   });
 
+  it("isolates the client components an MDX module imports, as a content collection loads it", () => {
+    const root = mkdtempSync(path.join(tmpdir(), "farm-islands-mdx-"));
+    roots.push(root);
+    mkdirSync(path.join(root, "src/app"), { recursive: true });
+    mkdirSync(path.join(root, "src/content"), { recursive: true });
+    for (const name of ["counter", "tabs", "example"]) {
+      const component = name[0]!.toUpperCase() + name.slice(1);
+      writeFileSync(
+        path.join(root, `src/${name}.tsx`),
+        `"use client";\nexport function ${component}() { return <button>1</button>; }\n`,
+      );
+    }
+    // The frontmatter's apostrophe and the fenced example's import are not module code.
+    writeFileSync(
+      path.join(root, "src/content/guide.mdx"),
+      [
+        "---",
+        "title: Don't skip this",
+        "---",
+        "",
+        'import { Counter } from "../counter";',
+        "",
+        "# Guide",
+        "",
+        "Here's a counter you can click:",
+        "",
+        "<Counter />",
+        "",
+        "```tsx",
+        'import { Example } from "../example";',
+        "```",
+        "",
+        "export const meta = {",
+        '  tabs: "below",',
+        "};",
+        "",
+        'import { Tabs } from "../tabs";',
+        "",
+        "<Tabs />",
+        "",
+      ].join("\n"),
+    );
+    writeFileSync(
+      path.join(root, "src/source.ts"),
+      'export const pages = { guide: () => import("./content/guide.mdx") };\n',
+    );
+    writeFileSync(
+      path.join(root, "src/app/page.tsx"),
+      'import { pages } from "../source";\nexport default async function Page() { const { default: Body } = await pages.guide(); return <Body />; }\n',
+    );
+    const page = getClientModuleHydrationPlan(path.join(root, "src/app/page.tsx"), root, "off", {
+      asyncOwnerIslands: true,
+      serverOwners: true,
+    });
+    expect(page.islandsError).toBeUndefined();
+    expect(page.isolatedBoundaries.map((boundary) => boundary.modulePath).sort()).toEqual([
+      path.join(root, "src/counter.tsx"),
+      path.join(root, "src/tabs.tsx"),
+    ]);
+  });
+
   it("points useFormStatus at islx's in islands mode, so a server form around the island reports to it", async () => {
     const { parseSync } = await import("vite");
     const transform = (slots: boolean) =>

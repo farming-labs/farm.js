@@ -208,6 +208,39 @@ test("does not select a route-slot page as the canonical URL", async () => {
   }
 });
 
+test("finds pages and layouts with the renderer's component extensions", async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "farm-cli-explain-leaf-"));
+
+  try {
+    await mkdir(path.join(root, "src/app/about"), { recursive: true });
+    await writeFile(
+      path.join(root, "farm.config.mjs"),
+      [
+        "export default {",
+        "  renderer: {",
+        "    name: 'leaf',",
+        "    vite: 'farm-leaf/vite',",
+        "    server: 'farm-leaf/server',",
+        "    client: 'farm-leaf/client',",
+        "    componentExtensions: ['.leaf'],",
+        "  },",
+        "};",
+        "",
+      ].join("\n"),
+    );
+    await writeFile(path.join(root, "src/app/layout.leaf"), "<slot />\n");
+    await writeFile(path.join(root, "src/app/about/page.leaf"), "<h1>About</h1>\n");
+
+    const explanation = await explainFarmRoute("/about", { root });
+
+    assert.equal(explanation.pattern, "/about");
+    assert.equal(explanation.filePath, "src/app/about/page.leaf");
+    assert.deepEqual(explanation.layouts, ["src/app/layout.leaf"]);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
 test("explains routes from --root even when farm.config sets another root", async () => {
   const root = await createExplainProject();
   const elsewhere = await mkdtemp(path.join(os.tmpdir(), "farm-cli-explain-elsewhere-"));

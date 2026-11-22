@@ -1170,10 +1170,12 @@ export default async function Page({ searchParams }) {
         path.join(root, "src", "components", "counter.tsx"),
         `
 "use client";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 export default function Counter() {
   const [count, setCount] = useState(0);
-  return <button data-counter onClick={() => setCount((value) => value + 1)}>count:{count}</button>;
+  const [hydrated, setHydrated] = useState(false);
+  useEffect(() => setHydrated(true), []);
+  return <button data-counter data-hydrated={hydrated ? "true" : "false"} onClick={() => setCount((value) => value + 1)}>count:{count}</button>;
 }`,
       );
       await fs.writeFile(
@@ -1240,14 +1242,23 @@ export default async function Page({ searchParams }) {
             page.on("console", (message) => {
               if (/Content Security Policy/.test(message.text())) violations.push(message.text());
             });
+            // The server HTML shows the counter and the streamed content before React hydrates
+            // the page, and a click before then is lost. Click once the counter has mounted.
+            const counter = page.locator("[data-counter]");
+            const clickCounter = async () => {
+              await expect
+                .poll(() => counter.getAttribute("data-hydrated"), { timeout: 15_000 })
+                .toBe("true");
+              await counter.click();
+              await expect.poll(() => counter.textContent()).toBe("count:1");
+            };
             const bio = encodeURIComponent(
               '<script>window.pwned="script"</script>' +
                 '<script nonce="guess">window.pwned="guessed"</script>',
             );
             await page.goto(new URL(`/?bio=${bio}`, response.url).toString());
             await page.locator("#nonce-reveal").waitFor({ state: "visible" });
-            await page.locator("[data-counter]").click();
-            await expect.poll(() => page.locator("[data-counter]").textContent()).toBe("count:1");
+            await clickCounter();
             expect(await page.evaluate(() => (window as any).appReady)).toBe(true);
             expect(await page.evaluate(() => (window as any).pwned)).toBeUndefined();
             expect(violations.length).toBeGreaterThanOrEqual(2);
@@ -1272,8 +1283,7 @@ export default async function Page({ searchParams }) {
               }
               expect(tags.length).toBeGreaterThanOrEqual(2);
               expect(isrHtml).toContain('<script>window.pwned="isr"</script>');
-              await page.locator("[data-counter]").click();
-              await expect.poll(() => page.locator("[data-counter]").textContent()).toBe("count:1");
+              await clickCounter();
               expect(await page.evaluate(() => (window as any).pwned)).toBeUndefined();
             }
             expect(isrNonces[1]).not.toBe(isrNonces[0]);

@@ -12,6 +12,7 @@ const BROWSER_ENTRIES = [
   "renderer-client.ts",
   "client/lifecycle.ts",
   "client/production-runtime.ts",
+  "client/spa-router.ts",
   "api-client.ts",
   "query/client.ts",
   "server-fn-client.ts",

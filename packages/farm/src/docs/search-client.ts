@@ -45,6 +45,8 @@ export function generateFarmDocsSearchClientRuntime(
   enabled: boolean,
   moduleId?: string,
   frameworkModuleId = moduleId ? resolveFarmDocsSearchFrameworkModule(moduleId) : undefined,
+  /** The generated function that loads `createRoot` when the entry loads React DOM lazily. */
+  loadRenderer?: string,
 ): string {
   if (!enabled || !moduleId) {
     return `
@@ -166,7 +168,7 @@ async function mountFarmDocsSearch() {
   try {
     farmDocsSearchModulePromise ||= Promise.all([
       import(${JSON.stringify(moduleId)}),
-      ${frameworkModuleId ? `import(${JSON.stringify(frameworkModuleId)})` : "null"},
+      ${frameworkModuleId ? `import(${JSON.stringify(frameworkModuleId)})` : "null"},${loadRenderer ? `\n      ${loadRenderer}(),` : ""}
     ]);
     const [{ DocsCommandSearch }, framework] = await farmDocsSearchModulePromise;
     if (!container.isConnected) return false;

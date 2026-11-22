@@ -7,6 +7,11 @@ import { createServer as createNetServer } from "node:net";
 const FIRST_PORT = 20_000;
 const LAST_PORT = 32_767;
 const MAX_PROBES = 50;
+/**
+ * Vite's HMR WebSocket port, inside that range. Every Vite server in middleware mode with HMR on
+ * binds it (several suites start one), so a test server handed it can lose it to them.
+ */
+const VITE_HMR_PORT = 24_678;
 
 /**
  * Reserve a free TCP port for a test server.
@@ -29,6 +34,7 @@ export async function getAvailablePort(): Promise<number> {
   let lastError: unknown;
   for (let probe = 0; probe < MAX_PROBES; probe++) {
     const port = FIRST_PORT + Math.floor(Math.random() * (LAST_PORT - FIRST_PORT + 1));
+    if (port === VITE_HMR_PORT) continue;
     try {
       await probePort(port);
       return port;

@@ -245,7 +245,7 @@ describe("a docs runtime's MCP server in production", () => {
             agent: cursor,
           }),
         ]);
-        // Each call is tied to the request that carried it, and never carries its arguments.
+        // Each call is tied to the request that carried it.
         const requests = events().filter(
           ({ kind, method }) => kind === "request" && method === "POST",
         );
@@ -255,7 +255,12 @@ describe("a docs runtime's MCP server in production", () => {
         for (const call of calls) {
           expect(requests.map(({ requestId }) => requestId)).toContain(call.requestId);
         }
-        expect(JSON.stringify(events())).not.toContain("private-argument");
+        // A tool call carries its arguments and result; the request carrying it doesn't.
+        expect(calls.map(({ arguments: args }) => args)).toEqual(
+          calls.map(() => ({ query: "private-argument" })),
+        );
+        expect(calls.every(({ result }) => typeof result === "object")).toBe(true);
+        expect(JSON.stringify(requests)).not.toContain("private-argument");
       } finally {
         await server.stop();
       }

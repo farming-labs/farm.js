@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { scheduleFarmIslandHydration } from "../client/island-runtime";
+import { holdFarmIslandInteractions, scheduleFarmIslandHydration } from "../client/island-runtime";
 
 describe("scheduleFarmIslandHydration", () => {
   beforeEach(() => {
@@ -500,5 +500,68 @@ describe("scheduleFarmIslandHydration", () => {
 
     await expect(scheduled).resolves.toBe("idle");
     expect(cancelIdleCallback).toHaveBeenCalledWith(7);
+  });
+});
+
+describe("holdFarmIslandInteractions", () => {
+  afterEach(() => {
+    vi.useRealTimers();
+    delete (window as typeof window & { __FARM_PREHYDRATION_CLICK_QUEUE__?: unknown })
+      .__FARM_PREHYDRATION_CLICK_QUEUE__;
+    document.body.innerHTML = "";
+  });
+
+  // Islands mode's entry holds these while islx loads (RFC 0010); no scheduler runs yet.
+  it("holds clicks on islands that have not hydrated until their scheduler replays them", async () => {
+    vi.useFakeTimers();
+    document.body.innerHTML = `
+      <f-island id="waiting"><button type="button">Count</button></f-island>
+      <f-island data-farm-island-hydrated="true"><button type="button">Hydrated</button></f-island>
+      <button type="button" id="outside">Outside</button>`;
+    const container = document.getElementById("waiting")!;
+    const button = container.querySelector("button")!;
+    const hydratedButton = document.querySelector("[data-farm-island-hydrated] button")!;
+    const outside = document.getElementById("outside")!;
+    const seen: string[] = [];
+    document.addEventListener("click", (event) => {
+      seen.push((event.target as Element).textContent ?? "");
+    });
+
+    const release = holdFarmIslandInteractions("f-island");
+    button.click();
+    button.click();
+    hydratedButton.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    outside.click();
+    release();
+    // Once released, a click reaches the page again.
+    outside.click();
+    expect(seen).toEqual(["Hydrated", "Outside", "Outside"]);
+
+    let handledClicks = 0;
+    const scheduled = scheduleFarmIslandHydration({
+      container,
+      strategy: "interaction",
+      hydrate: () => {
+        button.addEventListener("click", () => handledClicks++);
+      },
+    });
+    await scheduled;
+    await vi.runAllTimersAsync();
+    expect(handledClicks).toBe(2);
+  });
+
+  it("holds a form's submit once", () => {
+    document.body.innerHTML = `<f-island><form><input name="q"></form></f-island>`;
+    const form = document.querySelector("form")!;
+    const release = holdFarmIslandInteractions("f-island");
+    const first = new Event("submit", { bubbles: true, cancelable: true });
+    form.dispatchEvent(first);
+    form.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true }));
+    release();
+
+    expect(first.defaultPrevented).toBe(true);
+    const queue = (window as typeof window & { __FARM_PREHYDRATION_CLICK_QUEUE__?: unknown[] })
+      .__FARM_PREHYDRATION_CLICK_QUEUE__;
+    expect(queue).toEqual([{ target: form, kind: "submit" }]);
   });
 });

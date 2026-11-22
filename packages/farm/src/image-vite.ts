@@ -4,7 +4,8 @@ import { imageSize } from "image-size";
 import type { Plugin } from "vite";
 
 const FARM_IMAGE_ID_PREFIX = "\0farm:image:";
-const STATIC_IMAGE_RE = /\.(?:avif|gif|jpe?g|png|webp)$/i;
+const STATIC_IMAGE_RE = /\.(?:avif|gif|jpe?g|png|svg|webp)$/i;
+const SVG_RE = /\.svg$/i;
 const SCRIPT_IMPORTER_RE = /\.(?:[cm]?[jt]sx?|mdx?)$/i;
 
 export function farmImageImportsPlugin(): Plugin {
@@ -57,7 +58,8 @@ async function createStaticImageModule(
     throw new Error(`Could not determine image dimensions for ${filePath}`);
   }
 
-  const blurDataURL = await createBlurDataURL(bytes);
+  // An SVG is served as it is, never rasterized, so it gets no blur placeholder (as in Next.js).
+  const blurDataURL = SVG_RE.test(filePath) ? undefined : await createBlurDataURL(bytes);
   return [
     sourceDeclaration,
     `const image = ${JSON.stringify({

@@ -18,6 +18,10 @@ if (process.env.FARM_REQUIRE_TEST_POSTGRES === "1" && !postgresTestUrl) {
   throw new Error("FARM_TEST_POSTGRES_URL is required when FARM_REQUIRE_TEST_POSTGRES=1.");
 }
 
+if (process.env.FARM_REQUIRE_TEST_MYSQL === "1" && !mysqlTestUrl) {
+  throw new Error("FARM_TEST_MYSQL_URL is required when FARM_REQUIRE_TEST_MYSQL=1.");
+}
+
 /** A loyalty plugin: its own history table, and a points column on the app's user. */
 const loyaltySchema = (extra: Record<string, unknown> = {}) =>
   defineSchema({

@@ -56,6 +56,65 @@ describe("client module preloads", () => {
       "chunks/counter.js",
       "chunks/icons.js",
     ]);
+    expect(manifest.router).toEqual([]);
+  });
+
+  it("lists the router modules' chunks and their static imports outside the entry's", () => {
+    const router = path.join(root, ".farm/tmp/client-entry-1/farm-client-router.tsx");
+    const routes = path.join(root, ".farm/tmp/client-entry-1/farm-client-routes.tsx");
+    const manifest = collectFarmClientModulePreloads(
+      {
+        ...bundle,
+        "chunks/router.js": chunk("chunks/router.js", ["chunks/react.js", "chunks/nav.js"], {
+          module: router,
+        }),
+        "chunks/nav.js": chunk("chunks/nav.js"),
+        "chunks/routes.js": chunk("chunks/routes.js", ["chunks/nav.js"], {
+          module: `${routes}?v=1`,
+        }),
+      },
+      {
+        root,
+        entryName: "farm-client",
+        routerModules: [router, routes, path.join(root, "src/missing.tsx")],
+      },
+    )!;
+    expect(manifest.router.map((index) => manifest.files[index])).toEqual([
+      "chunks/router.js",
+      "chunks/nav.js",
+      "chunks/routes.js",
+    ]);
+  });
+
+  it("lists the renderer modules' chunks and their static imports outside the entry's", () => {
+    const reactDom = path.join(root, "node_modules/react-dom/client.js");
+    const islands = path.join(root, "node_modules/@farm.js/core/dist/internal/islands-runtime.mjs");
+    const manifest = collectFarmClientModulePreloads(
+      {
+        ...bundle,
+        "chunks/client.js": chunk("chunks/client.js", ["chunks/react.js", "chunks/scheduler.js"], {
+          module: reactDom,
+        }),
+        "chunks/scheduler.js": chunk("chunks/scheduler.js"),
+        "chunks/islands-runtime.js": chunk(
+          "chunks/islands-runtime.js",
+          ["chunks/client.js", "chunks/islx.js"],
+          { module: islands },
+        ),
+        "chunks/islx.js": chunk("chunks/islx.js", ["chunks/react.js"]),
+      },
+      { root, entryName: "farm-client", rendererModules: [reactDom, islands] },
+    )!;
+    expect(manifest.renderer!.map((index) => manifest.files[index])).toEqual([
+      "chunks/client.js",
+      "chunks/scheduler.js",
+      "chunks/islands-runtime.js",
+      "chunks/islx.js",
+    ]);
+    // An entry that imports its renderer statically has none to list.
+    expect(
+      collectFarmClientModulePreloads(bundle, { root, entryName: "farm-client" })!.renderer,
+    ).toBeUndefined();
   });
 
   it("returns null without the entry", () => {
@@ -68,7 +127,7 @@ describe("client module preloads", () => {
   });
 
   it("encodes a manifest that survives any string literal", () => {
-    const manifest = { files: ["chunks/a$&'`\" .js"], entry: [0], modules: {} };
+    const manifest = { files: ["chunks/a$&'`\" .js"], entry: [0], router: [0], modules: {} };
     const encoded = encodeFarmClientModulePreloads(manifest);
     for (const quote of [`"`, `'`, "`"]) {
       // eslint-disable-next-line no-new-func

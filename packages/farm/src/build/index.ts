@@ -336,7 +336,7 @@ async function createProjectModuleServer(
           basePath: config.basePath,
           publicDir: config.publicDir,
         }),
-        farmEnvironmentFunctionsPlugin(),
+        farmEnvironmentFunctionsPlugin({ renderer: config.renderer }),
         // Route modules load here at build time (rendering config, prerendering): `server-only`
         // resolves as it does in the server build. Module-entry packages load pre-bundled, as in
         // `farm dev`: unbundled, lucide-react alone is ~1,750 modules through the module runner,

@@ -115,6 +115,50 @@ and reconnect behavior across all bindings. During server rendering a query bind
 idle snapshot and starts no read, matching React's `useServerQuery`; the browser loads it after
 hydration.
 
+## Renderer modules
+
+A renderer descriptor names three modules by package specifier. FARMJS resolves each one from the
+app and imports its named exports, in development and in production builds. None of them needs a
+default export.
+
+| Module   | Required named exports                                                              | Optional named exports include                                                                                                                                                    |
+| -------- | ----------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `vite`   | `createFarmRendererPlugin`                                                          |                                                                                                                                                                                   |
+| `server` | `name`, `createElement`, `isValidElement`, `Fragment`, `Suspense`, `renderToString` | `renderToReadableStream`, `renderToPipeableStream`, `renderToStringWithHead`, `ErrorBoundary`, `generateHydrationScript`, `markFunctionComponent`, `configureApp`, `capabilities` |
+| `client` | `createElement`, `Suspense`, `createRoot`, `hydrateRoot`                            | `configureApp`                                                                                                                                                                    |
+
+- `createFarmRendererPlugin({ ssr, buildLifetime, rendererOptions })` returns a Vite plugin, an
+  array of plugins, or a promise of either. `rendererOptions` is the descriptor's `options`.
+- FARMJS composes every route tree with `createElement()`: layouts, the page, and the boundaries for
+  loading, error, and not-found files. The server and client modules must build the same tree from
+  the same calls.
+- `renderToString()` may return a promise.
+- `createRoot()` and `hydrateRoot()` return a root with `render(element)` and `unmount()`, plus the
+  optional `renderRoute()` described under [Re-render behavior](#re-render-behavior).
+- Both modules must export `configureApp()` when the descriptor sets `appSetup`.
+
+Check a renderer against the contract types from `@farm.js/core/renderer`. The full list of optional
+server exports is on `FarmServerRendererRuntime`.
+
+```ts
+import type {
+  FarmRendererClientRuntime,
+  FarmRendererViteModule,
+  FarmServerRendererRuntime,
+} from "@farm.js/core/renderer";
+import * as client from "./client";
+import * as server from "./server";
+import * as vite from "./vite";
+
+// Each line fails type-checking when a module drifts from what FARMJS imports.
+export const serverContract: FarmServerRendererRuntime = server;
+export const clientContract: FarmRendererClientRuntime = client;
+export const viteContract: FarmRendererViteModule = vite;
+```
+
+The official renderers also run the shared conformance suite in `packages/farm-renderer-tests`, which
+renders through these exports in Node and jsdom. It is not published to npm yet.
+
 ## Renderer capability contract
 
 Renderer packages advertise streaming support in their descriptor instead of relying on FARMJS to

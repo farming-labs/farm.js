@@ -150,8 +150,31 @@ export const agentScanSections = [
   ["how-i-measured", "How I measured"],
 ] as const satisfies BlogSections;
 
+export const rendererPost: BlogPost = {
+  href: "/blog/bring-your-own-renderer",
+  title: "Bring your own renderer",
+  description:
+    "I wrote a small React-like library to find out what Farm needs from a renderer: three modules, eleven named exports, and two fixes the official renderers had been hiding.",
+  ...AUTHOR,
+  date: "Nov 2026",
+  dateTime: "2026-11-21",
+  category: "Engineering",
+};
+
+export const rendererSections = [
+  ["what-farm-asks-of-a-renderer", "What Farm asks"],
+  ["meet-leaf", "Meet leaf"],
+  ["the-first-break-a-default-export", "A default export"],
+  ["the-second-break-react-in-the-dev-entry", "React in the dev entry"],
+  ["what-the-fixes-cost", "What the fixes cost"],
+  ["your-own-file-format", "Your own file format"],
+  ["what-still-needs-work", "What still needs work"],
+  ["write-your-own", "Write your own"],
+] as const satisfies BlogSections;
+
 /** Every post. The index features the first and lists the rest. */
 export const posts: readonly { post: BlogPost; sections: BlogSections }[] = [
+  { post: rendererPost, sections: rendererSections },
   { post: agentScanPost, sections: agentScanSections },
   { post: nativeInternalsPost, sections: nativeInternalsSections },
   { post: agentNativePost, sections: agentNativeSections },
