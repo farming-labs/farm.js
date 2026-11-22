@@ -10,6 +10,7 @@ import {
   disposeStorage,
   farmStorage,
   getDatabase,
+  getStorage,
   initStorage,
   memoryStorage,
   localStorage,
@@ -39,9 +40,12 @@ afterEach(async () => {
 });
 
 it("resolves Farm storage to the same hosted resources as existing managed mounts", () => {
-  expect(sqliteStorage({ managed: true })).toEqual({ ...farmStorage(), declaredDriver: "sqlite" });
+  expect(sqliteStorage({ managed: true })).toEqual({
+    ...farmStorage({ type: "sql" }),
+    declaredDriver: "sqlite",
+  });
   expect(sqliteStorage({ managed: { name: "drafts" } })).toEqual({
-    ...farmStorage({ namespace: "drafts" }),
+    ...farmStorage({ type: "sql", namespace: "drafts" }),
     declaredDriver: "sqlite",
   });
   expect(() => farmStorage({ namespace: "bad/name" })).toThrow();
@@ -59,29 +63,88 @@ it("accepts an explicit managed flag with either an inferred or an explicit name
 });
 
 it.each([
-  ["sqlite", sqliteStorage],
-  ["postgres", postgresStorage],
-  ["postgres", pgStorage],
-  ["mysql", mysqlStorage],
-  ["mysql", mysql2Storage],
-  ["pglite", pgliteStorage],
-  ["planetscale", planetscaleStorage],
-  ["libsql", libsqlStorage],
-  ["redis", redisStorage],
-  ["s3", s3Storage],
-  ["mongodb", mongodbStorage],
-  ["upstash", upstashStorage],
-  ["netlify-blobs", netlifyBlobsStorage],
-  ["vercel-kv", vercelKVStorage],
-  ["vercel-blob", vercelBlobStorage],
-  ["local", localStorage],
-  ["memory", memoryStorage],
-] as const)("%s preserves its declared driver when managed", (driver, helper) => {
-  expect(helper({ managed: true })).toEqual({ ...farmStorage(), declaredDriver: driver });
-  expect(helper({ managed: true, namespace: "drafts" })).toEqual({
-    ...farmStorage({ namespace: "drafts" }),
-    declaredDriver: driver,
+  ["sqlite", "sql", sqliteStorage],
+  ["postgres", "sql", postgresStorage],
+  ["postgres", "sql", pgStorage],
+  ["mysql", "sql", mysqlStorage],
+  ["mysql", "sql", mysql2Storage],
+  ["pglite", "sql", pgliteStorage],
+  ["planetscale", "sql", planetscaleStorage],
+  ["libsql", "sql", libsqlStorage],
+  ["redis", "kv", redisStorage],
+  ["s3", "kv", s3Storage],
+  ["mongodb", "kv", mongodbStorage],
+  ["upstash", "kv", upstashStorage],
+  ["netlify-blobs", "kv", netlifyBlobsStorage],
+  ["vercel-kv", "kv", vercelKVStorage],
+  ["vercel-blob", "kv", vercelBlobStorage],
+  ["local", "kv", localStorage],
+  ["memory", "kv", memoryStorage],
+] as const)(
+  "%s preserves its declared driver and holds %s data when managed",
+  (driver, type, helper) => {
+    expect(helper({ managed: true })).toEqual({ ...farmStorage({ type }), declaredDriver: driver });
+    expect(helper({ managed: true, namespace: "drafts" })).toEqual({
+      ...farmStorage({ type, namespace: "drafts" }),
+      declaredDriver: driver,
+    });
+  },
+);
+
+it("makes every typed mount one kind and rejects a schema without tables", () => {
+  const schema = defineSchema({ draft: model({ table: "drafts", fields: { id: id() } }) });
+  expect(farmStorage({ type: "kv" })).toEqual({
+    driver: "farm-managed-sqlite",
+    managed: true,
+    declaredDriver: "farm",
+    type: "kv",
   });
+  expect(farmStorage({ type: "sql", schema })).toMatchObject({ type: "sql", schema });
+  // @ts-expect-error A key-value mount has no tables to describe.
+  expect(() => farmStorage({ type: "kv", schema })).toThrow(/type: "sql"/);
+  // @ts-expect-error Only "kv" and "sql" are mount types.
+  expect(() => farmStorage({ type: "pg" })).toThrow(/"kv" or "sql"/);
+  // @ts-expect-error A key-value driver has no tables to describe.
+  expect(() => redisStorage({ managed: true, schema })).toThrow(/key-value data/);
+  expect(() =>
+    resolveManagedStorageMount({ driver: "postgres", managed: true, type: "kv" }),
+  ).toThrow(/always holds tables/);
+  // A descriptor keeps its type through the CLI, the bundler, and the runtime.
+  for (const mount of [farmStorage({ type: "kv" }), farmStorage({ type: "sql", schema })])
+    expect(resolveManagedStorageMount(mount)).toEqual(mount);
+  expect(() =>
+    resolveManagedStorageMount({ driver: "farm-managed-sqlite", managed: true, type: "blob" }),
+  ).toThrow(/type/);
+});
+
+it("sends each typed mount to the one API that reads it", async () => {
+  vi.stubEnv("FARMJS_API_KEY", "");
+  const fetch = vi.fn();
+  vi.stubGlobal("fetch", fetch);
+  await initStorage({
+    mounts: {
+      stats: farmStorage({ type: "kv" }),
+      feedback: farmStorage({ type: "sql" }),
+      orders: postgresStorage({ managed: true }),
+      cache: memoryStorage(),
+    },
+  });
+  await expect(getDatabase("stats")).rejects.toThrow(
+    'Storage mount "stats" is a key-value mount. Use getStorage("stats")',
+  );
+  await expect(getStorage("feedback").setItem("k", "v")).rejects.toThrow(
+    'Storage mount "feedback" is a SQL mount. Use getDatabase("feedback")',
+  );
+  await expect(getStorage("orders").getItem("k")).rejects.toThrow(/SQL mount/);
+  await expect(getStorage().hasItem("feedback:k")).rejects.toThrow(/SQL mount/);
+  // A SQL mount holds no keys, so listing across every mount still works.
+  await getStorage("cache").setItem("greeting", "hi");
+  await expect(getStorage("feedback").getKeys()).resolves.toEqual([]);
+  await expect(getStorage("orders").getKeys()).resolves.toEqual([]);
+  // The right API still reaches the hosted database, which needs a key.
+  await expect(getDatabase("feedback")).rejects.toThrow("FARMJS_API_KEY");
+  await expect(getStorage("stats").getItem("k")).rejects.toThrow("FARMJS_API_KEY");
+  expect(fetch).not.toHaveBeenCalled();
 });
 
 it("retains unknown driver identity for a descriptor from an older config", () => {
@@ -101,8 +164,10 @@ it("plans and loads only the hosted client for managed native and raw KV declara
   } as const;
   expect(_collectFarmStorageModules(config)).toEqual([]);
   await initStorage(config);
-  for (const name of Object.keys(config.mounts))
-    await expect(getDatabase(name)).rejects.toThrow("FARMJS_API_KEY");
+  await expect(getDatabase("drafts")).rejects.toThrow("FARMJS_API_KEY");
+  // Redis and Cloudflare KV are key-value drivers, so their managed mounts have no database.
+  for (const name of ["cache", "settings"])
+    await expect(getDatabase(name)).rejects.toThrow("key-value mount");
 });
 
 it("connects hosted storage without a libSQL client installed in the app", async () => {
@@ -177,7 +242,7 @@ it("binds the ORM schema to the mount and leaves raw access available", async ()
   const bare = farmStorage({ namespace: "drafts" });
   const bound = postgresStorage({ managed: true, namespace: "drafts", schema });
   expect(bound).toEqual({
-    ...farmStorage({ namespace: "drafts", schema }),
+    ...farmStorage({ type: "sql", namespace: "drafts", schema }),
     declaredDriver: "postgres",
   });
   expect(bound.schema).toBe(schema);

@@ -10,12 +10,20 @@ export interface ManagedSqliteOptions {
   url?: never;
 }
 
+/**
+ * What a hosted mount holds. A `"kv"` mount is read with `getStorage()`, a `"sql"` mount with
+ * `getDatabase()`. One mount is never both.
+ */
+export type ManagedStorageType = "kv" | "sql";
+
 export interface ManagedSqliteMount {
   driver: "farm-managed-sqlite";
   /** Driver selected in the app config, when reported by the declaring framework. */
   declaredDriver?: string;
   managed: ManagedSqliteOptions["managed"];
   schema?: SchemaDefinition;
+  /** Absent only on a mount from a deprecated untyped `farmStorage()` call. */
+  type?: ManagedStorageType;
 }
 
 export function managedSqliteName(mount: string, managed: unknown) {
@@ -132,11 +140,19 @@ export const databaseAccessor = Symbol.for("farmjs.storage.managedDatabase");
 
 export const mountSchema = Symbol.for("farmjs.storage.managedSchema");
 
+export const mountType = Symbol.for("farmjs.storage.managedType");
+
 export function managedSqliteDriver(
   name: string,
   loadClient: LoadClient,
   schema?: SchemaDefinition,
-): Driver & { [databaseAccessor]: () => Promise<Client>; [mountSchema]?: SchemaDefinition } {
+  type?: ManagedStorageType,
+  mount = name,
+): Driver & {
+  [databaseAccessor]: () => Promise<Client>;
+  [mountSchema]?: SchemaDefinition;
+  [mountType]?: ManagedStorageType;
+} {
   let pending: Promise<Client> | undefined;
   let initialized: Promise<Client> | undefined;
   let closed = false;
@@ -148,6 +164,14 @@ export function managedSqliteDriver(
     }));
   }
   function kv() {
+    if (type === "sql")
+      return Promise.reject(
+        new TypeError(
+          `Storage mount ${JSON.stringify(mount)} is a SQL mount. ` +
+            `Use getDatabase(${JSON.stringify(mount)}) to read and write it, ` +
+            'or add a mount with `type: "kv"` for key-value data.',
+        ),
+      );
     return (initialized ??= client()
       .then(async (db) => {
         await db.execute(
@@ -164,6 +188,7 @@ export function managedSqliteDriver(
     name: "farm-managed-sqlite",
     [databaseAccessor]: client,
     [mountSchema]: schema,
+    [mountType]: type,
     async hasItem(key) {
       return (
         (await (await kv()).execute({ sql: "SELECT 1 FROM _farm_kv WHERE key=?", args: [key] }))
@@ -177,6 +202,8 @@ export function managedSqliteDriver(
       return rows[0]?.value ?? null;
     },
     async getKeys(base = "") {
+      // A SQL mount holds no keys, so a listing that spans every mount still succeeds.
+      if (type === "sql") return [];
       const { rows } = await (
         await kv()
       ).execute({
@@ -197,6 +224,7 @@ export function managedSqliteDriver(
       await (await kv()).execute({ sql: "DELETE FROM _farm_kv WHERE key=?", args: [key] });
     },
     async clear(base = "") {
+      if (type === "sql") return;
       await (
         await kv()
       ).execute({ sql: "DELETE FROM _farm_kv WHERE instr(key,?)=1", args: [base] });
