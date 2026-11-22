@@ -1,4 +1,5 @@
 import type { OpenAPIPathItemObject } from "@farm.js/core";
+import { agentFeedbackPayloadSchema } from "./agent-feedback-schema";
 
 /**
  * Hand-written OpenAPI path items for farmjs.dev's public API. Keys are relative to
@@ -29,21 +30,8 @@ const docsFeedbackSchema = {
         source: { type: "string" },
       },
     },
-    payload: {
-      type: "object",
-      additionalProperties: false,
-      required: ["task", "outcome"],
-      properties: {
-        task: { type: "string", description: "What the agent was trying to do." },
-        understanding: { type: "string", description: 'How well the docs helped, e.g. "clear".' },
-        outcome: { type: "string", description: 'What happened, e.g. "implemented" or "blocked".' },
-        confidence: { type: "number", minimum: 0, maximum: 1 },
-        neededCodeReading: { type: "boolean" },
-        missingContext: { type: "array", items: { type: "string" } },
-        docIssues: { type: "array", items: { type: "string" } },
-        suggestedImprovement: { type: "string" },
-      },
-    },
+    // The same schema the docs engine checks feedback against before the site stores it.
+    payload: agentFeedbackPayloadSchema,
   },
 };
 
