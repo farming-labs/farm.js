@@ -86,7 +86,7 @@ async function renderLayout(head: React.ReactNode): Promise<string> {
 function productionEnsureHead(): typeof ensureFarmDocumentHead {
   const source = readFileSync(new URL("../nitro/universal-build.ts", import.meta.url), "utf8");
   const start = source.indexOf("function ensureFarmDocumentHead(markup)");
-  const end = source.indexOf("function createFarmErrorDocument(html, title)", start);
+  const end = source.indexOf("function createFarmErrorDocument(", start);
   expect(start).toBeGreaterThan(-1);
   expect(end).toBeGreaterThan(start);
   const generated = new Function("return `" + source.slice(start, end) + "`;")();
@@ -96,7 +96,7 @@ function productionEnsureHead(): typeof ensureFarmDocumentHead {
 function productionEnsureRoot(): typeof ensureFarmDocumentRoot {
   const source = readFileSync(new URL("../nitro/universal-build.ts", import.meta.url), "utf8");
   const start = source.indexOf("function ensureFarmDocumentRoot(markup)");
-  const end = source.indexOf("function createFarmErrorDocument(html, title)", start);
+  const end = source.indexOf("function createFarmErrorDocument(", start);
   expect(start).toBeGreaterThan(-1);
   expect(end).toBeGreaterThan(start);
   const generated = new Function("return `" + source.slice(start, end) + "`;")();
