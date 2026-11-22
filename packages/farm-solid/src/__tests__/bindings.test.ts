@@ -4,7 +4,8 @@ import { createRoot } from "solid-js";
 import { describe, expect, it, vi } from "vitest";
 import type { ServerFn } from "@farm.js/core/server-fn";
 import type { ServerQuery } from "@farm.js/core/server-query";
-import { useAction, useServerQuery } from "../bindings";
+import { createStore } from "@farm.js/core/renderer-client";
+import { useAction, useServerQuery, useStore } from "../bindings";
 
 describe("Solid FARMJS bindings", () => {
   it("exposes action state through reactive getters", async () => {
@@ -61,5 +62,21 @@ describe("Solid FARMJS bindings", () => {
     await vi.waitFor(() => expect(account.data).toEqual({ email: "solid@example.com" }));
     expect(account.status).toBe("success");
     dispose();
+  });
+
+  it("binds a Farm store and stops listening with its owner", () => {
+    const cart = createStore({ items: [] as string[] });
+    let dispose!: () => void;
+    const state = createRoot((disposeRoot) => {
+      dispose = disposeRoot;
+      return useStore(cart);
+    });
+
+    cart.items.set(["tea"]);
+    expect(state()).toEqual({ items: ["tea"] });
+
+    dispose();
+    cart.items.set(["tea", "milk"]);
+    expect(state()).toEqual({ items: ["tea"] });
   });
 });

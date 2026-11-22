@@ -206,3 +206,12 @@ function createReactiveTranslator(
   };
   return translate;
 }
+
+/**
+ * Binds any `FarmClientStore`, such as a store from `createStore` in
+ * `@farm.js/core/renderer-client`, to a read-only ref that updates when the store changes. The
+ * subscription ends with the current effect scope.
+ */
+export function useStore<T>(store: FarmClientStore<T>): Readonly<ShallowRef<T>> {
+  return bindFarmStore(store);
+}

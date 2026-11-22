@@ -78,6 +78,9 @@ React and Preact routes use `.tsx`/`.jsx`, Solid uses `.tsx`/`.jsx`, Vue uses `.
 uses `.svelte`. Do not mix renderer component formats in one route tree. Use renderer-native client
 bindings from `@farm.js/solid/bindings`, `@farm.js/vue/bindings`, or
 `@farm.js/svelte/bindings`; keep APIs, middleware, secrets, storage, and deployment renderer-neutral.
+Shared client state uses `createStore` from `@farm.js/core/renderer-client`, bound with `useStore`
+(Solid, Vue) or `createReadable` (Svelte); React and Preact import it from `@farm.js/core/client`,
+which adds `store.use()`.
 
 Upgrade every published Farm package together:
 

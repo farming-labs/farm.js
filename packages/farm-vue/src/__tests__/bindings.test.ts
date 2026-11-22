@@ -4,7 +4,8 @@ import { effectScope } from "vue";
 import { describe, expect, it, vi } from "vitest";
 import type { ServerFn } from "@farm.js/core/server-fn";
 import type { ServerQuery } from "@farm.js/core/server-query";
-import { useAction, useServerQuery } from "../bindings";
+import { createStore } from "@farm.js/core/renderer-client";
+import { useAction, useServerQuery, useStore } from "../bindings";
 
 describe("Vue FARMJS bindings", () => {
   it("exposes action state through refs", async () => {
@@ -44,5 +45,18 @@ describe("Vue FARMJS bindings", () => {
     await vi.waitFor(() => expect(account.data.value).toEqual({ email: "vue@example.com" }));
     expect(account.status.value).toBe("success");
     scope.stop();
+  });
+
+  it("binds a Farm store and stops listening with its scope", () => {
+    const cart = createStore({ items: [] as string[] });
+    const scope = effectScope();
+    const state = scope.run(() => useStore(cart))!;
+
+    cart.items.set(["tea"]);
+    expect(state.value).toEqual({ items: ["tea"] });
+
+    scope.stop();
+    cart.items.set(["tea", "milk"]);
+    expect(state.value).toEqual({ items: ["tea"] });
   });
 });

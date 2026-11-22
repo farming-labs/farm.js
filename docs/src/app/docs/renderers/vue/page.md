@@ -166,7 +166,9 @@ await router.push("/products");
 theme.toggleTheme();
 ```
 
-The composables return Vue refs and computed values. Renderer-specific `Link` and form components,
+The composables return Vue refs and computed values. `useStore(store)` binds your own state, a
+store from `createStore` in `@farm.js/core/renderer-client`, to a read-only ref; see
+[Shared client state](/docs/renderers#shared-client-state). Renderer-specific `Link` and form components,
 fetchers, integration providers, programmatic UI routes, Markdown/MDX visual pages, the docs
 adapter, and generated JSX metadata images remain React-oriented today.
 

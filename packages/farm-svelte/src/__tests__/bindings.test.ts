@@ -3,7 +3,8 @@
 import { describe, expect, it, vi } from "vitest";
 import type { ServerFn } from "@farm.js/core/server-fn";
 import type { ServerQuery } from "@farm.js/core/server-query";
-import { createAction, createServerQuery } from "../bindings";
+import { createStore } from "@farm.js/core/renderer-client";
+import { createAction, createReadable, createServerQuery } from "../bindings";
 
 describe("Svelte FARMJS bindings", () => {
   it("exposes action state through a readable store", async () => {
@@ -38,5 +39,18 @@ describe("Svelte FARMJS bindings", () => {
     await vi.waitFor(() => expect(latest?.data).toEqual({ email: "svelte@example.com" }));
     expect(latest?.status).toBe("success");
     unsubscribe();
+  });
+
+  it("wraps a Farm store in a readable store", () => {
+    const cart = createStore({ items: [] as string[] });
+    const readable = createReadable(cart);
+    const seen: string[][] = [];
+    const unsubscribe = readable.subscribe((state) => seen.push(state.items));
+
+    cart.items.set(["tea"]);
+    unsubscribe();
+    cart.items.set(["tea", "milk"]);
+
+    expect(seen).toEqual([[], ["tea"]]);
   });
 });
