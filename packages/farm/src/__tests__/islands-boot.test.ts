@@ -282,9 +282,9 @@ describe("the boot's preloads", () => {
     expect(preloaded()).toEqual([react, theme, shared, router, shared]);
   });
 
-  it("leaves a waiting root's modules for a link outside it", () => {
+  it("leaves a waiting root's modules for a link in it, whose page swaps in while it waits", () => {
     boot(
-      `${runtime} data-farm-root="root" data-farm-root-strategy="interaction"></script><div id="root"></div><a href="/out">Out</a>`,
+      `${runtime} data-farm-root="root" data-farm-root-strategy="interaction"></script><div id="root"><a href="/next">Next</a></div>`,
     );
     hover(document.querySelector("a")!);
     expect(preloaded()).toEqual([react, router, shared]);
@@ -315,11 +315,13 @@ describe("the boot's preloads", () => {
       expect(preloaded()).toEqual([react, reactDom]);
     });
 
-    it("fetches it for a link whose navigation renders in a root", () => {
+    it("leaves it for a link in a root that waits, and fetches it for an interaction there", () => {
       boot(
-        `${withRenderer} data-farm-root="root" data-farm-root-strategy="interaction"></script><div id="root"><a href="/next">Next</a></div>`,
+        `${withRenderer} data-farm-root="root" data-farm-root-strategy="interaction"></script><div id="root"><a href="/next">Next</a><button>Toggle</button></div>`,
       );
       hover(document.querySelector("a")!);
+      expect(preloaded()).not.toContain(reactDom);
+      click(document.querySelector("button")!);
       expect(preloaded()).toContain(reactDom);
     });
   });
@@ -354,15 +356,13 @@ describe("the boot's request for a held link click", () => {
     expect(early()!.response).toBe(pageRequests.mock.results[0]!.value);
   });
 
-  it("asks for the tree when the page's layout hydrates as one root", () => {
+  it("asks for the whole page when the page's layout hydrates as one root", () => {
     boot(
       '<script type="module" data-farm-runtime="/farm-client-h1.js" data-farm-root="root" data-farm-root-strategy="interaction"></script><div id="root"><a href="/shop/b">B</a></div>',
     );
     click(document.querySelector("a")!);
-    expect(pageRequests.mock.calls[0]![1].headers).toEqual({
-      accept: "text/html",
-      "f-render": "tree",
-    });
+    // The router swaps such a page in while the root waits, and asks for it whole (RFC 0011).
+    expect(pageRequests.mock.calls[0]![1].headers).toEqual({ accept: "text/html" });
   });
 
   it("requests the page of the last click when two are held", () => {

@@ -88,6 +88,28 @@ describe("deferred island activation beyond clicks", () => {
     expect(event.defaultPrevented).toBe(false);
   });
 
+  it("leaves a link that navigates to its navigation, and starts on one to a hash", async () => {
+    // Its click is not held either: it navigates whether or not the island hydrated, so starting
+    // here would only load the code of the page it leaves.
+    const container = document.getElementById("island")!;
+    container.insertAdjacentHTML(
+      "beforeend",
+      '<a href="/next"><span>Next</span></a><a href="#details">Details</a>',
+    );
+    const hydrate = vi.fn(() => "hydrated");
+    const scheduled = scheduleFarmIslandHydration({ container, strategy: "interaction", hydrate });
+    const next = container.querySelector("span")!;
+    next.dispatchEvent(new Event("pointerdown", { bubbles: true, cancelable: true }));
+    next.dispatchEvent(new FocusEvent("focusin", { bubbles: true }));
+    await flush();
+    expect(hydrate).not.toHaveBeenCalled();
+
+    container
+      .querySelector('a[href="#details"]')!
+      .dispatchEvent(new Event("pointerdown", { bubbles: true, cancelable: true }));
+    await expect(scheduled).resolves.toBe("hydrated");
+  });
+
   it("does not replay a click on an element that was only focused", async () => {
     // An observed interaction carries no replay kind. Synthesizing a click on a
     // focused text field would be an interaction the user never made.

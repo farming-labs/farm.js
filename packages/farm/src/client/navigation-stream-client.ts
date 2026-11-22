@@ -67,7 +67,10 @@ function takeFarmEarlyNavigation(url, headers, signal) {
   headers.forEach(function(value, name) { names.add(name); });
   names.forEach(function(name) {
     const sent = Object.prototype.hasOwnProperty.call(early.headers, name) ? early.headers[name] : null;
-    if (name !== "f-values" && sent !== headers.get(name)) same = false;
+    // A whole page answers a request for a streamed one, as a response without flush markers is
+    // all shell. The boot asks for it whole from under a layout that hydrates as one root.
+    if (name === "f-values" || (name === "f-stream" && sent === null)) return;
+    if (sent !== headers.get(name)) same = false;
   });
   if (!same) {
     early.controller.abort();
