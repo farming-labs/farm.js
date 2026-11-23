@@ -24,6 +24,9 @@ The renderer controls component compilation, element creation, server rendering,
 hydration. FARMJS continues to control route discovery, layouts, API routes, middleware, cache and
 storage, integrations, observability, and deployment output.
 
+To render pages with a UI library that isn't listed, write a
+[custom renderer](/docs/renderers/custom).
+
 ## Feature support
 
 The first two tables are checked against the renderer descriptors and their server/client exports,
@@ -237,7 +240,7 @@ data out of it.
 
 A renderer descriptor names three modules by package specifier. FARMJS resolves each one from the
 app and imports its named exports, in development and in production builds. None of them needs a
-default export.
+default export. [Custom renderers](/docs/renderers/custom) walks through each module in detail.
 
 | Module   | Required named exports                                                              | Optional named exports include                                                                                                                                   |
 | -------- | ----------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------- |

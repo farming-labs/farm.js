@@ -30,6 +30,7 @@ Routes, rendering, layouts, and request flow.
 - [Solid Renderer](/docs/renderers/solid): Use Solid signals, SSR, hydration, and renderer-neutral FARMJS server primitives.
 - [Vue Renderer](/docs/renderers/vue): Use Vue SFCs, SSR, hydration, and typed FARMJS server calls.
 - [Svelte Renderer](/docs/renderers/svelte): Use Svelte 5 components, runes, SSR, hydration, and typed FARMJS server calls.
+- [Custom Renderers](/docs/renderers/custom): Render pages with another UI library: the descriptor, its three modules, streaming, client hooks, and the conformance suite.
 - [Built-in Authentication](/docs/auth): Enable email/password auth, sessions, server helpers, and React APIs with the top-level `auth` framework config.
 - [Middleware](/docs/middleware): Run request behavior before routes, pass request-scoped data to pages, and short-circuit with redirects or responses.
 - [Environment Functions](/docs/environment-functions): Remove server-only or client-only implementations from the opposite bundle while preserving one typed interface.

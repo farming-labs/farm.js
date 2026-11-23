@@ -203,6 +203,7 @@ const sidebar = [
           { label: "Solid", slug: "renderers/solid", icon: "brand-solid" },
           { label: "Vue", slug: "renderers/vue", icon: "brand-vue" },
           { label: "Svelte", slug: "renderers/svelte", icon: "brand-svelte" },
+          { label: "Custom", slug: "renderers/custom", icon: "code" },
         ],
       },
       { label: "Internationalization", slug: "internationalization", icon: "languages" },
