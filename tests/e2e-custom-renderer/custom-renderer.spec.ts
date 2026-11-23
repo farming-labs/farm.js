@@ -120,6 +120,10 @@ test("a browser module calls a server function, which runs on the server", async
     }
   });
   await gotoHydrated(page, "/");
+  // useServerQuery reads after hydration. Other tests may have planted already, so compare counts.
+  const total = page.locator("#planted-total");
+  await expect(total).toHaveText(/^Planted so far: \d+$/);
+  const before = Number((await total.textContent())?.match(/\d+/)?.[0]);
   const call = page.waitForRequest(
     (request) => request.method() === "POST" && request.headers()["f-action"] !== undefined,
   );
@@ -127,6 +131,8 @@ test("a browser module calls a server function, which runs on the server", async
   // The call posts to the page, which runs the action.
   expect(new URL((await call).url()).pathname).toBe("/");
   await expect(page.locator("#planted")).toHaveText("Planted barley on the server.");
+  // The action invalidated the query's key, so the query read again.
+  await expect(total).toHaveText(`Planted so far: ${before + 1}`);
   // The browser got a reference, not the handler, whose message is a template literal.
   for (const source of await Promise.all(scripts)) expect(source).not.toContain("Planted ${");
 });
