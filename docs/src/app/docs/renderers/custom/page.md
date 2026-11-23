@@ -480,7 +480,8 @@ export function useServerQuery(query, input, options) {
   skip an update.
 - Call `dispose()` on a query store when its component unmounts.
 - On the server, the router store reads the request's URL, so a component renders the same path,
-  search params, and route params there as in the browser.
+  search params, and route params there as in the browser. This ships in the release after 0.1.81;
+  in 0.1.81 the server snapshot is `/` with no params.
 - On the server, a query store returns an idle snapshot and starts no request. The browser loads the
   query after hydration.
 - A query that is still on the page reads again when an action invalidates its key with
