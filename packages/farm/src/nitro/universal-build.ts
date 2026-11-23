@@ -5165,10 +5165,19 @@ function createFarmRouteState(page, pathname, params, includeLayouts) {
 
 function hydrateFarmRoute(container, route) {
   farmLastRouteState = route;
-  ${
-    isReactRenderer(renderer)
-      ? "return hydrateRoot(container, route.element);"
-      : "return route.layouts.length > 0 ? hydrateRoot(container, route.element, route) : hydrateRoot(container, route.element);"
+  try {
+    ${
+      isReactRenderer(renderer)
+        ? "return hydrateRoot(container, route.element);"
+        : "return route.layouts.length > 0 ? hydrateRoot(container, route.element, route) : hydrateRoot(container, route.element);"
+    }
+  } catch (error) {
+    // As in development: the page still works, but the server's DOM, focus, and typed input are
+    // gone, so say so.
+    console.error("[Farm.js] Hydration error; rendering the page on the client instead:", error);
+    const root = createRoot(container);
+    renderFarmRoute(root, route);
+    return root;
   }
 }
 
