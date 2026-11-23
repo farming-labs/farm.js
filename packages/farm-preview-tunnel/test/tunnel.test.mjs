@@ -140,6 +140,57 @@ test("mounts public preview paths beneath the target URL pathname", async () => 
   }
 });
 
+test("watches the local target without sending it requests or closing on a slow page", async () => {
+  // Each liveness check used to GET the app's root: every two seconds it rendered the page,
+  // showed up in the app's analytics, and closed the tunnel when the page took over a second.
+  const requests = [];
+  let connections = 0;
+  let sawProbes;
+  const probes = new Promise((resolve) => (sawProbes = resolve));
+  const target = createServer((request, response) => {
+    requests.push(request.url);
+    setTimeout(() => response.end("slow page"), 200);
+  });
+  target.on("connection", () => {
+    connections += 1;
+    if (connections >= 5) sawProbes();
+  });
+  await listen(target);
+  const targetAddress = target.address();
+  const relay = createPersistentPreviewRelay({ registrationToken: RELAY_TOKEN });
+  const relayAddress = await relay.listen();
+  const agent = await startTypeScriptPreviewAgent({
+    relayUrl: relayAddress.websocketUrl,
+    token: RELAY_TOKEN,
+    name: "quiet-probe",
+    targetUrl: `http://127.0.0.1:${targetAddress.port}`,
+    localProbeIntervalMs: 10,
+    localProbeTimeoutMs: 50,
+  });
+
+  try {
+    await Promise.race([
+      probes,
+      new Promise((_, reject) =>
+        setTimeout(() => reject(new Error("the agent stopped watching the local target")), 2000),
+      ),
+    ]);
+    assert.deepEqual(requests, []);
+
+    // A page slower than the probe timeout still loads through the open tunnel.
+    const response = await fetch(`${agent.publicUrl}/slow`);
+    assert.equal(await response.text(), "slow page");
+    assert.deepEqual(requests, ["/slow"]);
+
+    await close(target);
+    await expectInactive(agent.publicUrl);
+  } finally {
+    await agent.close();
+    await relay.close();
+    await close(target);
+  }
+});
+
 test("replaces client-supplied forwarding headers at the relay boundary", async () => {
   const target = createServer((request, response) => {
     response.setHeader("content-type", "application/json");
