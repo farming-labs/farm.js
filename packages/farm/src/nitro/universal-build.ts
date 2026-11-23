@@ -24,6 +24,7 @@ async function readFarmNativeStylesheets(
 }
 import { resolveServerActionsConfig } from "../server-action-security";
 import { resolveFarmServerComponentsMode } from "../server-components-mode";
+import { resolveFarmIslxActionsMode } from "../server-actions-mode";
 import { createBundledEnv } from "../env";
 import { generateNativeMCPPluginSource } from "./native-mcp-source";
 import { createNitroStaticRangePlugin } from "./static-range";
@@ -7592,6 +7593,8 @@ function generateVirtualEntryCode(
   // Islands mode runs `"use server"` actions posted to a page (RFC 0003).
   const farmIslandsMode =
     resolveFarmServerComponentsMode(config.experimental?.serverComponents) === "islands";
+  // A renderer other than React with server actions on runs them the same way, without islands.
+  const farmRendererActions = resolveFarmIslxActionsMode(config) === "renderer";
   const farmClientBoot = canBootFarmIslandsClient(config);
   const farmMobileClient = shouldBuildFarmMobileClient(config);
   // farm build --mobile with mobile.shells: this server renders page shells for its token.
@@ -8306,8 +8309,12 @@ function resolveFarmMobileShellRender(request, route, routePathname) {
       : ""
   }${
     farmIslandsMode
-      ? `\nimport { getFarmFormState as farmFormState, getSharedLayoutPrefixLength, handleFarmFormActionRequest, ignoreFarmHeldValues, installFarmIslandValues, parseFarmLayoutChainHeader, renderFarmFormStateScript as farmFormStateScript } from "@farm.js/core/internal/production-runtime";\nimport { installFarmIslandsServer } from "@farm.js/core/internal/islands-server";\ninstallFarmIslandsServer();\nconst farmFormActionsConfig = ${JSON.stringify(resolveServerActionsConfig(config.serverActions))};\ninstallFarmIslandValues();\n${islandsActionKeyCode()}\n${FARM_SEGMENT_NAVIGATION_SERVER_RUNTIME}`
-      : `\nfunction farmFormState() { return undefined; }\nfunction farmFormStateScript() { return ""; }`
+      ? `\nimport { getFarmFormState as farmFormState, getSharedLayoutPrefixLength, handleFarmFormActionRequest, ignoreFarmHeldValues, installFarmIslandValues, parseFarmLayoutChainHeader, renderFarmFormStateScript as farmFormStateScript } from "@farm.js/core/internal/production-runtime";\nimport { installFarmIslandsServer } from "@farm.js/core/internal/islands-server";\ninstallFarmIslandsServer();\nconst farmFormActionsConfig = ${JSON.stringify(resolveServerActionsConfig(config.serverActions))};\ninstallFarmIslandValues();\n${islandsActionKeyCode("@farm.js/core/internal/islx-server")}\n${FARM_SEGMENT_NAVIGATION_SERVER_RUNTIME}`
+      : `${
+          farmRendererActions
+            ? `\nimport { handleFarmFormActionRequest } from "@farm.js/core/internal/production-runtime";\nconst farmFormActionsConfig = ${JSON.stringify(resolveServerActionsConfig(config.serverActions))};\n${islandsActionKeyCode("@farm.js/core/internal/islx-actions-server")}`
+            : ""
+        }\nfunction farmFormState() { return undefined; }\nfunction farmFormStateScript() { return ""; }`
   }`;
   const productionSiteTelemetryImport = config.telemetry
     ? `import { createFarmProductionSiteReporter } from "@farm.js/core/internal/product-telemetry-runtime";`
@@ -12085,8 +12092,8 @@ ${
     farmCacheGuard.deploymentPage = true;
   }
   ${
-    farmIslandsMode
-      ? `// Islands mode: a form or client component posting a server action to this page.
+    farmIslandsMode || farmRendererActions
+      ? `// A form or client component posting a server action to this page.
   if (matchedRoute && request.method === "POST") {
     const actionResponse = await _runWithMiddlewareData(middlewareData || {}, () =>
       _runWithMiddlewareContext(middlewareContext || {}, () =>
@@ -16113,7 +16120,8 @@ export { generateNativeMCPPluginSource } from "./native-mcp-source";
  * shares (islx reads `ISLX_ACTIONS_KEY` first, so an app can keep it across deploys). Without it,
  * each serverless instance would make its own key and reject forms another one rendered.
  */
-function islandsActionKeyCode(): string {
+/** The build's key for sealing actions' bound values, set through `runtimeModule`'s islx server. */
+function islandsActionKeyCode(runtimeModule: string): string {
   const key = randomBytes(32).toString("base64url");
-  return `import { setBuildDefaults as __farmIslxBuildDefaults } from "@farm.js/core/internal/islx-server";\n__farmIslxBuildDefaults({ key: ${JSON.stringify(key)} });`;
+  return `import { setBuildDefaults as __farmIslxBuildDefaults } from ${JSON.stringify(runtimeModule)};\n__farmIslxBuildDefaults({ key: ${JSON.stringify(key)} });`;
 }

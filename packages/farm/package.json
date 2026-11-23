@@ -789,6 +789,16 @@
       "import": "./dist/internal/islx-server.mjs",
       "require": "./dist/internal/islx-server.cjs"
     },
+    "./internal/islx-actions-client": {
+      "types": "./dist/internal/islx-actions-client.d.ts",
+      "import": "./dist/internal/islx-actions-client.mjs",
+      "require": "./dist/internal/islx-actions-client.cjs"
+    },
+    "./internal/islx-actions-server": {
+      "types": "./dist/internal/islx-actions-server.d.ts",
+      "import": "./dist/internal/islx-actions-server.mjs",
+      "require": "./dist/internal/islx-actions-server.cjs"
+    },
     "./internal/islx-react": {
       "types": "./dist/internal/islx-react.d.ts",
       "import": "./dist/internal/islx-react.mjs",

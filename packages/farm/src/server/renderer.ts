@@ -212,6 +212,7 @@ import {
   handleFarmFormActionRequest,
   renderFarmFormStateScript,
 } from "../form-actions";
+import { resolveFarmIslxActionsMode } from "../server-actions-mode";
 import { installFarmIslandValues, uninstallFarmIslandValues } from "../client/island-values";
 import { resolveServerActionsConfig } from "../server-action-security";
 import { resolveFarmRouteRootStrategy } from "../island-inference";
@@ -2049,14 +2050,11 @@ window.__FARM_I18N__ = ${i18nSnapshot ? serializeInlineValue(i18nSnapshot) : "nu
         params,
       });
 
-      // Islands mode: a form or client component posting a server action to this page. Loading
-      // the page and its layouts registers the `"use server"` modules they import, as the
-      // production server does at startup.
+      // Islands mode, or a renderer other than React with server actions on: a form or client
+      // component posting a server action to this page. Loading the page and its layouts registers
+      // the `"use server"` modules they import, as the production server does at startup.
       let actionRequest: Request | undefined;
-      if (
-        req.method === "POST" &&
-        resolveFarmServerComponentsMode(this.config.experimental?.serverComponents) === "islands"
-      ) {
+      if (req.method === "POST" && resolveFarmIslxActionsMode(this.config) !== null) {
         await Promise.all([
           this.routeManager.loadRouteModule(route.modulePath),
           ...layouts.map((layout) => this.routeManager.loadLayoutModule(layout.modulePath)),

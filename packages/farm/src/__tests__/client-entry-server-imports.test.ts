@@ -21,6 +21,7 @@ const BROWSER_ENTRIES = [
   "router.ts",
   "theme/client.tsx",
   "i18n/client.tsx",
+  "islx/actions-client.ts",
 ];
 
 // Server-side observability. Bundling it into the browser ships OpenTelemetry
@@ -128,9 +129,16 @@ describe("browser entries", () => {
 });
 
 // Solid, Vue, Svelte, and custom-renderer apps load these without React installed.
-const RENDERER_NEUTRAL_ENTRIES = ["renderer-client.ts", "store-core.ts", "navigation-neutral.ts"];
+const RENDERER_NEUTRAL_ENTRIES = [
+  "renderer-client.ts",
+  "store-core.ts",
+  "navigation-neutral.ts",
+  "islx/actions-client.ts",
+  "islx/actions-server.ts",
+];
 const isReactPackage = (specifier: string) =>
-  /^(react|react-dom)(\/|$)/.test(specifier) || specifier.startsWith("@farm.js/react");
+  /^(react|react-dom|@farm\.js\/islx\/react)(\/|$)/.test(specifier) ||
+  specifier.startsWith("@farm.js/react");
 
 describe("renderer-neutral entries", () => {
   it.each(RENDERER_NEUTRAL_ENTRIES)("%s does not import React", (entry) => {
@@ -139,6 +147,13 @@ describe("renderer-neutral entries", () => {
 
   it("finds the React import in the React store", () => {
     expect(findImportChain("store.ts", isReactPackage)).toEqual(["store.ts", "react"]);
+  });
+
+  it("finds islx's React runtime in islands mode's islx entries", () => {
+    expect(findImportChain("islx/client.ts", isReactPackage)).toEqual([
+      "islx/client.ts",
+      "@farm.js/islx/react/client",
+    ]);
   });
 
   it("finds the React import in the navigation entry other renderers do not load", () => {

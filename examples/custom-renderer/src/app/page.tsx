@@ -2,7 +2,7 @@
 
 import { useRouter } from "farm-leaf/bindings";
 import { useState } from "leaf";
-import { apiClient } from "../lib/api";
+import { plantCrop } from "../server/plant";
 
 export default function HomePage() {
   const [count, setCount] = useState(0);
@@ -11,8 +11,8 @@ export default function HomePage() {
   const router = useRouter();
 
   const plant = async () => {
-    const result = await apiClient.plant.post({ body: { name: "barley" } });
-    setPlanted(result.data ? result.data.message : "The server call failed.");
+    const result = await plantCrop({ name: "barley" });
+    setPlanted(result.message);
   };
 
   return (
