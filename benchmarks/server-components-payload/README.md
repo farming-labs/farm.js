@@ -75,7 +75,7 @@ Four sections of the app:
 | guide   | `islands` | 9.5 KB (129.2 KB)  | 27.5 KB           | 9.6 KB (129.4 KB)         | 0                 |
 
 An islands page whose client components only react to clicks starts with the boot entry (RFC 0003,
-sections 10 and 11), 2.2 KB. Once the page is idle the boot fetches the client entry and router,
+sections 10 and 11), 2.3 KB. Once the page is idle the boot fetches the client entry and router,
 25.3 KB, without running them, so "First-load JS" counts them and the navigations fetch no code.
 Until 2026-11-23 they arrived with the first navigation or click, and "Navigation JS" spread them
 over the ten navigations (2.5 KB each). The client runtime, about 95 KB, comes in two parts since
@@ -110,8 +110,9 @@ engines, so both see the same load. This run had other work on the machine (load
 | guide   | `rsc`     | 216 ms (89 ms)                   | 84 ms            | 73 ms      | 52 (34-57)           |
 | guide   | `islands` | 105 ms (3 ms)                    | 120 ms           | 77 ms      | 176 (122-205)        |
 
-- A first load sends 2.2 KB of JavaScript instead of 71.0 KB, does about half the main-thread work
-  and runs 3 to 5 ms of script instead of 67 to 91 ms: nothing on these pages hydrates at load.
+- A first load runs 2.3 KB of JavaScript instead of 71.0 KB (it fetches 27.5 KB once the page is
+  idle), does about half the main-thread work and runs 3 to 5 ms of script instead of 67 to 91 ms:
+  nothing on these pages hydrates at load.
 - Navigations carry a fifth of RSC's data on docs pages and half on shop pages. On a
   content page (blog) Flight sends every token twice, as HTML and as rows: islands sends half the
   document, and its server renders 7.2 times as many pages per second.
