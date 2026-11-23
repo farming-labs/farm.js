@@ -136,7 +136,8 @@ The returned values implement Svelte's readable-store contract. `createReadable(
 your own state, a store from `createStore` in `@farm.js/core/renderer-client`, the same way; see
 [Shared client state](/docs/renderers#shared-client-state). `Link` from `@farm.js/svelte/link`
 navigates and prefetches like the React one; see [Link in Solid, Vue, and Svelte](/docs/routing#link-in-solid-vue-and-svelte).
-Action form components (`useAction().Form`), fetchers, integration providers, and the docs adapter
+`<form use:action.enhance>` submits a form through an action; see
+[action forms](/docs/renderers#action-forms). Fetchers, integration providers, and the docs adapter
 remain React-oriented today. Markdown and MDX pages and [programmatic UI routes](/docs/routing#programmatic-routes) render with
 Svelte, and an `opengraph-image.svelte` component draws a
 [generated metadata image](/docs/routing#generated-metadata-images).
