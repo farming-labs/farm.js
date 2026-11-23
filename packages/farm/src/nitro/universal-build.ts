@@ -4520,11 +4520,12 @@ ${generateUniversalRouterStateProperties()}
     
     reconcileFarmDocumentHead(doc);
     
-    // Swap root content
+    // Swap root content: the parsed nodes themselves, not markup the page parses again.
     const newRoot = doc.getElementById("root");
     const currentRoot = document.getElementById("root");
     if (!newRoot || !currentRoot) return this.swapDocument(doc);
-    currentRoot.innerHTML = newRoot.innerHTML;
+    adoptFarmParsedNodes(newRoot);
+    currentRoot.replaceChildren(...newRoot.childNodes);
     return true;
   },
 
@@ -4541,7 +4542,8 @@ ${generateUniversalRouterStateProperties()}
     });
 
     document.head.innerHTML = doc.head ? doc.head.innerHTML : "";
-    document.body.innerHTML = doc.body.innerHTML;
+    adoptFarmParsedNodes(doc.body);
+    document.body.replaceChildren(...doc.body.childNodes);
     delete window.__farmDocsRuntime;
     delete window.__farmDocsPageActionsRuntime;
 
@@ -5673,9 +5675,12 @@ async function streamFarmNavigation(stream, root, isCurrent) {
     for (let flush = await stream.next(); flush !== null; flush = await stream.next()) {
       if (!isCurrent()) return stream.cancel();
       html += flush;
-      const parsed = new DOMParser().parseFromString('<div id="root">' + flush, "text/html");
+      const parsed = new DOMParser()
+        .parseFromString('<div id="root">' + flush, "text/html")
+        .getElementById("root");
+      adoptFarmParsedNodes(parsed);
       const fragment = document.createDocumentFragment();
-      for (const node of Array.from(parsed.getElementById("root").childNodes)) fragment.appendChild(node);
+      for (const node of Array.from(parsed.childNodes)) fragment.appendChild(node);
       activateNavigationScripts(fragment);
       root.appendChild(fragment);
     }
@@ -5785,6 +5790,8 @@ ${islandValues ? FARM_REFRESH_FIELDS_SOURCE : ""}function replaceSharedLayoutBou
         }disposeFarmIsolatedClientBoundaries(currentTarget);`
       : ""
   }
+  // After the comparison: a noscript turned to text serializes escaped in the parsed document.
+  adoptFarmParsedNodes(nextRoot);
   currentTarget.replaceWith(nextTarget);${islandValues ? "\n  if (fields) restoreFarmServerFields(fields, nextTarget);" : ""}
   activateNavigationScripts(nextTarget);
   if (nextTreeRoot && nextTreeRoot !== nextTarget) nextTreeRoot.remove();
@@ -6209,7 +6216,9 @@ ${
     ${islandValues ? 'if (!replacedSharedBoundary && isSegment) return "segment-mismatch";' : ""}
     if (!replacedSharedBoundary) {
       ${isolatedHydrationEnabled ? "disposeFarmIsolatedClientBoundaries(currentRoot);" : ""}
-      currentRoot.innerHTML = newRoot.innerHTML;
+      // The parsed nodes themselves, not markup the page parses again.
+      adoptFarmParsedNodes(newRoot);
+      currentRoot.replaceChildren(...newRoot.childNodes);
       activateNavigationScripts(currentRoot);
       isolatedHydrationScope = currentRoot;
     }
@@ -6297,7 +6306,8 @@ ${
     });
 
     document.head.innerHTML = doc.head ? doc.head.innerHTML : "";
-    document.body.innerHTML = doc.body.innerHTML;
+    adoptFarmParsedNodes(doc.body);
+    document.body.replaceChildren(...doc.body.childNodes);
     delete window.__farmDocsRuntime;
     delete window.__farmDocsPageActionsRuntime;
 

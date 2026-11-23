@@ -8245,6 +8245,8 @@ ${islandValues ? FARM_REFRESH_FIELDS_SOURCE : ""}function replaceNavigationBound
   ) {
     sharedCount++;
   }
+  // After the comparison: a noscript turned to text serializes escaped in the template's document.
+  adoptFarmParsedNodes(fragment);
 
   const fragmentTreeRoot = nextPatterns.length > 0
     ? find(fragment, nextPatterns[0])
@@ -8490,9 +8492,12 @@ async function streamFarmDevNavigation(stream, root, generation) {
         observer.disconnect();
         return stream.cancel();
       }
-      const parsed = new DOMParser().parseFromString('<div id="root">' + flush, 'text/html');
+      const parsed = new DOMParser()
+        .parseFromString('<div id="root">' + flush, 'text/html')
+        .getElementById('root');
+      adoptFarmParsedNodes(parsed);
       const fragment = document.createDocumentFragment();
-      for (const node of Array.from(parsed.getElementById('root').childNodes)) fragment.appendChild(node);
+      for (const node of Array.from(parsed.childNodes)) fragment.appendChild(node);
       activateFragmentScripts(fragment);
       root.appendChild(fragment);
     }
@@ -8651,6 +8656,7 @@ async function renderPage(pageData, info) {
         ${isolatedHydrationEnabled ? "disposeFarmIsolatedClientBoundaries(container);" : ""}
         if (appRoot) { try { appRoot.unmount(); } catch (error) {} appRoot = null; }
         if (reactRoot) { try { reactRoot.unmount(); } catch (error) {} reactRoot = null; }
+        adoptFarmParsedNodes(fragment);
         container.replaceChildren(fragment);
         activateFragmentScripts(container);
       } else {
