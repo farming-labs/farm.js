@@ -3,6 +3,7 @@ import { FARM_DEPLOYMENT_ID_HEADER } from "../deployment";
 import { FARM_ISLAND_REPLAYABLE_SELECTOR } from "../island";
 import {
   FARM_ISLANDS_BOOT_DEPLOYMENT_HEADER,
+  FARM_ISLANDS_BOOT_PREFETCHING_LINK,
   FARM_ISLANDS_BOOT_REPLAYABLE_SELECTOR,
   FARM_ISLANDS_BOOT_VISIBLE_MARGIN,
   type FarmEarlyNavigation,
@@ -15,6 +16,7 @@ import {
   FARM_VALUES_HEADER,
   getFarmIslandValueHeaders,
 } from "../client/island-value-protocol";
+import { type FarmLinkOptions, resolveLinkAttributes } from "../client/link-attributes";
 
 type QueueWindow = Window & {
   __FARM_PREHYDRATION_CLICK_QUEUE__?: unknown[];
@@ -65,6 +67,11 @@ function click(target: Element): boolean {
   target.dispatchEvent(event);
   window.removeEventListener("click", read);
   return prevented ?? event.defaultPrevented;
+}
+
+/** Presses `target` with the primary button, or as `init` says. */
+function press(target: Element, init: MouseEventInit = {}) {
+  target.dispatchEvent(new MouseEvent("pointerdown", { bubbles: true, button: 0, ...init }));
 }
 
 afterEach(async () => {
@@ -436,9 +443,12 @@ describe("the boot's request for a held link click", () => {
     boot('<a href="/a">A</a><a href="/b">B</a>');
     const [a, b] = Array.from(document.querySelectorAll("a"));
     click(a!);
+    const first = early()!;
     click(b!);
     expect(early()!.url).toBe(new URL("/b", document.baseURI).href);
     expect(early()!.response).toBe(pageRequests.mock.results[1]!.value);
+    // The router takes only the last, so the first is not left to finish.
+    expect(first.controller.signal.aborted).toBe(true);
   });
 
   it("requests nothing for a hover, a link the router does not take, or once the runtime runs", async () => {
@@ -453,6 +463,89 @@ describe("the boot's request for a held link click", () => {
     finishLoad!();
     await settle();
     click(next!);
+    expect(pageRequests).not.toHaveBeenCalled();
+  });
+});
+
+describe("the boot's request on a link's press", () => {
+  const early = () => (window as QueueWindow).__FARM_EARLY_NAVIGATION__;
+  const link = (options: FarmLinkOptions<string>) => {
+    const anchor = document.createElement("a");
+    for (const [name, value] of Object.entries(resolveLinkAttributes(options))) {
+      if (value !== undefined) anchor.setAttribute(name, value);
+    }
+    return anchor;
+  };
+
+  it("takes a Link that prefetches, as Link writes it, and no other link", () => {
+    for (const prefetch of [undefined, true, "intent", "hover", "viewport", "render"] as const) {
+      expect(link({ href: "/a", prefetch }).matches(FARM_ISLANDS_BOOT_PREFETCHING_LINK)).toBe(true);
+    }
+    for (const prefetch of [false, "none"] as const) {
+      expect(link({ href: "/a", prefetch }).matches(FARM_ISLANDS_BOOT_PREFETCHING_LINK)).toBe(
+        false,
+      );
+    }
+    const plain = document.createElement("a");
+    plain.href = "/a";
+    expect(plain.matches(FARM_ISLANDS_BOOT_PREFETCHING_LINK)).toBe(false);
+  });
+
+  it("requests a Link's page on its press, and its click takes that request", () => {
+    boot('<a href="/docs/b" data-farm-link>B</a>');
+    const anchor = document.querySelector("a")!;
+    press(anchor);
+    expect(pageRequests).toHaveBeenCalledTimes(1);
+    const sent = early()!;
+    expect(sent.url).toBe(new URL("/docs/b", document.baseURI).href);
+    expect(click(anchor)).toBe(true);
+    expect(pageRequests).toHaveBeenCalledTimes(1);
+    expect(early()).toBe(sent);
+    expect(sent.controller.signal.aborted).toBe(false);
+  });
+
+  it("leaves a plain link, a Link that never prefetches and any other press to the click", () => {
+    boot(
+      '<a href="/logout">Sign out</a><a href="/a" data-farm-link data-farm-prefetch="none">A</a>' +
+        '<a href="/b" data-farm-link>B</a>',
+    );
+    const [logout, none, b] = Array.from(document.querySelectorAll("a"));
+    press(logout!);
+    press(none!);
+    press(b!, { button: 2 });
+    press(b!, { metaKey: true });
+    expect(pageRequests).not.toHaveBeenCalled();
+    click(logout!);
+    expect(pageRequests).toHaveBeenCalledTimes(1);
+  });
+
+  it("aborts the request a later press replaces, and requests again once the router would not take it", () => {
+    boot('<a href="/a" data-farm-link>A</a><a href="/b" data-farm-link>B</a>');
+    const [a, b] = Array.from(document.querySelectorAll("a"));
+    press(a!);
+    const first = early()!;
+    press(b!);
+    expect(first.controller.signal.aborted).toBe(true);
+    expect(early()!.url).toBe(new URL("/b", document.baseURI).href);
+    const pressed = early()!;
+    const clock = vi.spyOn(Date, "now").mockReturnValue(pressed.at + 30_001);
+    try {
+      click(b!);
+    } finally {
+      clock.mockRestore();
+    }
+    expect(pageRequests).toHaveBeenCalledTimes(3);
+    expect(pressed.controller.signal.aborted).toBe(true);
+    expect(early()!.response).toBe(pageRequests.mock.results[2]!.value);
+  });
+
+  it("requests nothing on a press once the runtime runs", async () => {
+    boot('<a href="/b" data-farm-link>B</a>');
+    const anchor = document.querySelector("a")!;
+    anchor.dispatchEvent(new MouseEvent("mouseover", { bubbles: true }));
+    finishLoad!();
+    await settle();
+    press(anchor);
     expect(pageRequests).not.toHaveBeenCalled();
   });
 });

@@ -1234,6 +1234,40 @@ test("a link followed before the client runtime loads requests its page with the
   expect(errors).toEqual([]);
 });
 
+test("a Link pressed before the client runtime loads requests its page before the click", async ({
+  page,
+}) => {
+  test.skip(mode !== "islands", "rsc hydrates every client component on load");
+  const errors = collectErrors(page);
+  const pageRequests: string[] = [];
+  page.on("request", (request) => {
+    if (new URL(request.url()).pathname === "/timing") pageRequests.push(request.url());
+  });
+  // As above: with the runtime held back, a request for the page is the boot's.
+  let release!: () => void;
+  const released = new Promise<void>((resolve) => (release = resolve));
+  await page.route(
+    (url) => isClientRuntime(url.pathname),
+    async (route) => {
+      await released;
+      await route.continue();
+    },
+  );
+  await page.goto("/timing/later");
+  await page.evaluate(() => Object.assign(window, { __farmSameDocument: true }));
+  await page.getByRole("link", { name: "To timing" }).hover();
+  await page.mouse.down();
+  await expect.poll(() => pageRequests.length).toBe(1);
+  await page.mouse.up();
+  release();
+  await expect(page).toHaveURL(/\/timing$/);
+  await expect(page.getByRole("heading", { name: "Timing", exact: true })).toBeVisible();
+  expect(await page.evaluate(() => "__farmSameDocument" in window)).toBe(true);
+  // The click took the press's request rather than sending its own.
+  expect(pageRequests).toHaveLength(1);
+  expect(errors).toEqual([]);
+});
+
 // RFC 0010: the production islands entry loads React DOM and islx with its first render or
 // hydration. These are the chunks only they need, as `page`'s boot script lists them, held until
 // `release` runs; `requested` collects the requests for them.
