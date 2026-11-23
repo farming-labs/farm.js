@@ -16,7 +16,7 @@ export function webhooks(receivers: Record<string, Receiver>) {
   const secrets = new Set<string>();
   const routes = Object.entries(receivers).map(([name, receiver]) => {
     if (!isSigningSecret(receiver.secret) || secrets.has(receiver.secret))
-      throw new TypeError(`Configure a distinct receiver signing secret for "${name}".`);
+      throw new TypeError(`Configure a distinct webhook signing secret for "${name}".`);
     if (!/^\/(?:[\w-]+\/)*[\w-]+$/.test(receiver.path) || paths.has(receiver.path))
       throw new TypeError(`Configure a unique absolute route path for "${name}".`);
     paths.add(receiver.path);
