@@ -7599,8 +7599,9 @@ function generateVirtualEntryCode(
   const farmMobileClient = shouldBuildFarmMobileClient(config);
   // farm build --mobile with mobile.shells: this server renders page shells for its token.
   const farmMobileShells = farmMobileClient && config.mobileShells ? config.mobileShells : null;
+  // Node and Bun both implement node:zlib's streaming compressors; edge runtimes have no zlib.
   const hasCompressionRuntime =
-    config.compress && resolveFarmInstrumentationRuntime(preset) === "nodejs";
+    config.compress && resolveFarmInstrumentationRuntime(preset) !== "edge";
   // agent.crawlers serves /robots.txt unless a root robots.ts owns it.
   const servesAgentRobotsTxt =
     Boolean(config.agent?.crawlers?.enabled) &&
