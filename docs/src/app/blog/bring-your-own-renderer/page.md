@@ -35,7 +35,7 @@ For each request, Farm builds the route as one element tree. It calls your libra
 
 That's the whole job. The leaf repo has three parts:
 
-- **`packages/leaf`** is the UI library: elements, hooks, a DOM patcher, and an HTML renderer that can stream. It's about 750 lines of JavaScript, and your library replaces it.
+- **`packages/leaf`** is the UI library: elements, hooks, a DOM patcher, and an HTML renderer that can stream. It's about 1,000 lines of TypeScript, and your library replaces it.
 - **`packages/farm-leaf`** is the adapter between leaf and Farm. This post builds it, one step at a time.
 - **`app`** is a Farm app that uses it.
 
@@ -47,11 +47,11 @@ You probably have the library already. The adapter is what you write.
 
 The descriptor tells Farm where your three modules are and what your library can do. It's the only thing an app imports:
 
-```js
-// packages/farm-leaf/src/index.js
-import { defineRenderer } from "@farm.js/core/renderer";
+```ts
+// packages/farm-leaf/src/index.ts
+import { defineRenderer, type FarmRenderer } from "@farm.js/core/renderer";
 
-export function leaf() {
+export function leaf(): FarmRenderer {
   return defineRenderer({
     name: "leaf",
     vite: "farm-leaf/vite",
@@ -92,16 +92,27 @@ export default defineConfig({ renderer: leaf() });
 
 The server module renders routes to HTML. If your library already has these exports, it's a re-export:
 
-```js
-// packages/farm-leaf/src/server.js
+```ts
+// packages/farm-leaf/src/server.ts
+import {
+  renderToReadableStream as renderLeafToReadableStream,
+  type RenderToReadableStreamOptions,
+} from "leaf/server";
+
 export { Fragment, Suspense, createElement, isValidElement } from "leaf";
-export { renderToReadableStream, renderToString } from "leaf/server";
+export { renderToString } from "leaf/server";
+
+/** leaf's stream, typed the way Farm calls it: with the route tree its createElement built. */
+export const renderToReadableStream = renderLeafToReadableStream as (
+  element: unknown,
+  options?: RenderToReadableStreamOptions,
+) => ReadableStream<Uint8Array>;
 
 export const name = "leaf";
-export const capabilities = { streaming: { node: false, web: true } };
+export const capabilities = { streaming: { node: false, web: true } } as const;
 ```
 
-`renderToReadableStream` and `capabilities` are optional, and [step 8](#step-8-optional-streaming) covers them. Farm reads six named exports:
+`renderToReadableStream` and `capabilities` are optional, and [step 8](#step-8-optional-streaming) covers them. The cast is only for TypeScript: Farm hands the stream the route tree as `unknown`, so the re-export takes `unknown` too. It's the same function. Farm reads six named exports:
 
 - **`name`** names the renderer in errors.
 - **`createElement(type, props, ...children)`** builds the route tree: layouts wrapped around the page.
@@ -118,8 +129,8 @@ Two things you don't have to build. Farm awaits an `async` page itself and hands
 
 The client module runs in the browser. It's also a re-export:
 
-```js
-// packages/farm-leaf/src/client.js
+```ts
+// packages/farm-leaf/src/client.ts
 export { Fragment, Suspense, createElement, isValidElement } from "leaf";
 export { createRoot, hydrateRoot } from "leaf/dom";
 ```
@@ -131,7 +142,7 @@ Farm needs four of these: `createElement` and `Suspense` build the same tree in 
 
 Both return a root with two methods:
 
-```js
+```ts
 const root = hydrateRoot(container, tree);
 root.render(nextTree); // every client navigation
 root.unmount();
@@ -145,9 +156,11 @@ On a client navigation, Farm builds the next route's tree and calls `render()` o
 
 The Vite module exports one function, `createFarmRendererPlugin()`. Farm adds the plugin it returns to the app's server and browser builds, in development and in production. At minimum, it points JSX at your runtime:
 
-```js
-// packages/farm-leaf/src/vite.js (the JSX part)
-export function createFarmRendererPlugin() {
+```ts
+// packages/farm-leaf/src/vite.ts (the JSX part)
+import type { Plugin } from "vite";
+
+export function createFarmRendererPlugin(): Plugin {
   return {
     name: "farm-leaf",
     config() {
@@ -188,12 +201,12 @@ Pages want the router: the current path, and `push()` for navigation. Farm keeps
 
 Write one hook that turns a store into your library's state. The rest are thin wrappers:
 
-```js
-// packages/farm-leaf/src/bindings.js (abridged)
+```ts
+// packages/farm-leaf/src/bindings.ts (abridged)
 import { useEffect, useState } from "leaf";
-import { createRendererRouter } from "@farm.js/core/renderer-client";
+import { createRendererRouter, type FarmClientStore } from "@farm.js/core/renderer-client";
 
-export function useFarmStore(store) {
+export function useFarmStore<T>(store: FarmClientStore<T>): T {
   const [snapshot, setSnapshot] = useState(() => store.getSnapshot());
   useEffect(() => {
     setSnapshot(() => store.getSnapshot()); // catch a change before we subscribed
@@ -278,19 +291,21 @@ export const plantCrop = createServerFn({
 
 Browser code can import `plantCrop` and `await` it like any function. To render its pending state and result, wrap Farm's action and query stores the way step 5 wrapped the router:
 
-```js
-// packages/farm-leaf/src/bindings.js (continued)
+```ts
+// packages/farm-leaf/src/bindings.ts (continued, return types abridged)
 import { createRendererAction, createRendererQuery } from "@farm.js/core/renderer-client";
+import type { ServerFn } from "@farm.js/core/server-fn";
+import type { ServerQuery } from "@farm.js/core/server-query";
 
-export function useAction(target, options) {
-  const [action] = useState(() => createRendererAction(target, options));
+export function useAction<TInput, TResult>(target: ServerFn<TInput, TResult>) {
+  const [action] = useState(() => createRendererAction(target));
   return { ...useFarmStore(action), submit: action.submit, reset: action.reset };
 }
 
-export function useServerQuery(query, input, options) {
+export function useServerQuery<TInput, TData>(query: ServerQuery<TInput, TData>, input: TInput) {
   // The input is posted to the server, so its JSON identifies a new read.
   const observer = useMemo(
-    () => createRendererQuery(query, input, options),
+    () => createRendererQuery(query, input),
     [query, JSON.stringify(input ?? null)],
   );
   useEffect(() => () => observer.dispose(), [observer]);
@@ -354,10 +369,10 @@ It looks like Svelte because I copied Svelte. It doesn't have to. Farm asks two 
 1. **List the extension** in `componentExtensions`. That's how Farm's route scanner knows `page.leaf` is a page.
 2. **Compile each file** in your Vite plugin into an ordinary module, whose default export is the component:
 
-```js
-// packages/farm-leaf/src/vite.js (the .leaf part)
+```ts
+// packages/farm-leaf/src/vite.ts (the .leaf part)
 async transform(code, id) {
-  const file = id.split("?")[0];
+  const file = id.split("?")[0]!;
   if (!file.endsWith(".leaf")) return null;
   // compileLeaf() turns the file into: imports, module exports, and
   // `export default function Notes(props) { ...; return (<>markup</>); }`
@@ -370,7 +385,7 @@ async transform(code, id) {
 },
 ```
 
-leaf's compiler is 46 lines of string handling. A template language, Markdown, or something nobody has invented yet works the same way, as long as it compiles to that shape. `.leaf` files then work as pages, layouts, dynamic segments, and error and not-found pages, next to `.tsx` routes in the same app.
+leaf's compiler is 43 lines of string handling. A template language, Markdown, or something nobody has invented yet works the same way, as long as it compiles to that shape. `.leaf` files then work as pages, layouts, dynamic segments, and error and not-found pages, next to `.tsx` routes in the same app.
 
 There's one exception: Farm reads `hydrate` from the file as written, before your compiler runs. So `hydrate` must be the literal `true` or `false`. A value Farm can't read without running your code, like `!0`, stops the build with an error that names the file.
 
@@ -385,14 +400,17 @@ Without streaming, Farm renders the whole page with `renderToString()` and sends
 
 leaf uses the first. Its HTML renderer is a generator: it yields strings, a marker where a `<Suspense>` starts, and the promise an async component returns. `renderChunks()` joins the strings into one chunk per marker and waits on each promise in order. The stream sends each chunk as it's ready:
 
-```js
-// packages/leaf/src/server.js (the stream)
-export function renderToReadableStream(element, options) {
+```ts
+// packages/leaf/src/server.ts (the stream)
+export function renderToReadableStream(
+  element: Children,
+  options?: RenderToReadableStreamOptions,
+): ReadableStream<Uint8Array> {
   const chunks = renderChunks(renderChildren(element));
   let started = false;
-  return new ReadableStream({
+  return new ReadableStream<Uint8Array>({
     async pull(controller) {
-      let result;
+      let result: IteratorResult<string, void>;
       try {
         result = await chunks.next();
       } catch (error) {
@@ -406,8 +424,8 @@ export function renderToReadableStream(element, options) {
       started = true;
       controller.enqueue(encoder.encode(result.value));
     },
-    cancel() {
-      return chunks.return();
+    async cancel() {
+      await chunks.return();
     },
   });
 }
@@ -463,8 +481,8 @@ npm install -D @farm.js/core @farm.js/renderer-tests vitest jsdom
 
 One call per module:
 
-```js
-// packages/farm-leaf/test/server.test.js
+```ts
+// packages/farm-leaf/test/server.test.ts
 import {
   defineRendererDescriptorConformance,
   defineRendererServerConformance,
@@ -487,8 +505,8 @@ defineRendererDescriptorConformance({
 defineRendererServerConformance(server);
 ```
 
-```js
-// packages/farm-leaf/test/client.test.js
+```ts
+// packages/farm-leaf/test/client.test.ts
 // @vitest-environment jsdom
 import { defineRendererClientConformance } from "@farm.js/renderer-tests";
 import * as client from "../src/client.js";
