@@ -22,6 +22,7 @@ defineRendererDescriptorConformance({
       streaming: { node: false, web: true },
       reconcilesRerenders: true,
       functionComponents: true,
+      hydrationFallback: true,
     },
   },
 });

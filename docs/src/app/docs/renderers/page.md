@@ -516,6 +516,30 @@ content instead of throwing: the official Preact renderer uses `renderToStringAs
 `renderToStringAsync()`, and Vue's `renderToString()` is already async. React renders a document
 that suspends with its streaming renderer and waits for every boundary before sending it.
 
+### Hydration errors
+
+`hydrationFallback` states what a production build does when `hydrateRoot()` throws.
+
+In development, Farm always logs `[Farm.js] Hydration error; rendering the page on the client
+instead:` and renders the route with `createRoot()`, so the page keeps working while you fix it. In
+production, a renderer opts in to the same behavior:
+
+```ts
+capabilities: {
+  hydrationFallback: true,
+},
+```
+
+Without it, a production page whose hydration throws keeps the server's markup, without event
+listeners, and Farm logs `[Farm.js] Hydration error:`. With it, the page works, but the server's
+DOM, focus, and typed input are replaced.
+
+Opt in only when the client module's `createRoot()` replaces what's in its container on its first
+render. The failed hydration leaves the server's markup there, and a root that renders next to it
+shows the page twice. The field defaults to `false`, and no official renderer sets it, so their
+production behavior is unchanged. React recovers from most hydration errors inside `hydrateRoot()`
+itself.
+
 ## Renderer-neutral server code
 
 Keep product and server behavior outside the component runtime whenever possible:

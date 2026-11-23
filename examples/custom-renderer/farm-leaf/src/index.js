@@ -17,6 +17,9 @@ export function leaf() {
       streaming: { node: false, web: true }, // renderToReadableStream() in farm-leaf/server
       reconcilesRerenders: true, // patching keeps same-position DOM nodes and their state
       functionComponents: true, // components are plain functions
+      // After a production hydrateRoot() throws, Farm may render the route with createRoot(): the
+      // one in farm-leaf/client empties its container first.
+      hydrationFallback: true,
     },
   });
 }

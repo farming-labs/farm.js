@@ -63,6 +63,7 @@ export function leaf(): FarmRenderer {
       streaming: { node: false, web: true },
       reconcilesRerenders: true,
       functionComponents: true,
+      hydrationFallback: true,
     },
   });
 }
@@ -74,6 +75,7 @@ export function leaf(): FarmRenderer {
 - **`capabilities`** says what your library can do:
   - `reconcilesRerenders: true` means a re-render patches the DOM that's already there, so a layout keeps its state across navigation.
   - `functionComponents: true` means a plain function that returns elements is a component. Farm checks it before rendering integration providers.
+  - `hydrationFallback: true` means that when hydration throws in production, Farm may render the page again with your `createRoot()`, as it always does in development. [Step 3](#step-3-the-client-module) shows why that needs a `createRoot()` that replaces what is already on the page.
   - `streaming` is covered in [step 8](#step-8-optional-streaming).
 
 The app picks the renderer in its config:
@@ -146,7 +148,7 @@ export function createRoot(container: Element) {
 Farm needs four of these: `createElement` and `Suspense` build the same tree in the browser, and the other two make roots:
 
 - **`hydrateRoot(container, element)`** adopts the HTML the server sent. The button the server rendered should be the button the user clicks, not a copy.
-- **`createRoot(container)`** makes a root that replaces whatever is in the container. Farm uses it when there's no server HTML to adopt, and when hydration throws, which leaves the server's HTML in place. That's why the wrapper empties the container: without it, the page shows up twice.
+- **`createRoot(container)`** makes a root that replaces whatever is in the container. Farm uses it when there's no server HTML to adopt, and when hydration throws (in production, only with `hydrationFallback: true`). A failed hydration leaves the server's HTML in place, so the wrapper empties the container: without it, the page shows up twice.
 
 Both return a root with two methods:
 
