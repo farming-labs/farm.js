@@ -418,36 +418,34 @@ The `catch` is the rule that matters. If rendering fails before any output, erro
 Now a page can stream past slow data:
 
 ```tsx
-// app/src/app/harvest/page.tsx (abridged)
+// app/src/app/streaming/page.tsx (abridged)
 import { Suspense } from "leaf";
-import { readHarvest } from "../../server/harvest";
+import { loadCropsSlowly } from "../../server/slow-crops";
 
-async function HarvestReport() {
-  const harvest = await readHarvest(); // takes 400 ms
+async function SlowCropList() {
+  const crops = await loadCropsSlowly(); // takes 400 ms
   return (
     <ul>
-      {harvest.map((crop) => (
-        <li>
-          {crop.name}: {crop.tonnes} t
-        </li>
+      {crops.map((crop) => (
+        <li>{crop}</li>
       ))}
     </ul>
   );
 }
 
-export default function HarvestPage() {
+export default function StreamingPage() {
   return (
     <section>
-      <p>Farm sends this before the report is ready.</p>
+      <p>This arrives first. The list below waits 400 ms for its data.</p>
       <Suspense>
-        <HarvestReport />
+        <SlowCropList />
       </Suspense>
     </section>
   );
 }
 ```
 
-The layout and the first paragraph reach the browser at once, and the report follows when its data does. Three limits are leaf's, not Farm's:
+The layout and the paragraph reach the browser at once, and the list follows when its data does. Three limits are leaf's, not Farm's:
 
 - It streams in order. React streams out of order, showing `fallback` and swapping the content in with a script. leaf never shows `fallback`.
 - Its browser renderer can't run an async component, so a page that has one stays server HTML.

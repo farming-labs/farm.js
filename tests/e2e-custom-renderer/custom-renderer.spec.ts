@@ -156,39 +156,35 @@ test("notFound() and a throwing page answer with their route files and statuses"
 test("a page streams what's before a Suspense boundary before the async component in it", async ({
   baseURL,
 }) => {
-  const response = await fetch(`${baseURL}/harvest`);
+  const response = await fetch(`${baseURL}/streaming`);
   expect(response.status).toBe(200);
   const reader = response.body!.getReader();
   const decoder = new TextDecoder();
   let html = "";
-  while (!html.includes("before the report is ready")) {
+  while (!html.includes("This arrives first.")) {
     const { done, value } = await reader.read();
     if (done) break;
     html += decoder.decode(value, { stream: true });
   }
-  // The report waits on its data, so the chunks that carried the text before it can't hold it.
-  expect(html).toContain("before the report is ready");
-  expect(html).not.toContain('id="harvest"');
+  // The list waits on its data, so the chunks that carried the text before it can't hold it.
+  expect(html).toContain("This arrives first.");
+  expect(html).not.toContain('id="slow-crops"');
   for (;;) {
     const { done, value } = await reader.read();
     if (done) break;
     html += decoder.decode(value, { stream: true });
   }
-  expect(html).toContain("<li>wheat: 12 t</li><li>barley: 24 t</li><li>rye: 36 t</li>");
+  expect(html).toContain('<ul id="slow-crops"><li>wheat</li><li>barley</li><li>rye</li></ul>');
   expect(html).toMatch(/<\/html>\s*$/);
 });
 
 test("a client navigation renders a page with an async component", async ({ page }) => {
   await gotoHydrated(page, "/");
   await markDocument(page);
-  await page.getByRole("link", { name: "Harvest" }).click();
-  await expect(page).toHaveURL(/\/harvest$/);
-  await expect(page.locator("#harvest li")).toHaveText([
-    "wheat: 12 t",
-    "barley: 24 t",
-    "rye: 36 t",
-  ]);
-  await expect(page).toHaveTitle("Harvest");
+  await page.getByRole("link", { name: "Streaming" }).click();
+  await expect(page).toHaveURL(/\/streaming$/);
+  await expect(page.locator("#slow-crops li")).toHaveText(["wheat", "barley", "rye"]);
+  await expect(page).toHaveTitle("Streaming");
   expect(await readDocumentMark(page)).toBe("first");
 });
 
