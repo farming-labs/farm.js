@@ -15,3 +15,4 @@ implementation changes default behavior.
 | [0008: Platform screens (`page.kt`, `page.swift`)](./0008-platform-screens.md)                           | Draft, open for discussion                 |                                                            |
 | [0009: Naming the MCP client behind each tool call](./0009-mcp-client-session.md)                        | Implemented                                |                                                            |
 | [0010: A first navigation that does not wait for the renderer](./0010-renderer-free-first-navigation.md) | Draft (islands mode)                       |                                                            |
+| [0012: Component islands for every renderer](./0012-component-islands-for-every-renderer.md)             | Draft, open for discussion                 |                                                            |
