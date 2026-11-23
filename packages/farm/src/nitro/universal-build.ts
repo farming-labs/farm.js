@@ -12528,11 +12528,11 @@ ${
             // outer request handler exactly like sync render errors.
             if (typeof PageComponent === "function" && PageComponent.constructor.name === "AsyncFunction") {
               const result = await PageComponent(pageProps);
-              if (React.isValidElement(result)) {
-                pageElement = result;
-              } else {
-                pageElement = React.createElement("div", null, String(result));
-              }
+              // Anything else (text, a number, null) renders as the renderer renders a child,
+              // as in development.
+              pageElement = React.isValidElement(result)
+                ? result
+                : React.createElement(React.Fragment, null, result);
             } else {
               // Sync component - create element directly
               pageElement = React.createElement(PageComponent, pageProps);
