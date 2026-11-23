@@ -410,7 +410,11 @@ export interface FarmServerRendererRuntime {
   generateHydrationScript?: () => string;
   /** Receives the descriptor's `appSetup` module. Required when the descriptor sets `appSetup`. */
   configureApp?(setup: unknown): void;
-  /** Optional component used to render route-level failures. */
+  /**
+   * @deprecated Farm no longer reads this export. A page that throws under an `error.*` file
+   * renders that file as the route's error page, with the error's status, in development and in
+   * production: https://farmjs.dev/docs/renderers#renderer-modules
+   */
   ErrorBoundary?: unknown;
   /** Optional streaming primitive. Renderers without one use buffered SSR. */
   renderToPipeableStream?: (

@@ -2285,14 +2285,6 @@ window.__FARM_I18N__ = ${i18nSnapshot ? serializeInlineValue(i18nSnapshot) : "nu
         }
       }
 
-      let ErrorFallbackComponent: any = null;
-      if (errorBoundaryEntry) {
-        const errorModule = await this.routeManager.loadRouteModule(errorBoundaryEntry.modulePath);
-        if (errorModule.default) {
-          ErrorFallbackComponent = errorModule.default;
-        }
-      }
-
       // Hydration decisions are compiled into a manifest and reused on requests.
       // Development HMR invalidates this cache when a route module changes.
       const routeManifest = this.routeManager.generateClientManifest(this.config.root);
@@ -2693,25 +2685,6 @@ window.__FARM_I18N__ = ${i18nSnapshot ? serializeInlineValue(i18nSnapshot) : "nu
 
             if (shouldHydrateLayout) {
               wrappedElement = this.wrapClientGraph(wrappedElement);
-            }
-
-            if (ErrorFallbackComponent && this.rendererRuntime.ErrorBoundary) {
-              wrappedElement = this.rendererRuntime.createElement(
-                this.rendererRuntime.ErrorBoundary,
-                {
-                  Fallback: ErrorFallbackComponent,
-                  fallbackProps: {
-                    ...createRouteStateProps({
-                      params,
-                      searchParamsObject,
-                      path: pathname,
-                      middlewareMap,
-                      pluginExposedContext,
-                    }),
-                  },
-                },
-                wrappedElement,
-              );
             }
 
             if (
