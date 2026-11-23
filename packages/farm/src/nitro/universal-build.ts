@@ -5345,33 +5345,21 @@ function replayPreHydrationClicks(container) {
   }
 }
 
-// Once a page, a route slot or the islands have hydrated, the whole document stops holding, as in
-// development: what a navigation renders after it is already live, so nothing waits on a
-// container's mark the navigation replaced. A document that hydrates nothing never sets it.
-// Interactions an island that has not hydrated holds stay queued for its own scheduler.
-function markFarmHydrated() {
-  window.__FARM_HYDRATED__ = true;
-  document.documentElement.dataset.farmHydrated = "true";
-}
-
 function hydrateInitialRouteSlots() {
   const slots = Array.isArray(window.__FARM_ROUTE_SLOTS__)
     ? window.__FARM_ROUTE_SLOTS__
     : [];
-  let hydrated = false;
   for (const slot of slots) {
     const registration = findClientRouteSlot(slot);
     if (!registration) continue;
     try {
       if (renderClientRouteSlot(slot, registration, "hydrate")) {
-        hydrated = true;
         replayPreHydrationClicks(document.getElementById(slot.containerId));
       }
     } catch (error) {
       console.warn("[Farm.js] Could not hydrate route slot:", slot.name, error);
     }
   }
-  return hydrated;
 }
 
 /*farm-router-start*/
@@ -5515,10 +5503,9 @@ ${
     return;
   }
 
-  const hydratedSlots = hydrateInitialRouteSlots();
+  hydrateInitialRouteSlots();
 
   if (!matched) {
-    if (hydratedSlots) markFarmHydrated();
     return;
   }
 
@@ -5538,7 +5525,6 @@ ${
     // Each island reports and recovers its own failure, so this resolves once they are live.
     await hydrateFarmIsolatedClientBoundaries(document);
     await farmClientRuntime.completeHydration(hydrationSession);
-    markFarmHydrated();
     return;
   }`
       : ""
@@ -5623,7 +5609,6 @@ function scheduleFarmRouteHydration(matched, pathname, container, serverProps) {
           renderFarmRoute(reactRoot, routeState);
         }
         await farmClientRuntime.completeHydration(hydrationSession);
-        markFarmHydrated();
       } catch (error) {
         await farmClientRuntime.failHydration(hydrationSession, error);
         console.error("[Farm.js] Hydration error:", error);
