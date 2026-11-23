@@ -8726,6 +8726,12 @@ function wrapWithFarmIntegrationProviders(element) {
   }
   return wrapped;
 }
+// The browser hydrates a page island or a route slot as its own root, inside the integration
+// providers, so the server renders them inside it too. React lines an island up with its tree
+// position instead, and its providers render no markup.
+function wrapFarmIslandIntegrationProviders(element) {
+  return ${isReactRenderer(config.renderer) ? "element" : "wrapWithFarmIntegrationProviders(element)"};
+}
 const serverRuntimeIntegrations = Object.fromEntries(
   Object.entries(configuredIntegrations).filter(([, integration]) =>
     integration && typeof integration === "object" && integration.serverRuntime !== false
@@ -12539,7 +12545,7 @@ ${
             }
 
             if (route.shouldHydrate && !shouldHydrateLayout) {
-              pageElement = wrapFarmRouteClientGraph(pageElement);
+              pageElement = wrapFarmRouteClientGraph(wrapFarmIslandIntegrationProviders(pageElement));
             } else if (shouldHydrateLayout && !route.shouldHydrate) {
               pageElement = route.serverTree
                 ? await renderFarmRouteServerTree(
@@ -12600,7 +12606,9 @@ ${
                     },
                     slot.hydrates
                       ? wrapFarmRouteClientGraph(
-                          React.createElement(slot.module.default, slot.props),
+                          wrapFarmIslandIntegrationProviders(
+                            React.createElement(slot.module.default, slot.props),
+                          ),
                         )
                       : React.createElement(slot.module.default, slot.props),
                   );

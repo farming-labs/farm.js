@@ -904,14 +904,17 @@ export class ServerRenderer {
     configureApp((setupModule as { default?: unknown }).default);
   }
 
-  private createPageBoundary(
+  private async createPageBoundary(
     pageElement: unknown,
     options: {
       pageShouldHydrate: boolean;
       layoutShouldHydrate: boolean;
       islandStrategy?: FarmIslandStrategy | null;
     },
-  ): unknown {
+  ): Promise<unknown> {
+    if (options.pageShouldHydrate && !options.layoutShouldHydrate) {
+      pageElement = await this.wrapIslandIntegrationProviders(pageElement);
+    }
     const boundary = this.rendererRuntime.createElement(
       "div",
       {
@@ -927,6 +930,16 @@ export class ServerRenderer {
     return options.pageShouldHydrate && !options.layoutShouldHydrate && this.reactRenderer
       ? this.reactRenderer.markPagePosition(boundary)
       : boundary;
+  }
+
+  /**
+   * The browser hydrates a page island or a route slot as its own root, inside the integration
+   * providers, so the server renders the providers inside it too, or a provider that renders
+   * markup (a Vue `<slot />` renders fragment markers) puts the root's HTML out of step. React
+   * lines an island up with its tree position instead, and its providers render no markup.
+   */
+  private async wrapIslandIntegrationProviders(element: unknown): Promise<unknown> {
+    return this.reactRenderer ? element : this.wrapWithIntegrationProviders(element);
   }
 
   /// The app's `<srcDir>/app/globals.css`, linked only when it exists, as the
@@ -1237,7 +1250,7 @@ export class ServerRenderer {
       // unless the page renders as a server tree the layout's root rebuilds.
       element = await this.isolateServerPage(element, input.serverTree === true);
     }
-    element = this.createPageBoundary(element, {
+    element = await this.createPageBoundary(element, {
       pageShouldHydrate: input.pageShouldHydrate,
       layoutShouldHydrate: input.layoutShouldHydrate,
       islandStrategy: input.islandStrategy,
@@ -1267,7 +1280,11 @@ export class ServerRenderer {
           continue;
         }
         let slotElement = this.rendererRuntime.createElement(slot.module.default, slot.props);
-        if (slot.shouldHydrate !== false) slotElement = this.wrapClientGraph(slotElement);
+        if (slot.shouldHydrate !== false) {
+          slotElement = this.wrapClientGraph(
+            await this.wrapIslandIntegrationProviders(slotElement),
+          );
+        }
         slotProps[slot.name] = this.rendererRuntime.createElement(
           "div",
           {
@@ -1716,7 +1733,7 @@ window.__FARM_I18N__ = ${i18nSnapshot ? serializeInlineValue(i18nSnapshot) : "nu
               },
           );
           const layoutShouldHydrate = layoutMetadata.some((metadata) => metadata.shouldHydrate);
-          pageElement = this.createPageBoundary(pageElement, {
+          pageElement = await this.createPageBoundary(pageElement, {
             pageShouldHydrate: pageMetadata.shouldHydrate,
             layoutShouldHydrate,
             islandStrategy: pageMetadata.islandStrategy,
@@ -2570,7 +2587,7 @@ window.__FARM_I18N__ = ${i18nSnapshot ? serializeInlineValue(i18nSnapshot) : "nu
             // Every route gets a stable HTML boundary. Server-only pages keep
             // native markup with no React root; interactive pages hydrate this
             // exact boundary.
-            pageElement = this.createPageBoundary(pageElement, {
+            pageElement = await this.createPageBoundary(pageElement, {
               pageShouldHydrate: isClientComponent || shouldHydrate,
               layoutShouldHydrate: shouldHydrateLayout,
               islandStrategy: hydrationIslandStrategy,
@@ -2648,7 +2665,11 @@ window.__FARM_I18N__ = ${i18nSnapshot ? serializeInlineValue(i18nSnapshot) : "nu
                   slot.module.default,
                   slot.props,
                 );
-                if (slot.shouldHydrate) slotElement = this.wrapClientGraph(slotElement);
+                if (slot.shouldHydrate) {
+                  slotElement = this.wrapClientGraph(
+                    await this.wrapIslandIntegrationProviders(slotElement),
+                  );
+                }
                 slotElement = this.rendererRuntime.createElement(
                   "div",
                   {
