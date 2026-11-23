@@ -175,6 +175,7 @@ export {
   resolveDefaultErrorStatus,
 } from "../components/error-page";
 export {
+  hasFarmHtmlPreloadToken,
   manageFarmDocumentPreloads,
   manageFarmHtmlPreloads,
   manageFarmLinkHeaderPreloads,

@@ -124,6 +124,14 @@ engines, so both see the same load. This run had other work on the machine (load
   another, load average 5 to 18) the first navigation there took 13 to 34 ms less than just before
   it. Those runs moved every engine's numbers by up to a factor of two, so this table keeps the
   earlier one. Over a network the picture changes; see below.
+- The preload budget used to scan every islands document for preload links: the boot script's
+  `data-farm-preload` attributes hold the word `preload`, so the budget walked the whole document
+  up to them. Since it stopped (2026-11-22), the server spends 13% less CPU per docs page, 25% less
+  per blog post and 22% less per guide post. Server CPU time per document, 600 requests 8 at a
+  time, medians of 10 rounds alternating with a build from just before (`main` at fe3388c0f): docs
+  3.95 to 3.42 ms, shop 2.00 to 1.78, blog 5.27 to 3.97, guide 6.93 to 5.40. An A/A run of one
+  build against itself differed by 4 to 9%, and by 13% on shop in an earlier run, so shop's change
+  is within noise. The table above predates it.
 - A docs navigation request takes 0.58 ms on the server against 0.66 to 0.69 ms for RSC's `.rsc`
   request (medians of 1,495 requests alternating between the engines, `accept-encoding: identity`
   for both, so neither pays for compression), and returns 7.3 KB instead of 37.3 KB.
