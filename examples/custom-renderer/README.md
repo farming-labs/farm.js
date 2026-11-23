@@ -29,6 +29,13 @@ pnpm --filter farm-leaf test
 pnpm test:e2e:custom-renderer
 ```
 
+## Use it outside this repo
+
+This copy runs against Farm's source in CI. To start your own renderer, clone
+[farming-labs/leaf](https://github.com/farming-labs/leaf) instead. It's the same adapter and app
+on published packages, plus ui-sdk components. [Bring your own
+renderer](https://farmjs.dev/blog/bring-your-own-renderer) walks through it step by step.
+
 ## What it does not do
 
 - leaf doesn't stream, so Farm renders its pages buffered through `renderToString()`.
