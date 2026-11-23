@@ -46,7 +46,9 @@ client entry loading React DOM lazily (RFC 0010). Bytes and first navigations ov
 again on 2026-11-22, with a layout root that waits kept waiting through a navigation (RFC 0011),
 and bytes once more that day, with a navigation before islx loads naming the values the page holds,
 again with React loading beside React DOM, and again with React DOM and islx waiting for an island
-that is due. Averages; KB = 1024 bytes.
+that is due. Bytes and first navigations over a network again on 2026-11-23, with the boot entry
+fetching the client entry and router once the page is idle, and again that day with a `Link`'s
+page requested on its press. Averages; KB = 1024 bytes.
 
 Four sections of the app:
 
@@ -65,23 +67,25 @@ Four sections of the app:
 | Section | Engine    | Document, br (raw) | First-load JS, br | Navigation data, br (raw) | Navigation JS, br |
 | ------- | --------- | ------------------ | ----------------- | ------------------------- | ----------------- |
 | docs    | `rsc`     | 16.3 KB (76.4 KB)  | 71.0 KB           | 12.0 KB (37.5 KB)         | 0                 |
-| docs    | `islands` | 16.2 KB (70.1 KB)  | 2.2 KB            | 2.7 KB (7.6 KB)           | 2.5 KB            |
+| docs    | `islands` | 16.2 KB (70.1 KB)  | 27.6 KB           | 2.7 KB (7.6 KB)           | 0                 |
 | shop    | `rsc`     | 5.5 KB (33.2 KB)   | 71.0 KB           | 3.8 KB (13.2 KB)          | 0                 |
-| shop    | `islands` | 5.9 KB (31.0 KB)   | 2.2 KB            | 4.4 KB (20.0 KB)          | 2.5 KB            |
+| shop    | `islands` | 5.9 KB (31.0 KB)   | 27.6 KB           | 4.4 KB (20.0 KB)          | 0                 |
 | blog    | `rsc`     | 17.9 KB (379.5 KB) | 71.0 KB           | 10.8 KB (203.7 KB)        | 0                 |
-| blog    | `islands` | 9.1 KB (127.6 KB)  | 2.2 KB            | 9.2 KB (127.7 KB)         | 2.5 KB            |
+| blog    | `islands` | 9.1 KB (127.6 KB)  | 27.6 KB           | 9.2 KB (127.7 KB)         | 0                 |
 | guide   | `rsc`     | 18.0 KB (379.8 KB) | 71.0 KB           | 10.9 KB (203.9 KB)        | 0                 |
-| guide   | `islands` | 9.5 KB (129.2 KB)  | 2.2 KB            | 9.6 KB (129.4 KB)         | 2.5 KB            |
+| guide   | `islands` | 9.5 KB (129.2 KB)  | 27.6 KB           | 9.6 KB (129.4 KB)         | 0                 |
 
 An islands page whose client components only react to clicks starts with the boot entry (RFC 0003,
-sections 10 and 11). The client runtime, about 95 KB, arrives with the first navigation or click;
-"Navigation JS" spreads it over the ten navigations. Since RFC 0010 it comes in two parts: the
-entry and router (about 25 KB), then React, React DOM and islx (about 71 KB), which a navigation
-that swaps its page in does not wait for. That made it 2.5 KB larger: about 0.4 KB of code that
-loads the renderer and holds clicks meanwhile, and the rest compression lost to four files instead
-of one. In every section the ten navigations load only the entry and router: React, React DOM and
-islx load with the first island that is due, and the islands of these pages wait for a click (on
-shop and guide so does the layout's root, RFC 0011), so they never load. Until 2026-11-22 they
+sections 10 and 11), 2.4 KB. Once the page is idle the boot fetches the client entry and router,
+25.3 KB, without running them, so "First-load JS" counts them and the navigations fetch no code.
+Until 2026-11-23 they arrived with the first navigation or click, and "Navigation JS" spread them
+over the ten navigations (2.5 KB each). The client runtime, about 95 KB, comes in two parts since
+RFC 0010: the entry and router (about 25 KB), then React, React DOM and islx (about 71 KB), which a
+navigation that swaps its page in does not wait for. That made it 2.5 KB larger: about 0.4 KB of
+code that loads the renderer and holds clicks meanwhile, and the rest compression lost to four
+files instead of one. In every section a visit loads only the entry and router: React, React DOM
+and islx load with the first island that is due, and the islands of these pages wait for a click
+(on shop and guide so does the layout's root, RFC 0011), so they never load. Until 2026-11-22 they
 loaded with the entry on docs and blog, 9.6 KB per navigation, more in total than `rsc`'s 71 KB.
 
 ### Time (`timing.mjs`)
@@ -107,8 +111,9 @@ engines, so both see the same load. This run had other work on the machine (load
 | guide   | `rsc`     | 216 ms (89 ms)                   | 84 ms            | 73 ms      | 52 (34-57)           |
 | guide   | `islands` | 105 ms (3 ms)                    | 120 ms           | 77 ms      | 176 (122-205)        |
 
-- A first load sends 2.2 KB of JavaScript instead of 71.0 KB, does about half the main-thread work
-  and runs 3 to 5 ms of script instead of 67 to 91 ms: nothing on these pages hydrates at load.
+- A first load runs 2.4 KB of JavaScript instead of 71.0 KB (it fetches 27.6 KB once the page is
+  idle), does about half the main-thread work and runs 3 to 5 ms of script instead of 67 to 91 ms:
+  nothing on these pages hydrates at load.
 - Navigations carry a fifth of RSC's data on docs pages and half on shop pages. On a
   content page (blog) Flight sends every token twice, as HTML and as rows: islands sends half the
   document, and its server renders 7.2 times as many pages per second.
@@ -116,6 +121,12 @@ engines, so both see the same load. This run had other work on the machine (load
   data, as a server tree leaves out its static HTML, and the server renders 3.4 times as many pages.
 - After the first, navigations paint within a millisecond of RSC on docs and shop pages, 5 ms
   sooner on blog posts and 4 ms later on guide posts, within this machine's noise.
+- A navigation that swaps the whole page in (guide and shop, while their layout waits) parsed
+  the response, took the page's markup back out and parsed it again in the document. Since it
+  moves the parsed nodes in (2026-11-23), a guide navigation paints in 68 ms instead of 75, against
+  RSC's 71 (`timing.mjs` with a build from just before, `main` at a2406339f), and in 66 ms instead
+  of 72 over five more rounds of ten, where that build against a copy of itself differed by 1 ms.
+  docs and blog swap a segment, which already moved its nodes; shop's pages are too small to show.
 - From a server on the same machine, the first navigation is slower than RSC's: by 15 ms on docs,
   5 ms on blog, 36 ms on guide and 66 ms on shop. It loads what the first load left out, the
   client runtime (81.5 KB br, with React DOM) and the router. On shop and guide the click was also
@@ -234,5 +245,48 @@ run of one build against a copy of it differed by 6 ms at most (5 rounds). With 
 and no bandwidth limit the two builds are within 4 ms (5 rounds). The `rsc` build did not
 compress its static files then, so the proxy brotli-compressed its scripts at quality 5, as a CDN
 would; its Node server alone sent them uncompressed until #3097.
+
+Measured again 2026-11-23 once the boot entry fetched the client entry and router, 25.3 KB, as soon
+as the page was idle, without running them. Before, a first tap waited for them: they started
+downloading on the touch, and at 1.6 Mbit/s took longer than the page, which arrived first in
+every section. Interleaved with `rsc` and a build from just before it (`main` at a2406339f), load
+average 3 to 4, medians of 9 rounds in ms:
+
+| Section | `rsc` | `islands`, before | `islands` |
+| ------- | ----- | ----------------- | --------- |
+| docs    | 265   | 267               | 218       |
+| shop    | 218   | 294               | 239       |
+| blog    | 280   | 326               | 283       |
+| guide   | 281   | 332               | 294       |
+
+That is 150 ms at 1.6 Mbit/s with an 80 ms tap: 38 to 55 ms faster in every section, and faster
+than `rsc` on docs. An instant tap with 50 ms of latency (5 rounds, an A/A copy of the build from
+before within 7 ms of it) went from 113, 133, 158 and 165 ms to 111, 116, 139 and 145 (`rsc`: 112,
+112, 164, 161). What it costs: 25.3 KB more on a first load that never navigates (a connection that
+asks to save data skips it), and 4 ms more script on the first load's main thread at 4x CPU
+throttling, Chrome compiling the fetched modules while the page is idle (`timing.mjs`, 3 runs).
+
+Measured again 2026-11-23 once the boot entry requested a `Link`'s page on its press instead of its
+click: a primary, unmodified press on a `Link` that prefetches (any but `prefetch="none"`). The
+router takes that response at the click, as it took the click's. Interleaved with `rsc` and the
+build from just before it, load average 4 to 5, medians of 9 rounds in ms for an 80 ms tap with
+150 ms of latency:
+
+| Section | `rsc`, 1.6 Mbit/s | `islands`, before | `islands` | `rsc`, unlimited | `islands`, before | `islands` |
+| ------- | ----------------- | ----------------- | --------- | ---------------- | ----------------- | --------- |
+| docs    | 265               | 228               | 119       | 199              | 215               | 102       |
+| shop    | 217               | 241               | 139       | 198              | 208               | 109       |
+| blog    | 281               | 283               | 180       | 232              | 236               | 137       |
+| guide   | 282               | 292               | 189       | 237              | 243               | 139       |
+
+The time runs from the click, and the request now leaves at the press, the tap's 80 ms before it.
+It gains 99 to 113 ms, likely because the time starts when the browser receives the click, which
+a page busy running the runtime the press started (at 4x CPU throttling) handles later, and the
+click's request waited for that. `islands` is now faster than `rsc` in every section on both
+networks, by 78 to 146 ms. An instant tap with 50 ms of latency (7 rounds), where the press and the
+click come together, went from 111, 115, 134 and 144 ms to 95, 105, 131 and 135 (`rsc`: 114, 112,
+156, 155). What it costs: 0.1 KB more boot entry (2.3 to
+2.4 KB), and a page request for a press that does not end in a click, such as a scroll that starts
+on a link. `Link`'s own prefetch sends that request on a touch too, once the runtime runs.
 
 `results/latest.json` has the per-page numbers of the last run.

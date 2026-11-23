@@ -4,6 +4,8 @@
  * an island's own trigger, or intent to follow a link. Until then it holds the clicks and submits
  * that would be lost (in an island that has not hydrated, or on a link), and the runtime replays
  * them: islands through the pre-hydration queue its scheduler reads, links on the same element.
+ * Once the page has loaded and the browser is idle, it fetches what a link runs, without running it,
+ * and it requests a link's page on the press or click that follows it.
  *
  * It imports nothing at runtime, and runs the client entry from the URL the server wrote on its
  * script: a module it shared with the entry, or an import of the entry itself, would change how
@@ -24,8 +26,8 @@ interface FarmQueuedInteraction {
 }
 
 /**
- * @internal The request for a link clicked before the runtime ran, which the boot sends with the
- * click (`window.__FARM_EARLY_NAVIGATION__`). The router's next navigation request takes the
+ * @internal The request for a link pressed or clicked before the runtime ran, which the boot sends
+ * then (`window.__FARM_EARLY_NAVIGATION__`). The router's next navigation request takes the
  * response when it would send the same request, and drops it otherwise.
  */
 export interface FarmEarlyNavigation {
@@ -42,6 +44,9 @@ export interface FarmEarlyNavigation {
 
 /** Kept equal to the routers' deployment header (FARM_DEPLOYMENT_ID_HEADER); a test compares them. */
 export const FARM_ISLANDS_BOOT_DEPLOYMENT_HEADER = "x-farm-deployment-id";
+/** A `Link` that prefetches, as its attributes say (resolveLinkAttributes); a test compares them. */
+export const FARM_ISLANDS_BOOT_PREFETCHING_LINK =
+  'a[data-farm-link]:not([data-farm-prefetch="none"])';
 
 const ISLAND = "f-island";
 const HYDRATED_ISLAND = '[data-farm-island-hydrated="true"]';
@@ -129,20 +134,21 @@ export function startFarmIslandsBoot(load: () => Promise<unknown> = loadFarmClie
   // renders and hydrates with (-renderer), and the modules a root that waits for a click hydrates
   // with (-root). A file listed twice is fetched once.
   const preloaded = new Set<string>();
+  const runtime = new URL(script?.dataset.farmRuntime ?? "", document.baseURI);
+  const modulepreload = (file: string) => {
+    const link = document.createElement("link");
+    link.rel = "modulepreload";
+    link.href = new URL(file, runtime).href;
+    if (script?.nonce) link.nonce = script.nonce;
+    document.head.append(link);
+  };
   const preload = (
     group: "farmPreload" | "farmPreloadRouter" | "farmPreloadRenderer" | "farmPreloadRoot",
   ) => {
     const files = script?.dataset[group];
     if (!script || !files || preloaded.has(group)) return;
     preloaded.add(group);
-    const base = new URL(script.dataset.farmRuntime ?? "", document.baseURI);
-    for (const file of files.split(" ")) {
-      const link = document.createElement("link");
-      link.rel = "modulepreload";
-      link.href = new URL(file, base).href;
-      if (script.nonce) link.nonce = script.nonce;
-      document.head.append(link);
-    }
+    for (const file of files.split(" ")) modulepreload(file);
   };
 
   // The runtime holds and replays from here on: its scheduler for islands, its router for links.
@@ -238,14 +244,24 @@ export function startFarmIslandsBoot(load: () => Promise<unknown> = loadFarmClie
   };
   for (const type of ["pointerdown", "focusin", "mouseover"]) listen(type, observe, true);
 
-  // The page a held click goes to is requested with the click, alongside the runtime, rather than
-  // a round trip after it runs. The headers are the ones the router sends for that navigation from
-  // this document: the layouts it shows, and flush markers for a page that streams. From under a
-  // layout that hydrates as one root it asks for the page whole, as the router does for a page
-  // under it, and the router takes a whole page for one it would stream too. It names the island
-  // values the page holds, as the router does before islx loads (getFarmIslandValueHeaders): the
-  // router's swap keeps them, so the server leaves them out.
+  // The page a held click goes to is requested with the click, or the press before it, alongside
+  // the runtime, rather than a round trip after it runs. The headers are the ones the router sends
+  // for that navigation from this document: the layouts it shows, and flush markers for a page that
+  // streams. From under a layout that hydrates as one root it asks for the page whole, as the
+  // router does for a page under it, and the router takes a whole page for one it would stream too.
+  // It names the island values the page holds, as the router does before islx loads
+  // (getFarmIslandValueHeaders): the router's swap keeps them, so the server leaves them out.
   const requestPage = (href: string) => {
+    const scope = window as Window & {
+      __FARM_DEPLOYMENT_ID__?: string;
+      __FARM_EARLY_NAVIGATION__?: FarmEarlyNavigation;
+    };
+    const early = scope.__FARM_EARLY_NAVIGATION__;
+    // The press before this click requested the page already, and the router takes that response
+    // for 30 seconds (takeFarmEarlyNavigation).
+    if (early?.url === href && Date.now() - early.at <= 30_000) return;
+    // The router takes only the last request, so an earlier one is aborted.
+    early?.controller.abort();
     const headers: Record<string, string> = { accept: "text/html" };
     const content = document.getElementById("root") ?? document.body;
     // The keys, script type, header and limit getFarmIslandValueHeaders uses; a test compares them.
@@ -263,10 +279,6 @@ export function startFarmIslandsBoot(load: () => Promise<unknown> = loadFarmClie
     ).filter(Boolean);
     if (layouts.length) headers["f-layouts"] = JSON.stringify(layouts);
     if (rootId !== "root") headers["f-stream"] = "flush";
-    const scope = window as Window & {
-      __FARM_DEPLOYMENT_ID__?: string;
-      __FARM_EARLY_NAVIGATION__?: FarmEarlyNavigation;
-    };
     if (scope.__FARM_DEPLOYMENT_ID__) {
       headers[FARM_ISLANDS_BOOT_DEPLOYMENT_HEADER] = scope.__FARM_DEPLOYMENT_ID__;
     }
@@ -276,6 +288,26 @@ export function startFarmIslandsBoot(load: () => Promise<unknown> = loadFarmClie
     response.catch(() => {});
     scope.__FARM_EARLY_NAVIGATION__ = { url: href, headers, response, at: Date.now(), controller };
   };
+
+  // A press on a `Link` requests its page then, rather than at the click that follows, as `Link`
+  // prefetches it on the same press once the runtime runs. Only a `Link` that prefetches: the page
+  // of any other link may change something on the server (a sign-out), so only its click asks.
+  listen(
+    "pointerdown",
+    (event) => {
+      const press = event as PointerEvent;
+      const anchor = routedLink(press.target);
+      if (
+        press.button ||
+        isModified(press) ||
+        !anchor?.matches(FARM_ISLANDS_BOOT_PREFETCHING_LINK)
+      ) {
+        return;
+      }
+      requestPage(anchor.href);
+    },
+    true,
+  );
 
   // A link clicked before the runtime runs: held, then clicked again once the router listens, so
   // it decides as for any click. Bubble phase, like the router, so a handler that prevents the
@@ -314,22 +346,25 @@ export function startFarmIslandsBoot(load: () => Promise<unknown> = loadFarmClie
         )
       : null;
   if (visibility) cleanups.push(() => visibility.disconnect());
-  let idle = false;
-  const startWhenIdle = () => {
-    if (idle) return;
-    idle = true;
+  // The same timing as the island scheduler's idle trigger.
+  const whenIdle = (callback: () => void) => {
     const idleWindow = window as Window & {
       requestIdleCallback?: (callback: () => void, options?: { timeout?: number }) => number;
       cancelIdleCallback?: (handle: number) => void;
     };
-    // The same timing as the island scheduler's idle trigger.
     if (typeof idleWindow.requestIdleCallback === "function") {
-      const handle = idleWindow.requestIdleCallback(() => void start(), { timeout: 2_000 });
+      const handle = idleWindow.requestIdleCallback(callback, { timeout: 2_000 });
       cleanups.push(() => idleWindow.cancelIdleCallback?.(handle));
     } else {
-      const handle = window.setTimeout(() => void start(), 1);
+      const handle = window.setTimeout(callback, 1);
       cleanups.push(() => window.clearTimeout(handle));
     }
+  };
+  let idle = false;
+  const startWhenIdle = () => {
+    if (idle) return;
+    idle = true;
+    whenIdle(() => void start());
   };
   // Islands render with display:contents, so observe their children, as the scheduler does. They
   // are judged once parsed: a streamed island's children may not have arrived when it does.
@@ -387,5 +422,24 @@ export function startFarmIslandsBoot(load: () => Promise<unknown> = loadFarmClie
       observer.disconnect();
       document.removeEventListener("DOMContentLoaded", parsed);
     });
+  }
+
+  // Once the page has loaded and the browser is idle, what a link's intent runs (the entry, its
+  // imports, the router) is fetched, not run. A first tap then waits for its page alone, where on a
+  // slow connection the runtime took longer than the page. Nothing runs, so the page does no more
+  // work; a connection that asks to save data fetches it on intent, as before.
+  const prefetch = () => {
+    const connection = (navigator as Navigator & { connection?: { saveData?: boolean } })
+      .connection;
+    if (loading || !script?.dataset.farmRuntime || connection?.saveData) return;
+    modulepreload(runtime.href);
+    preload("farmPreload");
+    preload("farmPreloadRouter");
+  };
+  const prefetchWhenIdle = () => whenIdle(prefetch);
+  if (document.readyState === "complete") prefetchWhenIdle();
+  else {
+    window.addEventListener("load", prefetchWhenIdle, { once: true });
+    cleanups.push(() => window.removeEventListener("load", prefetchWhenIdle));
   }
 }
