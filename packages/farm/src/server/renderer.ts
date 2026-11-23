@@ -200,6 +200,7 @@ import {
   type FarmRendererRenderOptions,
   type FarmServerRendererRuntime,
   resolveFarmComponentExtensions,
+  assertFarmRendererServerModule,
 } from "../renderer";
 import { isRendererCompiledComponent } from "../integration-provider-build";
 import { pathToFileURL } from "node:url";
@@ -861,14 +862,7 @@ export class ServerRenderer {
               ).href
             );
     const runtime = loaded as Partial<FarmServerRendererRuntime>;
-    const required = ["createElement", "isValidElement", "renderToString"] as const;
-    for (const key of required) {
-      if (typeof runtime[key] !== "function") {
-        throw new Error(
-          `Renderer \`${this.config.renderer.name}\` server module must export ${key}().`,
-        );
-      }
-    }
+    assertFarmRendererServerModule(runtime, this.config.renderer);
 
     assertFarmRendererStreamingRuntime(
       this.config.renderer.name,

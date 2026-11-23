@@ -171,6 +171,8 @@ default export.
 | `server` | `name`, `createElement`, `isValidElement`, `Fragment`, `Suspense`, `renderToString` | `renderToReadableStream`, `renderToPipeableStream`, `renderToStringWithHead`, `ErrorBoundary`, `generateHydrationScript`, `markFunctionComponent`, `configureApp`, `capabilities` |
 | `client` | `createElement`, `Suspense`, `createRoot`, `hydrateRoot`                            | `configureApp`                                                                                                                                                                    |
 
+- The development server and `farm build` check the server module's required exports when they load
+  it, and fail with one error that names every missing export.
 - `createFarmRendererPlugin({ ssr, buildLifetime, rendererOptions })` returns a Vite plugin, an
   array of plugins, or a promise of either. `rendererOptions` is the descriptor's `options`.
 - FARMJS composes every route tree with `createElement()`: layouts, the page, and the boundaries for

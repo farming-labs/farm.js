@@ -12,7 +12,12 @@ function throwNoRenderer(): never {
   throw new Error(FARM_NO_RENDERER_MESSAGE);
 }
 
+export const name = "none";
+
 export const Fragment = Symbol.for("farm.no-renderer.fragment");
+
+// Nothing renders, so a Suspense boundary is only another fragment.
+export const Suspense = Fragment;
 
 export function createElement(): never {
   return throwNoRenderer();
