@@ -4887,7 +4887,7 @@ ${layoutImports}
 ${rendererClientImports}
 ${isolatedHydrationImport}
 ${providerClientCode.imports}
-import { createClientCancellation, createClientPluginManager, createPluginlessClientRuntime, getFarmIslandValueHeaders, getHashTargetElement, keepFarmIslandValues, installChunkErrorRecovery, installFarmLinkPrefetch, isFarmBlockedNavigationURL, isFarmExternalNavigationURL, readFarmLinkNavigateOptions, rememberFarmLinkLocale, reconcileFarmDocumentHead, runFarmNavigationDelegates, scheduleFarmIslandHydration, createFarmSearchParams, searchParamsToObject, setFarmBasePath, setFarmTrailingSlashPreference, stripFarmBasePath } from "@farm.js/core/internal/client-runtime";
+import { createClientCancellation, createClientPluginManager, createPluginlessClientRuntime, getFarmIslandValueHeaders, getHashTargetElement, keepFarmIslandValues, installChunkErrorRecovery, installFarmLinkPrefetch, isFarmBlockedNavigationURL, isFarmExternalNavigationURL, readFarmLinkNavigateOptions, rememberFarmLinkLocale, reconcileFarmDocumentHead, replayFarmQueuedInteraction, runFarmNavigationDelegates, scheduleFarmIslandHydration, createFarmSearchParams, searchParamsToObject, setFarmBasePath, setFarmTrailingSlashPreference, stripFarmBasePath } from "@farm.js/core/internal/client-runtime";
 import { createFarmDeploymentMismatchError, createFarmDeploymentRequestHeaders, isFarmDeploymentMismatchResponse } from "@farm.js/core/deployment";
 import { createFarmRouter, isFarmRouteActive, matchFarmRoute } from "@farm.js/core/router";
 ${clientPluginEntry.imports}
@@ -5325,19 +5325,53 @@ function renderClientRouteSlot(slot, registration, mode) {
   return true;
 }
 
+// The document's pre-hydration hold keeps clicks and submits until what they target hydrates, as in
+// development. A hydrated route slot stops holding its own and replays what it held, as the page's
+// scheduler does for the page.
+function replayPreHydrationClicks(container) {
+  container.dataset.farmIslandHydrated = "true";
+  const queue = Array.isArray(window.__FARM_PREHYDRATION_CLICK_QUEUE__)
+    ? window.__FARM_PREHYDRATION_CLICK_QUEUE__
+    : [];
+  const held = queue.filter(function(item) {
+    return item && item.target instanceof Element && container.contains(item.target);
+  });
+  if (held.length === 0) return;
+  queue.splice(0, queue.length, ...queue.filter(function(item) { return held.indexOf(item) === -1; }));
+  for (const item of held) {
+    setTimeout(function() {
+      if (item.target.isConnected) replayFarmQueuedInteraction(item.target, item.kind);
+    }, 0);
+  }
+}
+
+// Once a page, a route slot or the islands have hydrated, the whole document stops holding, as in
+// development: what a navigation renders after it is already live, so nothing waits on a
+// container's mark the navigation replaced. A document that hydrates nothing never sets it.
+// Interactions an island that has not hydrated holds stay queued for its own scheduler.
+function markFarmHydrated() {
+  window.__FARM_HYDRATED__ = true;
+  document.documentElement.dataset.farmHydrated = "true";
+}
+
 function hydrateInitialRouteSlots() {
   const slots = Array.isArray(window.__FARM_ROUTE_SLOTS__)
     ? window.__FARM_ROUTE_SLOTS__
     : [];
+  let hydrated = false;
   for (const slot of slots) {
     const registration = findClientRouteSlot(slot);
     if (!registration) continue;
     try {
-      renderClientRouteSlot(slot, registration, "hydrate");
+      if (renderClientRouteSlot(slot, registration, "hydrate")) {
+        hydrated = true;
+        replayPreHydrationClicks(document.getElementById(slot.containerId));
+      }
     } catch (error) {
       console.warn("[Farm.js] Could not hydrate route slot:", slot.name, error);
     }
   }
+  return hydrated;
 }
 
 /*farm-router-start*/
@@ -5472,9 +5506,10 @@ ${
     return;
   }
 
-  hydrateInitialRouteSlots();
+  const hydratedSlots = hydrateInitialRouteSlots();
 
   if (!matched) {
+    if (hydratedSlots) markFarmHydrated();
     return;
   }
 
@@ -5494,6 +5529,7 @@ ${
     // Each island reports and recovers its own failure, so this resolves once they are live.
     await hydrateFarmIsolatedClientBoundaries(document);
     await farmClientRuntime.completeHydration(hydrationSession);
+    markFarmHydrated();
     return;
   }`
       : ""
@@ -5578,6 +5614,7 @@ function scheduleFarmRouteHydration(matched, pathname, container, serverProps) {
           renderFarmRoute(reactRoot, routeState);
         }
         await farmClientRuntime.completeHydration(hydrationSession);
+        markFarmHydrated();
       } catch (error) {
         await farmClientRuntime.failHydration(hydrationSession, error);
         console.error("[Farm.js] Hydration error:", error);
