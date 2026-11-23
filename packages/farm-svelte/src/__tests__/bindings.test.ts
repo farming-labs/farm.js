@@ -53,4 +53,35 @@ describe("Svelte FARMJS bindings", () => {
 
     expect(seen).toEqual([[], ["tea"]]);
   });
+
+  it("submits an enhanced form's fields through the action until destroyed", async () => {
+    const save = vi.fn(async (_data: FormData) => "saved") as unknown as ServerFn<FormData, string>;
+    const action = createAction(save);
+    const form = document.createElement("form");
+    form.innerHTML =
+      '<input name="name" /><button type="submit" name="intent" value="publish">Publish</button>';
+    document.body.append(form);
+    const enhanced = action.enhance(form);
+    form.querySelector("input")!.value = "wheat";
+
+    const event = submit(form);
+    expect(event.defaultPrevented).toBe(true);
+    await vi.waitFor(() => expect(save).toHaveBeenCalledOnce());
+    const data = vi.mocked(save).mock.calls[0]![0];
+    expect(data.get("name")).toBe("wheat");
+    expect(data.get("intent")).toBe("publish");
+    await vi.waitFor(() => expect(form.querySelector("input")!.value).toBe(""));
+
+    enhanced?.destroy?.();
+    expect(submit(form).defaultPrevented).toBe(false);
+    expect(save).toHaveBeenCalledOnce();
+    form.remove();
+  });
 });
+
+function submit(form: HTMLFormElement): SubmitEvent {
+  const submitter = form.querySelector<HTMLButtonElement>("button[type=submit]");
+  const event = new SubmitEvent("submit", { bubbles: true, cancelable: true, submitter });
+  form.dispatchEvent(event);
+  return event;
+}

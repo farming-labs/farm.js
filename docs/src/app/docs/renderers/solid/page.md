@@ -113,7 +113,8 @@ The binding properties are backed by Solid signals. `useStore(store)` binds your
 store from `createStore` in `@farm.js/core/renderer-client`, to an accessor; see
 [Shared client state](/docs/renderers#shared-client-state). `Link` from `@farm.js/solid/bindings`
 navigates and prefetches like the React one; see [Link in Solid, Vue, and Svelte](/docs/routing#link-in-solid-vue-and-svelte).
-Action form components (`useAction().Form`), fetchers, integration providers, and the docs adapter
+`useAction(fn).Form` renders a form that submits through the action; see
+[action forms](/docs/renderers#action-forms). Fetchers, integration providers, and the docs adapter
 remain React-oriented today. Markdown and MDX pages and [programmatic UI routes](/docs/routing#programmatic-routes) render with Solid, and so
 do [generated metadata images](/docs/routing#generated-metadata-images) written in Solid JSX.
 

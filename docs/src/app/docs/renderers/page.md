@@ -71,7 +71,7 @@ The higher-level framework features below use those adapter primitives:
 | Client theme and i18n state                      | Available                | Through `preact/compat`         | Solid binding        | Vue binding          | Svelte store         |
 | Shared client stores (`createStore`)             | Available                | Through `preact/compat`         | Solid binding        | Vue binding          | Svelte store         |
 | Typed `Link` components                          | Available                | Through `preact/compat`         | Solid component      | Vue component        | Svelte component     |
-| Action form components (`useAction().Form`)      | Available                | Through `preact/compat`         | Not yet              | Not yet              | Not yet              |
+| Action form components (`useAction().Form`)      | Available                | Through `preact/compat`         | `<action.Form>`      | `<action.Form>`      | `use:action.enhance` |
 | Programmatic UI routes                           | Available                | Available                       | Available            | Available            | Available            |
 | Markdown and MDX pages (`page.md`)               | Available                | Available                       | Available            | Available            | Available            |
 | Docs adapter                                     | Available                | Compatibility surface           | React-oriented today | React-oriented today | React-oriented today |
@@ -135,6 +135,69 @@ and sends the result back, on the same actions islands mode uses. A query's resu
 cache, and a query still on the page reads again when an action invalidates its key. Without the
 flag, the import stops the build with `CLIENT_SERVER_FUNCTION`. Keep server functions in their own
 modules: in the browser, a module that defines one exports only its server functions.
+
+### Action forms
+
+Each binding gives an action a form, as React's `useAction().Form` does. Submitting it sends the
+form's fields, and the name and value of the button that submitted it, to the action as `FormData`.
+A successful submission resets the form. A failed one keeps the fields and leaves the error in the
+action's `error`.
+
+```tsx
+// Solid: `<save.Form>` renders a `<form method="post">` and passes its props through.
+import { useAction } from "@farm.js/solid/bindings";
+import { saveCrop } from "../crops.server";
+
+export default function SaveCrop() {
+  const save = useAction(saveCrop);
+
+  return (
+    <save.Form>
+      <input name="name" />
+      <button type="submit">Save</button>
+      {save.error && <p role="alert">{save.error.message}</p>}
+    </save.Form>
+  );
+}
+```
+
+```vue
+<!-- Vue: `save.Form` renders a `<form method="post">`; attributes and listeners pass through. -->
+<script setup lang="ts">
+import { useAction } from "@farm.js/vue/bindings";
+import { saveCrop } from "../crops.server";
+
+const save = useAction(saveCrop);
+</script>
+
+<template>
+  <save.Form>
+    <input name="name" />
+    <button type="submit">Save</button>
+  </save.Form>
+  <p v-if="save.error.value" role="alert">{{ save.error.value.message }}</p>
+</template>
+```
+
+```svelte
+<!-- Svelte: enhance a form you write. -->
+<script lang="ts">
+  import { createAction } from "@farm.js/svelte/bindings";
+  import { saveCrop } from "../crops.server";
+
+  const save = createAction(saveCrop);
+</script>
+
+<form method="post" use:save.enhance>
+  <input name="name" />
+  <button type="submit">Save</button>
+</form>
+{#if $save.error}<p role="alert">{$save.error.message}</p>{/if}
+```
+
+A submit listener of your own runs first. If it calls `event.preventDefault()`, the action does not
+run. The browser calls the action, so a form submitted with JavaScript turned off posts to the page
+natively instead of reaching it.
 
 ### Shared client state
 
@@ -299,6 +362,9 @@ export function useRouter() {
 - `getSnapshot()` returns the same value until the state changes, so an identity check is enough to
   skip an update.
 - Call `dispose()` on a query store when its component unmounts.
+- For an action form, call `submitRendererActionForm(action, event)` from the form's `submit`
+  listener. It does what the [action forms](#action-forms) above do: it cancels the browser's
+  submission, sends the fields and submitter as `FormData`, and resets the form on success.
 - During server rendering, a query store returns an idle snapshot and starts no request. The browser
   loads it after hydration.
 

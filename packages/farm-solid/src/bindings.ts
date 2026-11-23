@@ -18,6 +18,7 @@ import {
   createRendererTheme,
   FARM_LINK_OPTION_KEYS,
   resolveLinkAttributes,
+  submitRendererActionForm,
   type DefaultRouteHref,
   type FarmActionOptions,
   type FarmActionSnapshot,
@@ -91,7 +92,33 @@ export type FarmSolidAction<TInput, TResult, TError extends Error = Error> = Far
   readonly data: TResult | null;
   readonly error: TError | null;
   reset(): void;
+  /**
+   * A `<form>` that submits its fields through this action, as React's `useAction().Form`
+   * does. Attributes and an `onSubmit` handler pass through; calling `preventDefault()` in that
+   * handler keeps the form from submitting.
+   */
+  Form(props: JSX.FormHTMLAttributes<HTMLFormElement>): JSX.Element;
 };
+
+function createActionForm(action: Parameters<typeof submitRendererActionForm>[0]) {
+  return function Form(props: JSX.FormHTMLAttributes<HTMLFormElement>): JSX.Element {
+    const [local, form] = splitProps(props, ["onSubmit"]);
+    const onSubmit = (event: SubmitEvent & { currentTarget: HTMLFormElement }) => {
+      const handler = local.onSubmit as
+        | ((event: SubmitEvent) => void)
+        | [(data: unknown, event: SubmitEvent) => void, unknown]
+        | undefined;
+      if (typeof handler === "function") handler(event);
+      else if (Array.isArray(handler)) handler[0](handler[1], event);
+      void submitRendererActionForm(action, event);
+    };
+    // POST keeps field values out of the URL if the form submits before the page hydrates.
+    return createComponent(
+      Dynamic,
+      mergeProps({ method: "post" }, form, { component: "form", onSubmit }),
+    );
+  };
+}
 
 export function useAction<TInput, TResult, TError extends Error = Error>(
   target:
@@ -109,6 +136,7 @@ export function useAction<TInput, TResult, TError extends Error = Error>(
     data: { get: () => snapshot().data },
     error: { get: () => snapshot().error },
     reset: { value: () => action.reset() },
+    Form: { value: createActionForm(action) },
   }) as FarmSolidAction<TInput, TResult, TError>;
 }
 

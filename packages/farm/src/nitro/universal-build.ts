@@ -8148,6 +8148,7 @@ function renderFarmServerTreeLayout(Layout, props, outlets) {
   applyFarmBasePath,
   applyFarmCspNonceToResponse,
   createFarmCspNonce,
+  createPreHydrationClickQueueScript,
   stampFarmCspNonce,
   isDeferred,
   prepareDeferredData,
@@ -8744,6 +8745,12 @@ function wrapWithFarmIntegrationProviders(element) {
     wrapped = React.createElement(Component, provider.props || {}, wrapped);
   }
   return wrapped;
+}
+// The browser hydrates a page island or a route slot as its own root, inside the integration
+// providers, so the server renders them inside it too. React lines an island up with its tree
+// position instead, and its providers render no markup.
+function wrapFarmIslandIntegrationProviders(element) {
+  return ${isReactRenderer(config.renderer) ? "element" : "wrapWithFarmIntegrationProviders(element)"};
 }
 const serverRuntimeIntegrations = Object.fromEntries(
   Object.entries(configuredIntegrations).filter(([, integration]) =>
@@ -12558,7 +12565,7 @@ ${
             }
 
             if (route.shouldHydrate && !shouldHydrateLayout) {
-              pageElement = wrapFarmRouteClientGraph(pageElement);
+              pageElement = wrapFarmRouteClientGraph(wrapFarmIslandIntegrationProviders(pageElement));
             } else if (shouldHydrateLayout && !route.shouldHydrate) {
               pageElement = route.serverTree
                 ? await renderFarmRouteServerTree(
@@ -12619,7 +12626,9 @@ ${
                     },
                     slot.hydrates
                       ? wrapFarmRouteClientGraph(
-                          React.createElement(slot.module.default, slot.props),
+                          wrapFarmIslandIntegrationProviders(
+                            React.createElement(slot.module.default, slot.props),
+                          ),
                         )
                       : React.createElement(slot.module.default, slot.props),
                   );
@@ -12845,6 +12854,18 @@ ${
         // Set once the whole document is rendered: whether it starts with the boot entry, which
         // preloads nothing.
         let farmBootsClient = false;
+        // A document something hydrates over holds the clicks and submits made before it hydrates,
+        // for the client entry to replay, as development does. One that starts with the boot entry
+        // holds its own.
+        const farmHoldsInteractions =
+          route.shouldHydrate ||
+          shouldHydrateLayout ||
+          renderedRouteSlots.some(function(slot) { return slot.hydrates; });
+        const renderFarmPreHydrationHoldScript = function() {
+          return farmHoldsInteractions && !farmBootsClient
+            ? stampFarmCspNonce(createPreHydrationClickQueueScript()) + '\\n'
+            : '';
+        };
         // A client navigation swaps this document in without running its scripts. A route a
         // shared cache stores renders the same for every request.
         const farmNavigationRequest = ${
@@ -12863,7 +12884,7 @@ ${
           composed = composed
             // Inject CSS link after opening head tag or first meta tag
             .replace(/<head([^>]*)>/i, function(match, attrs) { return '<head' + attrs + '>\\n  <link rel="stylesheet" href="/__farm_client_css_href__">' + (farmBootsClient ? "" : renderFarmClientModulePreloads(composed, route.clientModule, farmNavigationRequest)); })
-            .replace(/<\\/head>/i, () => renderFarmRendererHydrationScript() + '\\n</head>')
+            .replace(/<\\/head>/i, () => renderFarmRendererHydrationScript() + '\\n' + renderFarmPreHydrationHoldScript() + '</head>')
             // Explicit metadata wins over renderer and layout titles. Without
             // explicit metadata, a renderer title wins over the layout title.
             .replace(/<head([^>]*)>([\\s\\S]*?)<\\/head>/i, (match, attrs, headContent) => {
@@ -12938,6 +12959,7 @@ ${
             '  <link rel="stylesheet" href="/__farm_client_css_href__">\\n' +
             '  <link rel="modulepreload" href="/__farm_client_js_src__">' + renderFarmClientModulePreloads(null, route.clientModule) + '\\n' +
             renderFarmRendererHydrationScript() + '\\n' +
+            renderFarmPreHydrationHoldScript() +
             '</head>\\n<body>\\n' + farmEarlyClientScripts + '  <div id="root">';
           const streamClientScripts = farmEarlyClientScripts ? '' : farmClientScripts();
           const streamSuffix = function() {
@@ -13094,7 +13116,7 @@ ${
   \${suppressDefaultTitle ? "" : "<title>" + title + "</title>"}\${metaTags}\${rendererHead ? "\\n  " + rendererHead : ""}
   <link rel="stylesheet" href="/__farm_client_css_href__">\${farmBootsClient ? "" : renderFarmClientModulePreloads(html, route.clientModule, farmNavigationRequest)}
   \${renderFarmRendererHydrationScript()}
-</head>
+\${renderFarmPreHydrationHoldScript()}</head>
 <body>
   <div id="root">\${html}</div>
   \${renderFarmClientBootstrapScript(pageProps.__farmCanonicalPath, farmDeferredData.data.slots, farmDeferredData.data.page, routePathname)}\${renderFarmDeferredDataScript(farmDeferredData.records)}

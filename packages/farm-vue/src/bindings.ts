@@ -4,6 +4,7 @@ import {
   computed,
   defineComponent,
   h,
+  mergeProps,
   onScopeDispose,
   readonly,
   shallowRef,
@@ -18,6 +19,7 @@ import {
   createRendererRouter,
   createRendererTheme,
   resolveLinkAttributes,
+  submitRendererActionForm,
   type FarmActionOptions,
   type FarmActionSnapshot,
   type FarmActionSubmit,
@@ -97,7 +99,26 @@ export type FarmVueAction<TInput, TResult, TError extends Error = Error> = FarmA
   data: ComputedRef<TResult | null>;
   error: ComputedRef<TError | null>;
   reset(): void;
+  /**
+   * A `<form>` that submits its fields through this action, as React's `useAction().Form`
+   * does. Attributes and an `@submit` listener pass through; calling `preventDefault()` in that
+   * listener keeps the form from submitting.
+   */
+  Form: ReturnType<typeof createActionForm>;
 };
+
+function createActionForm(action: Parameters<typeof submitRendererActionForm>[0]) {
+  return defineComponent({
+    name: "FarmActionForm",
+    inheritAttrs: false,
+    setup(_props, { attrs, slots }) {
+      const onSubmit = (event: Event) => void submitRendererActionForm(action, event);
+      // POST keeps field values out of the URL if the form submits before the page hydrates.
+      return () =>
+        h("form", mergeProps({ method: "post" }, attrs, { onSubmit }), slots.default?.());
+    },
+  });
+}
 
 export function useAction<TInput, TResult, TError extends Error = Error>(
   target:
@@ -116,6 +137,7 @@ export function useAction<TInput, TResult, TError extends Error = Error>(
     data: computed(() => state.value.data),
     error: computed(() => state.value.error),
     reset: () => action.reset(),
+    Form: createActionForm(action),
   });
 }
 

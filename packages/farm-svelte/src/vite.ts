@@ -7,7 +7,26 @@ export async function createFarmRendererPlugin(): Promise<PluginOption> {
   // The adapter runtime is distributed as production-compiled Svelte code. Keep
   // application components on that same ABI in dev; HMR remains enabled by the
   // Vite plugin through Svelte's separate `hmr` compiler option.
-  return [sveltePlugin({ compilerOptions: { dev: false } }), svelteBrowserConditions()];
+  return [
+    svelteServerRuntime(),
+    sveltePlugin({ compilerOptions: { dev: false } }),
+    svelteBrowserConditions(),
+  ];
+}
+
+/**
+ * In development, vite-plugin-svelte pre-bundles `svelte` for the server environment unless the
+ * app excludes it. Pages then import that bundled copy while this adapter's server renderer, which
+ * Vite does not pre-bundle, imports Svelte's own modules: two runtimes, so a page's `getContext()`
+ * read a component context the renderer had set in the other one and threw
+ * `lifecycle_outside_component`. Excluding `svelte` keeps both on one runtime, as a production
+ * build does.
+ */
+function svelteServerRuntime(): PluginOption {
+  return {
+    name: "farm:svelte-server-runtime",
+    config: () => ({ ssr: { optimizeDeps: { exclude: ["svelte"] } } }),
+  } as PluginOption;
 }
 
 /**
