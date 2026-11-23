@@ -106,6 +106,10 @@ may be restricted to one project slug: pass the matching `--project` when starti
 With the matching Infra access-control gateway, revoking a key also blocks existing
 preview traffic. **Stop preview** in the detail page revokes that grant across reconnects
 without stopping your local app; start a new `farm preview` to get another grant.
+A stopped preview releases its address: visitors get the same 404 as a preview that isn't
+running, the CLI reports that the preview is no longer authorized, and you can start a new
+preview under the same name right away. Other accounts can't claim the name for a short
+reservation window. The dashboard moves the preview from **Active** to **History**.
 Both transports check access before forwarding. WebSocket relays also check idle connections
 every five seconds; authority requests have a five-second timeout and fail closed.
 Work already executed locally cannot be undone. Older gateways without the access hook

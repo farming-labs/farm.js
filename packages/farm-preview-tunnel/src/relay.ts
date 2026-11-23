@@ -402,8 +402,12 @@ export function createPersistentPreviewRelay(options: PersistentPreviewRelayOpti
         return sendText(response, 412, "The selected preview connection has changed.");
       }
 
+      // A denied session's socket is already closed and its name released, so its address
+      // answers like any preview that isn't running.
       if (activeLocalSession && !(await checkAccess(activeLocalSession))) {
-        return sendText(response, 403, "This preview is no longer authorized.");
+        return handleFallback(request, response, options.fallbackHandler, () =>
+          sendText(response, 404, `No active persistent preview is running for "${route.name}".`),
+        );
       }
 
       if (options.observer?.request) {

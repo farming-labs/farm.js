@@ -1019,14 +1019,20 @@ async function handleSessionRoute(
   config: PreviewGatewayRuntimeConfig,
   route: { sessionId: string; action?: string; requestId?: string },
 ) {
-  const session = await requireSession(
-    store,
-    route.sessionId,
-    readPreviewBearerToken(request) || url.searchParams.get("token"),
-  );
+  const token = readPreviewBearerToken(request) || url.searchParams.get("token");
+  // Cleanup of a session that already ended, for example one released when its preview was
+  // stopped, has nothing left to do.
+  if (
+    request.method === "DELETE" &&
+    !route.action &&
+    !(await store.getSessionById(route.sessionId))
+  )
+    return json({ ok: true });
+  const session = await requireSession(store, route.sessionId, token);
 
   // Cleanup is still possible when the authority is unavailable or the grant is revoked.
-  if (request.method !== "DELETE" || route.action) await requireSessionAccess(config, session);
+  if (request.method !== "DELETE" || route.action)
+    await requireSessionAccess(config, session, store);
 
   if (request.method === "GET" && route.action === "requests") {
     return await pollSessionRequests(url, store, config, session, request.signal);
@@ -1136,13 +1142,13 @@ async function pollSessionRequests(
   while (Date.now() < deadline) {
     if (signal.aborted) return abandoned();
     if (Date.now() >= nextAccessCheckAt) {
-      await requireSessionAccess(config, session);
+      await requireSessionAccess(config, session, store);
       nextAccessCheckAt = Date.now() + 1000;
     }
     const requests = await store.takeRequests(session.id, DEFAULT_POLL_REQUEST_LIMIT);
     if (requests.length) {
       try {
-        await requireSessionAccess(config, session);
+        await requireSessionAccess(config, session, store);
         if (!signal.aborted) await markSessionOnline(store, config, session);
       } catch (error) {
         await requeuePreviewRequests(store, config, session, requests);
@@ -1204,7 +1210,14 @@ async function proxyPublicRequest(
     return inactivePreviewResponse(request, route.name);
   }
 
-  await requireSessionAccess(config, session);
+  try {
+    await requireSessionAccess(config, session, store);
+  } catch (error) {
+    // A stopped preview's address answers like one that isn't running.
+    if (error instanceof PreviewAccessDeniedError)
+      return inactivePreviewResponse(request, route.name);
+    throw error;
+  }
 
   const startedAt = Date.now();
   let status = 500;
@@ -1306,7 +1319,7 @@ async function waitForPreviewResponse(
   while (Date.now() < deadline) {
     if (signal.aborted) return "cancelled";
     if (Date.now() >= nextLivenessCheckAt) {
-      await requireSessionAccess(config, session);
+      await requireSessionAccess(config, session, store);
       const latestSession = await store.getSessionById(session.id);
       if (!latestSession || !isPreviewClientOnline(latestSession, config)) {
         if (latestSession) await releasePreviewSession(store, config, latestSession);
@@ -1317,7 +1330,7 @@ async function waitForPreviewResponse(
 
     const response = await store.getResponse(session.id, requestId);
     if (response) {
-      await requireSessionAccess(config, session);
+      await requireSessionAccess(config, session, store);
       await store.deleteResponse(session.id, requestId);
       return response;
     }
@@ -1332,9 +1345,15 @@ async function waitForPreviewResponse(
   return undefined;
 }
 
+/**
+ * Asks the access hook whether a session may still serve. A denial is final: with `store`, the
+ * session is released at once, so its address answers like any inactive preview and its owner
+ * can start a new preview under the same name. A hook failure releases nothing.
+ */
 async function requireSessionAccess(
   config: PreviewGatewayRuntimeConfig,
   session: PreviewGatewaySession,
+  store?: PreviewGatewayStore,
 ) {
   if (!config.authorizeSession) return;
   const { id, name, ownerId, project, keyId, grantId, expiresAt } = session;
@@ -1352,7 +1371,13 @@ async function requireSessionAccess(
   } catch {
     throw new GatewayHttpError(503, "Preview access verification is temporarily unavailable.");
   }
-  if (allowed !== true) throw new GatewayHttpError(403, "This preview is no longer authorized.");
+  if (allowed !== true) {
+    if (store && (await store.getSessionById(session.id))) {
+      await releasePreviewSession(store, config, session);
+      reportSession(config, session, "disconnected");
+    }
+    throw new PreviewAccessDeniedError();
+  }
 }
 
 async function markSessionOnline(
@@ -1516,7 +1541,10 @@ async function readBodyWithLimit(request: Request, maxBytes: number, message: st
 async function requireSession(store: PreviewGatewayStore, sessionId: string, token: string | null) {
   const session = await store.getSessionById(sessionId);
   if (!session || !token || !tokensMatch(token, session.token)) {
-    throw new GatewayHttpError(401, "Invalid preview gateway session.");
+    throw new GatewayHttpError(
+      401,
+      "This preview session ended or its token is invalid. Run farm preview to start a new one.",
+    );
   }
   return session;
 }
@@ -1731,5 +1759,12 @@ class GatewayHttpError extends Error {
     message: string,
   ) {
     super(message);
+  }
+}
+
+/** The access hook refused a session, for example because its preview was stopped. */
+class PreviewAccessDeniedError extends GatewayHttpError {
+  constructor() {
+    super(403, "This preview is no longer authorized.");
   }
 }
