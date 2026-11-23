@@ -302,6 +302,21 @@ either. `options` holds:
   they all close. Tie a cache shared between the graphs to it, and clear it on `abort`. Development
   doesn't pass it.
 
+### Hot updates in development
+
+The renderer contract has no hot-update hook: hot updates belong to your Vite plugin. The official
+renderers get them from their library's plugin: `@vitejs/plugin-vue`, `vite-plugin-solid`,
+`@sveltejs/vite-plugin-svelte`, and `@preact/preset-vite`. Each accepts an edited component module
+and swaps it in place, so the page and its layouts keep their state.
+
+Without that, Vite reloads the page when you save a component, and all component state resets,
+including the layout's. The leaf example works this way. Production builds aren't affected.
+
+To add hot updates, have the plugin's `transform()` append an `import.meta.hot.accept()` handler to
+component modules in the browser graph (`ssr` false in the transform options) that swaps the new
+component into the instances your runtime has mounted. Vite's
+[HMR API](https://vite.dev/guide/api-hmr) describes the handler.
+
 ## Streaming
 
 Without streaming, Farm renders a page with `renderToString()` and sends it once the whole page is
@@ -464,9 +479,8 @@ export function useServerQuery(query, input, options) {
 - `getSnapshot()` returns the same value until the state changes, so an identity check is enough to
   skip an update.
 - Call `dispose()` on a query store when its component unmounts.
-- On the server, the router store has no request to read: its snapshot is the pathname `/` with no
-  params. Render anything route-specific on the server from the `params` and `searchParams` props
-  Farm passes to pages, and the `params` it passes to layouts.
+- On the server, the router store reads the request's URL, so a component renders the same path,
+  search params, and route params there as in the browser.
 - On the server, a query store returns an idle snapshot and starts no request. The browser loads the
   query after hydration.
 - A query that is still on the page reads again when an action invalidates its key with
