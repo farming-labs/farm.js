@@ -4219,6 +4219,9 @@ window.__FARM_I18N__ = ${getFarmI18nClientSnapshot() ? serializeInlineValue(getF
         resolveFarmPlatform() !== "mobile" &&
         canBootFarmIslandsClient(this.config);
       const hydrationClickQueueScript = this.renderPreHydrationHold(req, bootClient);
+      // What a renderer needs before it hydrates, such as Solid's hydration globals. The buffered
+      // document and production write it too.
+      const rendererHydrationScript = this.rendererRuntime.generateHydrationScript?.() || "";
 
       const {
         title,
@@ -4302,7 +4305,7 @@ window.__FARM_I18N__ = ${getFarmI18nClientSnapshot() ? serializeInlineValue(getF
   <title>${title}</title>${metaTags}${i18nAlternateTags}
   ${fontHead}
   ${globalStylesheetLink}${devStyleLinks.map((l) => `\n  ${l}`).join("")}
-  <script type="module" src="/@vite/client"></script>
+  <script type="module" src="/@vite/client"></script>${rendererHydrationScript ? `\n  ${rendererHydrationScript}` : ""}
   ${propsScript}
   ${hydrationClickQueueScript}
 </head>
@@ -4375,6 +4378,7 @@ window.__FARM_I18N__ = ${getFarmI18nClientSnapshot() ? serializeInlineValue(getF
                             globalStylesheetLink,
                             ...devStyleLinks,
                             `<script type="module" src="/@vite/client"></script>`,
+                            rendererHydrationScript,
                             propsScript,
                             hydrationClickQueueScript,
                           ]
