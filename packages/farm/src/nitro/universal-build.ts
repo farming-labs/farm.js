@@ -2047,8 +2047,12 @@ async function buildClient(
   // A mobile client from an earlier build must not outlive the `mobile` block.
   if (!mobile) await removeFarmMobileClientManifest(path.dirname(outputDir));
   const viteBuild = productionVite.build;
-  const { farmIslandContainersPlugin, farmPlugin, farmServerOnlyEntriesPlugin } =
-    await import("../vite");
+  const {
+    farmIslandContainersPlugin,
+    farmNavigationPlugin,
+    farmPlugin,
+    farmServerOnlyEntriesPlugin,
+  } = await import("../vite");
   const { PluginManager } = await import("../plugin");
   const fs = await import("fs/promises");
 
@@ -2642,6 +2646,7 @@ async function buildClient(
           ...(rendererVitePlugins as any[]),
           ...(config.vite.plugins || []),
           farmServerOnlyEntriesPlugin({ platform, distDir: config.distDir || ".farm" }),
+          farmNavigationPlugin(config.renderer),
           farmDocsClientConfigPlugin(
             adapterOwnsDocsRuntime ? getFarmDocsAdapterConfigModule(config.docs) : undefined,
           ),
@@ -6444,8 +6449,12 @@ async function buildSSRInMemory(
   configuredHeaderRoutes: UniversalConfiguredHeaderRoute[];
 }> {
   const viteBuild = productionVite.build;
-  const { farmIslandContainersPlugin, farmPlugin, farmServerOnlyEntriesPlugin } =
-    await import("../vite");
+  const {
+    farmIslandContainersPlugin,
+    farmNavigationPlugin,
+    farmPlugin,
+    farmServerOnlyEntriesPlugin,
+  } = await import("../vite");
   const { PluginManager } = await import("../plugin");
   const fs = await import("fs/promises");
 
@@ -6897,6 +6906,7 @@ async function buildSSRInMemory(
           : []),
         { ...createReactProductionModePlugin(), enforce: "pre" as const },
         farmServerOnlyEntriesPlugin({ distDir: config.distDir || ".farm" }),
+        farmNavigationPlugin(config.renderer),
         farmIslandContainersPlugin(config),
         farmPlugin(
           {

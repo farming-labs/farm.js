@@ -77,6 +77,7 @@ const entry = {
   "i18n/client": "src/i18n/client.tsx",
   "internal/client-runtime": "src/client/production-runtime.ts",
   "internal/spa-router": "src/client/spa-router.ts",
+  "internal/navigation-neutral": "src/navigation-neutral.ts",
   "internal/client-error-overlay": "src/client/runtime-error-overlay.ts",
   "internal/isolated-boundary": "src/client/isolated-boundary.ts",
   "internal/island-value-store": "src/client/island-value-store.ts",

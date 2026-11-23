@@ -724,6 +724,11 @@
       "import": "./dist/internal/spa-router.mjs",
       "require": "./dist/internal/spa-router.cjs"
     },
+    "./internal/navigation-neutral": {
+      "types": "./dist/internal/navigation-neutral.d.ts",
+      "import": "./dist/internal/navigation-neutral.mjs",
+      "require": "./dist/internal/navigation-neutral.cjs"
+    },
     "./internal/client-error-overlay": {
       "types": "./dist/internal/client-error-overlay.d.ts",
       "import": "./dist/internal/client-error-overlay.mjs",
