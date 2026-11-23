@@ -298,6 +298,52 @@ export function createRendererAction<TInput, TResult, TError extends Error = Err
   } as FarmAction<TInput, TResult, TError>;
 }
 
+/**
+ * Submits a form through an action, as React's `useAction().Form` does: the browser's own
+ * submission is cancelled, the form's fields and the button that submitted it become the action's
+ * `FormData`, a failure stays in the action's `error`, and a successful submission resets the
+ * form. Solid's and Vue's `Form` components and Svelte's `enhance` action call it from their
+ * `submit` listener. A listener that already cancelled the submission keeps it cancelled.
+ */
+export async function submitRendererActionForm(
+  action: Pick<FarmAction<any, any, any>, "submit">,
+  event: Event,
+): Promise<void> {
+  const form = event.target;
+  if (event.defaultPrevented || !isFormElement(form)) return;
+  event.preventDefault();
+  const submitter = (event as SubmitEvent).submitter ?? null;
+  try {
+    await action.submit(createSubmittedFormData(form, submitter));
+  } catch {
+    // The action's snapshot keeps the error, as React's form action does.
+    return;
+  }
+  form.reset();
+}
+
+function isFormElement(value: EventTarget | null): value is HTMLFormElement {
+  return typeof HTMLFormElement !== "undefined" && value instanceof HTMLFormElement;
+}
+
+function createSubmittedFormData(form: HTMLFormElement, submitter: HTMLElement | null): FormData {
+  if (submitter) {
+    try {
+      const data = new FormData(form, submitter);
+      const name = submitter.getAttribute("name");
+      // An engine that ignores the submitter argument leaves the button out.
+      if (!name || data.has(name)) return data;
+    } catch {
+      // Not one of this form's submit buttons: submit the fields alone.
+      return new FormData(form);
+    }
+    const data = new FormData(form);
+    data.append(submitter.getAttribute("name")!, submitter.getAttribute("value") ?? "");
+    return data;
+  }
+  return new FormData(form);
+}
+
 export interface FarmRendererQueryOptions extends ServerQueryFetchOptions {
   enabled?: boolean;
   refetchOnWindowFocus?: boolean;
