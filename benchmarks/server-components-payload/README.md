@@ -120,6 +120,12 @@ engines, so both see the same load. This run had other work on the machine (load
   data, as a server tree leaves out its static HTML, and the server renders 3.4 times as many pages.
 - After the first, navigations paint within a millisecond of RSC on docs and shop pages, 5 ms
   sooner on blog posts and 4 ms later on guide posts, within this machine's noise.
+- A navigation that swaps the whole page in (guide and shop, while their layout waits) parsed
+  the response, took the page's markup back out and parsed it again in the document. Since it
+  moves the parsed nodes in (2026-11-23), a guide navigation paints in 68 ms instead of 75, against
+  RSC's 71 (`timing.mjs` with a build from just before, `main` at a2406339f), and in 66 ms instead
+  of 72 over five more rounds of ten, where that build against a copy of itself differed by 1 ms.
+  docs and blog swap a segment, which already moved its nodes; shop's pages are too small to show.
 - From a server on the same machine, the first navigation is slower than RSC's: by 15 ms on docs,
   5 ms on blog, 36 ms on guide and 66 ms on shop. It loads what the first load left out, the
   client runtime (81.5 KB br, with React DOM) and the router. On shop and guide the click was also
