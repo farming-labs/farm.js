@@ -166,7 +166,7 @@ So I threw it out. With the separate entry, the React production client entry is
 
 With both fixes in a packed `@farm.js/core`, leaf runs with no React anywhere in the app. The production build serves server-rendered HTML, the browser hydrates it in place (the button the server rendered is the button you click), the counter counts, and `router.push("/about")` navigates without a document reload. Development does the same.
 
-That's the answer I wanted. **Farm's renderer contract is real: three modules and eleven named exports, and the core path no longer needs React installed.** Both fixes are on `main` and ship in the next release.
+That's the answer I wanted. **Farm's renderer contract is real: three modules and eleven named exports, and the core path no longer needs React installed.** Both fixes shipped in 0.1.79.
 
 <span id="your-own-file-format" className="blog-heading-anchor" />
 
@@ -212,7 +212,7 @@ leaf's compiler is 24 lines of string handling. It pulls out the two script bloc
 
 There's one exception to Farm not reading your file. Farm decides whether a page hydrates before your compiler runs, by reading the `hydrate` export from the file as written. Any declaration with a literal `true` or `false` works: `const`, `let`, or `var`, with or without a type annotation, or through an export list. A value Farm can't read without running your code, like `!0` or an import, fails the build with an error that names the file. When I first wrote this post, `!0` made the page render on the server and silently never hydrate, with the official Svelte renderer as well as leaf.
 
-The file format also turned up three bugs in how Farm handled a renderer's extensions. A new `page.leaf` wasn't served until you restarted `farm dev`, and new `.svelte` and `.vue` pages had the same bug. A parallel-route slot like `@modal/page.leaf` was served as a page. And `farm explain` didn't find `.leaf` routes. All three, and the silent `hydrate` failure, are fixed on `main` and ship in the next release.
+The file format also turned up three bugs in how Farm handled a renderer's extensions. A new `page.leaf` wasn't served until you restarted `farm dev`, and new `.svelte` and `.vue` pages had the same bug. A parallel-route slot like `@modal/page.leaf` was served as a page. And `farm explain` didn't find `.leaf` routes. All three fixes shipped in 0.1.79. The silent `hydrate` failure is fixed on `main` and ships in the next release.
 
 <span id="components-for-leaf" className="blog-heading-anchor" />
 
