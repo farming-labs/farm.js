@@ -685,6 +685,95 @@ test("treats an unexpected managed native disconnect as a fallback signal", asyn
   }
 });
 
+test("reconnects a long-lived native tunnel the relay drops, at the same URL", async () => {
+  // Vercel ends the relay's connections after the function's maximum duration and on deploys.
+  // The preview used to fall back to a polling session the gateway refused, and exit.
+  const plan = {
+    provider: "farm-gateway",
+    gatewayUrl: "https://preview.farmjs.dev",
+    relayUrl: "wss://preview.farmjs.dev/agent",
+    target: { localUrl: "http://localhost:3000", host: "localhost", port: 3000, source: "port" },
+    requestedName: "long-lived",
+    requestedHostname: "long-lived.preview.farmjs.dev",
+    requestedPublicUrl: "https://long-lived.preview.farmjs.dev",
+  };
+  const calls = [];
+  const starts = [
+    () => ({ sessionId: "first", publicUrl: plan.requestedPublicUrl }),
+    () => {
+      throw new Error("relay is redeploying");
+    },
+    () => ({ sessionId: "second", publicUrl: plan.requestedPublicUrl }),
+  ];
+  const exits = {
+    first: { closeCode: 1006 },
+    second: { closeCode: 1000, closeReason: "Preview expired" },
+  };
+  const runtime = {
+    async startPreviewAgent(_relayUrl, name) {
+      calls.push(["start", name]);
+      return starts.shift()();
+    },
+    async stopPreviewAgent(sessionId) {
+      calls.push(["stop", sessionId]);
+      return true;
+    },
+    async waitPreviewAgentExit(sessionId) {
+      calls.push(["wait-exit", sessionId]);
+      return exits[sessionId];
+    },
+  };
+
+  const session = await runNativePreviewTunnel(plan, {
+    runtime,
+    minConnectedMs: 0,
+    reconnectDelaysMs: [0, 0, 0],
+  });
+
+  assert.equal(session.sessionId, "first");
+  assert.deepEqual(calls.slice(0, 6), [
+    ["start", "long-lived"],
+    ["wait-exit", "first"],
+    ["stop", "first"],
+    ["start", "long-lived"],
+    ["start", "long-lived"],
+    ["wait-exit", "second"],
+  ]);
+  assert.deepEqual(calls.at(-1), ["stop", "second"]);
+});
+
+test("falls back when a dropped native tunnel cannot reconnect", async () => {
+  const plan = {
+    provider: "farm-gateway",
+    gatewayUrl: "https://preview.farmjs.dev",
+    relayUrl: "wss://preview.farmjs.dev/agent",
+    target: { localUrl: "http://localhost:3000", host: "localhost", port: 3000, source: "port" },
+    requestedName: "gone",
+    requestedHostname: "gone.preview.farmjs.dev",
+    requestedPublicUrl: "https://gone.preview.farmjs.dev",
+  };
+  let starts = 0;
+  const runtime = {
+    async startPreviewAgent() {
+      starts += 1;
+      if (starts > 1) throw new Error("relay unavailable");
+      return { sessionId: "only", publicUrl: plan.requestedPublicUrl };
+    },
+    async stopPreviewAgent() {
+      return true;
+    },
+    async waitPreviewAgentExit() {
+      return { closeCode: 1006 };
+    },
+  };
+
+  await assert.rejects(
+    runNativePreviewTunnel(plan, { runtime, minConnectedMs: 0, reconnectDelaysMs: [0, 0] }),
+    /disconnected unexpectedly/,
+  );
+  assert.equal(starts, 3);
+});
+
 test("uses the relay close reason for hosted expiry despite client clock skew", async () => {
   const basePlan = {
     provider: "farm-gateway",
