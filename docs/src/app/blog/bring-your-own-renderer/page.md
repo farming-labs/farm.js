@@ -1,99 +1,224 @@
 ---
 title: "Bring your own renderer"
-description: "I wrote a small React-like library to find out what Farm needs from a renderer: three modules, eleven named exports, and two fixes the official renderers had been hiding."
+description: "How to plug any UI library into Farm, one piece at a time: a descriptor, three small modules, a few hooks, and two ways to use a component library. The working example is farming-labs/leaf."
 ---
 
 # Bring your own renderer
 
 KinfeMichael Tariku · Nov 2026
 
-Farm ships five renderers: React, Preact, Solid, Vue, and Svelte. Every so often someone asks whether it could use a sixth, usually a library I have never written a line of. My honest answer has been "probably".
+Farm ships five renderers: React, Preact, Solid, Vue, and Svelte. This post is about the sixth, the one you write.
 
-I wanted a better answer than "probably". So I wrote a UI library nobody asked for and tried to plug it in.
+To find out what that takes, I wrote leaf, a small React-like UI library Farm had never heard of, and plugged it in. It now runs a whole Farm app: server rendering, hydration, client navigation, server functions, its own file format, and components from a component library. Every snippet below comes from that app, and you can run it:
 
-It's called leaf. It's 385 lines of TypeScript, it looks like React if you squint, and Farm had never heard of it. If Farm's renderer contract is real, leaf should run without a single change to core. If it isn't, leaf would show me where it breaks.
+```bash
+git clone https://github.com/farming-labs/leaf
+cd leaf
+pnpm install
+pnpm dev
+```
 
-It broke in two places.
+**A renderer is one descriptor and three small modules. Farm does the rest.**
 
 <BlogFigure kind="renderer-seams" caption="A renderer is three modules. Farm compiles routes with the Vite module, renders them to HTML with the server module, and hydrates that HTML with the client module." />
 
-<span id="what-farm-asks-of-a-renderer" className="blog-heading-anchor" />
+<span id="what-farm-does-and-what-you-do" className="blog-heading-anchor" />
 
-## What Farm asks of a renderer
+## What Farm does, and what you do
 
-A renderer is a descriptor that names three modules by package specifier. This is all of leaf's:
+Farm owns routing, layouts, data loading, server functions, caching, navigation, and deployment. A renderer never sees a URL.
 
-```ts
-// farm-leaf/src/index.ts
+For each request, Farm builds the route as one element tree. It calls your library's `createElement()` for the root layout, each nested layout, and the page. Then it asks your library for two things:
+
+- On the server, turn that tree into HTML.
+- In the browser, adopt that HTML, and render the next tree when the user navigates.
+
+That's the whole job. The leaf repo has three parts:
+
+- **`packages/leaf`** is the UI library: elements, hooks, a DOM patcher, and an HTML renderer that can stream. It's about 750 lines of JavaScript, and your library replaces it.
+- **`packages/farm-leaf`** is the adapter between leaf and Farm. This post builds it, one step at a time.
+- **`app`** is a Farm app that uses it.
+
+You probably have the library already. The adapter is what you write.
+
+<span id="step-1-the-descriptor" className="blog-heading-anchor" />
+
+## Step 1: the descriptor
+
+The descriptor tells Farm where your three modules are and what your library can do. It's the only thing an app imports:
+
+```js
+// packages/farm-leaf/src/index.js
 import { defineRenderer } from "@farm.js/core/renderer";
 
 export function leaf() {
   return defineRenderer({
     name: "leaf",
-    // Module ids, not functions: farm.config.ts stays serializable and each
-    // module resolves from the app's own node_modules.
     vite: "farm-leaf/vite",
     server: "farm-leaf/server",
     client: "farm-leaf/client",
     jsxImportSource: "leaf",
+    componentExtensions: [".leaf"],
     capabilities: {
-      streaming: { node: false, web: false }, // buffered SSR through renderToString()
-      reconcilesRerenders: true, // patching keeps same-position DOM nodes
-      functionComponents: true, // components are plain functions
+      streaming: { node: false, web: true },
+      reconcilesRerenders: true,
+      functionComponents: true,
     },
   });
 }
 ```
 
-An app selects it with `renderer: leaf()` in `farm.config.ts`. Farm resolves each module from the app and reads its named exports:
+- **`vite`, `server`, `client`** are package specifiers, not functions. That keeps `farm.config.ts` serializable, and each module resolves from the app's own `node_modules`. Give each one an entry in your package's `exports`.
+- **`jsxImportSource`** is where `.tsx` files get their JSX runtime. Your library needs a `jsx-runtime` entry that exports `jsx`, `jsxs`, and `Fragment`, as React's does.
+- **`componentExtensions`** adds file types that can be routes. It's optional, and [step 7](#step-7-optional-your-own-file-format) covers it.
+- **`capabilities`** says what your library can do:
+  - `reconcilesRerenders: true` means a re-render patches the DOM that's already there, so a layout keeps its state across navigation.
+  - `functionComponents: true` means a plain function that returns elements is a component. Farm checks it before rendering integration providers.
+  - `streaming` is covered in [step 8](#step-8-optional-streaming).
 
-| Module   | Required named exports                                                              |
-| -------- | ----------------------------------------------------------------------------------- |
-| `vite`   | `createFarmRendererPlugin`                                                          |
-| `server` | `name`, `createElement`, `isValidElement`, `Fragment`, `Suspense`, `renderToString` |
-| `client` | `createElement`, `Suspense`, `createRoot`, `hydrateRoot`                            |
-
-That's eleven exports. Streaming, error boundaries, head output, and app setup are optional exports on top, listed in [Renderer modules](/docs/renderers#renderer-modules).
-
-The surprising part is what is _not_ on the list. Routing, layouts, data loading, server functions, caching, navigation, and deployment are all Farm's. A renderer never sees a URL. **Farm composes every route into one tree with `createElement()`, and a renderer's whole job is to turn that tree into HTML on the server and into DOM in the browser.**
-
-That's a small contract. Small enough that a weekend library should be able to meet it.
-
-<span id="meet-leaf" className="blog-heading-anchor" />
-
-## Meet leaf
-
-leaf has the parts you would expect. Elements are plain objects, components are functions, state lives in hooks, and the browser patches the live DOM in place. There are no keys and no scheduler, and nothing suspends, so `Suspense` just renders its children.
-
-You can read it and run it. A version of leaf and its adapter is in the repo at [`examples/custom-renderer`](https://github.com/farming-labs/farm.js/tree/main/examples/custom-renderer), with an app, the conformance suite, and browser tests that run it in development and in a production build. That version is plain JavaScript with type declarations, the shape a published package has, so its line counts and a few names differ from the snippets here.
-
-The library is 316 lines for the core, 49 for `renderToString`, and 20 for the JSX runtime. The Farm adapter is smaller. The server module is a re-export with a name:
+The app picks the renderer in its config:
 
 ```ts
-// farm-leaf/src/server.ts
-import { Fragment, Suspense, createElement, isValidElement } from "leaf";
+// app/farm.config.ts
+import { defineConfig } from "@farm.js/core";
+import { leaf } from "farm-leaf";
 
-export { Fragment, Suspense, createElement, isValidElement };
-export { renderToString } from "leaf/server";
-
-export const name = "leaf";
-export const capabilities = { streaming: { node: false, web: false } } as const;
+export default defineConfig({ renderer: leaf() });
 ```
 
-The client module re-exports `createRoot` and `hydrateRoot` the same way. The Vite module is a 12-line plugin that points JSX at leaf's runtime. Adding the descriptor, the adapter is 52 lines.
+<span id="step-2-the-server-module" className="blog-heading-anchor" />
 
-Hooks took 38 more. Farm exposes router, query, action, theme, and i18n state as renderer-neutral stores with `getSnapshot()` and `subscribe()`, the same shape as React's `useSyncExternalStore`. A renderer wraps each store in its own reactivity once, and its users get the usual hooks:
+## Step 2: the server module
+
+The server module renders routes to HTML. If your library already has these exports, it's a re-export:
+
+```js
+// packages/farm-leaf/src/server.js
+export { Fragment, Suspense, createElement, isValidElement } from "leaf";
+export { renderToReadableStream, renderToString } from "leaf/server";
+
+export const name = "leaf";
+export const capabilities = { streaming: { node: false, web: true } };
+```
+
+`renderToReadableStream` and `capabilities` are optional, and [step 8](#step-8-optional-streaming) covers them. Farm reads six named exports:
+
+- **`name`** names the renderer in errors.
+- **`createElement(type, props, ...children)`** builds the route tree: layouts wrapped around the page.
+- **`Fragment`** wraps what an async page returns when it isn't a single element.
+- **`isValidElement(value)`** tells an element apart from other values, such as an async page's result.
+- **`Suspense`** wraps a page that has a `loading` file. leaf's renders its children, and its stream sends what came before it early.
+- **`renderToString(element)`** returns the HTML, or a promise of it.
+
+Two things you don't have to build. Farm awaits an `async` page itself and hands your library what it returned, so your library doesn't need async components to have async pages. And no default export is needed: Farm imports every module by name. If one of the six is missing, `farm dev` and `farm build` stop at startup with an error that names each missing export.
+
+<span id="step-3-the-client-module" className="blog-heading-anchor" />
+
+## Step 3: the client module
+
+The client module runs in the browser. It's also a re-export:
+
+```js
+// packages/farm-leaf/src/client.js
+export { Fragment, Suspense, createElement, isValidElement } from "leaf";
+export { createRoot, hydrateRoot } from "leaf/dom";
+```
+
+Farm needs four of these: `createElement` and `Suspense` build the same tree in the browser, and the other two make roots:
+
+- **`hydrateRoot(container, element)`** adopts the HTML the server sent. The button the server rendered should be the button the user clicks, not a copy.
+- **`createRoot(container)`** makes an empty root. Farm uses it when there's no server HTML to adopt, or when hydration throws.
+
+Both return a root with two methods:
+
+```js
+const root = hydrateRoot(container, tree);
+root.render(nextTree); // every client navigation
+root.unmount();
+```
+
+On a client navigation, Farm builds the next route's tree and calls `render()` on the root it already has. Because leaf patches in place, the layout's DOM and state survive. A fine-grained library like Solid or Svelte can't diff a new tree, so it can also give its root a `renderRoute()` method that keeps the layouts mounted and swaps only the page. leaf doesn't need one.
+
+<span id="step-4-the-vite-module" className="blog-heading-anchor" />
+
+## Step 4: the Vite module
+
+The Vite module exports one function, `createFarmRendererPlugin()`. Farm adds the plugin it returns to the app's server and browser builds, in development and in production. At minimum, it points JSX at your runtime:
+
+```js
+// packages/farm-leaf/src/vite.js (the JSX part)
+export function createFarmRendererPlugin() {
+  return {
+    name: "farm-leaf",
+    config() {
+      return { oxc: { jsx: { runtime: "automatic", importSource: "leaf" } } };
+    },
+  };
+}
+```
+
+It can also return an array of plugins, or a promise of one. Farm passes options such as `ssr`, for a library that compiles differently for each side.
+
+That's all eleven required exports: six on the server, four in the client, and one in Vite. Before you run anything, have TypeScript check your modules against the types Farm imports:
+
+```ts
+// packages/farm-leaf/test/contract.ts
+import type {
+  FarmRendererClientRuntime,
+  FarmRendererViteModule,
+  FarmServerRendererRuntime,
+} from "@farm.js/core/renderer";
+import * as client from "../src/client.js";
+import * as server from "../src/server.js";
+import * as vite from "../src/vite.js";
+
+// Each line fails type-checking when a module drifts from what Farm imports.
+export const serverContract: FarmServerRendererRuntime = server;
+export const clientContract: FarmRendererClientRuntime = client;
+export const viteContract: FarmRendererViteModule = vite;
+```
+
+Now `pnpm dev` serves leaf pages. A page or layout that starts with `"use client"` hydrates in the browser. One without it stays plain server HTML.
+
+<span id="step-5-hooks-over-farms-stores" className="blog-heading-anchor" />
+
+## Step 5: hooks over Farm's stores
+
+Pages want the router: the current path, and `push()` for navigation. Farm keeps that client state in renderer-neutral stores from `@farm.js/core/renderer-client`. Each one has `getSnapshot()` and `subscribe()`, the same shape as React's `useSyncExternalStore`.
+
+Write one hook that turns a store into your library's state. The rest are thin wrappers:
+
+```js
+// packages/farm-leaf/src/bindings.js (abridged)
+import { useEffect, useState } from "leaf";
+import { createRendererRouter } from "@farm.js/core/renderer-client";
+
+export function useFarmStore(store) {
+  const [snapshot, setSnapshot] = useState(() => store.getSnapshot());
+  useEffect(() => {
+    setSnapshot(() => store.getSnapshot()); // catch a change before we subscribed
+    return store.subscribe(() => setSnapshot(() => store.getSnapshot()));
+  }, [store]);
+  return snapshot;
+}
+
+export function useRouter() {
+  const [router] = useState(() => createRendererRouter());
+  return { ...useFarmStore(router), push: router.push, replace: router.replace };
+}
+```
+
+A page uses it like any hook:
 
 ```tsx
-// src/app/page.tsx
+// app/src/app/page.tsx
 "use client";
 
-import { useState } from "leaf";
 import { useRouter } from "farm-leaf/bindings";
+import { useState } from "leaf";
 
-export default function Page() {
+export default function HomePage() {
   const [count, setCount] = useState(0);
-  // Backed by Farm's router store, so push() is a client navigation.
   const router = useRouter();
   return (
     <section>
@@ -105,152 +230,326 @@ export default function Page() {
 }
 ```
 
-The adapter type-checked against Farm's contract types. It passed the renderer conformance suite the official renderers run. Then I ran a production build.
+`createRendererTheme()` and `createRendererI18n()` wrap the same way. The action and query stores get their own hooks in [step 6](#step-6-server-functions). For links, `resolveLinkAttributes()` returns the attributes Farm's router looks for. A `Link` component only has to render an `<a>` with them, and Farm handles the click. leaf's bindings, all five hooks and `Link`, are 77 lines.
 
-<span id="the-first-break-a-default-export" className="blog-heading-anchor" />
+One rule for apps without React: **import from core's subpaths**, such as `@farm.js/core/api`, `@farm.js/core/server-fn`, and `@farm.js/core/renderer-client`. The root `@farm.js/core` entry imports React. Type-only imports from it are fine, and so is `defineConfig` in `farm.config.ts`. `notFound()` and `redirect()` from `@farm.js/core/navigation` work with any renderer. That module's React hooks don't, so use your own bindings for those.
 
-## The first break: a default export
+<span id="step-6-server-functions" className="blog-heading-anchor" />
 
-```txt
-[MISSING_EXPORT] "default" is not exported by "../farm-leaf/src/server.ts".
-```
+## Step 6: server functions
 
-Farm generates the production server entry, and that code imported the renderer like this:
+A server function runs on the server, and browser code calls it like a function. With a custom renderer, turn it on with one flag:
 
 ```ts
-import React, * as ReactDOMServer from "farm-leaf/server";
+// app/farm.config.ts
+export default defineConfig({
+  renderer: leaf(),
+  experimental: { serverActions: true },
+});
 ```
 
-That's a default import, left over from when the server module was always React. Both client entries, production and development, did the same. The development server read the module's named exports instead. Neither the contract types nor the conformance suite mentioned a default, so everything that was supposed to check the adapter passed, and the build failed anyway.
-
-The five official renderers never hit it because each one happens to export a default. leaf didn't, because nothing asked it to.
-
-The fix is to import the namespace everywhere, the way the development server already did:
+Define server functions in their own module. A query reads data, and a function that changes it invalidates the query's key:
 
 ```ts
-import * as ReactDOMServer from "farm-leaf/server";
-const React = ReactDOMServer;
+// app/src/server/plant.ts (abridged)
+import { invalidate } from "@farm.js/core/cache";
+import { createServerFn } from "@farm.js/core/server-fn";
+import { createServerQuery } from "@farm.js/core/server-query";
+import { z } from "zod";
+
+let planted = 0;
+
+export const plantedCount = createServerQuery({
+  key: () => ["planted"],
+  async handler() {
+    return { planted };
+  },
+});
+
+export const plantCrop = createServerFn({
+  input: z.object({ name: z.enum(["wheat", "barley", "rye"]) }),
+  async handler({ input }) {
+    planted += 1;
+    invalidate(["planted"]);
+    return { message: `Planted ${input.name} on the server.` };
+  },
+});
 ```
 
-I also wrote down what was implicit. `FarmRendererClientRuntime` now lists `createElement`, `Suspense`, and `configureApp`, so a renderer can type-check its modules against what Farm actually imports. The shared conformance suite checks the same exports. A regression test builds and serves an app whose renderer has no default exports, then asserts the development client imports it by name. Both parts failed before the fix.
+Browser code can import `plantCrop` and `await` it like any function. To render its pending state and result, wrap Farm's action and query stores the way step 5 wrapped the router:
 
-<span id="the-second-break-react-in-the-dev-entry" className="blog-heading-anchor" />
+```js
+// packages/farm-leaf/src/bindings.js (continued)
+import { createRendererAction, createRendererQuery } from "@farm.js/core/renderer-client";
 
-## The second break: React in the dev entry
+export function useAction(target, options) {
+  const [action] = useState(() => createRendererAction(target, options));
+  return { ...useFarmStore(action), submit: action.submit, reset: action.reset };
+}
 
-With a default export added as a stopgap, the production build passed and hydrated in Chrome. Then I started the development server. The leaf app doesn't install React, since it has no reason to. The page rendered on the server, and then never hydrated:
-
-```txt
-Could not resolve "react" imported by "@farm.js/core". Is it installed?
+export function useServerQuery(query, input, options) {
+  // The input is posted to the server, so its JSON identifies a new read.
+  const observer = useMemo(
+    () => createRendererQuery(query, input, options),
+    [query, JSON.stringify(input ?? null)],
+  );
+  useEffect(() => () => observer.dispose(), [observer]);
+  return { ...useFarmStore(observer), refetch: observer.refetch };
+}
 ```
 
-React is an optional peer of `@farm.js/core`, and `create-farm-app` leaves it out of non-React starters on purpose. But the development client entry, which Farm generates for every renderer, imported its router like this:
+Then a page uses both:
 
-```ts
-import { installChunkErrorRecovery, SPARouter } from "@farm.js/core/client";
+```tsx
+// app/src/app/page.tsx (abridged)
+const plant = useAction(plantCrop);
+const total = useServerQuery(plantedCount, undefined);
+// A failed call lands in plant.error, which the page renders.
+const plantBarley = () => plant.submit({ name: "barley" }).catch(() => {});
+
+return (
+  <section>
+    <button disabled={plant.pending} onClick={plantBarley}>
+      Plant barley
+    </button>
+    <p>{plant.data?.message ?? "Nothing planted yet."}</p>
+    {plant.error && <p role="alert">{plant.error.message}</p>}
+    <p>Planted so far: {total.data?.planted ?? "…"}</p>
+  </section>
+);
 ```
 
-`@farm.js/core/client` is the React-facing client API. Its module graph imports `react`. The router class itself never touches React; it was just sitting in a module that does.
+The browser gets references, not handlers. Each call posts its input to the current page, and the server validates it, runs the handler, and sends back the result. The query reads after hydration, and Farm keeps its result in the same browser cache React's `useServerQuery` uses. When `plantCrop` invalidates `["planted"]`, the query reads again, and "Planted so far" goes up without a reload. Your renderer does none of this. Without the flag, a browser import of a server function stops the build with `CLIENT_SERVER_FUNCTION`.
 
-It wasn't leaf's bug. The official Solid renderer, in an app without React installed, failed the same way. The Farm monorepo couldn't catch it because core's own `node_modules` has React, so every test resolved it. I haven't checked whether a fresh `create-farm-app` Solid project gets React through some other dependency. The import was wrong either way.
+<span id="step-7-optional-your-own-file-format" className="blog-heading-anchor" />
 
-The fix moves the router behind its own entry, `@farm.js/core/internal/spa-router`, whose graph has no React, and points the development entry at it. The test for this one doesn't trust the monorepo. It loads the generated entry, follows every static import through the built files the browser would link, and fails if any of them reaches `react`.
+## Step 7 (optional): your own file format
 
-<span id="what-the-fixes-cost" className="blog-heading-anchor" />
-
-## What the fixes cost
-
-My first fix for the second break was simpler: re-export the router from the production client runtime, which the development entry already imported. It worked. It also grew the production client entry of every React app from 249,086 bytes to 249,665, for a router React apps already had. That's 579 bytes to fix a development-only problem.
-
-So I threw it out. With the separate entry, the React production client entry is 249,086 bytes before and after. React apps pay nothing, and the development entry of every other renderer stops loading a library it doesn't use.
-
-With both fixes in a packed `@farm.js/core`, leaf runs with no React anywhere in the app. The production build serves server-rendered HTML, the browser hydrates it in place (the button the server rendered is the button you click), the counter counts, and `router.push("/about")` navigates without a document reload. Development does the same.
-
-That's the answer I wanted. **Farm's renderer contract is real: three modules and eleven named exports, and the core path no longer needs React installed.** Both fixes are on `main` and ship in the next release.
-
-<span id="your-own-file-format" className="blog-heading-anchor" />
-
-## Your own file format
-
-Svelte and Vue routes aren't `.tsx` files, so I wanted to know whether a renderer can bring its own file type too. I gave leaf one:
+Svelte and Vue routes aren't `.tsx` files, and yours don't have to be either. leaf has `.leaf` files:
 
 ```svelte
-<!-- src/app/page.leaf -->
+<!-- app/src/app/notes/page.leaf -->
 <script module>
-// Runs once per file. Farm reads these exports.
+// Module scope: Farm reads these exports.
 export const hydrate = true;
+export const metadata = { title: "Notes in a .leaf file" };
 </script>
 
 <script>
 // Runs on every render.
 import { useState } from "leaf";
-import Badge from "../components/badge.leaf";
+import Badge from "../../components/badge.leaf";
 
-const [count, setCount] = useState(0);
+const [notes, setNotes] = useState(0);
 </script>
 
 <section>
   <Badge label="compiled by farm-leaf/vite" />
-  <button onClick={() => setCount((n) => n + 1)}>Clicked {count} times</button>
+  <button onClick={() => setNotes((n) => n + 1)}>Notes: {notes}</button>
 </section>
 ```
 
-It looks like Svelte because I copied Svelte. **It doesn't have to.** Farm asks two things of a file format:
+It looks like Svelte because I copied Svelte. It doesn't have to. Farm asks two things of a file format:
 
-1. Its extension in the descriptor: `componentExtensions: [".leaf", ".tsx"]`. That's how Farm's route scanner knows `page.leaf` is a page. The Svelte and Vue renderers register `.svelte` and `.vue` the same way.
-2. A compiler in the Vite module that turns each file into an ordinary module before Farm reads it:
+1. **List the extension** in `componentExtensions`. That's how Farm's route scanner knows `page.leaf` is a page.
+2. **Compile each file** in your Vite plugin into an ordinary module, whose default export is the component:
 
-```ts
-// What the Vite module has to turn page.leaf into
-export const hydrate = true; // optional: hydrate, metadata, dynamic, generateStaticParams
-export default function Page(props) {
-  // required: the component, returning your library's elements
+```js
+// packages/farm-leaf/src/vite.js (the .leaf part)
+async transform(code, id) {
+  const file = id.split("?")[0];
+  if (!file.endsWith(".leaf")) return null;
+  // compileLeaf() turns the file into: imports, module exports, and
+  // `export default function Notes(props) { ...; return (<>markup</>); }`
+  const result = await transformWithOxc(compileLeaf(code, componentName(file)), `${file}.tsx`, {
+    lang: "tsx",
+    jsx: JSX,
+    sourcemap: true,
+  });
+  return { code: result.code, map: result.map };
+},
+```
+
+leaf's compiler is 46 lines of string handling. A template language, Markdown, or something nobody has invented yet works the same way, as long as it compiles to that shape. `.leaf` files then work as pages, layouts, dynamic segments, and error and not-found pages, next to `.tsx` routes in the same app.
+
+There's one exception: Farm reads `hydrate` from the file as written, before your compiler runs. So `hydrate` must be the literal `true` or `false`. A value Farm can't read without running your code, like `!0`, stops the build with an error that names the file.
+
+<span id="step-8-optional-streaming" className="blog-heading-anchor" />
+
+## Step 8 (optional): streaming
+
+Without streaming, Farm renders the whole page with `renderToString()` and sends it. To stream, export one of these from the server module, and turn on its flag in the descriptor's `capabilities.streaming` (and in the server module's `capabilities`, if it exports one):
+
+- **`renderToReadableStream(element, options)`** returns a Web `ReadableStream` of HTML. Turn on `web`.
+- **`renderToPipeableStream(element, callbacks)`** returns an object with `pipe(destination)`, for Node streams. Turn on `node`.
+
+leaf uses the first. Its HTML renderer is a generator: it yields strings, a marker where a `<Suspense>` starts, and the promise an async component returns. `renderChunks()` joins the strings into one chunk per marker and waits on each promise in order. The stream sends each chunk as it's ready:
+
+```js
+// packages/leaf/src/server.js (the stream)
+export function renderToReadableStream(element, options) {
+  const chunks = renderChunks(renderChildren(element));
+  let started = false;
+  return new ReadableStream({
+    async pull(controller) {
+      let result;
+      try {
+        result = await chunks.next();
+      } catch (error) {
+        // Before any output, the error decides the status. After it, the status is already
+        // sent, so report the error and end the document.
+        if (!started) return controller.error(error);
+        options?.onError?.(error);
+        return controller.close();
+      }
+      if (result.done) return controller.close();
+      started = true;
+      controller.enqueue(encoder.encode(result.value));
+    },
+    cancel() {
+      return chunks.return();
+    },
+  });
 }
 ```
 
-leaf's compiler is 24 lines of string handling. It pulls out the two script blocks and wraps the markup in a function component. A template language, Markdown, or a syntax nobody has invented yet would work the same way, as long as it compiles to that shape. With it, `.leaf` files work as pages, layouts, dynamic segments, statically generated routes, and error and not-found pages, next to `.tsx` routes in the same app.
+The `catch` is the rule that matters. If rendering fails before any output, error the stream, so Farm can answer with the error's status: leaf's `/broken` page still gets its `error.tsx` and a 500. After output has started, call `options.onError(error)` and close the stream. Erroring a stream that has already sent bytes resets the connection.
 
-There's one exception to Farm not reading your file. Farm decides whether a page hydrates before your compiler runs, by reading the `hydrate` export from the file as written. Any declaration with a literal `true` or `false` works: `const`, `let`, or `var`, with or without a type annotation, or through an export list. A value Farm can't read without running your code, like `!0` or an import, fails the build with an error that names the file. When I first wrote this post, `!0` made the page render on the server and silently never hydrate, with the official Svelte renderer as well as leaf.
-
-The file format also turned up three bugs in how Farm handled a renderer's extensions. A new `page.leaf` wasn't served until you restarted `farm dev`, and new `.svelte` and `.vue` pages had the same bug. A parallel-route slot like `@modal/page.leaf` was served as a page. And `farm explain` didn't find `.leaf` routes. All three, and the silent `hydrate` failure, are fixed on `main` and ship in the next release.
-
-<span id="components-for-leaf" className="blog-heading-anchor" />
-
-## Components for leaf
-
-Sooner or later a UI library wants a component library, and component libraries ship one adapter per framework. Nobody else is going to write one for leaf.
-
-[ui-sdk](https://ui-sdk.dev) splits the work in a useful place. Its behaviors, from toggles and menus to dialogs and keyboard focus, live in a framework-free core. Each component there is a primitive: it holds the state and says which attributes and event handlers each part needs. ui-sdk's adapters for React, Vue, Svelte, and Solid build on that core, and one more build ships the same components as web components. That gives leaf two ways in.
-
-### The leaf way
-
-Write the adapter yourself, one component at a time. A leaf `Toggle` creates the primitive once, re-renders when it changes, and spreads its attributes and handlers onto a button:
+Now a page can stream past slow data:
 
 ```tsx
-// src/ui/toggle.tsx
-import { useMemo, useStore } from "leaf";
-import { toggle } from "@ui-sdk/core/toggle";
-import { attrs, handlers } from "@ui-sdk/core/renderer";
+// app/src/app/streaming/page.tsx (abridged)
+import { Suspense } from "leaf";
+import { loadCropsSlowly } from "../../server/slow-crops";
 
-type ToggleProps = { id: string; defaultPressed?: boolean; children?: unknown };
+async function SlowCropList() {
+  const crops = await loadCropsSlowly(); // takes 400 ms
+  return (
+    <ul>
+      {crops.map((crop) => (
+        <li>{crop}</li>
+      ))}
+    </ul>
+  );
+}
+
+export default function StreamingPage() {
+  return (
+    <section>
+      <p>This arrives first. The list below waits 400 ms for its data.</p>
+      <Suspense>
+        <SlowCropList />
+      </Suspense>
+    </section>
+  );
+}
+```
+
+The layout and the paragraph reach the browser at once, and the list follows when its data does. Three limits are leaf's, not Farm's:
+
+- It streams in order. React streams out of order, showing `fallback` and swapping the content in with a script. leaf never shows `fallback`.
+- Its browser renderer can't run an async component, so a page that has one stays server HTML.
+- Its `renderToString()` rejects an async component with an error that says to stream it. Farm's conformance suite expects that from a renderer that can't wait.
+
+<span id="step-9-test-it" className="blog-heading-anchor" />
+
+## Step 9: test it
+
+The official renderers share a conformance suite, and it's on npm:
+
+```bash
+npm install -D @farm.js/core @farm.js/renderer-tests vitest jsdom
+```
+
+One call per module:
+
+```js
+// packages/farm-leaf/test/server.test.js
+import {
+  defineRendererDescriptorConformance,
+  defineRendererServerConformance,
+} from "@farm.js/renderer-tests";
+import { leaf } from "../src/index.js";
+import * as server from "../src/server.js";
+
+defineRendererDescriptorConformance({
+  name: "leaf",
+  createDescriptor: leaf,
+  expected: {
+    vite: "farm-leaf/vite",
+    server: "farm-leaf/server",
+    client: "farm-leaf/client",
+    jsxImportSource: "leaf",
+    capabilities: { reconcilesRerenders: true, functionComponents: true },
+  },
+});
+
+defineRendererServerConformance(server);
+```
+
+```js
+// packages/farm-leaf/test/client.test.js
+// @vitest-environment jsdom
+import { defineRendererClientConformance } from "@farm.js/renderer-tests";
+import * as client from "../src/client.js";
+import * as server from "../src/server.js";
+
+defineRendererClientConformance({ name: "leaf", client, server, reconcilesRerenders: true });
+```
+
+The suite checks the exports, renders and hydrates real trees, and checks that a re-render keeps the DOM when you say it does.
+
+Unit tests don't prove the build works, so the repo also runs one Playwright spec against `farm dev` and against a production build. It covers hydration keeping the server's DOM, client navigation, a server function call, the `.leaf` page, and 404 and 500 pages:
+
+```bash
+pnpm test          # conformance and unit tests
+pnpm test:e2e      # the production build in a browser
+pnpm test:e2e:dev  # the same spec against farm dev
+```
+
+<span id="components-the-ui-sdk-way" className="blog-heading-anchor" />
+
+## Components: the ui-sdk way
+
+Sooner or later, your library wants a component library. Most ship one adapter per framework, and nobody is going to write one for yours.
+
+[ui-sdk](https://ui-sdk.dev) splits the work in a useful place. Its behaviors, from toggles and menus to dialogs and focus handling, live in a framework-free core. Each component there is a **primitive**: it holds the state and says which attributes and event handlers each part needs. That gives your library two ways in.
+
+### Way 1: build on the primitive
+
+Write a small component per primitive. leaf's `Toggle` creates the primitive once, re-renders when it changes, and spreads its attributes and handlers onto a button:
+
+```tsx
+// app/src/ui/toggle.tsx
+import { attrs, handlers } from "@ui-sdk/core/renderer";
+import { toggle } from "@ui-sdk/core/toggle";
+import { useFarmStore } from "farm-leaf/bindings";
+import { type Children, useMemo } from "leaf";
+
+type ToggleProps = { id: string; defaultPressed?: boolean; children?: Children };
 
 export function Toggle(props: ToggleProps) {
   // One primitive per component, kept across renders.
-  const t = useMemo(() => toggle({ id: props.id, defaultPressed: props.defaultPressed }));
-  // Re-render when its state changes.
-  useStore(useMemo(() => ({ getSnapshot: t.get, subscribe: t.subscribe })));
+  const primitive = useMemo(
+    () => toggle({ id: props.id, defaultPressed: props.defaultPressed }),
+    [],
+  );
+  // Re-render when its state changes, with the same hook the router uses.
+  useFarmStore(
+    useMemo(() => ({ getSnapshot: primitive.get, subscribe: primitive.subscribe }), [primitive]),
+  );
 
-  const part = t.part("root");
-  const on = handlers(part);
+  const root = primitive.part("root");
+  const on = handlers(root);
   return (
-    <button {...attrs(part)} onClick={on.click} onKeyDown={on.keydown} onKeyUp={on.keyup}>
+    <button {...attrs(root)} onClick={on.click} onKeyDown={on.keydown} onKeyUp={on.keyup}>
       {props.children}
     </button>
   );
 }
 ```
 
-The primitive has `get()` and `subscribe()`, so it plugs into the same `useStore` hook leaf's bindings use for Farm's router. The page passes an `id` because ui-sdk needs one for every primitive and leaf has no `useId`. A fixed id also means the server and the browser agree on it:
+The primitive has `get()` and `subscribe()`, so it's a store like Farm's, and the hook from [step 5](#step-5-hooks-over-farms-stores) works unchanged. The `id` is fixed, so the server and the browser agree on it:
 
 ```tsx
 <Toggle id="bold" defaultPressed>
@@ -258,29 +557,27 @@ The primitive has `get()` and `subscribe()`, so it plugs into the same `useStore
 </Toggle>
 ```
 
-The primitive runs while Farm renders the page on the server, so the ARIA is in the first HTML, with no plugin and nothing written by hand:
+The primitive runs during server rendering too, so the ARIA is in the first HTML:
 
 ```html
 <button data-slot="toggle" type="button" aria-pressed="true" data-pressed="">Bold</button>
 ```
 
-I ran it in a production build and in `farm dev`, in Chrome. Hydration keeps the button the server rendered, a click sets `aria-pressed` to `"false"`, a re-render of the page leaves it there, and Space and Enter each toggle it once.
+Click, Space, and Enter each toggle it, in `farm dev` and in a production build.
 
-The catch is where `attrs` and `handlers` come from. `@ui-sdk/core/renderer` is the entry ui-sdk's own adapters build on, and its source says: "It isn't documented, it may change with any release, and nothing here is public API." The toggle is also the easy case. ui-sdk's adapters hand each primitive its DOM element, which the toggle uses for its `focus()` method, toggle groups, and disabled fieldsets. leaf has no refs yet, so this `Toggle` skips that, and a standalone button works without it. One component is 21 lines. A whole library is ui-sdk's adapter work done again for leaf, and yours to keep current.
+The catch is where `attrs` and `handlers` come from. `@ui-sdk/core/renderer` is the entry ui-sdk's own adapters use, and it isn't documented or public API yet. It can change in any release. leaf also has no refs, so this `Toggle` skips what ui-sdk does with the DOM element, like its `focus()` method. A standalone button doesn't need it.
 
-### Or ditch the adapter: web components
+### Way 2: use the web components
 
-The other way is to write no adapter at all. **A custom element is just a tag, so any renderer that can write HTML can use it.** The page writes the element and imports its module:
+Or write no adapter at all. **A custom element is just a tag, so any renderer that can write HTML can use it.**
 
 ```tsx
-// src/app/editor/page.tsx
+// app/src/app/ui/web/page.tsx
 "use client";
 
 import "@ui-sdk/web/toggle";
 
-export const hydrate = true;
-
-export default function Editor() {
+export default function WebComponentPage() {
   return (
     <ui-toggle default-pressed>
       <button type="button" aria-pressed="true">
@@ -291,99 +588,40 @@ export default function Editor() {
 }
 ```
 
-Three things make it work:
+leaf writes `<ui-toggle>` into the server HTML like any other tag. `"use client"` sends the page to the browser, where the import registers the element and the browser upgrades the one already on the page. The import also runs on the server, which is safe because ui-sdk skips registration when `customElements` doesn't exist.
 
-1. The renderer writes `<ui-toggle>` into the server HTML like any other tag.
-2. `export const hydrate = true` sends the page module to the browser. The import registers the tag there, and the browser upgrades the element that's already on the page.
-3. The same import also runs on the server while Farm renders the page. That's safe: every ui-sdk element registers through one helper that does nothing when `customElements` doesn't exist.
-
-The catch here is ARIA. The web component computes `aria-pressed` in the browser, after the upgrade. The HTML your server sends, which is what a screen reader or an agent reading the page gets first, only has what you wrote. That's why the example writes `aria-pressed="true"` to match `default-pressed`.
-
-Farm can write it for you. A plugin's `render.html` hook gets the finished HTML from any renderer, in development and in production:
-
-```ts
-// farm.config.ts
-import { defineConfig } from "@farm.js/core";
-import { definePlugin } from "@farm.js/core/plugin";
-import { leaf } from "farm-leaf";
-
-const toggleAria = definePlugin({
-  name: "demo:ui-toggle-aria",
-  render: {
-    html(html) {
-      // A demo. A real plugin parses the HTML and asks the primitive for its attributes.
-      return html.replace(
-        /(<ui-toggle[^>]*\bdefault-pressed\b[^>]*>\s*<button type="button")>/g,
-        '$1 aria-pressed="true">',
-      );
-    },
-  },
-});
-
-export default defineConfig({ renderer: leaf(), plugins: [toggleAria] });
-```
-
-I ran both versions on leaf and on Preact, in a production build in Chrome. I also ran the plugin version, in development and production, with the smallest renderer in Farm's own tests, which renders to a string and never touches the DOM in the browser. On leaf and Preact:
-
-```txt
-                   pressed  aria-pressed
-server HTML        -        "true"
-after upgrade      true     "true"
-after a click      false    "false"
-after a re-render  false    "false"
-```
-
-The last line matters. When the page re-renders, leaf and Preact compare their new props with their old ones, not with the DOM, so they leave the attribute ui-sdk changed alone.
-
-The plugin has a price. Farm holds the whole page before it can rewrite it, so with the plugin installed a streaming renderer stops streaming. leaf renders to a string anyway, so it pays nothing. And the regex is a demo. A real plugin has to ask the primitive for its attributes, and today the only way to ask is the same undocumented entry the leaf way uses. So for now I write simple ARIA by hand, and I'll build the plugin once ui-sdk makes that step public.
-
-ui-sdk's web build also ships its agent bridge, `@ui-sdk/web/agent`. I haven't tried that on Farm yet.
+The catch here is ARIA. The web component sets `aria-pressed` in the browser, after the upgrade. The HTML the server sends, which is what an agent fetching the page reads, only has what you wrote. That's why the page writes `aria-pressed="true"` to match `default-pressed`.
 
 ### Which one
 
-|                         | The leaf way                           | Web components         |
+|                         | On the primitive                       | Web components         |
 | ----------------------- | -------------------------------------- | ---------------------- |
 | Adapter code            | A component per primitive              | None                   |
-| ARIA in the server HTML | From the primitive                     | By hand, or a plugin   |
+| ARIA in the server HTML | From the primitive                     | Written by hand        |
 | Depends on              | `@ui-sdk/core/renderer` (undocumented) | `@ui-sdk/web` (public) |
 
-Either way, ui-sdk is a beta (`0.1.0-beta.13`). Both ways get better the day it makes its renderer entry public: the leaf way stops depending on internals, and the plugin can ask the primitive instead of matching a regex.
+ui-sdk is a beta (`0.1.0-beta.13`). The first way stops depending on internals the day it makes its renderer entry public.
 
-<span id="what-still-needs-work" className="blog-heading-anchor" />
+<span id="what-a-custom-renderer-doesnt-get" className="blog-heading-anchor" />
 
-## What still needs work
+## What a custom renderer doesn't get
 
-"You can bring your own renderer" is true for the core path: routes, layouts, SSR, hydration, navigation, server functions called from server code, and production output. It is not true for everything Farm does, and I would rather say so here than in an issue later.
+Routes, layouts, SSR, hydration, navigation, server functions, and production output work with any renderer. Some things don't:
 
-- **Some features are still React-oriented.** React Server Components are React-only today. The [feature table](/docs/renderers#feature-support) says which features each official renderer gets, and a custom renderer gets the same as Solid, Vue, and Svelte. Markdown pages, generated metadata images, and programmatic UI routes were on this list when the post went up. All three now work with any renderer on `main`.
-- **The conformance suite isn't on npm yet.** It's `@farm.js/renderer-tests` on `main` and ships in the next release. Until then, the type-check below is how a third-party renderer checks itself.
-- **Browser code can't import a server function yet.** Importing a `createServerFn` or `createServerQuery` module into a client component needs Farm's server-actions transform, which today comes only with React Server Components or islands, and both are React-only. Until that changes, browser code calls an API route through the typed API client, the way the example's "Plant barley" button does.
-- **One renderer per app.** You choose a renderer; you can't mix leaf on one page and React on the next.
+- **React Server Components and islands are React-only.** The [feature table](/docs/renderers#feature-support) lists what each renderer gets. A custom renderer gets the same as Solid, Vue, and Svelte.
+- **One renderer per app.** You can't render one page with leaf and the next with React.
+- **leaf's own gaps are leaf's.** It streams only in order, and it has no keys and no refs. Those are missing from the library, not from Farm's contract.
 
-<span id="write-your-own" className="blog-heading-anchor" />
+<span id="what-building-leaf-fixed-in-farm" className="blog-heading-anchor" />
 
-## Write your own
+## What building leaf fixed in Farm
 
-The quickest start is [`examples/custom-renderer`](https://github.com/farming-labs/farm.js/tree/main/examples/custom-renderer). Copy `farm-leaf/`, point it at your library instead of leaf, and keep its tests: they run the conformance suite and type-check each module against Farm's contract types.
+leaf was a test of the contract, and the contract had gaps. Each one is fixed and has a regression test:
 
-If your library can build an element tree, render it to a string, and patch or hydrate the DOM, it can be a Farm renderer. If it has its own file format, list the extensions in `componentExtensions` and compile those files in the Vite module. Write the descriptor, write the three modules, and check them against the types Farm imports:
+- Farm imported renderer modules with a default import that only the official renderers happened to have. It imports them by name since 0.1.79.
+- The development client loaded React through its router, so a Solid app without React installed never hydrated in `farm dev`. The router has its own entry since 0.1.79, and the React production client entry stayed 249,086 bytes.
+- A new `page.leaf` wasn't served until `farm dev` restarted, and `.svelte` and `.vue` pages had the same bug. Fixed in 0.1.79.
+- `notFound()` and `redirect()` pulled in React, and browser code couldn't import server functions outside React. Both work with any renderer since 0.1.81.
+- A `hydrate` value Farm couldn't read silently skipped hydration. Since 0.1.81 it stops the build.
 
-```ts
-import type {
-  FarmRendererClientRuntime,
-  FarmRendererViteModule,
-  FarmServerRendererRuntime,
-} from "@farm.js/core/renderer";
-import * as client from "./client";
-import * as server from "./server";
-import * as vite from "./vite";
-
-// Each line fails type-checking when a module drifts from what Farm imports.
-export const serverContract: FarmServerRendererRuntime = server;
-export const clientContract: FarmRendererClientRuntime = client;
-export const viteContract: FarmRendererViteModule = vite;
-```
-
-To stream, export `renderToPipeableStream()` or `renderToReadableStream()` from the server module and turn on `node` or `web` under `capabilities.streaming`. leaf doesn't stream, so after this post went up I added a test renderer that is nothing but the contract. It stops halfway through a page until the test lets it continue, and the test checks that the first half reaches the browser first. It streams through both primitives, in development and in production builds. Writing it turned up one more bug: with only `renderToReadableStream()`, development buffered the whole page. That's fixed on `main` too.
-
-The full contract, including the optional exports and how route updates reach an existing root, is in [Renderer modules](/docs/renderers#renderer-modules) and the [renderer capability contract](/docs/renderers#renderer-capability-contract). If you build one and something breaks, that's exactly the bug report I want.
+The full contract, with every optional export, is in [Renderer modules](/docs/renderers#renderer-modules). Start from [farming-labs/leaf](https://github.com/farming-labs/leaf): keep `farm-leaf`'s tests, and point the three modules at your library. If something breaks, that's exactly the bug report I want.

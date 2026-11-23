@@ -1,11 +1,13 @@
-// Farm's router and theme as leaf hooks, plus a Link.
+// Farm's router, theme, server functions, and server queries as leaf hooks, plus a Link.
 //
 // Farm keeps that state in renderer-neutral stores (getSnapshot + subscribe). One hook,
 // useFarmStore, turns any of them into leaf state; the rest are thin wrappers.
 
-import { createElement, useEffect, useState } from "leaf";
+import { createElement, useEffect, useMemo, useState } from "leaf";
 import {
   FARM_LINK_OPTION_KEYS,
+  createRendererAction,
+  createRendererQuery,
   createRendererRouter,
   createRendererTheme,
   resolveLinkAttributes,
@@ -38,6 +40,26 @@ export function useRouter(options) {
 export function useTheme() {
   const [theme] = useState(() => createRendererTheme());
   return { ...useFarmStore(theme), setTheme: theme.setTheme, toggleTheme: theme.toggleTheme };
+}
+
+/** A server function's call state: `submit()` calls it, and the snapshot has `pending`, `data`, and `error`. */
+export function useAction(target, options) {
+  const [action] = useState(() => createRendererAction(target, options));
+  return { ...useFarmStore(action), submit: action.submit, reset: action.reset };
+}
+
+/**
+ * A server query's result from Farm's browser cache. It reads after hydration, and reads again
+ * when a server function invalidates its key.
+ */
+export function useServerQuery(query, input, options) {
+  // Inputs are serializable, since the browser posts them, so their JSON identifies a new read.
+  const observer = useMemo(
+    () => createRendererQuery(query, input, options),
+    [query, JSON.stringify(input ?? null)],
+  );
+  useEffect(() => () => observer.dispose(), [observer]);
+  return { ...useFarmStore(observer), refetch: observer.refetch };
 }
 
 /**

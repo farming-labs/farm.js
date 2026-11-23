@@ -127,6 +127,10 @@ test("a browser module calls a server function, which runs on the server", async
     }
   });
   await gotoHydrated(page, "/");
+  // useServerQuery reads after hydration. Other tests may have planted already, so compare counts.
+  const total = page.locator("#planted-total");
+  await expect(total).toHaveText(/^Planted so far: \d+$/);
+  const before = Number((await total.textContent())?.match(/\d+/)?.[0]);
   const call = page.waitForRequest(
     (request) => request.method() === "POST" && request.headers()["f-action"] !== undefined,
   );
@@ -134,6 +138,8 @@ test("a browser module calls a server function, which runs on the server", async
   // The call posts to the page, which runs the action.
   expect(new URL((await call).url()).pathname).toBe("/");
   await expect(page.locator("#planted")).toHaveText("Planted barley on the server.");
+  // The action invalidated the query's key, so the query read again.
+  await expect(total).toHaveText(`Planted so far: ${before + 1}`);
   // The browser got a reference, not the handler, whose message is a template literal.
   for (const source of await Promise.all(scripts)) expect(source).not.toContain("Planted ${");
 });
@@ -152,6 +158,41 @@ test("notFound() and a throwing page answer with their route files and statuses"
   const broken = await page.goto("/broken");
   expect(broken?.status()).toBe(500);
   await expect(page.locator("#error")).toHaveText("Something broke while rendering this page.");
+});
+
+test("a page streams what's before a Suspense boundary before the async component in it", async ({
+  baseURL,
+}) => {
+  const response = await fetch(`${baseURL}/streaming`);
+  expect(response.status).toBe(200);
+  const reader = response.body!.getReader();
+  const decoder = new TextDecoder();
+  let html = "";
+  while (!html.includes("This arrives first.")) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    html += decoder.decode(value, { stream: true });
+  }
+  // The list waits on its data, so the chunks that carried the text before it can't hold it.
+  expect(html).toContain("This arrives first.");
+  expect(html).not.toContain('id="slow-crops"');
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    html += decoder.decode(value, { stream: true });
+  }
+  expect(html).toContain('<ul id="slow-crops"><li>wheat</li><li>barley</li><li>rye</li></ul>');
+  expect(html).toMatch(/<\/html>\s*$/);
+});
+
+test("a client navigation renders a page with an async component", async ({ page }) => {
+  await gotoHydrated(page, "/");
+  await markDocument(page);
+  await page.getByRole("link", { name: "Streaming" }).click();
+  await expect(page).toHaveURL(/\/streaming$/);
+  await expect(page.locator("#slow-crops li")).toHaveText(["wheat", "barley", "rye"]);
+  await expect(page).toHaveTitle("Streaming");
+  expect(await readDocumentMark(page)).toBe("first");
 });
 
 test("API routes answer next to leaf pages", async ({ request }) => {

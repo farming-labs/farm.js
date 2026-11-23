@@ -176,7 +176,7 @@ function renderComponent(instance) {
   const output = internals.render(instance.type, instance.props, createDispatcher(instance));
   if (output && typeof output.then === "function") {
     throw new Error(
-      `leaf can't render async components: ${instance.type.name || "a component"} returned a promise.`,
+      `leaf can't render async components in the browser: ${instance.type.name || "a component"} returned a promise. Async components render on the server, so use them in a page or layout that doesn't hydrate.`,
     );
   }
   return toChildArray(output);

@@ -9,7 +9,7 @@ Releases, engineering notes, and ideas.
 
 ## [Bring your own renderer](/blog/bring-your-own-renderer)
 
-I wrote a 385-line React-like library to find out what Farm needs from a renderer. The answer is three modules and eleven named exports, plus two fixes it took to get there: a default export nobody documented, and a development entry that loaded React for every renderer.
+A step-by-step guide to plugging any UI library into Farm: a descriptor, three small modules, hooks over Farm's stores, and two ways to use ui-sdk components. Every snippet comes from a working app you can clone, farming-labs/leaf.
 
 ## [I asked 105 developer sites for Markdown. A third answered with HTML.](/blog/agent-markdown-scan)
 

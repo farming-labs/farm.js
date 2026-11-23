@@ -17,19 +17,22 @@ export type RoutePath =
   | "/about"
   | "/broken"
   | `/crops/${string}`
-  | "/notes";
+  | "/notes"
+  | "/streaming";
 export type RoutePattern =
   | "/"
   | "/about"
   | "/broken"
   | "/crops/[name]"
-  | "/notes";
+  | "/notes"
+  | "/streaming";
 export type RouteModulePattern =
   | "/"
   | "/about"
   | "/broken"
   | "/crops/[name]"
-  | "/notes";
+  | "/notes"
+  | "/streaming";
 declare module "@farm.js/core/client" {
   interface LinkDefaultRoute {
     _: import("./farm").RoutePath;
