@@ -1921,10 +1921,8 @@ export class RouteManager {
     | undefined {
     const docs = this.config.docs;
     if (!docs || typeof docs !== "object" || !docs.enabled) return undefined;
-    // The docs runtime answers its paths before page routes: Farm's built-in renderer always,
-    // an adapter when the app renders with React.
-    const usesAdapter = Boolean(docs.adapter && docs.adapter.server && docs.adapter.react);
-    if (usesAdapter && !isReactRenderer(this.config.renderer)) return undefined;
+    // The docs runtime answers its paths before page routes, Farm's built-in renderer and an
+    // adapter alike: config resolution stops an adapter whose UI the app's renderer cannot run.
     const entry = `/${String(docs.entry || "docs").replace(/^\/+|\/+$/g, "")}`;
     return {
       owns: (routePath) =>

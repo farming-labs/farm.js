@@ -182,6 +182,7 @@ import {
   generateFarmDocsAdapterClientRuntime,
   getFarmDocsAdapterConfigModule,
 } from "../docs/adapter-client";
+import { getFarmDocsAdapterRenderer, getFarmDocsAdapterUIModule } from "../docs/adapter-descriptor";
 import { farmDocsClientConfigPlugin } from "../docs/client-config";
 import { resolveFarmDocsFontAssets, toFarmDocsPublicFontAssets } from "../docs/fonts";
 import { FARM_VIDEO_PLAYER_PATH } from "../metadata";
@@ -2124,12 +2125,7 @@ async function buildClient(
   const islandsMode =
     resolveFarmServerComponentsMode(config.experimental?.serverComponents) === "islands";
 
-  const adapterOwnsDocsRuntime = Boolean(
-    isReactRenderer(config.renderer) &&
-    config.docs?.enabled &&
-    config.docs.adapter?.server &&
-    config.docs.adapter.react,
-  );
+  const adapterOwnsDocsRuntime = hasFarmDocsRuntimeAdapter(config.docs);
   const docsEntries = config.docs?.enabled
     ? getFarmDocsRoots(config.docs).map(
         (docsRoot) => `/${docsRoot.entry || "docs"}`.replace(/\/+/g, "/").replace(/\/$/, "") || "/",
@@ -2465,7 +2461,7 @@ async function buildClient(
       config.docs?.enabled
         ? getFarmDocsRoots(config.docs).map((docsRoot) => docsRoot.entry)
         : undefined,
-      adapterOwnsDocsRuntime ? config.docs.adapter?.react : undefined,
+      adapterOwnsDocsRuntime ? getFarmDocsAdapterUIModule(config.docs.adapter) : undefined,
       config.i18n,
       config.plugins,
       config.renderer,
@@ -2637,7 +2633,7 @@ async function buildClient(
                   importer: clientEntryPath,
                   entryName: "farm-client",
                   modules: [
-                    config.docs.adapter!.react!,
+                    getFarmDocsAdapterUIModule(config.docs.adapter),
                     getFarmDocsAdapterConfigModule(config.docs),
                   ].filter((specifier): specifier is string => Boolean(specifier)),
                 }),
@@ -4140,7 +4136,7 @@ export function generateClientHydrationEntry(
   docsSearchEnabled: boolean,
   docsSearchModuleId: string | undefined,
   docsEntryPath: string | readonly string[] | undefined,
-  docsAdapterReact: string | undefined,
+  docsAdapterUI: string | undefined,
   i18nConfig: ResolvedFarmConfig["i18n"] = {
     enabled: false,
     basePath: "/",
@@ -4335,10 +4331,7 @@ function isFarmDocsPath() {
   return false;
 }
 `;
-  const docsAdapterRuntime = generateFarmDocsAdapterClientRuntime(
-    docsAdapterReact,
-    docsConfigModule,
-  );
+  const docsAdapterRuntime = generateFarmDocsAdapterClientRuntime(docsAdapterUI, docsConfigModule);
 
   if (
     clientPages.length === 0 &&
@@ -7671,16 +7664,11 @@ function generateVirtualEntryCode(
   const hasInfraAnalyticsRuntime =
     config.analytics !== false && resolveFarmInstrumentationRuntime(preset) === "nodejs";
   const hasPrecompiledDocs = Boolean(farmDocsPrecompiledManifest);
-  const adapterOwnsDocsRuntime = Boolean(
-    isReactRenderer(config.renderer) &&
-    config.docs?.enabled &&
-    config.docs.adapter?.server &&
-    config.docs.adapter.react,
-  );
+  const adapterOwnsDocsRuntime = hasFarmDocsRuntimeAdapter(config.docs);
   if (config.docs?.enabled && config.docs.roots?.length && !adapterOwnsDocsRuntime) {
     throw new Error(
-      "Several docs roots need the docs adapter, which serves the React renderer only; Farm's " +
-        "built-in docs renderer serves a single docs root.",
+      "Several docs roots need a docs adapter; Farm's built-in docs renderer serves a single " +
+        "docs root.",
     );
   }
   // The adapter renders icons, MDX components, and callbacks from the docs config, which
@@ -8397,7 +8385,7 @@ import { ${
               ? "createFarmDocsMultiRuntimeHandler as createFarmDocsAdapterMultiRuntimeHandler"
               : "createFarmDocsRuntimeHandler as createFarmDocsAdapterRuntimeHandler"
           } } from ${JSON.stringify(config.docs.adapter!.server)};
-import * as FarmDocsAdapterReact from ${JSON.stringify(config.docs.adapter!.react)};${
+import * as FarmDocsAdapterUI from ${JSON.stringify(getFarmDocsAdapterUIModule(config.docs.adapter))};${
             docsConfigModulePath
               ? `\nimport * as farmDocsConfigModule from ${toVirtualEntryImportSpecifier(docsConfigModulePath)};`
               : ""
@@ -9064,7 +9052,12 @@ const farmDocsHandler = ${
     resolveFarmLayoutFonts(
       getApplicableLayouts(getFarmRoutePathname(pathname)).map((layout) => layout.module),
     ),
-  loadReactModule: async () => FarmDocsAdapterReact,
+  loadUIModule: async () => FarmDocsAdapterUI,${
+    getFarmDocsAdapterRenderer(config.docs.adapter!) === "react"
+      ? `
+  loadReactModule: async () => FarmDocsAdapterUI,`
+      : ""
+  }
   // Lists the docs MCP endpoint in /.well-known/ai-catalog.json for the server's lifetime.
   registerMCPServer: registerFarmMCPServer,
   // A page built with this keeps its HTML string, so the preload budget and the response
@@ -14113,12 +14106,6 @@ async function getFarmDocsPrerenderPages(
     }
     return pages;
   }
-  if (!isReactRenderer(config.renderer)) {
-    logger.warn(
-      `The docs adapter ${JSON.stringify(config.docs.adapter.id)} renders with React; docs.prerender keeps its pages rendering on request with the "${config.renderer.name}" renderer.`,
-    );
-    return [];
-  }
   const pages = await listFarmDocsAdapterPages(config.docs, { root, srcDir: config.srcDir });
   if (!pages) {
     logger.warn(
@@ -14151,7 +14138,7 @@ async function listFarmDocsAnalyticsPages(
     return await listFarmDocsPagePaths(config.docs, {
       root,
       srcDir: config.srcDir,
-      adapter: isReactRenderer(config.renderer) && hasFarmDocsRuntimeAdapter(config.docs),
+      adapter: hasFarmDocsRuntimeAdapter(config.docs),
     });
   } catch (error) {
     logger.warn(

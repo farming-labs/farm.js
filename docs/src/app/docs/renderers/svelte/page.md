@@ -137,8 +137,9 @@ your own state, a store from `createStore` in `@farm.js/core/renderer-client`, t
 [Shared client state](/docs/renderers#shared-client-state). `Link` from `@farm.js/svelte/link`
 navigates and prefetches like the React one; see [Link in Solid, Vue, and Svelte](/docs/routing#link-in-solid-vue-and-svelte).
 `<form use:action.enhance>` submits a form through an action; see
-[action forms](/docs/renderers#action-forms). Fetchers, integration providers, and the docs adapter
-remain React-oriented today. Markdown and MDX pages and [programmatic UI routes](/docs/routing#programmatic-routes) render with
+[action forms](/docs/renderers#action-forms). Fetchers and integration providers remain
+React-oriented today. A docs adapter needs a docs UI written for Svelte; `@farming-labs/farmjs` ships a
+React one. See [Docs adapters on any renderer](/docs/docs-engine#docs-adapters-on-any-renderer). Markdown and MDX pages and [programmatic UI routes](/docs/routing#programmatic-routes) render with
 Svelte, and an `opengraph-image.svelte` component draws a
 [generated metadata image](/docs/routing#generated-metadata-images).
 

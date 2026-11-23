@@ -169,6 +169,32 @@ without the capability makes `farm dev` and `farm build` stop with that error on
 upgrade it, move private pages out of the docs folder, or set `docs.adapter: false` to use Farm's
 built-in docs runtime.
 
+## Docs adapters on any renderer
+
+A docs adapter is a docs engine plus a UI written for one renderer. Its descriptor names the UI
+module `ui` and that renderer `renderer`. Farm loads `ui` on the server through `loadUIModule()`,
+and in the browser calls its `hydrateFarmDocs()` on the pages the adapter rendered. A descriptor
+without `renderer` has a React UI, and one written before `ui` existed names it `react`, which Farm
+still reads.
+
+`@farming-labs/farmjs` ships a React UI. An app with another renderer, a custom one included, gives
+it a UI of its own:
+
+```ts
+import { defineConfig } from "@farm.js/core";
+import { withDocs } from "@farming-labs/farmjs/config";
+import { leaf } from "farm-leaf";
+
+export default withDocs(defineConfig({ renderer: leaf() }), {
+  ui: { module: "@acme/leaf-docs", renderer: "leaf" },
+});
+```
+
+The app's Vite pipeline compiles the UI and the docs config module with its renderer, so an adapter
+runs only under the renderer its UI is written for. `farm dev` and `farm build` stop when they
+differ, and name the fix. Farm's built-in renderer (`docs.adapter: false`) serves docs under any
+renderer.
+
 ## Configure the docs experience
 
 Keep docs configuration alongside the rest of the application in `farm.config.ts`:
