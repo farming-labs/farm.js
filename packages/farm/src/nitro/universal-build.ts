@@ -2625,6 +2625,8 @@ async function buildClient(
                         "react-dom/client",
                         "@farm.js/core/internal/islands-runtime",
                       ],
+                      // What a call's result is handled with, imported on the first (RFC 0013).
+                      actionImports: ["@farm.js/core/internal/islands-action-client"],
                       rendererImporter: clientEntryPath,
                     }
                   : {}),
@@ -10160,6 +10162,9 @@ const farmClientRendererPreloadTags = farmClientModulePreloads
 // client references of its server tree. An island with a deferred strategy loads its
 // module on its own trigger, so it is not preloaded.
 const FARM_CLIENT_MODULE_REFERENCE_PATTERN = /<f-island src="([^"]+)"([^>]*)>|"r":"(\\/[^"]+)"/g;
+// A server action reference in a document's markup: an action in an island's or a client
+// component's props (islx's \`{"$":"a",...}\`), or a server form posting one (its \`$F_REF_\` field).
+const FARM_ACTION_REFERENCE_PATTERN = /"\\$":"a"|name="\\$F_REF_/;
 
 function renderFarmClientModulePreload(index) {
   return '\\n  <link rel="modulepreload" href="/' +
@@ -10190,6 +10195,15 @@ function collectFarmClientDocumentModules(markup, pageModule, listed) {
   return indexes;
 }
 
+// The manifest indexes of islands mode's action client, which handles a call's result (RFC 0013),
+// for a document whose markup holds an action reference, leaving out those already listed. Its
+// islands import it on their first call otherwise.
+function collectFarmClientActionModules(markup, listed) {
+  const actions = farmClientModulePreloads.actions;
+  if (!actions || typeof markup !== "string" || !FARM_ACTION_REFERENCE_PATTERN.test(markup)) return [];
+  return actions.filter((index) => !listed.has(index) && listed.add(index));
+}
+
 // The modulepreload links for a document: the entry's static imports and, unless it answers a
 // client navigation, the renderer, then the modules its hydrating page and its markup load.
 function renderFarmClientModulePreloads(markup, pageModule, navigation) {
@@ -10197,8 +10211,10 @@ function renderFarmClientModulePreloads(markup, pageModule, navigation) {
   // response filter manages nonces on script elements only, so CSP nonce mode
   // keeps the documents it had.
   if (!farmClientModulePreloads || (farmSecurityConfig.csp && farmSecurityConfig.csp.nonce)) return "";
+  const listed = new Set();
   return farmClientEntryPreloadTags + (navigation ? "" : farmClientRendererPreloadTags) +
-    collectFarmClientDocumentModules(markup, pageModule, new Set())
+    collectFarmClientDocumentModules(markup, pageModule, listed)
+      .concat(collectFarmClientActionModules(markup, listed))
       .map(renderFarmClientModulePreload)
       .join("");
 }
@@ -10224,9 +10240,15 @@ function renderFarmClientBootPreloads(markup, pageModule, root, rootStrategy, na
     ? collectFarmClientDocumentModules(markup, pageModule, new Set(entry))
     : [];
   const waitsForClick = rootStrategy === "interaction";
+  // A call needs a hydrated island, so the action client comes with the renderer.
+  const renderer = navigation
+    ? []
+    : (farmClientModulePreloads.renderer || []).concat(
+        collectFarmClientActionModules(markup, new Set(entry.concat(rootModules))),
+      );
   return attribute("data-farm-preload", waitsForClick ? entry : entry.concat(rootModules)) +
     attribute("data-farm-preload-router", farmClientModulePreloads.router || []) +
-    attribute("data-farm-preload-renderer", navigation ? [] : farmClientModulePreloads.renderer || []) +
+    attribute("data-farm-preload-renderer", renderer) +
     (waitsForClick ? attribute("data-farm-preload-root", rootModules) : "");
 }
 

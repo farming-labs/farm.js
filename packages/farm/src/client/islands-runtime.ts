@@ -10,7 +10,7 @@ import {
   setActionInterceptor,
   setActionNavigator,
 } from "@farm.js/islx/client";
-import { farmIslandsActionInterceptor } from "../islands-action-client";
+import { farmIslandsLazyActionInterceptor } from "../islands-action-call";
 import * as React from "react";
 import {
   IslandsProvider,
@@ -65,8 +65,9 @@ export function createFarmIsolatedHydrationRuntime(options: FarmIslandsRuntimeOp
     report: options.report,
   });
   const router = () => (window as Window & { __FARM_SPA_ROUTER__?: Router }).__FARM_SPA_ROUTER__;
-  // Server functions and queries on islx's calls: their cache entries, invalidations and errors.
-  setActionInterceptor(farmIslandsActionInterceptor);
+  // Server functions and queries on islx's calls: their cache entries, invalidations and errors,
+  // handled by code the first call imports (RFC 0013).
+  setActionInterceptor(farmIslandsLazyActionInterceptor);
   setActionNavigator({
     refresh: () => router()?.refresh?.({ scroll: false }),
     navigate: (href) => {
