@@ -98,7 +98,7 @@ function findImportChain(
   const chainTo = (file: string, last: string) => {
     const chain = [last];
     for (let current: string | null = file; current; current = parent.get(current) ?? null) {
-      chain.unshift(path.relative(SRC, current));
+      chain.unshift(path.relative(SRC, current).split(path.sep).join("/"));
     }
     return chain;
   };
