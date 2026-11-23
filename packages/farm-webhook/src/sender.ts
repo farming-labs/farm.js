@@ -55,11 +55,11 @@ function registrationUrl(config: Registration) {
   if (!["development", "staging", "production"].includes(config.environment))
     throw new TypeError("Set environment to development, staging or production.");
   if (typeof config.name !== "string" || !/^[a-z][a-z0-9-]{0,62}$/.test(config.name))
-    throw new TypeError("Set name to a lowercase receiver name of 1 to 63 characters.");
+    throw new TypeError("Set name to a lowercase webhook name of 1 to 63 characters.");
   secureUrl(config.destination);
   const verification = config.verification;
   if (verification.mode !== "preserve" && !isSigningSecret(verification.deliverySecret))
-    throw new TypeError("Set deliverySecret to the receiver's Standard Webhooks signing secret.");
+    throw new TypeError("Set deliverySecret to the webhook's Standard Webhooks signing secret.");
   if (
     verification.mode === "standard" &&
     (!isSigningSecret(verification.sourceSecret) ||
@@ -79,14 +79,14 @@ function register(config: Registration, url: URL) {
   );
 }
 
-/** Explicit provisioning for deployment tools and provider-signed receivers. */
+/** Explicit provisioning for deployment tools and webhooks whose service signs its own events. */
 export function registerWebhook(
   config: Registration,
 ): Promise<{ id: string; url: string; sendKey?: string }> {
   return register(config, registrationUrl(config));
 }
 
-/** Construct locally. The first send resolves the receiver and obtains its credential. */
+/** Construct locally. The first send resolves the webhook and obtains its credential. */
 export function createWebhook(options: ReceiverCredentials | NamedSender) {
   let access: Access | undefined;
   let pending: Promise<Access> | undefined;
@@ -94,7 +94,7 @@ export function createWebhook(options: ReceiverCredentials | NamedSender) {
   if ("url" in options) {
     const url = secureUrl(options.url);
     if (!/^fws_[\w-]{43}$/.test(options.sendKey))
-      throw new TypeError("Supply the receiver's write-only send key.");
+      throw new TypeError("Supply the webhook's write-only send key.");
     if (options.auth !== undefined && options.auth !== "token" && options.auth !== "direct")
       throw new TypeError("Choose direct or token authentication.");
     if (options.auth === "direct") access = { url, token: options.sendKey, expiresAt: Infinity };
@@ -107,7 +107,7 @@ export function createWebhook(options: ReceiverCredentials | NamedSender) {
       const result = await register(options, endpoint);
       const url = secureUrl(result.url);
       if (url.origin !== endpoint.origin)
-        throw new Error("Receiver URL does not match the configured Infra origin.");
+        throw new Error("The webhook URL does not match the configured Infra origin.");
       return tokenAccess(url, result);
     };
   }
