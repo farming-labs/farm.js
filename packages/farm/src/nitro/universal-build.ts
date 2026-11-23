@@ -24,6 +24,7 @@ async function readFarmNativeStylesheets(
 }
 import { resolveServerActionsConfig } from "../server-action-security";
 import { resolveFarmServerComponentsMode } from "../server-components-mode";
+import { resolveFarmIslxActionsMode } from "../server-actions-mode";
 import { createBundledEnv } from "../env";
 import { generateNativeMCPPluginSource } from "./native-mcp-source";
 import { createNitroStaticRangePlugin } from "./static-range";
@@ -7468,7 +7469,7 @@ function getFarmBufferedPreloadMarker(html) {
   // Prove eligibility while Farm still owns the complete document string.
   // Candidate-bearing or unknown bodies must retain the full parser path.
   // Response.text() strips a leading UTF-8 BOM; retain that legacy behavior.
-  return typeof html === "string" && html.charCodeAt(0) !== 0xfeff && !/\\bpreload\\b/i.test(html) ? "none" : "1";
+  return typeof html === "string" && html.charCodeAt(0) !== 0xfeff && !hasFarmHtmlPreloadToken(html) ? "none" : "1";
 }
 
 async function applyFarmPreloadBudget(response, pathname, request) {
@@ -7592,12 +7593,15 @@ function generateVirtualEntryCode(
   // Islands mode runs `"use server"` actions posted to a page (RFC 0003).
   const farmIslandsMode =
     resolveFarmServerComponentsMode(config.experimental?.serverComponents) === "islands";
+  // A renderer other than React with server actions on runs them the same way, without islands.
+  const farmRendererActions = resolveFarmIslxActionsMode(config) === "renderer";
   const farmClientBoot = canBootFarmIslandsClient(config);
   const farmMobileClient = shouldBuildFarmMobileClient(config);
   // farm build --mobile with mobile.shells: this server renders page shells for its token.
   const farmMobileShells = farmMobileClient && config.mobileShells ? config.mobileShells : null;
+  // Node and Bun both implement node:zlib's streaming compressors; edge runtimes have no zlib.
   const hasCompressionRuntime =
-    config.compress && resolveFarmInstrumentationRuntime(preset) === "nodejs";
+    config.compress && resolveFarmInstrumentationRuntime(preset) !== "edge";
   // agent.crawlers serves /robots.txt unless a root robots.ts owns it.
   const servesAgentRobotsTxt =
     Boolean(config.agent?.crawlers?.enabled) &&
@@ -8207,6 +8211,7 @@ function renderFarmServerTreeLayout(Layout, props, outlets) {
   isFarmNotFoundError,
   isFarmRedirectError,
   localizeFarmHref,
+  hasFarmHtmlPreloadToken,
   manageFarmDocumentPreloads,
   mergeRouteRenderingDirectiveConfig,
   resolveRouteSharedCacheControl,
@@ -8306,8 +8311,12 @@ function resolveFarmMobileShellRender(request, route, routePathname) {
       : ""
   }${
     farmIslandsMode
-      ? `\nimport { getFarmFormState as farmFormState, getSharedLayoutPrefixLength, handleFarmFormActionRequest, ignoreFarmHeldValues, installFarmIslandValues, parseFarmLayoutChainHeader, renderFarmFormStateScript as farmFormStateScript } from "@farm.js/core/internal/production-runtime";\nimport { installFarmIslandsServer } from "@farm.js/core/internal/islands-server";\ninstallFarmIslandsServer();\nconst farmFormActionsConfig = ${JSON.stringify(resolveServerActionsConfig(config.serverActions))};\ninstallFarmIslandValues();\n${islandsActionKeyCode()}\n${FARM_SEGMENT_NAVIGATION_SERVER_RUNTIME}`
-      : `\nfunction farmFormState() { return undefined; }\nfunction farmFormStateScript() { return ""; }`
+      ? `\nimport { getFarmFormState as farmFormState, getSharedLayoutPrefixLength, handleFarmFormActionRequest, ignoreFarmHeldValues, installFarmIslandValues, parseFarmLayoutChainHeader, renderFarmFormStateScript as farmFormStateScript } from "@farm.js/core/internal/production-runtime";\nimport { installFarmIslandsServer } from "@farm.js/core/internal/islands-server";\ninstallFarmIslandsServer();\nconst farmFormActionsConfig = ${JSON.stringify(resolveServerActionsConfig(config.serverActions))};\ninstallFarmIslandValues();\n${islandsActionKeyCode("@farm.js/core/internal/islx-server")}\n${FARM_SEGMENT_NAVIGATION_SERVER_RUNTIME}`
+      : `${
+          farmRendererActions
+            ? `\nimport { handleFarmFormActionRequest } from "@farm.js/core/internal/production-runtime";\nconst farmFormActionsConfig = ${JSON.stringify(resolveServerActionsConfig(config.serverActions))};\n${islandsActionKeyCode("@farm.js/core/internal/islx-actions-server")}`
+            : ""
+        }\nfunction farmFormState() { return undefined; }\nfunction farmFormStateScript() { return ""; }`
   }`;
   const productionSiteTelemetryImport = config.telemetry
     ? `import { createFarmProductionSiteReporter } from "@farm.js/core/internal/product-telemetry-runtime";`
@@ -12085,8 +12094,8 @@ ${
     farmCacheGuard.deploymentPage = true;
   }
   ${
-    farmIslandsMode
-      ? `// Islands mode: a form or client component posting a server action to this page.
+    farmIslandsMode || farmRendererActions
+      ? `// A form or client component posting a server action to this page.
   if (matchedRoute && request.method === "POST") {
     const actionResponse = await _runWithMiddlewareData(middlewareData || {}, () =>
       _runWithMiddlewareContext(middlewareContext || {}, () =>
@@ -14753,7 +14762,9 @@ function toFarmNodeResponse(request, response) {
 
   // The client output is final here: the hashed stylesheet copy and the farm-client.js shim are
   // its last writes, so each brotli copy is of the bytes the server sends.
-  if (preset === "node-server") await writeFarmClientBrotliAssets(clientOutputDir);
+  if (preset === "node-server" || preset === "bun") {
+    await writeFarmClientBrotliAssets(clientOutputDir);
+  }
 
   // Content-hashed client files never change, so they are cached for a year. Vercel gets the same
   // policy from the immutable route postProcessVercelOutput writes, which replaces Nitro's routes.
@@ -14796,9 +14807,8 @@ function toFarmNodeResponse(request, response) {
     // A self-hosted Node or Bun server sends static files itself, so precompress
     // them with gzip and let Nitro serve that by Accept-Encoding. Brotli at Nitro's
     // fixed top quality on every file cost a docs app ~20 s of build CPU, so only
-    // client scripts and stylesheets get a brotli copy, on node-server
-    // (writeFarmClientBrotliAssets). Serverless and edge targets sit behind a CDN
-    // that compresses.
+    // client scripts and stylesheets get a brotli copy (writeFarmClientBrotliAssets).
+    // Serverless and edge targets sit behind a CDN that compresses.
     ...(preset === "node-server" || preset === "bun"
       ? { compressPublicAssets: { gzip: true } }
       : {}),
@@ -16113,7 +16123,8 @@ export { generateNativeMCPPluginSource } from "./native-mcp-source";
  * shares (islx reads `ISLX_ACTIONS_KEY` first, so an app can keep it across deploys). Without it,
  * each serverless instance would make its own key and reject forms another one rendered.
  */
-function islandsActionKeyCode(): string {
+/** The build's key for sealing actions' bound values, set through `runtimeModule`'s islx server. */
+function islandsActionKeyCode(runtimeModule: string): string {
   const key = randomBytes(32).toString("base64url");
-  return `import { setBuildDefaults as __farmIslxBuildDefaults } from "@farm.js/core/internal/islx-server";\n__farmIslxBuildDefaults({ key: ${JSON.stringify(key)} });`;
+  return `import { setBuildDefaults as __farmIslxBuildDefaults } from ${JSON.stringify(runtimeModule)};\n__farmIslxBuildDefaults({ key: ${JSON.stringify(key)} });`;
 }

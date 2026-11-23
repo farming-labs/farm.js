@@ -20,8 +20,8 @@ neither needs a build step. `farm-leaf/test/` runs the conformance suites from
 
 The app covers a hydrating layout that keeps its state across client navigation, a counter page,
 a page that ships no JavaScript, a dynamic route with metadata, a page and component in leaf's own
-`.leaf` file format, an API route backed by a validated `createServerFn`, and not-found and error
-pages.
+`.leaf` file format, an API route, a button that calls a validated `createServerFn` imported
+straight into the page (`experimental.serverActions`), and not-found and error pages.
 
 ```bash
 pnpm --filter farm-custom-renderer-example dev
@@ -32,9 +32,9 @@ pnpm test:e2e:custom-renderer
 ## What it does not do
 
 - leaf doesn't stream, so Farm renders its pages buffered through `renderToString()`.
-- Browser code reaches the server through API routes and the typed API client. Importing a
-  `createServerFn` or `createServerQuery` module into browser code needs the React-only server
-  actions transform, so the adapter has no `useAction` or `useServerQuery` hook.
+- The adapter has no `useAction` or `useServerQuery` hook. The page awaits the server function and
+  keeps the result in its own state; a hook would wrap `createRendererAction` and
+  `createRendererQuery` from `@farm.js/core/renderer-client` as `useRouter` wraps the router store.
 - leaf matches children by position and has no keys, so reordering a list re-renders its items.
 
 See [Renderer modules](https://farmjs.dev/docs/renderers#renderer-modules) for the full contract.

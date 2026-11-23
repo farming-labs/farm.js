@@ -336,7 +336,7 @@ farm build --preset my-company-preset
 
 For built-in Nitro presets, the generated output follows Nitro's provider shape. For custom presets, Farm passes the preset name through to Nitro, so the preset must be installed or otherwise resolvable by Nitro in the project.
 
-A `bun` build writes gzip copies of its static files, as a `node` build does, so the Bun server sends a browser that accepts gzip the smaller copy.
+A `bun` build writes the same gzip and brotli copies of its static files as a `node` build, and the Bun server picks one from the browser's `Accept-Encoding`.
 
 ### Nitro version compatibility
 

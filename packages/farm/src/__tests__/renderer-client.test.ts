@@ -3,6 +3,7 @@
 import { act, createElement } from "react";
 import { createRoot } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { applyFarmCacheInvalidations } from "../cache-invalidation";
 import { getFarmClientDataCache } from "../client-cache";
 import { _hydrateFarmI18n } from "../i18n/client-runtime";
 import {
@@ -14,6 +15,7 @@ import {
 } from "../renderer-client";
 import type { ServerFn } from "../server-fn";
 import type { ServerQuery } from "../server-query";
+import { createServerQueryCallKey } from "../server-query-runtime";
 import { setFarmBasePath } from "../base-path";
 import { useRouter } from "../client/router";
 import { getRouter } from "../client/spa-router";
@@ -142,6 +144,35 @@ describe("renderer-neutral client primitives", () => {
     await updated;
     expect(observer.getSnapshot().data).toEqual({ id: "42", version: 1 });
     await expect(observer.refetch()).resolves.toEqual({ id: "42", version: 2 });
+    observer.dispose();
+  });
+
+  // An action's response names the keys it invalidated. Marked stale but not read again, an
+  // observed query kept showing what the action had just changed.
+  it("reads an observed query again when an action invalidates it", async () => {
+    let version = 0;
+    const query = (async ({ id }: { id: string }) => ({ id, version: ++version })) as ServerQuery<
+      { id: string },
+      { id: string; version: number }
+    >;
+    const observer = createRendererQuery(query, { id: "42" }, { staleTime: 10_000 });
+    const reachedVersion = (target: number) =>
+      new Promise<void>((resolve) => {
+        const check = () => {
+          if (observer.getSnapshot().data?.version !== target) return;
+          unsubscribe();
+          resolve();
+        };
+        const unsubscribe = observer.subscribe(check);
+        check();
+      });
+    const observed = observer.subscribe(() => {});
+
+    await reachedVersion(1);
+    applyFarmCacheInvalidations([createServerQueryCallKey(query, { id: "42" })]);
+    await reachedVersion(2);
+    expect(version).toBe(2);
+    observed();
     observer.dispose();
   });
 

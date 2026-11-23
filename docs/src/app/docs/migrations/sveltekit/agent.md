@@ -33,9 +33,9 @@ checked against the Farm 0.1.14 source (`@farm.js/core` 0.1.14, `@farm.js/cli` 0
 5. **There are no form actions.** Forms post to API routes under `src/app/api/**/route.ts`.
 6. **Keep Svelte code off React entries.** `@farm.js/core/client` imports React at module load and
    React is only an optional peer of `@farm.js/core`. In `.svelte` files and browser helpers use
-   `@farm.js/svelte/bindings` and `@farm.js/core/api/client`. Modules that call `createServerFn` or
-   `createServerQuery` must never be imported by browser code: without the React-only server-function
-   transform (`experimental.serverActions`), the build fails with a boundary error.
+   `@farm.js/svelte/bindings` and `@farm.js/core/api/client`. Browser code may import a module that
+   calls `createServerFn` or `createServerQuery` only with `experimental.serverActions: true`
+   (experimental); without it, the build fails with `CLIENT_SERVER_FUNCTION`.
 
 ## Migration procedure
 
@@ -368,16 +368,16 @@ export const GET = createEndpoint(async ({ params }) => {
 
 ## Feature parity: form actions and `$app/forms`
 
-| SvelteKit                          | Farm                                                                                                           | Status      |
-| ---------------------------------- | -------------------------------------------------------------------------------------------------------------- | ----------- |
-| default action (`actions.default`) | `POST` in `src/app/api/<name>/route.ts`; `<form method="POST" action="/api/<name>">`                           | `different` |
-| named actions (`?/create`)         | one API route per action, or one route that switches on a form field                                           | `different` |
-| `fail(400, data)`                  | redirect back with a query value for no-JS, JSON `400` for enhanced requests                                   | `different` |
-| `form` prop / `ActionData`         | read the `search` prop (no-JS) or local `$state` (enhanced)                                                    | `different` |
-| `use:enhance`                      | `onsubmit` handler that `fetch`es the same endpoint; requires `hydrate = true`                                 | `different` |
-| `applyAction`, `deserialize`       | none                                                                                                           | `none`      |
-| progressive enhancement            | native form post plus `303` redirect works without JavaScript                                                  | `same`      |
-| `createAction` (Svelte binding)    | requires a browser-callable server function, which needs the React-only `experimental.serverActions` transform | `none`      |
+| SvelteKit                          | Farm                                                                                                       | Status      |
+| ---------------------------------- | ---------------------------------------------------------------------------------------------------------- | ----------- |
+| default action (`actions.default`) | `POST` in `src/app/api/<name>/route.ts`; `<form method="POST" action="/api/<name>">`                       | `different` |
+| named actions (`?/create`)         | one API route per action, or one route that switches on a form field                                       | `different` |
+| `fail(400, data)`                  | redirect back with a query value for no-JS, JSON `400` for enhanced requests                               | `different` |
+| `form` prop / `ActionData`         | read the `search` prop (no-JS) or local `$state` (enhanced)                                                | `different` |
+| `use:enhance`                      | `onsubmit` handler that `fetch`es the same endpoint; requires `hydrate = true`                             | `different` |
+| `applyAction`, `deserialize`       | none                                                                                                       | `none`      |
+| progressive enhancement            | native form post plus `303` redirect works without JavaScript                                              | `same`      |
+| `createAction` (Svelte binding)    | takes a server function imported from its server module; needs `experimental.serverActions` (experimental) | `different` |
 
 ```ts
 // src/app/api/todos/route.ts
@@ -437,8 +437,11 @@ Behind a proxy, `request.url` reflects the public origin only with `server.trust
 | `getRequestEvent()`      | `getCurrentRequest()` from `@farm.js/core/request`                     | `different` |
 | `read()`                 | none; read files with `node:fs` in server code                         | `none`      |
 
-`createServerFn` and `createServerQuery` exist in Farm, but browser callers need the React server
-components transform. In a Svelte app, call them from API routes or other server code only.
+`createServerFn` and `createServerQuery` run on the server. With `experimental.serverActions: true`
+(experimental), Svelte code can import them and call them directly, or through `createAction` and
+`createServerQuery` from `@farm.js/svelte/bindings`; see
+[callable actions](/docs/renderers#native-client-bindings). Without the flag, call them from API
+routes or other server code.
 
 ## Feature parity: `$app/navigation`
 

@@ -8,6 +8,7 @@
 import { createHash } from "node:crypto";
 import { transformActions } from "@farm.js/islx/compiler";
 import path from "node:path";
+import type { FarmIslxActionsMode } from "./server-actions-mode";
 
 interface AstNode {
   type: string;
@@ -67,6 +68,11 @@ export function transformFarmFormActionModule(options: {
   parse: (source: string) => AstNode;
   /** The specifier the module imports a Farm runtime module by (see farmPlugin's transform). */
   runtimeModule?: (specifier: string) => string;
+  /**
+   * Which islx runtime the compiled module imports: islands mode's, or the React-free one apps on
+   * other renderers use (see `resolveFarmIslxActionsMode`). Defaults to islands mode's.
+   */
+  runtime?: FarmIslxActionsMode;
 }): string | null {
   const runtimeModule = options.runtimeModule ?? ((specifier: string) => specifier);
   // islx compiles both `"use server"` modules and inline `"use server"` functions; the runtime
@@ -77,10 +83,16 @@ export function transformFarmFormActionModule(options: {
     root: options.root,
     environment: options.ssr ? "server" : "client",
     parse: options.parse as never,
-    runtime: {
-      server: runtimeModule("@farm.js/core/internal/islx-server"),
-      client: runtimeModule("@farm.js/core/internal/islx-client"),
-    },
+    runtime:
+      options.runtime === "renderer"
+        ? {
+            server: runtimeModule("@farm.js/core/internal/islx-actions-server"),
+            client: runtimeModule("@farm.js/core/internal/islx-actions-client"),
+          }
+        : {
+            server: runtimeModule("@farm.js/core/internal/islx-server"),
+            client: runtimeModule("@farm.js/core/internal/islx-client"),
+          },
   });
   return result ? result.code : null;
 }

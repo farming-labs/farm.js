@@ -460,10 +460,12 @@ onMounted(async () => {
 Wrap server data access with `createServerOnlyFn` from `@farm.js/core/environment` so a module
 imported by a route that later hydrates cannot ship its implementation to the browser.
 
-`useServerQuery` and `useAction` from `@farm.js/vue/bindings` exist, but calling a server query or
-server function from browser code requires the server-function transform (`@farm.js/plugin/rsc`
-with `experimental.serverActions: true`). That path is not documented for Vue; prefer API routes
-plus `apiClient`. Do not import `@farm.js/core/server-query/client` in Vue code: it imports React.
+`useServerQuery` and `useAction` from `@farm.js/vue/bindings` take a server query or server
+function that browser code imports from its server module. Turn that on with
+`experimental.serverActions: true` (experimental; see
+[callable actions](/docs/renderers#native-client-bindings)); without it, the import fails the build
+with `CLIENT_SERVER_FUNCTION`, and API routes plus `apiClient` remain the path. Do not import
+`@farm.js/core/server-query/client` in Vue code: it imports React.
 
 ## State
 

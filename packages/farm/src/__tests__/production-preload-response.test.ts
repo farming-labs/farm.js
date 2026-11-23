@@ -2,6 +2,7 @@
 import { describe, expect, it, vi } from "vitest";
 import { generatePreloadResponseRuntimeSource } from "../nitro/universal-build";
 import {
+  hasFarmHtmlPreloadToken,
   manageFarmDocumentPreloads,
   manageFarmLinkHeaderPreloads,
   resolveFarmPerformanceConfig,
@@ -16,6 +17,7 @@ function runtime(mode: FarmPreloadMode = "enforce") {
   const report = vi.fn();
   const headerCopies = vi.fn();
   const generated = new Function(
+    "hasFarmHtmlPreloadToken",
     "manageFarmDocumentPreloads",
     "manageFarmLinkHeaderPreloads",
     "farmPreloadConfig",
@@ -23,6 +25,7 @@ function runtime(mode: FarmPreloadMode = "enforce") {
     "Headers",
     `${generatePreloadResponseRuntimeSource()}; return { getFarmBufferedPreloadMarker, rememberFarmBufferedHtml, getFarmOwnedBufferedHtml, applyFarmPreloadBudget };`,
   )(
+    hasFarmHtmlPreloadToken,
     manageFarmDocumentPreloads,
     manageFarmLinkHeaderPreloads,
     config,
@@ -260,6 +263,8 @@ describe("production preload response processing", () => {
     "<p>hello 🌱</p>",
     '<link rel="modulepreload" href="/client.js">',
     '<link rel="stylesheet" href="/app.css">',
+    // The islands boot script names the modules it preloads in attributes, not links.
+    '<script type="module" src="/farm-client-boot.js" data-farm-runtime="/farm-client.js" data-farm-preload="chunks/a.js" data-farm-preload-router="chunks/router.js"></script>',
   ])("reuses a proven preload-free body: %s", async (html) => {
     const r = runtime();
     const original = r.response(html, {

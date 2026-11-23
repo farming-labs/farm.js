@@ -1,6 +1,6 @@
 {
   "name": "@farm.js/core",
-  "version": "0.1.80",
+  "version": "0.1.81",
   "description": "The core of Farm.js, the framework for the web and agents",
   "keywords": [
     "@farm.js/core",
@@ -788,6 +788,16 @@
       "types": "./dist/internal/islx-server.d.ts",
       "import": "./dist/internal/islx-server.mjs",
       "require": "./dist/internal/islx-server.cjs"
+    },
+    "./internal/islx-actions-client": {
+      "types": "./dist/internal/islx-actions-client.d.ts",
+      "import": "./dist/internal/islx-actions-client.mjs",
+      "require": "./dist/internal/islx-actions-client.cjs"
+    },
+    "./internal/islx-actions-server": {
+      "types": "./dist/internal/islx-actions-server.d.ts",
+      "import": "./dist/internal/islx-actions-server.mjs",
+      "require": "./dist/internal/islx-actions-server.cjs"
     },
     "./internal/islx-react": {
       "types": "./dist/internal/islx-react.d.ts",
