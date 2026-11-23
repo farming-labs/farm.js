@@ -178,7 +178,7 @@ The hosted service may cap the requested duration. The CLI prints the authoritat
 by the service. Heartbeats do not extend it. After expiration, browser visitors see a friendly
 Farm preview-expired page.
 
-The preview lifecycle is tied to the local app. When `farm dev` stops or the configured local target becomes unreachable, the native tunnel closes its hosted relay session and `farm preview` exits. The compatibility path closes its gateway session the same way.
+The preview lifecycle is tied to the local app. When `farm dev` stops or the configured local target becomes unreachable, the native tunnel closes its hosted relay session and `farm preview` exits. The compatibility path closes its gateway session the same way. To tell, the CLI checks every two seconds that the local port still accepts connections. The check opens and closes a connection without sending a request, so it never runs your routes or shows up in your analytics, and a slow page doesn't end the preview.
 
 The public URL is invalidated as soon as the session closes. Browser navigation receives an expired
 preview page; API-style requests receive `404`. You do not need to run a separate command to stop or
