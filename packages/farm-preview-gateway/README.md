@@ -16,10 +16,14 @@ Public disconnects are propagated through the request queue. The polling agent a
 
 `authorizeSession` is an optional, required-when-configured access hook. It receives only
 session ID, name, verified owner/project/key/grant IDs, and expiry—not transport tokens.
-Return `true` to allow access; denial returns 403 and exceptions return a generic 503.
+Return `true` to allow access; exceptions return a generic 503. A denial is final: the gateway
+releases the session, answers its control requests with 403, and answers its public address like
+an inactive preview (404), so the owner can start a new session under the same name. The name
+stays reserved for the owner for `nameReservationMs`.
 The gateway checks registration, public/control requests, queued dispatch and waiting responses.
 Unlike `observer`, errors never fail open. Bound your authority request with a timeout;
-the Infra example uses five seconds. Session DELETE remains available for cleanup.
+the Infra example uses five seconds. Session DELETE remains available for cleanup, and succeeds
+for a session that was already released.
 Omitting the hook preserves self-hosted behavior. The persistent relay offers the same
 hook, also checking idle sockets every five seconds and dispatch from its coordinator.
 
