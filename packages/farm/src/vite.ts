@@ -474,6 +474,38 @@ export function farmI18nClientBridgePlugin(): Plugin {
   };
 }
 
+/**
+ * `@farm.js/core/navigation` exports React's router hooks next to `notFound()` and `redirect()`, so
+ * loading it loads React. An app on another renderer doesn't install React, so the entry is an
+ * alias there for the same functions without the hooks, on the server and in the browser, in
+ * development and in builds. It is an alias, not a resolveId hook, because the development server
+ * leaves a package import it externalizes for Node to resolve, unless the import matches an alias.
+ * `renderer: false` has no pages for these to act on and is left alone, and so is Preact, whose
+ * plugin maps React's API to `preact/compat`, so the hooks run on Preact.
+ */
+export function farmNavigationPlugin(renderer: FarmRenderer | false | undefined): Plugin {
+  const otherRenderer =
+    !isFarmRendererDisabled(renderer) &&
+    !isReactRenderer(renderer || undefined) &&
+    (renderer || undefined)?.name !== "preact";
+  return {
+    name: "farm:navigation",
+    config() {
+      if (!otherRenderer) return;
+      return {
+        resolve: {
+          alias: [
+            {
+              find: /^@farm\.js\/core\/navigation$/,
+              replacement: "@farm.js/core/internal/navigation-neutral",
+            },
+          ],
+        },
+      };
+    },
+  };
+}
+
 /** Core entries whose runtime must never ship to the browser. */
 const FARM_SERVER_ONLY_ENTRIES = new Set(["@farm.js/core/og"]);
 
@@ -5357,9 +5389,9 @@ export function farmPlugin(
         const generatedDevIndicatorsClientRuntime = farmApp
           ? generateFarmDevIndicatorsClientRuntime(farmApp.getConfig().devIndicators)
           : "";
-        const integrationProviders = isReactRenderer(renderer)
-          ? getIntegrationProviders(integrations)
-          : [];
+        // Every renderer, as the server render and the production entry wrap pages: a page
+        // rendered inside a provider on the server hydrates inside it too.
+        const integrationProviders = getIntegrationProviders(integrations);
         const isolatedHydrationMode = resolveFarmIsolatedClientHydrationMode(
           resolvedConfig?.experimental?.isolatedClientHydration,
           {
@@ -9236,6 +9268,7 @@ export async function defineConfig(config: FarmVitePluginOptions = {}): Promise<
       viteBrowserExternalPlugin,
       farmI18nClientBridgePlugin(),
       farmServerOnlyEntriesPlugin({ distDir: config.distDir || ".farm" }),
+      farmNavigationPlugin(config.renderer),
       farmIslandContainersPlugin(config),
       farmPlugin(config),
       farmEnvironmentFunctionsPlugin(config),
