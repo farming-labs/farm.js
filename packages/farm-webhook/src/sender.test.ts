@@ -90,7 +90,7 @@ it("resolves a named receiver on first send and shares its short-lived credentia
   ]);
 });
 
-it("rejects an incomplete named receiver when constructing the instance", () => {
+it("rejects an incomplete named webhook when constructing the instance", () => {
   const fetcher = vi.fn();
   vi.stubGlobal("fetch", fetcher);
   const config = {
@@ -103,12 +103,12 @@ it("rejects an incomplete named receiver when constructing the instance", () => 
   } as const;
   expect(() => createWebhook({ ...config, apiKey: "" })).toThrow("apiKey");
   expect(() => createWebhook({ ...config, project: "" })).toThrow("project");
-  expect(() => createWebhook({ ...config, name: "two words" })).toThrow("name");
+  expect(() => createWebhook({ ...config, name: "two words" })).toThrow("lowercase webhook name");
   expect(() => createWebhook({ ...config, destination: "http://shop.example/hook" })).toThrow(
     "HTTPS",
   );
   expect(() =>
     createWebhook({ ...config, verification: { mode: "bearer", deliverySecret: "" } }),
-  ).toThrow("deliverySecret");
+  ).toThrow("deliverySecret to the webhook's");
   expect(fetcher).not.toHaveBeenCalled();
 });

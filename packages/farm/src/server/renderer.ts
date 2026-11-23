@@ -1737,7 +1737,9 @@ window.__FARM_I18N__ = ${i18nSnapshot ? serializeInlineValue(i18nSnapshot) : "nu
           if (pageMetadata.shouldHydrate && !layoutShouldHydrate && this.reactRenderer) {
             pageElement = this.reactRenderer.markLayoutPosition(pageElement);
           }
-          const html = await this.rendererRuntime.renderToString(
+          // Render as a request does, so a page the stream renders (one that suspends or has an
+          // async component) regenerates, and head markup the renderer emits stays.
+          const { html, head: rendererHead } = await this.renderElementToDocumentParts(
             await this.wrapWithIntegrationProviders(pageElement),
           );
 
@@ -1751,10 +1753,13 @@ window.__FARM_I18N__ = ${i18nSnapshot ? serializeInlineValue(i18nSnapshot) : "nu
             pageProps: pageProps as unknown as PageProps,
             pathname: page.urlPath,
           });
-          const { title, tags, hasFavicon } = renderMetadataHead(mergedMetadata);
+          const { title, tags, hasFavicon, hasExplicitTitle } = renderMetadataHead(mergedMetadata);
+          // As on a request, a renderer-emitted <title> replaces the fallback title.
+          const titleTag =
+            !hasExplicitTitle && /<title[\s>]/i.test(rendererHead) ? "" : `<title>${title}</title>`;
           const metadataHead = `${
             hasFavicon ? "" : '<link rel="icon" href="data:,">\n  '
-          }<title>${title}</title>${tags}`;
+          }${titleTag}${tags}${rendererHead}`;
           // No request drives a background regeneration, so the cached document's
           // hreflang alternates resolve against metadataBase only.
           const fullDocument = this.createFullHTML(
