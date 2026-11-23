@@ -4,6 +4,7 @@
  * an island's own trigger, or intent to follow a link. Until then it holds the clicks and submits
  * that would be lost (in an island that has not hydrated, or on a link), and the runtime replays
  * them: islands through the pre-hydration queue its scheduler reads, links on the same element.
+ * Once the page has loaded and the browser is idle, it fetches what a link runs, without running it.
  *
  * It imports nothing at runtime, and runs the client entry from the URL the server wrote on its
  * script: a module it shared with the entry, or an import of the entry itself, would change how
@@ -129,20 +130,21 @@ export function startFarmIslandsBoot(load: () => Promise<unknown> = loadFarmClie
   // renders and hydrates with (-renderer), and the modules a root that waits for a click hydrates
   // with (-root). A file listed twice is fetched once.
   const preloaded = new Set<string>();
+  const runtime = new URL(script?.dataset.farmRuntime ?? "", document.baseURI);
+  const modulepreload = (file: string) => {
+    const link = document.createElement("link");
+    link.rel = "modulepreload";
+    link.href = new URL(file, runtime).href;
+    if (script?.nonce) link.nonce = script.nonce;
+    document.head.append(link);
+  };
   const preload = (
     group: "farmPreload" | "farmPreloadRouter" | "farmPreloadRenderer" | "farmPreloadRoot",
   ) => {
     const files = script?.dataset[group];
     if (!script || !files || preloaded.has(group)) return;
     preloaded.add(group);
-    const base = new URL(script.dataset.farmRuntime ?? "", document.baseURI);
-    for (const file of files.split(" ")) {
-      const link = document.createElement("link");
-      link.rel = "modulepreload";
-      link.href = new URL(file, base).href;
-      if (script.nonce) link.nonce = script.nonce;
-      document.head.append(link);
-    }
+    for (const file of files.split(" ")) modulepreload(file);
   };
 
   // The runtime holds and replays from here on: its scheduler for islands, its router for links.
@@ -314,22 +316,25 @@ export function startFarmIslandsBoot(load: () => Promise<unknown> = loadFarmClie
         )
       : null;
   if (visibility) cleanups.push(() => visibility.disconnect());
-  let idle = false;
-  const startWhenIdle = () => {
-    if (idle) return;
-    idle = true;
+  // The same timing as the island scheduler's idle trigger.
+  const whenIdle = (callback: () => void) => {
     const idleWindow = window as Window & {
       requestIdleCallback?: (callback: () => void, options?: { timeout?: number }) => number;
       cancelIdleCallback?: (handle: number) => void;
     };
-    // The same timing as the island scheduler's idle trigger.
     if (typeof idleWindow.requestIdleCallback === "function") {
-      const handle = idleWindow.requestIdleCallback(() => void start(), { timeout: 2_000 });
+      const handle = idleWindow.requestIdleCallback(callback, { timeout: 2_000 });
       cleanups.push(() => idleWindow.cancelIdleCallback?.(handle));
     } else {
-      const handle = window.setTimeout(() => void start(), 1);
+      const handle = window.setTimeout(callback, 1);
       cleanups.push(() => window.clearTimeout(handle));
     }
+  };
+  let idle = false;
+  const startWhenIdle = () => {
+    if (idle) return;
+    idle = true;
+    whenIdle(() => void start());
   };
   // Islands render with display:contents, so observe their children, as the scheduler does. They
   // are judged once parsed: a streamed island's children may not have arrived when it does.
@@ -387,5 +392,24 @@ export function startFarmIslandsBoot(load: () => Promise<unknown> = loadFarmClie
       observer.disconnect();
       document.removeEventListener("DOMContentLoaded", parsed);
     });
+  }
+
+  // Once the page has loaded and the browser is idle, what a link's intent runs (the entry, its
+  // imports, the router) is fetched, not run. A first tap then waits for its page alone, where on a
+  // slow connection the runtime took longer than the page. Nothing runs, so the page does no more
+  // work; a connection that asks to save data fetches it on intent, as before.
+  const prefetch = () => {
+    const connection = (navigator as Navigator & { connection?: { saveData?: boolean } })
+      .connection;
+    if (loading || !script?.dataset.farmRuntime || connection?.saveData) return;
+    modulepreload(runtime.href);
+    preload("farmPreload");
+    preload("farmPreloadRouter");
+  };
+  const prefetchWhenIdle = () => whenIdle(prefetch);
+  if (document.readyState === "complete") prefetchWhenIdle();
+  else {
+    window.addEventListener("load", prefetchWhenIdle, { once: true });
+    cleanups.push(() => window.removeEventListener("load", prefetchWhenIdle));
   }
 }

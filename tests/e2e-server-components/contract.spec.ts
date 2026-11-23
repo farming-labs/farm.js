@@ -1115,8 +1115,9 @@ test("an idle island hydrates without input, and leaves the other islands waitin
   expect(errors).toEqual([]);
 });
 
-// The client runtime (React, islx, the router) loads when a page first needs it: at once when an
+// The client runtime (React, islx, the router) runs when a page first needs it: at once when an
 // island hydrates at load, otherwise on an island's own trigger or a link (RFC 0003, section 10).
+// Until then the boot fetches what a link runs, once the page is idle, and runs none of it.
 // /timing/later has an interaction island, a link, and a visible island below the fold.
 function scriptRequests(page: Page): string[] {
   const scripts: string[] = [];
@@ -1129,6 +1130,15 @@ function scriptRequests(page: Page): string[] {
 /** Production's client entry, or farm dev's. */
 function isClientRuntime(pathname: string): boolean {
   return /^\/farm-client-h[0-9a-f]+\.js$/.test(pathname) || pathname === "/@farm/client.js";
+}
+
+/** Whether the boot ran the client runtime: it adds a script for it, where a prefetch only fetches. */
+function runtimeRan(page: Page): Promise<boolean> {
+  return page.evaluate(() => {
+    const runtime = document.querySelector<HTMLScriptElement>("script[data-farm-runtime]")?.dataset
+      .farmRuntime;
+    return Array.from(document.scripts).some((script) => script.getAttribute("src") === runtime);
+  });
 }
 
 test("a page with an island that hydrates at load loads the client runtime at once", async ({
@@ -1150,9 +1160,10 @@ test("a page whose islands all hydrate later loads the client runtime when one i
   const scripts = scriptRequests(page);
   await page.goto("/timing/later");
   await hydrated(page);
-  expect(scripts.filter(isClientRuntime)).toEqual([]);
+  expect(await runtimeRan(page)).toBe(false);
   await page.getByTestId("visible").scrollIntoViewIfNeeded();
   await expect(page.getByTestId("visible")).toHaveAttribute("data-hydrated", "true");
+  // Fetched once: the boot's prefetch, which the runtime then runs from.
   expect(scripts.filter(isClientRuntime)).toHaveLength(1);
   await expect(page.getByTestId("interaction")).toHaveAttribute("data-hydrated", "false");
   expect(errors).toEqual([]);
@@ -1163,10 +1174,9 @@ test("a click on an island before the client runtime loads is replayed once it h
 }) => {
   test.skip(mode !== "islands", "rsc hydrates every client component on load");
   const errors = collectErrors(page);
-  const scripts = scriptRequests(page);
   await page.goto("/timing/later");
   await hydrated(page);
-  expect(scripts.filter(isClientRuntime)).toEqual([]);
+  expect(await runtimeRan(page)).toBe(false);
   const island = page.getByTestId("interaction");
   await island.click();
   await expect(island).toHaveAttribute("data-hydrated", "true");
@@ -1179,7 +1189,8 @@ test("every click on an island while its code loads is replayed once it hydrates
 }) => {
   test.skip(mode !== "islands", "rsc hydrates every client component on load");
   const errors = collectErrors(page);
-  // The runtime is held until both clicks are in, so neither lands after hydration.
+  // The runtime is held until both clicks are in, so neither lands after hydration. The boot's
+  // prefetch of it is held too, so the network never goes idle: the page has loaded.
   let release!: () => void;
   const released = new Promise<void>((resolve) => (release = resolve));
   await page.route(
@@ -1190,7 +1201,6 @@ test("every click on an island while its code loads is replayed once it hydrates
     },
   );
   await page.goto("/timing/later");
-  await hydrated(page);
   const island = page.getByTestId("interaction");
   await island.click();
   await island.click();
@@ -1204,10 +1214,9 @@ test("every click on an island while its code loads is replayed once it hydrates
 test("a link followed before the client runtime loads is a client navigation", async ({ page }) => {
   test.skip(mode !== "islands", "rsc hydrates every client component on load");
   const errors = collectErrors(page);
-  const scripts = scriptRequests(page);
   await page.goto("/timing/later");
   await hydrated(page);
-  expect(scripts.filter(isClientRuntime)).toEqual([]);
+  expect(await runtimeRan(page)).toBe(false);
   await page.evaluate(() => Object.assign(window, { __farmSameDocument: true }));
   // A click with no pointer before it: nothing has started the runtime, so the click is held.
   await page.getByRole("link", { name: "To timing" }).dispatchEvent("click");
@@ -1222,14 +1231,13 @@ test("a link followed before the client runtime loads requests its page with the
 }) => {
   test.skip(mode !== "islands", "rsc hydrates every client component on load");
   const errors = collectErrors(page);
-  await page.goto("/timing/later");
-  await hydrated(page);
   const pageRequests: string[] = [];
   page.on("request", (request) => {
     if (new URL(request.url()).pathname === "/timing") pageRequests.push(request.url());
   });
   // While the runtime is held back none of its code runs, so a request for the page meanwhile is
-  // the boot's, and the router answers the click with it rather than with a second one.
+  // the boot's, and the router answers the click with it rather than with a second one. The boot's
+  // prefetch of it is held too, so the network never goes idle: the page has loaded.
   let release!: () => void;
   const released = new Promise<void>((resolve) => (release = resolve));
   await page.route(
@@ -1239,6 +1247,7 @@ test("a link followed before the client runtime loads requests its page with the
       await route.continue();
     },
   );
+  await page.goto("/timing/later");
   await page.evaluate(() => Object.assign(window, { __farmSameDocument: true }));
   await page.getByRole("link", { name: "To timing" }).click();
   await expect.poll(() => pageRequests.length).toBe(1);
@@ -1406,25 +1415,31 @@ test("a first navigation out of a layout root that waits shows the next page bef
   expect(errors).toEqual([]);
 });
 
-test("a page that hydrates loads the router only when a navigation needs it", async ({ page }) => {
+test("a page that hydrates runs the router only when a navigation needs it", async ({ page }) => {
   test.skip(mode !== "islands" || dev, "the production islands client entry splits its router");
   const errors = collectErrors(page);
   const routerRequests: string[] = [];
   page.on("request", (request) => {
     if (request.url().includes("farm-client-router")) routerRequests.push(request.url());
   });
+  // The boot fetches the router once the page is idle, and runs it on a link's intent. Held back,
+  // it never arrives: an island still hydrates and counts without it.
+  let release!: () => void;
+  const released = new Promise<void>((resolve) => (release = resolve));
+  await page.route("**/farm-client-router-*", async (route) => {
+    await released;
+    await route.continue();
+  });
   await page.goto("/");
-  await hydrated(page);
-  expect(routerRequests).toEqual([]);
+  await expect.poll(() => routerRequests.length).toBe(1);
   const increment = page.getByRole("button", { name: /Count: 5/ });
   await increment.click();
   await expect(page.getByRole("button", { name: /Count: 6/ })).toBeVisible();
-  expect(routerRequests).toEqual([]);
 
   await page.evaluate(() => Object.assign(window, { __farmSameDocument: true }));
   const link = page.getByRole("link", { name: "Stream", exact: true });
   await link.hover();
-  await expect.poll(() => routerRequests.length).toBe(1);
+  release();
   await link.click();
   await expect(page.getByRole("heading", { name: "Stream" })).toBeVisible();
   expect(await page.evaluate(() => "__farmSameDocument" in window)).toBe(true);
@@ -1643,13 +1658,14 @@ test("the next page of a layout that hydrates as one root updates the page on sc
   expect(errors).toEqual([]);
 });
 
-test("the hover that loads the client runtime fetches what it imports alongside it", async ({
+test("once the page is idle, the boot fetches what a link runs and runs none of it", async ({
   page,
 }) => {
   test.skip(mode !== "islands" || dev, "the production boot script lists the runtime's chunks");
   const errors = collectErrors(page);
+  const requested: string[] = [];
+  page.on("request", (request) => requested.push(new URL(request.url()).pathname));
   await page.goto("/context/wait/a");
-  await page.waitForLoadState("networkidle");
   const boot = page.locator("script[data-farm-runtime]");
   const runtime = (await boot.getAttribute("data-farm-runtime"))!;
   // The entry's imports, and the router and route table it imports on a link's intent. The
@@ -1671,28 +1687,20 @@ test("the hover that loads the client runtime fetches what it imports alongside 
     (file) => !listed.includes(file),
   );
   expect(rootModules).toContainEqual(expect.stringMatching(/^chunks\/theme-h[0-9a-f]+\.js$/));
-  const requested = new Set<string>();
-  page.on("request", (request) => requested.add(new URL(request.url()).pathname));
-  // While the runtime is held back none of its code runs, so whatever is fetched meanwhile, the
-  // boot fetched.
-  let release!: () => void;
-  const held = new Promise<void>((resolve) => (release = resolve));
-  await page.route(
-    (url) => url.pathname === runtime,
-    async (route) => {
-      await held;
-      await route.continue();
-    },
-  );
-  await page.hover("[data-next]");
-  await expect.poll(() => listed.filter((file) => !requested.has(`/${file}`))).toEqual([]);
-  release();
+  const fetched = [runtime, ...listed.map((file) => `/${file}`)];
+  await expect.poll(() => fetched.filter((file) => !requested.includes(file))).toEqual([]);
+  await page.waitForLoadState("networkidle");
+  expect(await runtimeRan(page)).toBe(false);
+  expect(rootModules.filter((file) => requested.includes(`/${file}`))).toEqual([]);
+
+  // A link's intent runs them, and fetches none again.
   await page.click("[data-next]");
   await expect(page.locator("h1")).toHaveText("Waiting b");
-  expect(rootModules.filter((file) => requested.has(`/${file}`))).toEqual([]);
+  expect(requested.filter((file) => file === runtime)).toHaveLength(1);
+  expect(rootModules.filter((file) => requested.includes(`/${file}`))).toEqual([]);
   // A click in the root needs its modules, and loads them.
   await page.getByRole("button", { name: "Toggle theme" }).click();
   await expect(page.getByTestId("theme-label")).toHaveText("Theme: dark");
-  expect(rootModules.filter((file) => !requested.has(`/${file}`))).toEqual([]);
+  expect(rootModules.filter((file) => !requested.includes(`/${file}`))).toEqual([]);
   expect(errors).toEqual([]);
 });
