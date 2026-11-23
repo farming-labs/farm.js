@@ -230,7 +230,7 @@ export default function HomePage() {
 }
 ```
 
-The same package has `createRendererTheme()`, `createRendererQuery()`, `createRendererAction()`, and `createRendererI18n()`, and each one wraps the same way. For links, `resolveLinkAttributes()` returns the attributes Farm's router looks for. A `Link` component only has to render an `<a>` with them, and Farm handles the click. leaf's bindings, `Link` included, are 55 lines.
+`createRendererTheme()` and `createRendererI18n()` wrap the same way. The action and query stores get their own hooks in [step 6](#step-6-server-functions). For links, `resolveLinkAttributes()` returns the attributes Farm's router looks for. A `Link` component only has to render an `<a>` with them, and Farm handles the click. leaf's bindings, all five hooks and `Link`, are 77 lines.
 
 One rule for apps without React: **import from core's subpaths**, such as `@farm.js/core/api`, `@farm.js/core/server-fn`, and `@farm.js/core/renderer-client`. The root `@farm.js/core` entry imports React. Type-only imports from it are fine, and so is `defineConfig` in `farm.config.ts`. `notFound()` and `redirect()` from `@farm.js/core/navigation` work with any renderer. That module's React hooks don't, so use your own bindings for those.
 
@@ -248,28 +248,78 @@ export default defineConfig({
 });
 ```
 
-Define the function in its own module:
+Define server functions in their own module. A query reads data, and a function that changes it invalidates the query's key:
 
 ```ts
 // app/src/server/plant.ts (abridged)
+import { invalidate } from "@farm.js/core/cache";
 import { createServerFn } from "@farm.js/core/server-fn";
+import { createServerQuery } from "@farm.js/core/server-query";
 import { z } from "zod";
+
+let planted = 0;
+
+export const plantedCount = createServerQuery({
+  key: () => ["planted"],
+  async handler() {
+    return { planted };
+  },
+});
 
 export const plantCrop = createServerFn({
   input: z.object({ name: z.enum(["wheat", "barley", "rye"]) }),
   async handler({ input }) {
+    planted += 1;
+    invalidate(["planted"]);
     return { message: `Planted ${input.name} on the server.` };
   },
 });
 ```
 
-Then import it in a page and call it:
+Browser code can import `plantCrop` and `await` it like any function. To render its pending state and result, wrap Farm's action and query stores the way step 5 wrapped the router:
 
-```tsx
-const result = await plantCrop({ name: "barley" });
+```js
+// packages/farm-leaf/src/bindings.js (continued)
+import { createRendererAction, createRendererQuery } from "@farm.js/core/renderer-client";
+
+export function useAction(target, options) {
+  const [action] = useState(() => createRendererAction(target, options));
+  return { ...useFarmStore(action), submit: action.submit, reset: action.reset };
+}
+
+export function useServerQuery(query, input, options) {
+  // The input is posted to the server, so its JSON identifies a new read.
+  const observer = useMemo(
+    () => createRendererQuery(query, input, options),
+    [query, JSON.stringify(input ?? null)],
+  );
+  useEffect(() => () => observer.dispose(), [observer]);
+  return { ...useFarmStore(observer), refetch: observer.refetch };
+}
 ```
 
-The browser gets a reference, not the handler. The call posts the input to the current page, and the server validates it, runs the handler, and sends back the result. Your renderer does nothing for this. Without the flag, a browser import of a server function stops the build with `CLIENT_SERVER_FUNCTION`.
+Then a page uses both:
+
+```tsx
+// app/src/app/page.tsx (abridged)
+const plant = useAction(plantCrop);
+const total = useServerQuery(plantedCount, undefined);
+// A failed call lands in plant.error, which the page renders.
+const plantBarley = () => plant.submit({ name: "barley" }).catch(() => {});
+
+return (
+  <section>
+    <button disabled={plant.pending} onClick={plantBarley}>
+      Plant barley
+    </button>
+    <p>{plant.data?.message ?? "Nothing planted yet."}</p>
+    {plant.error && <p role="alert">{plant.error.message}</p>}
+    <p>Planted so far: {total.data?.planted ?? "…"}</p>
+  </section>
+);
+```
+
+The browser gets references, not handlers. Each call posts its input to the current page, and the server validates it, runs the handler, and sends back the result. The query reads after hydration, and Farm keeps its result in the same browser cache React's `useServerQuery` uses. When `plantCrop` invalidates `["planted"]`, the query reads again, and "Planted so far" goes up without a reload. Your renderer does none of this. Without the flag, a browser import of a server function stops the build with `CLIENT_SERVER_FUNCTION`.
 
 <span id="step-7-optional-your-own-file-format" className="blog-heading-anchor" />
 
