@@ -70,6 +70,30 @@ export async function renderToString(element: unknown): Promise<string> {
   return renderVueToString(createFarmVueServerApp(element));
 }
 
+/**
+ * Reads what Vue writes before its render waits on unsettled work: the first chunk, then every
+ * chunk that arrives before one timer tick passes. Vue settles a component that threw, and
+ * anything else that did not wait, in microtasks, which all run before a timer. A read that is
+ * still pending after the tick comes back as `pending`, for the caller to continue streaming.
+ */
+async function readFarmVueShell(reader: ReadableStreamDefaultReader<Uint8Array>): Promise<{
+  chunks: Uint8Array[];
+  pending?: Promise<ReadableStreamReadResult<Uint8Array>>;
+}> {
+  const chunks: Uint8Array[] = [];
+  const first = await reader.read();
+  if (first.done) return { chunks };
+  chunks.push(first.value);
+  const tick = new Promise<undefined>((resolve) => setTimeout(resolve, 0));
+  for (;;) {
+    const read = reader.read();
+    const result = await Promise.race([read, tick]);
+    if (result === undefined) return { chunks, pending: read };
+    if (result.done) return { chunks };
+    chunks.push(result.value);
+  }
+}
+
 export function renderToReadableStream(
   element: unknown,
   options?: { onError?(error: unknown): void },
@@ -89,15 +113,31 @@ export function renderToReadableStream(
   // a late error: erroring a response that has started would reset the connection.
   const reader = source.getReader();
   let started = false;
+  let pendingRead: Promise<ReadableStreamReadResult<Uint8Array>> | undefined;
   return new ReadableStream<Uint8Array>({
     async pull(controller) {
       try {
-        const { done, value } = await reader.read();
+        if (!started) {
+          // Vue writes the markup before a component and then awaits the component, and one that
+          // throws while rendering is awaited as a rejected promise. A redirect(), notFound() or
+          // error in a page therefore arrived after the layouts' opening markup had gone out.
+          // Hold everything Vue writes until a timer tick passes, so a render that waits on
+          // nothing still fails before any output, as React's shell does. A component that
+          // awaits real work streams from that point, as it did before.
+          const shell = await readFarmVueShell(reader);
+          started = true;
+          for (const chunk of shell.chunks) controller.enqueue(chunk);
+          if (shell.pending) pendingRead = shell.pending;
+          else controller.close();
+          return;
+        }
+        const read = pendingRead ?? reader.read();
+        pendingRead = undefined;
+        const { done, value } = await read;
         if (done) {
           controller.close();
           return;
         }
-        started = true;
         controller.enqueue(value);
       } catch (error) {
         if (!started) {
