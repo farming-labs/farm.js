@@ -302,6 +302,49 @@ describe("the boot's preloads", () => {
     expect(preloaded()).toEqual([react, router, shared]);
   });
 
+  describe("once the page has loaded and the browser is idle", () => {
+    let idle: Array<() => void>;
+    beforeEach(() => {
+      // The last test's boot releases after the links are removed, starting on a link of its own.
+      for (const link of Array.from(document.head.querySelectorAll("link"))) link.remove();
+      idle = [];
+      vi.stubGlobal("requestIdleCallback", (callback: () => void) => idle.push(callback));
+      vi.stubGlobal("cancelIdleCallback", () => {});
+    });
+    const runIdle = () => {
+      for (const callback of idle.splice(0)) callback();
+    };
+
+    it("fetches the entry, its imports and the router a link runs, without running them", () => {
+      const load = boot(
+        `${runtime}></script><f-island strategy="interaction"><button>+</button></f-island><a href="/next">Next</a>`,
+      );
+      expect(document.readyState).toBe("complete");
+      expect(preloaded()).toEqual([]);
+      runIdle();
+      expect(preloaded()).toEqual(["/base/farm-client-h1.js", react, router, shared]);
+      expect(load).not.toHaveBeenCalled();
+      // A link's intent then runs the entry, and fetches nothing again.
+      hover(document.querySelector("a")!);
+      expect(load).toHaveBeenCalledTimes(1);
+      expect(preloaded()).toEqual(["/base/farm-client-h1.js", react, router, shared]);
+    });
+
+    it("fetches nothing on a connection that asks to save data", () => {
+      vi.stubGlobal("navigator", { ...navigator, connection: { saveData: true } });
+      boot(`${runtime}></script><a href="/next">Next</a>`);
+      runIdle();
+      expect(preloaded()).toEqual([]);
+    });
+
+    it("fetches nothing more once the runtime is loading", () => {
+      boot(`${runtime}></script><f-island><button>+</button></f-island><a href="/next">Next</a>`);
+      expect(started).toHaveBeenCalledTimes(1);
+      runIdle();
+      expect(preloaded()).toEqual([react]);
+    });
+  });
+
   describe("of the renderer (RFC 0010)", () => {
     const withRenderer = `${runtime} data-farm-preload-renderer="chunks/react-dom.js"`;
     const reactDom = "/base/chunks/react-dom.js";

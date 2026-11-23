@@ -72,14 +72,17 @@ lets the browser give `useId` the ids in the HTML. The full contract is islx's
   React Server Components'.
 - **Browser.** Farm's client entry hands every `<f-island>` to islx's hydration runtime, which
   imports the island's module when its strategy is due and hydrates it in place. A page whose
-  islands all wait loads a 2.2 KB boot script instead of the runtime. When the page first needs
-  the runtime, the boot script fetches it together with what comes next: the router when a link
-  starts it, and the modules of a layout that hydrates as one root when another interaction inside
-  it does. They arrive in one round trip instead of one after another. A link clicked before the
-  runtime runs has its page requested with the click, so the page and the runtime travel together
-  and the router renders the response once it runs. That first response carries every island value
-  the page needs, including ones the current page already has. The next page renders before React
-  DOM and islx arrive: they load beside it and hydrate its islands, which hold a click until then.
+  islands all wait loads a 2.2 KB boot script instead of the runtime. Once the page has loaded and
+  the browser is idle, the boot script fetches the runtime's entry and the router without running
+  them, so a first tap waits for its page alone (a connection that asks to save data skips this).
+  When the page first needs the runtime, the boot script runs it and fetches what comes next with
+  it: the router when a link starts it, and the modules of a layout that hydrates as one root when
+  another interaction inside it does. They arrive in one round trip instead of one after another.
+  A link clicked before the runtime runs has its page requested with the click, so the page and
+  the runtime travel together and the router renders the response once it runs. That first
+  response carries every island value the page needs, including ones the current page already
+  has. The next page renders before React DOM and islx arrive: they load beside it and hydrate its
+  islands, which hold a click until then.
 - **Layouts.** A layout that needs one React root (a client provider around the pages) renders as
   an islx server tree: the browser rebuilds it from the HTML, so its module stays on the server,
   and a navigation keeps the provider's state. The pages below it, Markdown pages included, join
