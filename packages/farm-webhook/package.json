@@ -1,7 +1,7 @@
 {
   "name": "@farm.js/webhook",
   "version": "0.1.1",
-  "description": "Receive signed Farm Infra webhook deliveries and send events to a receiver",
+  "description": "Receive signed Farm Infra webhook deliveries and send events to a Farm Infra webhook",
   "keywords": [
     "farm.js",
     "webhooks"

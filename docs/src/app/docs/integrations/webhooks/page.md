@@ -121,7 +121,7 @@ await safeFetch(endpoint.url, {
 - Reuse the message `id` when you retry, so the receiver can drop the repeat.
 - Send to user-supplied URLs with [`safeFetch`](/docs/safe-fetch), so an endpoint can't point at your private network.
 
-## Managed receivers
+## Managed webhooks
 
 Farm Infra can store incoming JSON events and retry delivery while your app is offline.
 Install the managed webhook SDK in the sending and receiving apps.
@@ -130,15 +130,16 @@ Install the managed webhook SDK in the sending and receiving apps.
 pnpm add @farm.js/webhook
 ```
 
-In the Infra dashboard, open **Webhooks**, choose the project and environment, and create a
-**Send key** receiver pointing to your app's HTTPS route.
+In the Infra dashboard, open **Webhooks**, choose the project and environment, and click
+**New webhook**. Under **Who sends the events?**, choose **My own backend**, and set
+**Deliver events to** to your app's HTTPS route.
 
-Copy the receiver URL and send key to the sending backend. It can reuse one sender instance:
+Copy the webhook URL and send key to the sending backend. It can reuse one sender instance:
 
 ```ts
 import { createWebhook } from "@farm.js/webhook/sender";
 
-const stock = createWebhook({ url: env.FARM_RECEIVER_URL, sendKey: env.FARM_WEBHOOK_SEND_KEY });
+const stock = createWebhook({ url: env.FARM_WEBHOOK_URL, sendKey: env.FARM_WEBHOOK_SEND_KEY });
 await stock.send({ sku: "blue-shirt", quantity: 12 }, { idempotencyKey: change.id });
 ```
 
@@ -165,13 +166,14 @@ The sender gets a receipt after Infra commits the event. The receiving app verif
 signature before running `onEvent`. In `applyStockUpdateOnce`, validate the payload and
 commit its delivery ID with the inventory update so a retry can safely repeat the call.
 For development, start the receiving app and run `farm preview --name stock`. Use the
-HTTPS URL printed by the CLI plus `/api/hooks/stock` for a separate development receiver.
+HTTPS URL printed by the CLI plus `/api/hooks/stock` for a separate development webhook.
 For production, use the app's stable HTTPS URL.
 
-For a provider that already signs its events, select **Preserve provider signature** and
-keep its existing verification route. For a Standard Webhooks sender with expiring
-signatures, **Verify on arrival** checks the source signature before queuing and signs
-each attempt for the receiving app.
+For a service that signs its own events, such as GitHub, Stripe or a Standard Webhooks
+sender like Clerk, choose **A service** instead and paste the secret the service shows you
+into **Signing secret**. Infra checks the service's signature before keeping each event, then
+signs every delivery with the delivery signing secret, so the receiving app above stays the
+same. Point the service at the webhook URL.
 
 ## Secrets and rotation
 
