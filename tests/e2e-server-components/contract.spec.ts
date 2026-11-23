@@ -450,6 +450,31 @@ test("a layout's island waiting below a client page still hydrates after a navig
   expect(errors).toEqual([]);
 });
 
+test("a client navigation leaves the next page's noscript content inert", async ({ page }) => {
+  const errors = collectErrors(page);
+  const loaded: string[] = [];
+  page.on("request", (request) => {
+    const { pathname } = new URL(request.url());
+    if (pathname.startsWith("/noscript-pixel/")) loaded.push(pathname);
+  });
+  // A layout's segment, a page swapped in under a layout root that waits, and streamed content.
+  await page.goto("/nav/a");
+  await hydrated(page);
+  await page.getByRole("link", { name: "Page B" }).click();
+  await expect(page.getByRole("heading", { name: "Nav page B" })).toBeVisible();
+  await page.goto("/context/wait/a");
+  await hydrated(page);
+  await page.click("[data-next]");
+  await expect(page.locator("h1")).toHaveText("Waiting b");
+  await page.goto("/");
+  await hydrated(page);
+  await page.getByRole("link", { name: "Stream", exact: true }).click();
+  await expect(page.getByTestId("slow-content")).toBeVisible();
+  await page.waitForLoadState("networkidle");
+  expect(loaded).toEqual([]);
+  expect(errors).toEqual([]);
+});
+
 test("browser-only code runs after hydration without a mismatch", async ({ page, request }) => {
   expect(await (await request.get("/window")).text()).toContain("Measuring");
   const errors = collectErrors(page);

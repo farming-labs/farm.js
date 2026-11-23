@@ -2121,7 +2121,12 @@ export function Chart() {}
     ).toHaveLength(4);
     expect(source).toContain("if (!newRoot || !currentRoot) return this.swapDocument(doc);");
     expect(source).toContain("swapDocument: function(doc)");
-    expect(source).toContain("document.body.innerHTML = doc.body.innerHTML;");
+    expect(source).toContain("document.body.replaceChildren(...doc.body.childNodes);");
+    // A swap moves the parsed nodes in: markup taken back out of them is parsed a second time.
+    expect(source).not.toContain("innerHTML = newRoot.innerHTML");
+    expect(
+      source.match(/currentRoot\.replaceChildren\(\.\.\.newRoot\.childNodes\);/g),
+    ).toHaveLength(2);
     expect(source).toContain("delete window.__farmDocsRuntime;");
     expect(source).toContain("script.replaceWith(createFarmNavigationScript(script));");
     expect(source).toContain('document.documentElement.dataset.farmDocsRuntime === "true"');
