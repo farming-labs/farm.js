@@ -214,4 +214,31 @@ from these changes alone; see Open questions.
 
 ## Results
 
-None yet.
+**Item 1, and Farm's half of item 2 (#3143).**
+
+What changed:
+
+- Islands mode registers a stub interceptor that takes the server query making a call and sends
+  the call. It imports the action client, the server query runtime and the query cache on the
+  first call.
+- A document whose markup holds an action reference (`"$":"a"`, or a server form's `$F_REF_`
+  field) lists them with its other modules.
+- A client module's server function reference starts the import when it is created.
+- islx's half (the transport and the codec's encoder) is not done.
+
+Measured on the probe (`hydration.mjs`, added to the benchmark with the `dash` section), 150 ms
+latency, 4x CPU throttling, interleaved, medians of 11 rounds in ms:
+
+| Network                | `rsc` | `islands`, before | `islands` |
+| ---------------------- | ----- | ----------------- | --------- |
+| 1.6 Mbit/s             | 801   | 876               | 860       |
+| 1.6 Mbit/s, second run |       | 891               | 864       |
+| Unlimited              | 457   | 540               | 529       |
+
+- **Control:** an A/A copy of the build before had the same median in the second run.
+- **Unlimited:** the 11 ms is within that run's spread.
+- **Bytes:** the islands runtime chunk went from 15.4 KB to 13.1 KB at brotli 11, close to the
+  2.3 KB estimated above. Scripts on the wire went from 82.3 KB to 80.0 KB.
+- **Other sections:** unchanged in bytes and page errors (`measure.mjs`); their pages load the
+  runtime only on an interaction.
+- **Remaining gap:** 59 ms to `rsc` at 1.6 Mbit/s.
