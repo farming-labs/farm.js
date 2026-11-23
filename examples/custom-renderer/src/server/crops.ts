@@ -1,4 +1,4 @@
-import { createEndpoint } from "@farm.js/core";
+import { createEndpoint } from "@farm.js/core/api";
 import { createServerFn } from "@farm.js/core/server-fn";
 import { z } from "zod";
 
