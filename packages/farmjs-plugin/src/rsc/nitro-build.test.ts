@@ -11,9 +11,11 @@ import {
   symlinkSync,
   writeFileSync,
 } from "node:fs";
+import { get } from "node:http";
 import { createServer } from "node:net";
 import { tmpdir } from "node:os";
 import path from "node:path";
+import { gunzipSync } from "node:zlib";
 import { describe, expect, it } from "vitest";
 import { buildRscNitro, rewriteRscEntryImports } from "./nitro-build";
 
@@ -32,6 +34,25 @@ async function availablePort(): Promise<number> {
     server.close((error) => (error ? reject(error) : resolve())),
   );
   return port;
+}
+
+/** The response's own bytes: fetch would decode them and hide what the server sent. */
+function rawGet(url: string, acceptEncoding?: string) {
+  return new Promise<{ encoding: string | undefined; body: Buffer }>((resolve, reject) => {
+    const request = get(
+      url,
+      { headers: acceptEncoding ? { "accept-encoding": acceptEncoding } : {} },
+      (response) => {
+        const chunks: Buffer[] = [];
+        response.on("data", (chunk: Buffer) => chunks.push(chunk));
+        response.on("end", () =>
+          resolve({ encoding: response.headers["content-encoding"], body: Buffer.concat(chunks) }),
+        );
+        response.on("error", reject);
+      },
+    );
+    request.on("error", reject);
+  });
 }
 
 async function stopProcess(child: ChildProcess): Promise<void> {
@@ -160,6 +181,9 @@ export function render() {
 }`,
       );
       writeFileSync(path.join(clientDir, "asset.txt"), "production-asset");
+      const clientScript = `export const rows = [${Array.from({ length: 400 }, (_, i) => i).join(", ")}];\n`;
+      mkdirSync(path.join(clientDir, "assets"), { recursive: true });
+      writeFileSync(path.join(clientDir, "assets", "client-h0123abcd.js"), clientScript);
 
       const fixtureModules = path.join(fixtureRoot, "node_modules");
       mkdirSync(fixtureModules, { recursive: true });
@@ -232,6 +256,15 @@ export function render() {
       expect(body?.replace(/\u001b\[[0-9;]*m/g, "")).toMatch(
         /^standalone-rsc:<strong>native<\/strong>:(::ffff:)?127\.0\.0\.1$/,
       );
+
+      // A client script goes out gzipped to a browser that accepts it, and plain to one that does not.
+      const script = `http://127.0.0.1:${port}/assets/client-h0123abcd.js`;
+      const gzipped = await rawGet(script, "gzip");
+      expect(gzipped.encoding).toBe("gzip");
+      expect(gunzipSync(gzipped.body).toString()).toBe(clientScript);
+      const plain = await rawGet(script);
+      expect(plain.encoding).toBeUndefined();
+      expect(plain.body.toString()).toBe(clientScript);
     } finally {
       if (child) await stopProcess(child);
       rmSync(fixtureRoot, { recursive: true, force: true });
