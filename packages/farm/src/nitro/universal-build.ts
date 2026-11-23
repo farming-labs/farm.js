@@ -5436,6 +5436,15 @@ function setFarmHydrated() {
   isHydrated = true;
 }
 
+// The document's head script holds clicks and submits until the page hydrates. Once the first
+// hydration settles it holds nothing more, as in development: each root that hydrated replayed
+// what it held, and a navigation's page renders in a React root that takes its own clicks.
+function markFarmHydrated() {
+  if (window.__FARM_HYDRATED__ !== false) return;
+  window.__FARM_HYDRATED__ = true;
+  document.documentElement.dataset.farmHydrated = "true";
+}
+
 ${generateUniversalRouterStateRuntime(islandValues)}
 
 function cancelPendingPageHydration() {
@@ -6457,7 +6466,7 @@ document.addEventListener("click", function(e) {
 if (isFarmDocsSearchPage()) {
   mountFarmDocsSearch();
 }
-void hydrate();
+void hydrate().finally(markFarmHydrated);
 `.trim();
 }
 
