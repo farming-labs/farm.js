@@ -504,6 +504,9 @@ The preview URL forwards public internet traffic to your local app. Treat it lik
 - Rotate preview names after sharing sensitive routes.
 - Keep provider secrets in environment variables, not client code.
 - Remember that anyone with the URL can send requests while the session is active.
+- The relay and gateway replace forwarding headers with the public host and protocol, and drop
+  the hosting platform's own headers (`x-vercel-*`, including the gateway's OIDC token), so your
+  app never receives the gateway's credentials.
 
 ### What the preview serves from your machine
 

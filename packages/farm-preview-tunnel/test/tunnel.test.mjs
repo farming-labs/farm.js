@@ -185,6 +185,45 @@ test("replaces client-supplied forwarding headers at the relay boundary", async 
   }
 });
 
+test("keeps the hosting platform's headers, such as its OIDC token, off the local app", async () => {
+  const target = createServer((request, response) => {
+    response.setHeader("content-type", "application/json");
+    response.end(JSON.stringify(request.headers));
+  });
+  await listen(target);
+  const targetAddress = target.address();
+  const relay = createPersistentPreviewRelay({ registrationToken: RELAY_TOKEN });
+  const relayAddress = await relay.listen();
+  const agent = await startTypeScriptPreviewAgent({
+    relayUrl: relayAddress.websocketUrl,
+    token: RELAY_TOKEN,
+    name: "platform-headers",
+    targetUrl: `http://127.0.0.1:${targetAddress.port}`,
+  });
+
+  try {
+    const response = await fetch(agent.publicUrl, {
+      headers: {
+        "x-vercel-oidc-token": "gateway-deployment-credential",
+        "x-vercel-proxy-signature": "Bearer gateway-proxy-signature",
+        "X-Vercel-IP-City": "Ashburn",
+        "x-app-header": "kept",
+      },
+    });
+    const headers = await response.json();
+
+    assert.deepEqual(
+      Object.keys(headers).filter((name) => name.startsWith("x-vercel-")),
+      [],
+    );
+    assert.equal(headers["x-app-header"], "kept");
+  } finally {
+    await agent.close();
+    await relay.close();
+    await close(target);
+  }
+});
+
 test("marks every tunnelled request for the dev server and ignores a visitor's marker", async () => {
   // A raw agent, like the native one, forwards the headers the relay hands it, so the relay
   // must set the marker itself rather than rely on the agent.
