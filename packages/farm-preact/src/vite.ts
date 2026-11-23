@@ -69,9 +69,46 @@ interface RendererPluginOptions {
 export async function createFarmRendererPlugin(
   options: RendererPluginOptions = {},
 ): Promise<PluginOption[]> {
-  const plugins: PluginOption[] = [preactPreset()];
-  if (!options.rendererOptions?.compiler) return plugins;
+  const compiler = Boolean(options.rendererOptions?.compiler);
   let projectRoot = "";
+  const reactCompat: PluginOption = {
+    name: "farm:preact-react-compat",
+    configResolved(config) {
+      projectRoot = normalizePath(config.root).replace(/\/$/, "");
+    },
+    // Farm's server build keeps react and react-dom external for non-React renderers, and a
+    // bundler checks that list before any alias or resolveId hook. Rewrite the specifiers in
+    // Farm's own modules, the compiler runtime, and the app's modules instead, so Farm's hooks
+    // and compiled components run on the server with the same preact/compat they hydrate with,
+    // and an app without React installed still builds and starts.
+    transform(code, id, transformOptions) {
+      if (!transformOptions?.ssr) return null;
+      const cleanId = normalizePath(id.split("?", 1)[0]);
+      if (!/\.[cm]?[jt]sx?$/.test(cleanId)) return null;
+      const isFarmModule = /\/(?:farm|@farm\.js\/core|farm-react|@farm\.js\/react)\/dist\//.test(
+        cleanId,
+      );
+      const isAppModule =
+        projectRoot !== "" &&
+        cleanId.startsWith(`${projectRoot}/`) &&
+        !cleanId.includes("/node_modules/");
+      if (!isFarmModule && !isAppModule) return null;
+      if (!/["'](?:react|react-dom)(?:\/[\w-]+)?["']/.test(code)) return null;
+      return rewriteReactSpecifiers(code, this.parse(code));
+    },
+    config: () => ({
+      // Load Farm, these bindings (which import Farm), and the compiler runtime through Vite on
+      // the server, so their react and react-dom imports take the preact/compat aliases there
+      // as they do in the browser. Left external, Node would load real React, which a Preact app
+      // need not install, and server-rendered compiled components would mix React elements with
+      // Preact ones.
+      ssr: {
+        noExternal: ["@farm.js/core", "@farm.js/preact", ...(compiler ? ["@farm.js/react"] : [])],
+      },
+    }),
+  };
+  const plugins: PluginOption[] = [preactPreset(), reactCompat];
+  if (!compiler) return plugins;
   // preact({ compiler }): Farm's AOT compiler emits React-shaped code and imports
   // @farm.js/react/compiler-runtime, which the preset resolves to preact/compat.
   let compilerModule: typeof import("@farm.js/react/vite");
@@ -92,38 +129,5 @@ export async function createFarmRendererPlugin(
     }
     throw error;
   }
-  return [
-    ...plugins,
-    {
-      name: "farm:preact-compiler-runtime",
-      configResolved(config) {
-        projectRoot = normalizePath(config.root).replace(/\/$/, "");
-      },
-      // Farm's server build keeps react and react-dom external for non-React renderers, and a
-      // bundler checks that list before any alias or resolveId hook. Rewrite the specifiers in
-      // the compiler runtime and the app's own modules instead, so compiled components render
-      // on the server with the same preact/compat they hydrate with.
-      transform(code, id, transformOptions) {
-        if (!transformOptions?.ssr) return null;
-        const cleanId = normalizePath(id.split("?", 1)[0]);
-        if (!/\.[cm]?[jt]sx?$/.test(cleanId)) return null;
-        const isCompilerRuntime = /\/(?:farm-react|@farm\.js\/react)\/dist\//.test(cleanId);
-        const isAppModule =
-          projectRoot !== "" &&
-          cleanId.startsWith(`${projectRoot}/`) &&
-          !cleanId.includes("/node_modules/");
-        if (!isCompilerRuntime && !isAppModule) return null;
-        if (!/["'](?:react|react-dom)(?:\/[\w-]+)?["']/.test(code)) return null;
-        return rewriteReactSpecifiers(code, this.parse(code));
-      },
-      config: () => ({
-        // Bundle the compiler runtime into the server build, so its react and react-dom
-        // imports take the preact/compat aliases there as they do in the browser. Left
-        // external, Node would load real React, and server-rendered compiled components
-        // would mix React elements with Preact ones.
-        ssr: { noExternal: ["@farm.js/react"] },
-      }),
-    },
-    ...compilerModule.createFarmRendererPlugin(options),
-  ];
+  return [...plugins, ...compilerModule.createFarmRendererPlugin(options)];
 }
