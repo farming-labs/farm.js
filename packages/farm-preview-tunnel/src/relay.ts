@@ -11,7 +11,12 @@ import {
   type TunnelRequestMessage,
   type TunnelResponseMessage,
 } from "./protocol.js";
-import { getHopByHopHeaderNames, getRecordHeader, PREVIEW_REQUEST_HEADER } from "./headers.js";
+import {
+  getHopByHopHeaderNames,
+  getRecordHeader,
+  isGatewayPlatformHeader,
+  PREVIEW_REQUEST_HEADER,
+} from "./headers.js";
 import { closeWebSocket } from "./websocket.js";
 
 const MAX_TIMER_DELAY_MS = 2_147_483_647;
@@ -1153,6 +1158,7 @@ function normalizeIncomingHeaders(
       hopByHopHeaders.has(lowerName) ||
       lowerName === "forwarded" ||
       lowerName.startsWith("x-forwarded-") ||
+      isGatewayPlatformHeader(lowerName) ||
       lowerName === "x-farm-preview-connection" ||
       lowerName === PREVIEW_REQUEST_HEADER
     ) {
