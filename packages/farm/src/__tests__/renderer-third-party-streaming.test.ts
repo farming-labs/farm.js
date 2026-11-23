@@ -28,6 +28,9 @@ afterEach(async () => {
   for (const cleanup of cleanups.splice(0).reverse()) await cleanup();
 });
 
+// What the renderer's client needs in the document before it hydrates, as Solid's `_$HY` globals.
+const HYDRATION_SCRIPT = "<script>window.__TRICKLE_HYDRATION__=true</script>";
+
 const rendererFiles: Record<string, string> = {
   "package.json": JSON.stringify({
     name: "trickle-renderer",
@@ -40,7 +43,8 @@ const rendererFiles: Record<string, string> = {
       "./vite": "./vite.js",
     },
   }),
-  "index.js": `export const Fragment = Symbol.for("trickle.fragment");
+  "index.js": `export const HYDRATION_SCRIPT = ${JSON.stringify(HYDRATION_SCRIPT)};
+export const Fragment = Symbol.for("trickle.fragment");
 export const Gate = Symbol.for("trickle.gate");
 export function Suspense(props) { return props.children; }
 export function createElement(type, props, ...children) {
@@ -108,9 +112,10 @@ export async function renderToString(node) {
   return html;
 }
 `,
-  "server-node.js": `import { renderChunks } from "./index.js";
+  "server-node.js": `import { HYDRATION_SCRIPT, renderChunks } from "./index.js";
 export { Fragment, Suspense, createElement, isValidElement, renderToString } from "./index.js";
 export const name = "trickle";
+export function generateHydrationScript() { return HYDRATION_SCRIPT; }
 export function renderToPipeableStream(element, callbacks) {
   const chunks = renderChunks(element);
   const shell = chunks.next();
@@ -131,9 +136,10 @@ export function renderToPipeableStream(element, callbacks) {
   };
 }
 `,
-  "server-web.js": `import { renderChunks } from "./index.js";
+  "server-web.js": `import { HYDRATION_SCRIPT, renderChunks } from "./index.js";
 export { Fragment, Suspense, createElement, isValidElement, renderToString } from "./index.js";
 export const name = "trickle";
+export function generateHydrationScript() { return HYDRATION_SCRIPT; }
 const encoder = new TextEncoder();
 export function renderToReadableStream(element, options) {
   const chunks = renderChunks(element);
@@ -300,6 +306,7 @@ async function readThroughGate(url: string, gate: Awaited<ReturnType<typeof star
 
 function expectStreamedThroughGate(beforeGate: string, html: string) {
   expect(beforeGate).toMatch(/^<!DOCTYPE html>/i);
+  expect(beforeGate.slice(0, beforeGate.indexOf("</head>"))).toContain(HYDRATION_SCRIPT);
   expect(beforeGate).toContain('<main id="trickle-layout">');
   expect(beforeGate).toContain("<p>before the gate</p>");
   expect(beforeGate).not.toContain("after the gate");

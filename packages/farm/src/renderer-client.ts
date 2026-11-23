@@ -8,6 +8,7 @@ import {
   type FarmNavigateOptions,
 } from "./client/spa-router";
 import { subscribeHistoryChange } from "./client/history-sync";
+import { _peekCurrentRequest } from "./server/request-bridge";
 import { getFarmClientDataCache, type FarmClientCacheStatus } from "./client-cache";
 import { attachRevalidationListeners } from "./client-revalidation";
 import type { ServerFn } from "./server-fn";
@@ -498,7 +499,8 @@ function readRendererRouterSnapshot(
   matcher: FarmRouter | null,
   navigation: FarmNavigationState,
 ): FarmRendererRouterSnapshot {
-  if (typeof window === "undefined") {
+  const url = readRendererCurrentUrl();
+  if (!url) {
     return {
       pathname: "/",
       searchParams: new URLSearchParams(),
@@ -508,7 +510,6 @@ function readRendererRouterSnapshot(
     };
   }
 
-  const url = new URL(window.location.href);
   const pathname = stripFarmBasePath(url.pathname, basePath);
   const i18n = getFarmI18nClientState();
   // `pathname` is already basePath-relative; the snapshot's basePath must not
@@ -521,9 +522,25 @@ function readRendererRouterSnapshot(
     pathname,
     searchParams: url.searchParams,
     params: matcher?.match(routePathname)?.params || {},
-    pageState: readPageState(),
+    pageState: typeof window === "undefined" ? null : readPageState(),
     navigation,
   };
+}
+
+/**
+ * The URL being rendered, on either side of hydration. On the server it's the request's, as for
+ * React's `useRouter()`, so a component renders the same path there as in the browser instead of
+ * the site root, which hydration would then disagree with.
+ */
+function readRendererCurrentUrl(): URL | undefined {
+  if (typeof window !== "undefined") return new URL(window.location.href);
+  const request = _peekCurrentRequest();
+  if (!request) return undefined;
+  try {
+    return new URL(request.url);
+  } catch {
+    return undefined;
+  }
 }
 
 function resolveRendererHref(href: string, basePath: string): string {

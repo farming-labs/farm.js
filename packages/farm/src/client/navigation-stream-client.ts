@@ -50,7 +50,8 @@ async function readFarmNavigationStream(body, flushToken) {
  * The routers' half of the boot script's early request (islands-boot.ts, `FarmEarlyNavigation`),
  * as source, included by both client entries in islands mode beside the stream reader.
  */
-export const FARM_EARLY_NAVIGATION_SOURCE = `// The request the boot script sent for a link clicked before the router ran (islands-boot.ts).
+export const FARM_EARLY_NAVIGATION_SOURCE = `// The request the boot script sent for a link pressed or clicked before the router ran
+// (islands-boot.ts).
 // The next navigation request takes its response when it is the same request, and aborts it
 // otherwise. The held island values may differ: a response for fewer of them carries more values,
 // which fits any page. As with a prefetched page, a response sent over 30 seconds ago is not used.

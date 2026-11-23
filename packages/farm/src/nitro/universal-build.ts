@@ -4520,11 +4520,12 @@ ${generateUniversalRouterStateProperties()}
     
     reconcileFarmDocumentHead(doc);
     
-    // Swap root content
+    // Swap root content: the parsed nodes themselves, not markup the page parses again.
     const newRoot = doc.getElementById("root");
     const currentRoot = document.getElementById("root");
     if (!newRoot || !currentRoot) return this.swapDocument(doc);
-    currentRoot.innerHTML = newRoot.innerHTML;
+    adoptFarmParsedNodes(newRoot);
+    currentRoot.replaceChildren(...newRoot.childNodes);
     return true;
   },
 
@@ -4541,7 +4542,8 @@ ${generateUniversalRouterStateProperties()}
     });
 
     document.head.innerHTML = doc.head ? doc.head.innerHTML : "";
-    document.body.innerHTML = doc.body.innerHTML;
+    adoptFarmParsedNodes(doc.body);
+    document.body.replaceChildren(...doc.body.childNodes);
     delete window.__farmDocsRuntime;
     delete window.__farmDocsPageActionsRuntime;
 
@@ -4887,7 +4889,7 @@ ${layoutImports}
 ${rendererClientImports}
 ${isolatedHydrationImport}
 ${providerClientCode.imports}
-import { createClientCancellation, createClientPluginManager, createPluginlessClientRuntime, getFarmIslandValueHeaders, getHashTargetElement, keepFarmIslandValues, installChunkErrorRecovery, installFarmLinkPrefetch, isFarmBlockedNavigationURL, isFarmExternalNavigationURL, readFarmLinkNavigateOptions, rememberFarmLinkLocale, reconcileFarmDocumentHead, runFarmNavigationDelegates, scheduleFarmIslandHydration, createFarmSearchParams, searchParamsToObject, setFarmBasePath, setFarmTrailingSlashPreference, stripFarmBasePath } from "@farm.js/core/internal/client-runtime";
+import { createClientCancellation, createClientPluginManager, createPluginlessClientRuntime, getFarmIslandValueHeaders, getHashTargetElement, keepFarmIslandValues, installChunkErrorRecovery, installFarmLinkPrefetch, isFarmBlockedNavigationURL, isFarmExternalNavigationURL, readFarmLinkNavigateOptions, rememberFarmLinkLocale, reconcileFarmDocumentHead, replayFarmQueuedInteraction, runFarmNavigationDelegates, scheduleFarmIslandHydration, createFarmSearchParams, searchParamsToObject, setFarmBasePath, setFarmTrailingSlashPreference, stripFarmBasePath } from "@farm.js/core/internal/client-runtime";
 import { createFarmDeploymentMismatchError, createFarmDeploymentRequestHeaders, isFarmDeploymentMismatchResponse } from "@farm.js/core/deployment";
 import { createFarmRouter, isFarmRouteActive, matchFarmRoute } from "@farm.js/core/router";
 ${clientPluginEntry.imports}
@@ -5325,6 +5327,26 @@ function renderClientRouteSlot(slot, registration, mode) {
   return true;
 }
 
+// The document's pre-hydration hold keeps clicks and submits until what they target hydrates, as in
+// development. A hydrated route slot stops holding its own and replays what it held, as the page's
+// scheduler does for the page.
+function replayPreHydrationClicks(container) {
+  container.dataset.farmIslandHydrated = "true";
+  const queue = Array.isArray(window.__FARM_PREHYDRATION_CLICK_QUEUE__)
+    ? window.__FARM_PREHYDRATION_CLICK_QUEUE__
+    : [];
+  const held = queue.filter(function(item) {
+    return item && item.target instanceof Element && container.contains(item.target);
+  });
+  if (held.length === 0) return;
+  queue.splice(0, queue.length, ...queue.filter(function(item) { return held.indexOf(item) === -1; }));
+  for (const item of held) {
+    setTimeout(function() {
+      if (item.target.isConnected) replayFarmQueuedInteraction(item.target, item.kind);
+    }, 0);
+  }
+}
+
 function hydrateInitialRouteSlots() {
   const slots = Array.isArray(window.__FARM_ROUTE_SLOTS__)
     ? window.__FARM_ROUTE_SLOTS__
@@ -5333,7 +5355,9 @@ function hydrateInitialRouteSlots() {
     const registration = findClientRouteSlot(slot);
     if (!registration) continue;
     try {
-      renderClientRouteSlot(slot, registration, "hydrate");
+      if (renderClientRouteSlot(slot, registration, "hydrate")) {
+        replayPreHydrationClicks(document.getElementById(slot.containerId));
+      }
     } catch (error) {
       console.warn("[Farm.js] Could not hydrate route slot:", slot.name, error);
     }
@@ -5400,6 +5424,15 @@ function setFarmReactRoot(root, container) {
 
 function setFarmHydrated() {
   isHydrated = true;
+}
+
+// The document's head script holds clicks and submits until the page hydrates. Once the first
+// hydration settles it holds nothing more, as in development: each root that hydrated replayed
+// what it held, and a navigation's page renders in a React root that takes its own clicks.
+function markFarmHydrated() {
+  if (window.__FARM_HYDRATED__ !== false) return;
+  window.__FARM_HYDRATED__ = true;
+  document.documentElement.dataset.farmHydrated = "true";
 }
 
 ${generateUniversalRouterStateRuntime(islandValues)}
@@ -5673,9 +5706,12 @@ async function streamFarmNavigation(stream, root, isCurrent) {
     for (let flush = await stream.next(); flush !== null; flush = await stream.next()) {
       if (!isCurrent()) return stream.cancel();
       html += flush;
-      const parsed = new DOMParser().parseFromString('<div id="root">' + flush, "text/html");
+      const parsed = new DOMParser()
+        .parseFromString('<div id="root">' + flush, "text/html")
+        .getElementById("root");
+      adoptFarmParsedNodes(parsed);
       const fragment = document.createDocumentFragment();
-      for (const node of Array.from(parsed.getElementById("root").childNodes)) fragment.appendChild(node);
+      for (const node of Array.from(parsed.childNodes)) fragment.appendChild(node);
       activateNavigationScripts(fragment);
       root.appendChild(fragment);
     }
@@ -5785,6 +5821,8 @@ ${islandValues ? FARM_REFRESH_FIELDS_SOURCE : ""}function replaceSharedLayoutBou
         }disposeFarmIsolatedClientBoundaries(currentTarget);`
       : ""
   }
+  // After the comparison: a noscript turned to text serializes escaped in the parsed document.
+  adoptFarmParsedNodes(nextRoot);
   currentTarget.replaceWith(nextTarget);${islandValues ? "\n  if (fields) restoreFarmServerFields(fields, nextTarget);" : ""}
   activateNavigationScripts(nextTarget);
   if (nextTreeRoot && nextTreeRoot !== nextTarget) nextTreeRoot.remove();
@@ -6209,7 +6247,9 @@ ${
     ${islandValues ? 'if (!replacedSharedBoundary && isSegment) return "segment-mismatch";' : ""}
     if (!replacedSharedBoundary) {
       ${isolatedHydrationEnabled ? "disposeFarmIsolatedClientBoundaries(currentRoot);" : ""}
-      currentRoot.innerHTML = newRoot.innerHTML;
+      // The parsed nodes themselves, not markup the page parses again.
+      adoptFarmParsedNodes(newRoot);
+      currentRoot.replaceChildren(...newRoot.childNodes);
       activateNavigationScripts(currentRoot);
       isolatedHydrationScope = currentRoot;
     }
@@ -6297,7 +6337,8 @@ ${
     });
 
     document.head.innerHTML = doc.head ? doc.head.innerHTML : "";
-    document.body.innerHTML = doc.body.innerHTML;
+    adoptFarmParsedNodes(doc.body);
+    document.body.replaceChildren(...doc.body.childNodes);
     delete window.__farmDocsRuntime;
     delete window.__farmDocsPageActionsRuntime;
 
@@ -6420,7 +6461,7 @@ document.addEventListener("click", function(e) {
 if (isFarmDocsSearchPage()) {
   mountFarmDocsSearch();
 }
-void hydrate();
+void hydrate().finally(markFarmHydrated);
 `.trim();
 }
 

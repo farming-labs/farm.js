@@ -14,6 +14,10 @@ export default async function ContextWaitPage({
   return (
     <section>
       <h1>{`Waiting ${item}`}</h1>
+      {/* Only a browser without JavaScript loads this; a client navigation leaves it inert. */}
+      <noscript>
+        <img src={`/noscript-pixel/wait-${item}`} alt="" />
+      </noscript>
       <ThemeLabel />
       <WaitList entries={entries} />
       <Link href={item === "a" ? "/context/wait/b" : "/context/wait/a"} data-next>

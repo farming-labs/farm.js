@@ -93,6 +93,13 @@ test("router.push from a leaf hook navigates without a document load", async ({ 
   expect(await readDocumentMark(page)).toBe("first");
 });
 
+test("the router reads the request's path while the server renders a page", async ({ request }) => {
+  const response = await request.get("/crops/wheat");
+  expect(response.status()).toBe(200);
+  // Not the site root: the server rendered the path the browser shows.
+  expect(await response.text()).toContain('<p id="crop-path">path: /crops/wheat</p>');
+});
+
 test("a page navigated to on the client is interactive", async ({ page }) => {
   await gotoHydrated(page, "/about");
   await page.getByRole("link", { name: "Home" }).click();

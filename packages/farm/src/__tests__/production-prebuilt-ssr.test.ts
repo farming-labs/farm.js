@@ -1385,7 +1385,7 @@ export default function Page() {
     120_000,
   );
 
-  it("holds a submit made before a production page hydrates and replays it after", async () => {
+  it("holds a submit made before a production page hydrates and stops holding once it has", async () => {
     const root = await createProductionFixture();
     try {
       await fs.mkdir(path.join(root, "src", "app", "hold"), { recursive: true });
@@ -1409,8 +1409,20 @@ export default function HoldPage() {
         <button id="hold-submit" type="submit">Save</button>
       </form>
       <p id="hold-result">{submitted}</p>
+      <a id="hold-next-link" href="/hold-next">Next</a>
     </main>
   );
+}`,
+      );
+      await fs.mkdir(path.join(root, "src", "app", "hold-next"), { recursive: true });
+      await fs.writeFile(
+        path.join(root, "src", "app", "hold-next", "page.tsx"),
+        `
+"use client";
+import { useState } from "react";
+export default function HoldNextPage() {
+  const [count, setCount] = useState(0);
+  return <button id="hold-next-count" onClick={() => setCount(count + 1)}>{count}</button>;
 }`,
       );
       await fs.mkdir(path.join(root, "src", "app", "static-form"), { recursive: true });
@@ -1460,6 +1472,18 @@ export default function HoldPage() {
             .toBe("wheat");
           expect(navigations).toEqual([`${production.origin}/hold`]);
           expect(page.url()).toBe(`${production.origin}/hold`);
+          expect(await page.evaluate(() => document.documentElement.dataset.farmHydrated)).toBe(
+            "true",
+          );
+
+          // The page a client navigation renders is live at once: none of its clicks are held.
+          await page.locator("#hold-next-link").click();
+          await page.locator("#hold-next-count").waitFor();
+          await page.locator("#hold-next-count").click();
+          await expect
+            .poll(() => page.locator("#hold-next-count").textContent(), { timeout: 5_000 })
+            .toBe("1");
+          expect(navigations).toEqual([`${production.origin}/hold`]);
         } finally {
           await browser.close();
         }
