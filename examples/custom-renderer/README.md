@@ -3,16 +3,16 @@
 **A Farm app rendered by leaf, a UI library Farm has no code for, through an adapter you can copy.**
 
 `leaf/` is the library. It knows nothing about Farm: elements, function components, hooks, a DOM
-patcher that hydrates server markup, and `renderToString()`. `farm-leaf/` is the adapter that
+patcher that hydrates server markup, and an HTML renderer that streams. `farm-leaf/` is the adapter that
 plugs it into Farm:
 
-| File                        | What Farm gets from it                                                                        |
-| --------------------------- | --------------------------------------------------------------------------------------------- |
-| `farm-leaf/src/index.js`    | The descriptor `renderer: leaf()` selects, from `defineRenderer()`                            |
-| `farm-leaf/src/server.js`   | `createElement`, `renderToString`, and the rest of the server contract                        |
-| `farm-leaf/src/client.js`   | `createRoot` and `hydrateRoot` for the browser entry                                          |
-| `farm-leaf/src/vite.js`     | The Vite plugin: JSX against leaf's runtime, and the `.leaf` compiler                         |
-| `farm-leaf/src/bindings.js` | `useRouter`, `useTheme`, `useAction`, `useServerQuery`, and `Link`, over Farm's client stores |
+| File                        | What Farm gets from it                                                                           |
+| --------------------------- | ------------------------------------------------------------------------------------------------ |
+| `farm-leaf/src/index.js`    | The descriptor `renderer: leaf()` selects, from `defineRenderer()`                               |
+| `farm-leaf/src/server.js`   | `createElement`, `renderToString`, `renderToReadableStream`, and the rest of the server contract |
+| `farm-leaf/src/client.js`   | `createRoot` and `hydrateRoot` for the browser entry                                             |
+| `farm-leaf/src/vite.js`     | The Vite plugin: JSX against leaf's runtime, and the `.leaf` compiler                            |
+| `farm-leaf/src/bindings.js` | `useRouter`, `useTheme`, `useAction`, `useServerQuery`, and `Link`, over Farm's client stores    |
 
 Both packages are plain JavaScript with `.d.ts` files, the shape a published renderer has, so
 neither needs a build step. `farm-leaf/test/` runs the conformance suites from
@@ -22,7 +22,8 @@ The app covers a hydrating layout that keeps its state across client navigation,
 a page that ships no JavaScript, a dynamic route with metadata, a page and component in leaf's own
 `.leaf` file format, an API route, a button that calls a validated `createServerFn` imported
 straight into the page (`experimental.serverActions`) through `useAction`, a `useServerQuery` that
-reads again when that function invalidates its key, and not-found and error pages.
+reads again when that function invalidates its key, a page that streams past an async component
+inside `<Suspense>`, and not-found and error pages.
 
 ```bash
 pnpm --filter farm-custom-renderer-example dev
@@ -39,7 +40,9 @@ renderer](https://farmjs.dev/blog/bring-your-own-renderer) walks through it step
 
 ## What it does not do
 
-- leaf doesn't stream, so Farm renders its pages buffered through `renderToString()`.
+- leaf streams in order: a `<Suspense>` boundary sends what came before it, then waits for the
+  async components inside. It never shows `fallback`, and async components render on the server
+  only, so a page that has one doesn't hydrate.
 - leaf matches children by position and has no keys, so reordering a list re-renders its items.
 
 See [Renderer modules](https://farmjs.dev/docs/renderers#renderer-modules) for the full contract.

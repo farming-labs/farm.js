@@ -14,7 +14,7 @@ export function leaf() {
     // `.leaf` files are routes and components next to .tsx; farm-leaf/vite compiles them.
     componentExtensions: [".leaf"],
     capabilities: {
-      streaming: { node: false, web: false }, // buffered SSR through renderToString()
+      streaming: { node: false, web: true }, // renderToReadableStream() in farm-leaf/server
       reconcilesRerenders: true, // patching keeps same-position DOM nodes and their state
       functionComponents: true, // components are plain functions
     },
