@@ -441,7 +441,7 @@ that suspends with its streaming renderer and waits for every boundary before se
 Keep product and server behavior outside the component runtime whenever possible:
 
 ```ts
-import { createEndpoint } from "@farm.js/core";
+import { createEndpoint } from "@farm.js/core/api";
 import { createServerFn } from "@farm.js/core/server-fn";
 import { z } from "zod";
 
@@ -464,6 +464,13 @@ export const POST = createEndpoint(
 React, Preact, Solid, Vue, and Svelte components can call this endpoint through the same generated client.
 Database access, secrets, validation, cache invalidation, middleware, and the server-function
 handler remain on the server.
+
+Import from a subpath such as `@farm.js/core/api` rather than `@farm.js/core`: the root entry
+imports React, which an app on another renderer doesn't install. `notFound()`, `redirect()`, and
+`permanentRedirect()` from `@farm.js/core/navigation` work with every renderer. Its
+`useRouter()`, `usePathname()`, and `useSearchParams()` are React hooks: Preact runs them through
+`preact/compat`, and with Solid, Vue, Svelte, or a custom renderer they throw, so read the route
+from the renderer's bindings instead.
 
 ## Switch renderers deliberately
 

@@ -314,7 +314,7 @@ async function createProjectModuleServer(
   root: string,
   buildLifetime: AbortSignal,
 ): Promise<ViteDevServer> {
-  const { farmServerOnlyEntriesPlugin } = await import("../vite");
+  const { farmNavigationPlugin, farmServerOnlyEntriesPlugin } = await import("../vite");
   const rendererVitePlugins = await loadFarmRendererVitePlugins(config.renderer, root, {
     ssr: true,
     buildLifetime,
@@ -345,6 +345,7 @@ async function createProjectModuleServer(
           prebundleServerPackages: true,
           distDir: config.distDir || ".farm",
         }),
+        farmNavigationPlugin(config.renderer),
       ],
       server: {
         middlewareMode: true,
@@ -416,6 +417,7 @@ async function buildClient(
   const {
     farmI18nClientBridgePlugin,
     farmIslandContainersPlugin,
+    farmNavigationPlugin,
     farmPlugin,
     farmServerOnlyEntriesPlugin,
   } = await import("../vite");
@@ -440,6 +442,7 @@ async function buildClient(
     plugins: [
       farmI18nClientBridgePlugin(),
       farmServerOnlyEntriesPlugin({ distDir: config.distDir || ".farm" }),
+      farmNavigationPlugin(config.renderer),
       farmIslandContainersPlugin(config),
       farmPlugin(config, pluginManager),
       farmEnvironmentFunctionsPlugin(config),

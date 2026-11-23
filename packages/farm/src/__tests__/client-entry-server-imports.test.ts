@@ -98,7 +98,7 @@ function findImportChain(
   const chainTo = (file: string, last: string) => {
     const chain = [last];
     for (let current: string | null = file; current; current = parent.get(current) ?? null) {
-      chain.unshift(path.relative(SRC, current));
+      chain.unshift(path.relative(SRC, current).split(path.sep).join("/"));
     }
     return chain;
   };
@@ -128,7 +128,7 @@ describe("browser entries", () => {
 });
 
 // Solid, Vue, Svelte, and custom-renderer apps load these without React installed.
-const RENDERER_NEUTRAL_ENTRIES = ["renderer-client.ts", "store-core.ts"];
+const RENDERER_NEUTRAL_ENTRIES = ["renderer-client.ts", "store-core.ts", "navigation-neutral.ts"];
 const isReactPackage = (specifier: string) =>
   /^(react|react-dom)(\/|$)/.test(specifier) || specifier.startsWith("@farm.js/react");
 
@@ -139,5 +139,13 @@ describe("renderer-neutral entries", () => {
 
   it("finds the React import in the React store", () => {
     expect(findImportChain("store.ts", isReactPackage)).toEqual(["store.ts", "react"]);
+  });
+
+  it("finds the React import in the navigation entry other renderers do not load", () => {
+    expect(findImportChain("navigation.ts", isReactPackage)).toEqual([
+      "navigation.ts",
+      "client/router.ts",
+      "react",
+    ]);
   });
 });

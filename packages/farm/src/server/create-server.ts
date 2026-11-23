@@ -6,6 +6,7 @@ import type { FarmConfig } from "../types";
 import {
   farmI18nClientBridgePlugin,
   farmIslandContainersPlugin,
+  farmNavigationPlugin,
   farmPlugin,
   farmServerOnlyEntriesPlugin,
 } from "../vite";
@@ -408,6 +409,7 @@ export async function createServer(
               prebundleServerPackages: true,
               distDir: resolvedConfig.distDir || ".farm",
             }),
+            farmNavigationPlugin(finalConfig.renderer),
             farmIslandContainersPlugin(finalConfig),
             farmPlugin(finalConfig, pluginManager, deferredSetup),
             farmEnvironmentFunctionsPlugin(finalConfig),
