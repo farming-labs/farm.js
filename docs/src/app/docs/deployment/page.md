@@ -242,7 +242,7 @@ HOST=0.0.0.0 PORT=3000 pnpm start
 
 For a VPS, run the same start command behind nginx, Caddy, systemd, or a process manager such as PM2. Environment variables should be provided by the host at runtime, not committed into the bundle.
 
-The Node server sends static files itself, compressed when the app is built. Every public file of 1 KB or more that compresses well (scripts, stylesheets, HTML, JSON, SVG) gets a gzip copy. Client scripts and stylesheets also get a brotli copy at brotli's top quality, about 12% smaller than gzip for the [payload benchmark](https://github.com/farming-labs/farm.js/tree/main/benchmarks/server-components-payload)'s scripts. The server picks a copy from the browser's `Accept-Encoding`. A `.gz` or `.br` file the app ships in `public/` beside its original is kept. The other targets leave static compression to the platform's CDN. A build with the `rsc` server components engine does not compress its static files yet, so put a compressing proxy or CDN in front of it.
+The Node server sends static files itself, compressed when the app is built. Every public file of 1 KB or more that compresses well (scripts, stylesheets, HTML, JSON, SVG) gets a gzip copy. Client scripts and stylesheets also get a brotli copy at brotli's top quality, about 12% smaller than gzip for the [payload benchmark](https://github.com/farming-labs/farm.js/tree/main/benchmarks/server-components-payload)'s scripts. The server picks a copy from the browser's `Accept-Encoding`. A `.gz` or `.br` file the app ships in `public/` beside its original is kept. The other targets leave static compression to the platform's CDN. A build with the `rsc` server components engine gets the gzip copies but no brotli copies yet.
 
 The server sets `NODE_ENV=production` when the environment leaves it unset, as `next start` does, so packages that read it at runtime agree with the browser bundle. A value the host sets wins.
 
@@ -335,6 +335,8 @@ farm build --preset my-company-preset
 ```
 
 For built-in Nitro presets, the generated output follows Nitro's provider shape. For custom presets, Farm passes the preset name through to Nitro, so the preset must be installed or otherwise resolvable by Nitro in the project.
+
+A `bun` build writes gzip copies of its static files, as a `node` build does, so the Bun server sends a browser that accepts gzip the smaller copy.
 
 ### Nitro version compatibility
 

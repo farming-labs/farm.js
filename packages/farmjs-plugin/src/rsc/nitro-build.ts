@@ -690,6 +690,10 @@ export async function buildRscNitro(options: BuildRscNitroOptions): Promise<void
           publicDir: path.join(outputDir, "public"),
         },
     publicAssets,
+    // A self-hosted Node server sends static files itself, so Nitro precompresses them with gzip,
+    // as Farm's core build does; its prerender pass (prerenderRscPages) writes the copies. The
+    // other presets sit behind a CDN that compresses.
+    ...(preset === "node-server" ? { compressPublicAssets: { gzip: true } } : {}),
     renderer: { handler: entryPath },
     // The prebuilt RSC/SSR bundles are copied after Nitro finishes, so Nitro's
     // module graph cannot otherwise see their bare package imports. Trace both

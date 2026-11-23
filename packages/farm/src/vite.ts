@@ -5389,9 +5389,9 @@ export function farmPlugin(
         const generatedDevIndicatorsClientRuntime = farmApp
           ? generateFarmDevIndicatorsClientRuntime(farmApp.getConfig().devIndicators)
           : "";
-        const integrationProviders = isReactRenderer(renderer)
-          ? getIntegrationProviders(integrations)
-          : [];
+        // Every renderer, as the server render and the production entry wrap pages: a page
+        // rendered inside a provider on the server hydrates inside it too.
+        const integrationProviders = getIntegrationProviders(integrations);
         const isolatedHydrationMode = resolveFarmIsolatedClientHydrationMode(
           resolvedConfig?.experimental?.isolatedClientHydration,
           {

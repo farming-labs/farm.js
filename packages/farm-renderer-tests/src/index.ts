@@ -36,7 +36,7 @@ export interface RendererServerFixture {
   createElement(type: unknown, props?: unknown, ...children: unknown[]): unknown;
   isValidElement(value: unknown): boolean;
   markFunctionComponent?<T>(component: T): T;
-  /** The server boundary Farm wraps a route with an `error.*` file in, during development. */
+  /** Optional. Farm no longer reads it; one a renderer still exports lets a throw fail the render. */
   ErrorBoundary?: unknown;
   renderToString(element: unknown): string | Promise<string>;
   renderToStringWithHead?(
