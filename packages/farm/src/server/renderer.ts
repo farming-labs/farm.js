@@ -3776,6 +3776,33 @@ window.__FARM_I18N__ = ${i18nSnapshot ? serializeInlineValue(i18nSnapshot) : "nu
     }
   }
 
+  /**
+   * Islands mode: a page whose route hydrates nothing as a root hydrates only islands, which hold
+   * their own clicks, so nothing else on it is held, as in production.
+   */
+  private isIslandsOnlyPage(req: FarmRequest): boolean {
+    return (
+      this.islandValues() &&
+      (req as any).__FARM_PAGE_SHOULD_HYDRATE__ !== true &&
+      (req as any).__FARM_LAYOUT_SHOULD_HYDRATE__ !== true &&
+      (req as any).__FARM_HAS_HYDRATABLE_ROUTE_SLOTS__ !== true
+    );
+  }
+
+  /**
+   * The head script that holds a page's clicks and submits until it hydrates, which the client
+   * replays once it has. Production writes it into the same pages, streamed or buffered.
+   */
+  private renderPreHydrationHold(req: FarmRequest, bootClient: boolean): string {
+    const hydrates =
+      (req as any).__FARM_IS_CLIENT_COMPONENT__ === true ||
+      (req as any).__FARM_SHOULD_HYDRATE__ === true ||
+      (req as any).__FARM_HAS_HYDRATABLE_ROUTE_SLOTS__ === true;
+    return hydrates && !bootClient && !this.isIslandsOnlyPage(req)
+      ? createPreHydrationClickQueueScript()
+      : "";
+  }
+
   private async renderBufferedSSR(
     element: unknown,
     req: FarmRequest,
@@ -3850,6 +3877,8 @@ window.__FARM_I18N__ = ${getFarmI18nClientSnapshot() ? serializeInlineValue(getF
       const farmClientScript = farmScripts(
         `<script type="module" src="/@farm/client.js"></script>`,
       );
+      // This document always starts with the full client entry, never the islands boot.
+      const holdScript = farmScripts(this.renderPreHydrationHold(req, false));
       const { html: content, head: rendererHead } = await this.renderElementToDocumentParts(
         element,
         {
@@ -3928,6 +3957,7 @@ window.__FARM_I18N__ = ${getFarmI18nClientSnapshot() ? serializeInlineValue(getF
             viteClientScript,
             rendererHydrationScript,
             bootstrapScript,
+            holdScript,
           ]
             .filter(Boolean)
             .join("\n  "),
@@ -3951,7 +3981,7 @@ window.__FARM_I18N__ = ${getFarmI18nClientSnapshot() ? serializeInlineValue(getF
     .join("")}
   ${viteClientScript}
   ${rendererHydrationScript}
-  ${bootstrapScript}
+  ${bootstrapScript}${holdScript ? `\n  ${holdScript}` : ""}
 </head>
 <body class="">
   <div id="root">${content}</div>
@@ -4166,14 +4196,9 @@ window.__FARM_MANIFEST__ = ${JSON.stringify(clientManifest)};
 window.__FARM_INTEGRATION_API_MANIFEST__ = ${JSON.stringify(getRegisteredIntegrationAPIManifest())};
 window.__FARM_I18N__ = ${getFarmI18nClientSnapshot() ? serializeInlineValue(getFarmI18nClientSnapshot()) : "null"};
 </script>${renderFarmFormStateScript()}`;
-      // Islands mode: a page whose route hydrates nothing as a root hydrates only islands, which
-      // hold their own clicks, so nothing else on it is held, as in production. It starts with the
-      // boot entry, as in production, unless the app runs client code at load (RFC 0003, section 10).
-      const islandsOnlyPage =
-        this.islandValues() &&
-        (req as any).__FARM_PAGE_SHOULD_HYDRATE__ !== true &&
-        (req as any).__FARM_LAYOUT_SHOULD_HYDRATE__ !== true &&
-        (req as any).__FARM_HAS_HYDRATABLE_ROUTE_SLOTS__ !== true;
+      // An islands-only page starts with the boot entry, as in production, unless the app runs
+      // client code at load (RFC 0003, section 10).
+      const islandsOnlyPage = this.isIslandsOnlyPage(req);
       // A page whose route hydrates as one root that waits starts with it too, naming that root.
       const rootStrategy = (req as any).__FARM_ISLAND_STRATEGY__ as string | undefined;
       const waitingRoot =
@@ -4193,14 +4218,7 @@ window.__FARM_I18N__ = ${getFarmI18nClientSnapshot() ? serializeInlineValue(getF
         !staticShellParts &&
         resolveFarmPlatform() !== "mobile" &&
         canBootFarmIslandsClient(this.config);
-      const hydrationClickQueueScript =
-        !islandsOnlyPage &&
-        !bootClient &&
-        (isClientComponent ||
-          (req as any).__FARM_SHOULD_HYDRATE__ === true ||
-          (req as any).__FARM_HAS_HYDRATABLE_ROUTE_SLOTS__ === true)
-          ? createPreHydrationClickQueueScript()
-          : "";
+      const hydrationClickQueueScript = this.renderPreHydrationHold(req, bootClient);
 
       const {
         title,
