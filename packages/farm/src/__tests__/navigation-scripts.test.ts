@@ -5,12 +5,13 @@ import { FARM_NAVIGATION_SCRIPT_SOURCE } from "../client/navigation-scripts";
 type NavigationScripts = {
   createFarmNavigationScript(script: Element): HTMLScriptElement;
   revealFarmStreamedContent(root: ParentNode): void;
+  adoptFarmParsedNodes(root: ParentNode): void;
 };
 
 /** Evaluates the source as the client entry does: once, with the document as it is now. */
 function load(): NavigationScripts {
   return new Function(
-    `${FARM_NAVIGATION_SCRIPT_SOURCE}\nreturn { createFarmNavigationScript, revealFarmStreamedContent };`,
+    `${FARM_NAVIGATION_SCRIPT_SOURCE}\nreturn { createFarmNavigationScript, revealFarmStreamedContent, adoptFarmParsedNodes };`,
   )();
 }
 
@@ -103,5 +104,26 @@ describe("streamed content in a parsed page", () => {
     revealFarmStreamedContent(root);
     expect(root.querySelector("p")!.textContent).toBe("Loading");
     expect(root.querySelector("script")!.textContent).toBe('$RC("B:0","S:0")');
+  });
+});
+
+describe("nodes a navigation moves in from a parsed page", () => {
+  it("keep a noscript's content as text, so its images and frames do not load", () => {
+    const { adoptFarmParsedNodes } = load();
+    // DOMParser parses as a page without scripting: the noscript's content comes out as elements.
+    const parsed = new DOMParser()
+      .parseFromString(
+        '<div id="root"><noscript><img src="/pixel" alt=""><iframe src="/frame"></iframe></noscript><p>Page</p></div>',
+        "text/html",
+      )
+      .getElementById("root")!;
+    expect(parsed.querySelector("noscript img")).not.toBeNull();
+    adoptFarmParsedNodes(parsed);
+    const root = document.createElement("div");
+    root.replaceChildren(...parsed.childNodes);
+    const noscript = root.querySelector("noscript")!;
+    expect(noscript.children).toHaveLength(0);
+    expect(noscript.textContent).toBe('<img src="/pixel" alt=""><iframe src="/frame"></iframe>');
+    expect(root.querySelector("p")!.textContent).toBe("Page");
   });
 });

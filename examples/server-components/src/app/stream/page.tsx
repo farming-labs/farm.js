@@ -15,6 +15,10 @@ async function Slow({ searchParams }: { searchParams: SearchParams }) {
   return (
     <div>
       <p data-testid="slow-content">Slow content arrived</p>
+      {/* Only a browser without JavaScript loads this; a streamed navigation leaves it inert. */}
+      <noscript>
+        <img src="/noscript-pixel/stream" alt="" />
+      </noscript>
       <Counter start={0} label="Late" />
     </div>
   );
