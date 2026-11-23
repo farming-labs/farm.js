@@ -35,7 +35,7 @@ For each request, Farm builds the route as one element tree. It calls your libra
 
 That's the whole job. The leaf repo has three parts:
 
-- **`packages/leaf`** is the UI library: elements, hooks, a DOM patcher, and `renderToString()`. It's about 670 lines of JavaScript, and your library replaces it.
+- **`packages/leaf`** is the UI library: elements, hooks, a DOM patcher, and an HTML renderer that can stream. It's about 750 lines of JavaScript, and your library replaces it.
 - **`packages/farm-leaf`** is the adapter between leaf and Farm. This post builds it, one step at a time.
 - **`app`** is a Farm app that uses it.
 
@@ -60,7 +60,7 @@ export function leaf() {
     jsxImportSource: "leaf",
     componentExtensions: [".leaf"],
     capabilities: {
-      streaming: { node: false, web: false },
+      streaming: { node: false, web: true },
       reconcilesRerenders: true,
       functionComponents: true,
     },
@@ -95,22 +95,22 @@ The server module renders routes to HTML. If your library already has these expo
 ```js
 // packages/farm-leaf/src/server.js
 export { Fragment, Suspense, createElement, isValidElement } from "leaf";
-export { renderToString } from "leaf/server";
+export { renderToReadableStream, renderToString } from "leaf/server";
 
 export const name = "leaf";
-export const capabilities = { streaming: { node: false, web: false } };
+export const capabilities = { streaming: { node: false, web: true } };
 ```
 
-Farm reads six named exports:
+`renderToReadableStream` and `capabilities` are optional, and [step 8](#step-8-optional-streaming) covers them. Farm reads six named exports:
 
 - **`name`** names the renderer in errors.
 - **`createElement(type, props, ...children)`** builds the route tree: layouts wrapped around the page.
 - **`Fragment`** wraps what an async page returns when it isn't a single element.
 - **`isValidElement(value)`** tells an element apart from other values, such as an async page's result.
-- **`Suspense`** wraps a page that has a `loading` file. leaf never suspends, so its `Suspense` just renders its children.
+- **`Suspense`** wraps a page that has a `loading` file. leaf's renders its children, and its stream sends what came before it early.
 - **`renderToString(element)`** returns the HTML, or a promise of it.
 
-Two things you don't have to build. Farm awaits an `async` page itself and hands your library what it returned, so your library doesn't need async components. And no default export is needed: Farm imports every module by name. If one of the six is missing, `farm dev` and `farm build` stop at startup with an error that names each missing export.
+Two things you don't have to build. Farm awaits an `async` page itself and hands your library what it returned, so your library doesn't need async components to have async pages. And no default export is needed: Farm imports every module by name. If one of the six is missing, `farm dev` and `farm build` stop at startup with an error that names each missing export.
 
 <span id="step-3-the-client-module" className="blog-heading-anchor" />
 
@@ -383,9 +383,75 @@ Without streaming, Farm renders the whole page with `renderToString()` and sends
 - **`renderToReadableStream(element, options)`** returns a Web `ReadableStream` of HTML. Turn on `web`.
 - **`renderToPipeableStream(element, callbacks)`** returns an object with `pipe(destination)`, for Node streams. Turn on `node`.
 
-The error rule matters. Error the stream if rendering fails before any output, so Farm can answer with the error's status. After output has started, call `options.onError(error)` and close the stream. Erroring a stream that has already sent bytes resets the connection.
+leaf uses the first. Its HTML renderer is a generator: it yields strings, a marker where a `<Suspense>` starts, and the promise an async component returns. `renderChunks()` joins the strings into one chunk per marker and waits on each promise in order. The stream sends each chunk as it's ready:
 
-leaf doesn't stream. Farm's own tests include a renderer that is nothing but the contract, and it streams through both exports, in development and in production.
+```js
+// packages/leaf/src/server.js (the stream)
+export function renderToReadableStream(element, options) {
+  const chunks = renderChunks(renderChildren(element));
+  let started = false;
+  return new ReadableStream({
+    async pull(controller) {
+      let result;
+      try {
+        result = await chunks.next();
+      } catch (error) {
+        // Before any output, the error decides the status. After it, the status is already
+        // sent, so report the error and end the document.
+        if (!started) return controller.error(error);
+        options?.onError?.(error);
+        return controller.close();
+      }
+      if (result.done) return controller.close();
+      started = true;
+      controller.enqueue(encoder.encode(result.value));
+    },
+    cancel() {
+      return chunks.return();
+    },
+  });
+}
+```
+
+The `catch` is the rule that matters. If rendering fails before any output, error the stream, so Farm can answer with the error's status: leaf's `/broken` page still gets its `error.tsx` and a 500. After output has started, call `options.onError(error)` and close the stream. Erroring a stream that has already sent bytes resets the connection.
+
+Now a page can stream past slow data:
+
+```tsx
+// app/src/app/harvest/page.tsx (abridged)
+import { Suspense } from "leaf";
+import { readHarvest } from "../../server/harvest";
+
+async function HarvestReport() {
+  const harvest = await readHarvest(); // takes 400 ms
+  return (
+    <ul>
+      {harvest.map((crop) => (
+        <li>
+          {crop.name}: {crop.tonnes} t
+        </li>
+      ))}
+    </ul>
+  );
+}
+
+export default function HarvestPage() {
+  return (
+    <section>
+      <p>Farm sends this before the report is ready.</p>
+      <Suspense>
+        <HarvestReport />
+      </Suspense>
+    </section>
+  );
+}
+```
+
+The layout and the first paragraph reach the browser at once, and the report follows when its data does. Three limits are leaf's, not Farm's:
+
+- It streams in order. React streams out of order, showing `fallback` and swapping the content in with a script. leaf never shows `fallback`.
+- Its browser renderer can't run an async component, so a page that has one stays server HTML.
+- Its `renderToString()` rejects an async component with an error that says to stream it. Farm's conformance suite expects that from a renderer that can't wait.
 
 <span id="step-9-test-it" className="blog-heading-anchor" />
 
@@ -546,7 +612,7 @@ Routes, layouts, SSR, hydration, navigation, server functions, and production ou
 
 - **React Server Components and islands are React-only.** The [feature table](/docs/renderers#feature-support) lists what each renderer gets. A custom renderer gets the same as Solid, Vue, and Svelte.
 - **One renderer per app.** You can't render one page with leaf and the next with React.
-- **leaf's own gaps are leaf's.** It has no streaming, no keys, and no refs. Those are missing from the library, not from Farm's contract.
+- **leaf's own gaps are leaf's.** It streams only in order, and it has no keys and no refs. Those are missing from the library, not from Farm's contract.
 
 <span id="what-building-leaf-fixed-in-farm" className="blog-heading-anchor" />
 
