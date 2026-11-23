@@ -98,6 +98,8 @@ function createInjector(viewportTags = renderViewportHead(undefined), bootsClien
       // Props without defer() values: prepared as they are, with no snapshot to write.
       "const farmDeferredData = { data: { page: clientPageProps, slots: routeSlotPayload }, records: [] };\n" +
       'const renderFarmDeferredDataScript = () => "";\n' +
+      // The pre-hydration hold has its own production test.
+      'const renderFarmPreHydrationHoldScript = () => "";\n' +
       "const farmEntryScript = farmBootsClient ? " +
       JSON.stringify(BOOT_SCRIPT) +
       " : renderFarmClientEntryScript();\n" +

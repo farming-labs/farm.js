@@ -64,6 +64,7 @@ export {
   resolveFarmWebRequestOrigin,
 } from "../server/request";
 export { _resolveCurrentCspNonce } from "../server/request-bridge";
+export { createPreHydrationClickQueueScript } from "../server/prehydration-hold-script";
 export { _setFarmSearchPreserveRoutes } from "../client/search-preserve-routes";
 export { createFarmNativeTreeResponse } from "../mobile/native-tree";
 export { fetchFarmExternalRewrite } from "../server/response";

@@ -222,6 +222,10 @@ trigger.
 | `visible`     | When the route boundary approaches the viewport.               |
 | `idle`        | During browser idle time, with a timeout fallback.             |
 
+Until a page hydrates, Farm holds clicks on its buttons and its form submissions, and replays them
+once it has, in development and in production builds. An early submit runs the page's own handler
+instead of going to the server as a native form post.
+
 With [isolated client hydration](/docs/configuration#isolated-client-hydration), each eligible
 client module keeps its own strategy, including after SPA navigation. Sibling boundaries can mix
 all four strategies: one boundary's trigger never hydrates another, and an interaction click is
