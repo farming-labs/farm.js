@@ -368,16 +368,16 @@ export const GET = createEndpoint(async ({ params }) => {
 
 ## Feature parity: form actions and `$app/forms`
 
-| SvelteKit                          | Farm                                                                                                           | Status      |
-| ---------------------------------- | -------------------------------------------------------------------------------------------------------------- | ----------- |
-| default action (`actions.default`) | `POST` in `src/app/api/<name>/route.ts`; `<form method="POST" action="/api/<name>">`                           | `different` |
-| named actions (`?/create`)         | one API route per action, or one route that switches on a form field                                           | `different` |
-| `fail(400, data)`                  | redirect back with a query value for no-JS, JSON `400` for enhanced requests                                   | `different` |
-| `form` prop / `ActionData`         | read the `search` prop (no-JS) or local `$state` (enhanced)                                                    | `different` |
-| `use:enhance`                      | `onsubmit` handler that `fetch`es the same endpoint; requires `hydrate = true`                                 | `different` |
-| `applyAction`, `deserialize`       | none                                                                                                           | `none`      |
-| progressive enhancement            | native form post plus `303` redirect works without JavaScript                                                  | `same`      |
-| `createAction` (Svelte binding)    | takes a server function imported from its server module; needs `experimental.serverActions` (experimental)     | `different` |
+| SvelteKit                          | Farm                                                                                                       | Status      |
+| ---------------------------------- | ---------------------------------------------------------------------------------------------------------- | ----------- |
+| default action (`actions.default`) | `POST` in `src/app/api/<name>/route.ts`; `<form method="POST" action="/api/<name>">`                       | `different` |
+| named actions (`?/create`)         | one API route per action, or one route that switches on a form field                                       | `different` |
+| `fail(400, data)`                  | redirect back with a query value for no-JS, JSON `400` for enhanced requests                               | `different` |
+| `form` prop / `ActionData`         | read the `search` prop (no-JS) or local `$state` (enhanced)                                                | `different` |
+| `use:enhance`                      | `onsubmit` handler that `fetch`es the same endpoint; requires `hydrate = true`                             | `different` |
+| `applyAction`, `deserialize`       | none                                                                                                       | `none`      |
+| progressive enhancement            | native form post plus `303` redirect works without JavaScript                                              | `same`      |
+| `createAction` (Svelte binding)    | takes a server function imported from its server module; needs `experimental.serverActions` (experimental) | `different` |
 
 ```ts
 // src/app/api/todos/route.ts
