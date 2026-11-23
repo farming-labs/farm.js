@@ -1203,8 +1203,10 @@ test("aborts local gateway work after a public cancellation", async () => {
   }
 });
 
-test("cancels streaming local health probe responses", async () => {
-  const app = await createStreamingTestServer();
+test("watches the local target without sending it requests or closing on a stalled page", async () => {
+  // Each liveness check used to GET the app's root: it rendered the page every two seconds,
+  // showed up in the app's analytics, and ended the preview when the page took over a second.
+  const app = await createWatchedTestServer();
   const gateway = await createPreviewGatewayTestServer();
   const plan = createPreviewGatewayPlan(
     {
@@ -1213,25 +1215,33 @@ test("cancels streaming local health probe responses", async () => {
       port: app.port,
       source: "port",
     },
-    { gatewayUrl: gateway.url, name: "probe-cleanup" },
+    { gatewayUrl: gateway.url, name: "quiet-probe" },
   );
 
   try {
     const preview = runPreviewGateway(plan, {
       pollTimeoutMs: 25,
       localProbeIntervalMs: 20,
-      localProbeTimeoutMs: 200,
+      localProbeTimeoutMs: 50,
     });
 
     await gateway.waitForSession();
     await Promise.race([
-      app.waitForCancellation(),
+      app.waitForConnections(5),
       new Promise((_, reject) =>
-        setTimeout(() => reject(new Error("streaming health probe was not cancelled")), 500),
+        setTimeout(() => reject(new Error("the preview stopped watching the local target")), 2000),
       ),
     ]);
+    assert.deepEqual(app.requests, []);
+    assert.deepEqual(gateway.deletedSessions, []);
+
     await app.close();
-    await preview;
+    await Promise.race([
+      preview,
+      new Promise((_, reject) =>
+        setTimeout(() => reject(new Error("preview did not stop after local target closed")), 1000),
+      ),
+    ]);
   } finally {
     await app.close().catch(() => undefined);
     await gateway.close();
@@ -1632,15 +1642,17 @@ async function createTestServer(handler) {
   };
 }
 
-async function createStreamingTestServer() {
-  let resolveCancellation;
-  const cancellation = new Promise((resolve) => {
-    resolveCancellation = resolve;
+async function createWatchedTestServer() {
+  const requests = [];
+  const waiters = [];
+  let connections = 0;
+  // Never answers, like a page stuck rendering.
+  const server = createServer((req) => {
+    requests.push(req.url);
   });
-  const server = createServer((_req, res) => {
-    res.writeHead(200, { "content-type": "text/plain" });
-    res.write("streaming");
-    res.once("close", resolveCancellation);
+  server.on("connection", () => {
+    connections += 1;
+    for (const waiter of waiters) if (connections >= waiter.count) waiter.resolve();
   });
 
   await new Promise((resolve, reject) => {
@@ -1652,10 +1664,15 @@ async function createStreamingTestServer() {
 
   return {
     port: address.port,
-    waitForCancellation: () => cancellation,
+    requests,
+    waitForConnections: (count) =>
+      connections >= count
+        ? Promise.resolve()
+        : new Promise((resolve) => waiters.push({ count, resolve })),
     close: () =>
       new Promise((resolve, reject) => {
         server.close((error) => (error ? reject(error) : resolve()));
+        server.closeAllConnections();
       }),
   };
 }

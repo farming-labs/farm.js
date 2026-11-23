@@ -76,6 +76,10 @@ test("proxies a public preview request through the gateway queue", async () => {
         "x-forwarded-for": "127.0.0.1",
         "x-forwarded-host": "evil.example",
         "x-forwarded-proto": "https",
+        "x-vercel-oidc-token": "gateway-deployment-credential",
+        "x-vercel-proxy-signature": "Bearer gateway-proxy-signature",
+        "X-Vercel-IP-City": "Ashburn",
+        "x-app-header": "kept",
       },
     });
     const pollResponse = await fetch(
@@ -90,6 +94,14 @@ test("proxies a public preview request through the gateway queue", async () => {
     assert.equal(poll.requests[0].headers["x-forwarded-for"], undefined);
     assert.equal(poll.requests[0].headers["x-forwarded-host"], new URL(gateway.url).host);
     assert.equal(poll.requests[0].headers["x-forwarded-proto"], "http");
+    // The gateway's own platform headers, including its OIDC token, never reach the local app.
+    assert.deepEqual(
+      Object.keys(poll.requests[0].headers).filter((name) =>
+        name.toLowerCase().startsWith("x-vercel-"),
+      ),
+      [],
+    );
+    assert.equal(poll.requests[0].headers["x-app-header"], "kept");
 
     await fetch(
       `${gateway.url}/api/sessions/${session.id}/responses/${poll.requests[0].id}?token=${session.token}`,

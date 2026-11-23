@@ -1480,7 +1480,10 @@ async function serializePreviewRequest(
       !requestHopByHopHeaders.has(normalized) &&
       normalized !== "x-farm-preview-connection" &&
       normalized !== "forwarded" &&
-      !normalized.startsWith("x-forwarded-")
+      !normalized.startsWith("x-forwarded-") &&
+      // The hosting platform's own headers, such as Vercel's OIDC token for this deployment,
+      // describe the gateway, not the visitor, and must not reach the local app.
+      !normalized.startsWith("x-vercel-")
     ) {
       headers[key] = value;
     }

@@ -1,3 +1,5 @@
+import { connect } from "node:net";
+
 import { WebSocket } from "ws";
 
 import type {
@@ -113,19 +115,17 @@ function watchLocalTarget(socket: WebSocket, options: TypeScriptPreviewAgentOpti
     if (stopped) return;
     const controller = new AbortController();
     probeController = controller;
-    const timeout = setTimeout(() => controller.abort(), timeoutMs);
     try {
-      const response = await fetch(options.targetUrl, { signal: controller.signal });
-      await response.body?.cancel();
-      timer = setTimeout(probe, intervalMs);
-    } catch {
+      if (await isLocalTargetListening(options.targetUrl, timeoutMs, controller.signal)) {
+        timer = setTimeout(probe, intervalMs);
+        return;
+      }
       if (stopped) return;
       stop();
       if (socket.readyState === socket.OPEN) {
         socket.close(1001, "Local preview target stopped");
       }
     } finally {
-      clearTimeout(timeout);
       if (probeController === controller) probeController = undefined;
     }
   };
@@ -133,6 +133,39 @@ function watchLocalTarget(socket: WebSocket, options: TypeScriptPreviewAgentOpti
   socket.once("close", stop);
   timer = setTimeout(probe, intervalMs);
   return stop;
+}
+
+/**
+ * Whether the local target accepts connections. It opens and closes a TCP connection instead of
+ * sending a request, so it never runs the app's routes or shows up in the app's analytics, and a
+ * page that renders slowly doesn't count as a stopped app.
+ */
+function isLocalTargetListening(
+  targetUrl: string,
+  timeoutMs: number,
+  signal?: AbortSignal,
+): Promise<boolean> {
+  const url = new URL(targetUrl);
+  const host = url.hostname.replace(/^\[(.*)\]$/, "$1");
+  const port = Number(url.port) || (url.protocol === "https:" ? 443 : 80);
+  return new Promise((resolve) => {
+    if (signal?.aborted) {
+      resolve(false);
+      return;
+    }
+    const socket = connect({ host, port });
+    const finish = (listening: boolean) => {
+      clearTimeout(timer);
+      signal?.removeEventListener("abort", onAbort);
+      socket.destroy();
+      resolve(listening);
+    };
+    const onAbort = () => finish(false);
+    const timer = setTimeout(() => finish(false), timeoutMs);
+    signal?.addEventListener("abort", onAbort, { once: true });
+    socket.once("connect", () => finish(true));
+    socket.once("error", () => finish(false));
+  });
 }
 
 function waitForReady(socket: WebSocket, options: TypeScriptPreviewAgentOptions) {
