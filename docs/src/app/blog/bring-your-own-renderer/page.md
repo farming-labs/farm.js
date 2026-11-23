@@ -152,7 +152,7 @@ import { installChunkErrorRecovery, SPARouter } from "@farm.js/core/client";
 
 `@farm.js/core/client` is the React-facing client API. Its module graph imports `react`. The router class itself never touches React; it was just sitting in a module that does.
 
-It wasn't leaf's bug. The official Solid renderer, in an app without React installed, failed the same way. The Farm monorepo couldn't catch it because core's own `node_modules` has React, so every test resolved it. I haven't checked whether a fresh `create-farm-app` Solid project gets React through some other dependency. The import was wrong either way.
+It wasn't leaf's bug. The official Solid renderer, in an app without React installed, failed the same way. The Farm monorepo couldn't catch it because core's own `node_modules` has React, so every test resolved it. A fresh `create-farm-app` Solid project doesn't install React, so it would have hit this too.
 
 The fix moves the router behind its own entry, `@farm.js/core/internal/spa-router`, whose graph has no React, and points the development entry at it. The test for this one doesn't trust the monorepo. It loads the generated entry, follows every static import through the built files the browser would link, and fails if any of them reaches `react`.
 
@@ -167,6 +167,10 @@ So I threw it out. With the separate entry, the React production client entry is
 With both fixes in a packed `@farm.js/core`, leaf runs with no React anywhere in the app. The production build serves server-rendered HTML, the browser hydrates it in place (the button the server rendered is the button you click), the counter counts, and `router.push("/about")` navigates without a document reload. Development does the same.
 
 That's the answer I wanted. **Farm's renderer contract is real: three modules and eleven named exports, and the core path no longer needs React installed.** Both fixes shipped in 0.1.79.
+
+Then I ran the example the way you would: packed tarballs, installed in an app outside the repo. It found one more. `notFound()` and `redirect()` live in `@farm.js/core/navigation`, next to React's router hooks, so importing them imported React. A page that called `notFound()` answered 500 in development and stopped `farm build`. Since 0.1.81, when the renderer isn't React or Preact, Farm points that import at a copy without the hooks. Your import doesn't change. The hooks throw there, with an error that sends you to your renderer's bindings.
+
+The same run caught the example's API route importing `createEndpoint` from `@farm.js/core`, whose root entry imports React too. It imports from `@farm.js/core/api` now. In an app without React, import from core's subpaths.
 
 <span id="your-own-file-format" className="blog-heading-anchor" />
 
@@ -212,7 +216,7 @@ leaf's compiler is 24 lines of string handling. It pulls out the two script bloc
 
 There's one exception to Farm not reading your file. Farm decides whether a page hydrates before your compiler runs, by reading the `hydrate` export from the file as written. Any declaration with a literal `true` or `false` works: `const`, `let`, or `var`, with or without a type annotation, or through an export list. A value Farm can't read without running your code, like `!0` or an import, fails the build with an error that names the file. When I first wrote this post, `!0` made the page render on the server and silently never hydrate, with the official Svelte renderer as well as leaf.
 
-The file format also turned up three bugs in how Farm handled a renderer's extensions. A new `page.leaf` wasn't served until you restarted `farm dev`, and new `.svelte` and `.vue` pages had the same bug. A parallel-route slot like `@modal/page.leaf` was served as a page. And `farm explain` didn't find `.leaf` routes. All three fixes shipped in 0.1.79. The silent `hydrate` failure is fixed on `main` and ships in the next release.
+The file format also turned up three bugs in how Farm handled a renderer's extensions. A new `page.leaf` wasn't served until you restarted `farm dev`, and new `.svelte` and `.vue` pages had the same bug. A parallel-route slot like `@modal/page.leaf` was served as a page. And `farm explain` didn't find `.leaf` routes. All three fixes shipped in 0.1.79. The silent `hydrate` failure is fixed in 0.1.81.
 
 <span id="components-for-leaf" className="blog-heading-anchor" />
 
@@ -355,8 +359,7 @@ Either way, ui-sdk is a beta (`0.1.0-beta.13`). Both ways get better the day it 
 
 "You can bring your own renderer" is true for the core path: routes, layouts, SSR, hydration, navigation, server functions called from server code, and production output. It is not true for everything Farm does, and I would rather say so here than in an issue later.
 
-- **Some features are still React-oriented.** React Server Components are React-only today. The [feature table](/docs/renderers#feature-support) says which features each official renderer gets, and a custom renderer gets the same as Solid, Vue, and Svelte. Markdown pages, generated metadata images, and programmatic UI routes were on this list when the post went up. All three now work with any renderer on `main`.
-- **The conformance suite isn't on npm yet.** It's `@farm.js/renderer-tests` on `main` and ships in the next release. Until then, the type-check below is how a third-party renderer checks itself.
+- **Some features are still React-oriented.** React Server Components are React-only today. The [feature table](/docs/renderers#feature-support) says which features each official renderer gets, and a custom renderer gets the same as Solid, Vue, and Svelte. Markdown pages, generated metadata images, and programmatic UI routes were on this list when the post went up. All three work with any renderer since 0.1.81.
 - **Browser code can't import a server function yet.** Importing a `createServerFn` or `createServerQuery` module into a client component needs Farm's server-actions transform, which today comes only with React Server Components or islands, and both are React-only. Until that changes, browser code calls an API route through the typed API client, the way the example's "Plant barley" button does.
 - **One renderer per app.** You choose a renderer; you can't mix leaf on one page and React on the next.
 
@@ -364,7 +367,11 @@ Either way, ui-sdk is a beta (`0.1.0-beta.13`). Both ways get better the day it 
 
 ## Write your own
 
-The quickest start is [`examples/custom-renderer`](https://github.com/farming-labs/farm.js/tree/main/examples/custom-renderer). Copy `farm-leaf/`, point it at your library instead of leaf, and keep its tests: they run the conformance suite and type-check each module against Farm's contract types.
+The quickest start is [`examples/custom-renderer`](https://github.com/farming-labs/farm.js/tree/main/examples/custom-renderer). Copy `farm-leaf/`, point it at your library instead of leaf, and keep its tests: they run the conformance suite and type-check each module against Farm's contract types. The suite is on npm as `@farm.js/renderer-tests`. Outside the Farm repo, replace the `workspace:*` versions in the copied `package.json` with published ones:
+
+```bash
+npm install -D @farm.js/core @farm.js/renderer-tests vitest jsdom
+```
 
 If your library can build an element tree, render it to a string, and patch or hydrate the DOM, it can be a Farm renderer. If it has its own file format, list the extensions in `componentExtensions` and compile those files in the Vite module. Write the descriptor, write the three modules, and check them against the types Farm imports:
 
@@ -384,6 +391,6 @@ export const clientContract: FarmRendererClientRuntime = client;
 export const viteContract: FarmRendererViteModule = vite;
 ```
 
-To stream, export `renderToPipeableStream()` or `renderToReadableStream()` from the server module and turn on `node` or `web` under `capabilities.streaming`. leaf doesn't stream, so after this post went up I added a test renderer that is nothing but the contract. It stops halfway through a page until the test lets it continue, and the test checks that the first half reaches the browser first. It streams through both primitives, in development and in production builds. Writing it turned up one more bug: with only `renderToReadableStream()`, development buffered the whole page. That's fixed on `main` too.
+To stream, export `renderToPipeableStream()` or `renderToReadableStream()` from the server module and turn on `node` or `web` under `capabilities.streaming`. leaf doesn't stream, so after this post went up I added a test renderer that is nothing but the contract. It stops halfway through a page until the test lets it continue, and the test checks that the first half reaches the browser first. It streams through both primitives, in development and in production builds. Writing it turned up one more bug: with only `renderToReadableStream()`, development buffered the whole page. That's fixed in 0.1.81 too.
 
 The full contract, including the optional exports and how route updates reach an existing root, is in [Renderer modules](/docs/renderers#renderer-modules) and the [renderer capability contract](/docs/renderers#renderer-capability-contract). If you build one and something breaks, that's exactly the bug report I want.
