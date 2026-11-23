@@ -7458,7 +7458,7 @@ function getFarmBufferedPreloadMarker(html) {
   // Prove eligibility while Farm still owns the complete document string.
   // Candidate-bearing or unknown bodies must retain the full parser path.
   // Response.text() strips a leading UTF-8 BOM; retain that legacy behavior.
-  return typeof html === "string" && html.charCodeAt(0) !== 0xfeff && !/\\bpreload\\b/i.test(html) ? "none" : "1";
+  return typeof html === "string" && html.charCodeAt(0) !== 0xfeff && !hasFarmHtmlPreloadToken(html) ? "none" : "1";
 }
 
 async function applyFarmPreloadBudget(response, pathname, request) {
@@ -8197,6 +8197,7 @@ function renderFarmServerTreeLayout(Layout, props, outlets) {
   isFarmNotFoundError,
   isFarmRedirectError,
   localizeFarmHref,
+  hasFarmHtmlPreloadToken,
   manageFarmDocumentPreloads,
   mergeRouteRenderingDirectiveConfig,
   resolveRouteSharedCacheControl,
