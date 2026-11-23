@@ -1385,6 +1385,94 @@ export default function Page() {
     120_000,
   );
 
+  it("holds a submit made before a production page hydrates and replays it after", async () => {
+    const root = await createProductionFixture();
+    try {
+      await fs.mkdir(path.join(root, "src", "app", "hold"), { recursive: true });
+      await fs.writeFile(
+        path.join(root, "src", "app", "hold", "page.tsx"),
+        `
+"use client";
+import { useState } from "react";
+export default function HoldPage() {
+  const [submitted, setSubmitted] = useState("");
+  return (
+    <main>
+      <form
+        id="hold-form"
+        onSubmit={(event) => {
+          event.preventDefault();
+          setSubmitted(String(new FormData(event.currentTarget).get("name")));
+        }}
+      >
+        <input name="name" defaultValue="wheat" />
+        <button id="hold-submit" type="submit">Save</button>
+      </form>
+      <p id="hold-result">{submitted}</p>
+    </main>
+  );
+}`,
+      );
+      await fs.mkdir(path.join(root, "src", "app", "static-form"), { recursive: true });
+      await fs.writeFile(
+        path.join(root, "src", "app", "static-form", "page.tsx"),
+        `export default function Page() { return <form><input name="q" /></form>; }`,
+      );
+      const config = await resolveConfig(
+        { root, srcDir: "src", images: { provider: "none" }, telemetry: false },
+        "production",
+      );
+      await build(config, { root, preset: "node-server" });
+      const production = await startProductionServer(path.join(root, ".farm", ".output", "server"));
+      try {
+        // The hold runs from the head, before the page's markup can be clicked. A page nothing
+        // hydrates over has nothing to replay a held submit, so it holds none.
+        const hydrating = await (await fetch(`${production.origin}/hold`)).text();
+        const head = hydrating.slice(0, hydrating.indexOf("</head>"));
+        expect(head).toContain("__FARM_PREHYDRATION_CLICK_QUEUE__");
+        const serverOnly = await (await fetch(`${production.origin}/static-form`)).text();
+        expect(serverOnly).not.toContain("__FARM_PREHYDRATION_CLICK_QUEUE__");
+
+        const executablePath = await resolveInstalledChromiumExecutable();
+        if (!executablePath) return;
+        const browser = await chromium.launch({ headless: true, executablePath });
+        try {
+          const page = await browser.newPage();
+          const navigations: string[] = [];
+          page.on("request", (request) => {
+            if (request.isNavigationRequest()) navigations.push(request.url());
+          });
+          // Keep every script waiting until the submit is made, so the page cannot hydrate first.
+          let releaseScripts!: () => void;
+          const scriptsReleased = new Promise<void>((resolve) => {
+            releaseScripts = resolve;
+          });
+          await page.route("**/*", async (route) => {
+            if (route.request().resourceType() === "script") await scriptsReleased;
+            await route.continue();
+          });
+          await page.goto(`${production.origin}/hold`, { waitUntil: "commit" });
+          await page.locator("#hold-submit").click({ noWaitAfter: true });
+          releaseScripts();
+
+          await expect
+            .poll(() => page.locator("#hold-result").textContent(), { timeout: 15_000 })
+            .toBe("wheat");
+          expect(navigations).toEqual([`${production.origin}/hold`]);
+          expect(page.url()).toBe(`${production.origin}/hold`);
+        } finally {
+          await browser.close();
+        }
+      } catch (error) {
+        throw new Error(`${String(error)}\nProduction output:\n${production.output()}`);
+      } finally {
+        await production.stop();
+      }
+    } finally {
+      await fs.rm(root, { recursive: true, force: true });
+    }
+  }, 120_000);
+
   it("hashes only Farm's and opted-in inline scripts in prerendered production HTML", async () => {
     const root = await createProductionFixture();
     try {
