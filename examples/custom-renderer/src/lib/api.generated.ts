@@ -6,15 +6,11 @@
  */
 
 import type { GET as GET_crops } from "../app/api/crops/route";
-import type { POST as POST_plant } from "../app/api/plant/route";
 
 // Type-only representation of your API routes
 export type APIRouter = {
   crops: {
     get: typeof GET_crops;
-  };
-  plant: {
-    post: typeof POST_plant;
   };
 };
 
@@ -23,9 +19,5 @@ export const apiRoutes = [
   {
     path: "/api/crops",
     methods: ["GET"],
-  },
-  {
-    path: "/api/plant",
-    methods: ["POST"],
   },
 ] as const;

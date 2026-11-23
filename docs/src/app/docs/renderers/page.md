@@ -67,7 +67,7 @@ The higher-level framework features below use those adapter primitives:
 | Basic create-app starter                         | Available                | Available                       | Available            | Available            | Available            |
 | Better Auth create-app starter                   | Available                | Native                          | Native               | Native               | Native               |
 | Router state and programmatic navigation         | Available                | Through `preact/compat`         | Solid binding        | Vue binding          | Svelte store         |
-| Callable actions and server queries              | Available                | Not yet                         | Not yet              | Not yet              | Not yet              |
+| Callable actions and server queries              | Available                | Experimental                    | Experimental         | Experimental         | Experimental         |
 | Client theme and i18n state                      | Available                | Through `preact/compat`         | Solid binding        | Vue binding          | Svelte store         |
 | Shared client stores (`createStore`)             | Available                | Through `preact/compat`         | Solid binding        | Vue binding          | Svelte store         |
 | Typed `Link` components                          | Available                | Through `preact/compat`         | Solid component      | Vue component        | Svelte component     |
@@ -118,12 +118,23 @@ and reconnect behavior across all bindings. During server rendering a query bind
 idle snapshot and starts no read, matching React's `useServerQuery`; the browser loads it after
 hydration.
 
-These bindings take a server function or server query, and browser code can only import one through
-React's server-function transform today (`experimental.serverActions` with `@farm.js/plugin/rsc` or
-with islands mode). In Preact, Solid, Vue, Svelte, and custom renderers that import stops the build with
-`CLIENT_SERVER_FUNCTION`. Until a renderer-neutral transport lands, call server code through an API
-route and `apiClient`, as the
-[Solid example](https://github.com/farming-labs/farm.js/tree/main/examples/solid-renderer) does.
+These bindings take a server function or server query, which browser code imports from its server
+module. In a Preact, Solid, Vue, Svelte, or custom-renderer app, turn that on with
+`experimental.serverActions`:
+
+```ts
+export default defineConfig({
+  renderer: solid(),
+  experimental: { serverActions: true },
+});
+```
+
+The browser then gets a reference for each server function instead of its code. Calling it posts
+the input to the current page, whose server runs the function with its validation and middleware
+and sends the result back, on the same actions islands mode uses. A query's result fills the shared
+cache, and a query still on the page reads again when an action invalidates its key. Without the
+flag, the import stops the build with `CLIENT_SERVER_FUNCTION`. Keep server functions in their own
+modules: in the browser, a module that defines one exports only its server functions.
 
 ### Shared client state
 

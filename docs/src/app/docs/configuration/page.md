@@ -1256,10 +1256,12 @@ Customize both paths through `server.health`, or set `health: false` when an ada
 
 Server actions are same-origin application RPC endpoints. Farm rejects cross-origin action requests by default and limits the encoded request body to 1 MB.
 
-Server actions run with server components, which `experimental.serverComponents` turns on (see
-[React Server Components](/docs/server-rendering#react-server-components)).
+In a React app, server actions run with server components, which `experimental.serverComponents`
+turns on (see [React Server Components](/docs/server-rendering#react-server-components)). There,
 `experimental.serverActions` without `serverComponents` does not make server functions callable
-from the browser, and Farm keeps rejecting client imports of server-function modules.
+from the browser, and Farm keeps rejecting client imports of server-function modules. Apps on the
+Preact, Solid, Vue, Svelte, or a custom renderer need only `experimental.serverActions`; see
+[callable actions in other renderers](/docs/renderers#native-client-bindings).
 
 ```ts
 import { defineConfig } from "@farm.js/core";

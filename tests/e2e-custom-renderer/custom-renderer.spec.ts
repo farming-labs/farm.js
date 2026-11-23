@@ -112,10 +112,23 @@ test("a .leaf page compiles, renders its .leaf component, and hydrates", async (
   await expect(notes).toHaveText("Notes: 1");
 });
 
-test("a button calls a server function through an API route", async ({ page }) => {
+test("a browser module calls a server function, which runs on the server", async ({ page }) => {
+  const scripts: Array<Promise<string>> = [];
+  page.on("response", (response) => {
+    if (response.request().resourceType() === "script") {
+      scripts.push(response.text().catch(() => ""));
+    }
+  });
   await gotoHydrated(page, "/");
+  const call = page.waitForRequest(
+    (request) => request.method() === "POST" && request.headers()["f-action"] !== undefined,
+  );
   await page.locator("#plant").click();
+  // The call posts to the page, which runs the action.
+  expect(new URL((await call).url()).pathname).toBe("/");
   await expect(page.locator("#planted")).toHaveText("Planted barley on the server.");
+  // The browser got a reference, not the handler, whose message is a template literal.
+  for (const source of await Promise.all(scripts)) expect(source).not.toContain("Planted ${");
 });
 
 test("notFound() and a throwing page answer with their route files and statuses", async ({

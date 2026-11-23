@@ -30,6 +30,10 @@ export const FARM_CLIENT_OPTIMIZE_DEPS_INCLUDE = [
   "@farm.js/core > @farm.js/islx/client",
   "@farm.js/core > @farm.js/islx/react",
   "@farm.js/core > @farm.js/islx/react/client",
+  // What a browser module's import of a server function compiles to on other renderers (see
+  // `resolveFarmIslxActionsMode`). Found only when that module is first requested, it made Vite
+  // bundle again and reload the page while it loaded.
+  "@farm.js/core/internal/islx-actions-client",
 ] as const;
 
 /**

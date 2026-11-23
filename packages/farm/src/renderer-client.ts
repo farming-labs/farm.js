@@ -352,9 +352,19 @@ export function createRendererQuery<TInput, TData>(
   let cleanupBrowser: (() => void) | undefined;
 
   const run = (force = false) => fetchServerQuery(query, input, { ...options, force });
+  let pendingInvalidation = false;
   const ensureStarted = () => {
     if (options.enabled === false || unsubscribeCache) return;
-    unsubscribeCache = cache.subscribe(key, () => {
+    unsubscribeCache = cache.subscribe(key, (event) => {
+      // As React's useServerQuery does: a query something still observes reads again once the
+      // keys an action invalidated reach it, after any read already in flight.
+      const entry = cache.get(key);
+      if (event === "invalidate") pendingInvalidation = true;
+      else if (entry?.fetching) pendingInvalidation = false;
+      if (pendingInvalidation && entry?.invalidatedAt !== undefined && !entry.fetching) {
+        pendingInvalidation = false;
+        void run().catch(() => undefined);
+      }
       for (const listener of listeners) listener();
     });
     if (!cache.get(key) || cache.isStale(key)) void run().catch(() => undefined);

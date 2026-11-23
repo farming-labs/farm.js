@@ -94,8 +94,8 @@ export function Greeting() {
 ```
 
 The endpoint can call a validated `createServerFn`; its handler, database access, and secrets stay
-in the server bundle. Browser code can't import the server function itself yet: only React's server-function
-transform turns that import into a call to the server, so other renderers go through an API route.
+in the server bundle. With `experimental.serverActions`, browser code can also import the server function and call it
+directly; see [callable actions](/docs/renderers#native-client-bindings).
 
 ## React compatibility
 

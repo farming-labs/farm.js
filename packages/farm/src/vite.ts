@@ -220,6 +220,7 @@ import {
   createServerFnBoundaryDiagnostic,
   findClientServerFnViolation,
 } from "./server-query-boundary";
+import { farmBrowserServerFnsEnabled, resolveFarmIslxActionsMode } from "./server-actions-mode";
 
 /** The @farm.js/plugin/rsc transform that turns client imports of server functions into stubs. */
 const SERVER_FN_TRANSFORM_PLUGIN = "@farm.js/plugin/rsc:server-fn-actions";
@@ -2004,14 +2005,12 @@ export function farmPlugin(
     if (mdxComponents) files.add(mdxComponents);
     return files;
   };
-  // Islands mode runs server functions on islx's actions: no @farm.js/plugin/rsc needed.
-  const islandsServerFns = () => {
-    const config = (farmApp?.getConfig() ?? options) as FarmVitePluginOptions;
-    return (
-      config.experimental?.serverActions === true &&
-      resolveFarmServerComponentsMode(config.experimental?.serverComponents) === "islands"
-    );
-  };
+  // Islands mode, and every renderer other than React, run server functions on islx's actions:
+  // no @farm.js/plugin/rsc needed.
+  const islxActionsMode = () =>
+    resolveFarmIslxActionsMode((farmApp?.getConfig() ?? options) as FarmVitePluginOptions);
+  const islandsServerFns = () =>
+    farmBrowserServerFnsEnabled((farmApp?.getConfig() ?? options) as FarmVitePluginOptions);
   let reactRefreshActive = false;
   let server: ViteDevServer;
   // Where configureServer registers Farm's middleware: Vite's stack, or the stacks a deferred
@@ -5575,9 +5574,9 @@ export { manifest };
           code = serverFns.code;
         }
       }
+      const actionsMode = islxActionsMode();
       if (
-        resolveFarmServerComponentsMode(actionConfig.experimental?.serverComponents) ===
-          "islands" &&
+        actionsMode !== null &&
         code.includes("use server") &&
         !id.includes("/node_modules/") &&
         /\.[cm]?[jt]sx?(?:$|\?)/.test(id)
@@ -5592,6 +5591,7 @@ export { manifest };
           // Parsed by file type: page components are TSX.
           parse: (source) => (parseSync(file, source) as { program: unknown }).program as never,
           runtimeModule,
+          runtime: actionsMode,
         });
         if (actionModule) return { code: actionModule, map: null };
       }
