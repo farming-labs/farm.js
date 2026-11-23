@@ -134,4 +134,19 @@ describe("the development client entry of a non-React app", () => {
     }
     expect(reactImports).toEqual([]);
   }, 60_000);
+
+  // A renderer whose hydrate() throws gets its page rendered on the client instead. Development
+  // did that silently, so a page that never hydrated looked like one that did: Solid's streamed
+  // pages re-rendered on every load in development (#3129) with nothing in the console.
+  it("reports a page that fails to hydrate before rendering it on the client", async () => {
+    const root = await createApp();
+    const server = await createServer({ root, renderer, images: { provider: "none" } });
+    servers.push(server);
+
+    const loaded = await server.environments.client.pluginContainer.load("/@farm/client");
+    const entry = typeof loaded === "string" ? loaded : (loaded?.code ?? "");
+    const fallback = entry.match(/catch \(error\) \{([^}]*?)appRoot = createRoot\(container\);/);
+    expect(fallback).not.toBeNull();
+    expect(fallback![1]).toMatch(/console\.error\(\s*["']\[Farm\.js\][^"']*["'],\s*error\)/);
+  }, 60_000);
 });

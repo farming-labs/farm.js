@@ -8109,6 +8109,8 @@ async function tryHydrateImportedPage(
       window.__FARM_REACT_ROOT__ = reactRoot;
       return true;
     } catch (error) {
+      // The page still works, but the server's DOM, focus, and typed input are gone, so say so.
+      console.error('[Farm.js] Hydration error; rendering the page on the client instead:', error);
       appRoot = createRoot(container);
       if (routeState) renderFarmRoute(appRoot, routeState);
       else appRoot.render(wrappedElement);
