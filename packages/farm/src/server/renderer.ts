@@ -200,6 +200,7 @@ import {
   type FarmRendererRenderOptions,
   type FarmServerRendererRuntime,
   resolveFarmComponentExtensions,
+  assertFarmRendererServerModule,
 } from "../renderer";
 import { isRendererCompiledComponent } from "../integration-provider-build";
 import { pathToFileURL } from "node:url";
@@ -862,14 +863,7 @@ export class ServerRenderer {
               ).href
             );
     const runtime = loaded as Partial<FarmServerRendererRuntime>;
-    const required = ["createElement", "isValidElement", "renderToString"] as const;
-    for (const key of required) {
-      if (typeof runtime[key] !== "function") {
-        throw new Error(
-          `Renderer \`${this.config.renderer.name}\` server module must export ${key}().`,
-        );
-      }
-    }
+    assertFarmRendererServerModule(runtime, this.config.renderer);
 
     assertFarmRendererStreamingRuntime(
       this.config.renderer.name,
@@ -2289,14 +2283,6 @@ window.__FARM_I18N__ = ${i18nSnapshot ? serializeInlineValue(i18nSnapshot) : "nu
         }
       }
 
-      let ErrorFallbackComponent: any = null;
-      if (errorBoundaryEntry) {
-        const errorModule = await this.routeManager.loadRouteModule(errorBoundaryEntry.modulePath);
-        if (errorModule.default) {
-          ErrorFallbackComponent = errorModule.default;
-        }
-      }
-
       // Hydration decisions are compiled into a manifest and reused on requests.
       // Development HMR invalidates this cache when a route module changes.
       const routeManifest = this.routeManager.generateClientManifest(this.config.root);
@@ -2697,25 +2683,6 @@ window.__FARM_I18N__ = ${i18nSnapshot ? serializeInlineValue(i18nSnapshot) : "nu
 
             if (shouldHydrateLayout) {
               wrappedElement = this.wrapClientGraph(wrappedElement);
-            }
-
-            if (ErrorFallbackComponent && this.rendererRuntime.ErrorBoundary) {
-              wrappedElement = this.rendererRuntime.createElement(
-                this.rendererRuntime.ErrorBoundary,
-                {
-                  Fallback: ErrorFallbackComponent,
-                  fallbackProps: {
-                    ...createRouteStateProps({
-                      params,
-                      searchParamsObject,
-                      path: pathname,
-                      middlewareMap,
-                      pluginExposedContext,
-                    }),
-                  },
-                },
-                wrappedElement,
-              );
             }
 
             if (

@@ -238,6 +238,48 @@ export function getFarmRendererStreamingCapabilitiesForRuntime(
   return streaming.runtimes?.[runtime] ?? { node: streaming.node, web: streaming.web };
 }
 
+/** The named exports Farm reads from every renderer server module (`FarmServerRendererRuntime`). */
+const FARM_RENDERER_SERVER_EXPORTS = [
+  "name",
+  "createElement",
+  "isValidElement",
+  "Fragment",
+  "Suspense",
+  "renderToString",
+] as const;
+
+function isMissingServerExport(key: string, value: unknown): boolean {
+  if (key === "name") return typeof value !== "string" || value === "";
+  if (key === "Fragment" || key === "Suspense") return value === undefined || value === null;
+  return typeof value !== "function";
+}
+
+/**
+ * Throws one error that names every required export a renderer's server module lacks. The
+ * development server and `farm build` load the module through `ServerRenderer.initialize()`, so a
+ * missing export fails there instead of as `undefined` on the first request.
+ */
+export function assertFarmRendererServerModule(
+  runtime: unknown,
+  renderer: { readonly name: string; readonly server: string },
+): void {
+  const exports = (runtime ?? {}) as Record<string, unknown>;
+  const missing = FARM_RENDERER_SERVER_EXPORTS.filter((key) =>
+    isMissingServerExport(key, exports[key]),
+  );
+  if (missing.length === 0) return;
+  const names = missing.map((key) => `\`${key}\``);
+  const list =
+    names.length === 1
+      ? names[0]
+      : `${names.slice(0, -1).join(", ")}${names.length > 2 ? "," : ""} and ${names[names.length - 1]}`;
+  throw new Error(
+    `Renderer \`${renderer.name}\` server module \`${renderer.server}\` does not export ${list}. ` +
+      `Export ${missing.length === 1 ? "it" : "them"} by name from that module: ` +
+      "https://farmjs.dev/docs/renderers#renderer-modules",
+  );
+}
+
 export function assertFarmRendererStreamingRuntime(
   name: string,
   renderer: Pick<FarmRenderer, "capabilities"> | undefined,
@@ -368,7 +410,11 @@ export interface FarmServerRendererRuntime {
   generateHydrationScript?: () => string;
   /** Receives the descriptor's `appSetup` module. Required when the descriptor sets `appSetup`. */
   configureApp?(setup: unknown): void;
-  /** Optional component used to render route-level failures. */
+  /**
+   * @deprecated Farm no longer reads this export. A page that throws under an `error.*` file
+   * renders that file as the route's error page, with the error's status, in development and in
+   * production: https://farmjs.dev/docs/renderers#renderer-modules
+   */
   ErrorBoundary?: unknown;
   /** Optional streaming primitive. Renderers without one use buffered SSR. */
   renderToPipeableStream?: (

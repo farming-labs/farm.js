@@ -101,8 +101,11 @@ directly; see [callable actions](/docs/renderers#native-client-bindings).
 
 The renderer uses the official `@preact/preset-vite`, which aliases React and React DOM imports to
 `preact/compat`. This lets many existing FARMJS client components and hooks run without shipping a
-second UI runtime. Compatibility for third-party React integration providers still depends on each
-provider, so verify provider UI before relying on it in production.
+second UI runtime. On the server, Farm's own modules, `@farm.js/preact`, and your app's modules use
+`preact/compat` too, so pages that call `notFound()` or `redirect()` or use hooks from
+`@farm.js/preact/bindings` build and render without React installed. A third-party package that
+imports `react` still loads React on the server. Compatibility for third-party React integration
+providers still depends on each provider, so verify provider UI before relying on it in production.
 
 React Server Components remain React-only. The docs adapter and integration UI providers should be
 treated as compatibility surfaces until their Preact paths are covered by dedicated tests. Markdown

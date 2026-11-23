@@ -26,6 +26,16 @@ export const FARM_CLIENT_OPTIMIZE_DEPS_INCLUDE = [
   "@farm.js/core/query/client",
   "@farm.js/core/server-fn/client",
   "@farm.js/core/server-query/client",
+  // Farm's browser entry imports these and no app file does, so Vite's scan cannot see them. In an
+  // app that installs Farm from the registry, Vite found them on the first page request, bundled
+  // again, and reloaded the page while it loaded.
+  "@farm.js/core/internal/client-runtime",
+  "@farm.js/core/internal/spa-router",
+  "@farm.js/core/router",
+  // The typed API client. The development server excludes the server-only `@farm.js/core/api`,
+  // and Vite's scan skips every subpath of an excluded package, so an app's import of the client
+  // was also found only on the first request.
+  "@farm.js/core/api/client",
   // Islands mode's browser runtime: Farm imports islx, which the app reaches only through Farm.
   "@farm.js/core > @farm.js/islx/client",
   "@farm.js/core > @farm.js/islx/react",

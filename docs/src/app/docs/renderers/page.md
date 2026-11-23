@@ -176,17 +176,22 @@ A renderer descriptor names three modules by package specifier. FARMJS resolves 
 app and imports its named exports, in development and in production builds. None of them needs a
 default export.
 
-| Module   | Required named exports                                                              | Optional named exports include                                                                                                                                                    |
-| -------- | ----------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `vite`   | `createFarmRendererPlugin`                                                          |                                                                                                                                                                                   |
-| `server` | `name`, `createElement`, `isValidElement`, `Fragment`, `Suspense`, `renderToString` | `renderToReadableStream`, `renderToPipeableStream`, `renderToStringWithHead`, `ErrorBoundary`, `generateHydrationScript`, `markFunctionComponent`, `configureApp`, `capabilities` |
-| `client` | `createElement`, `Suspense`, `createRoot`, `hydrateRoot`                            | `configureApp`                                                                                                                                                                    |
+| Module   | Required named exports                                                              | Optional named exports include                                                                                                                                   |
+| -------- | ----------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `vite`   | `createFarmRendererPlugin`                                                          |                                                                                                                                                                  |
+| `server` | `name`, `createElement`, `isValidElement`, `Fragment`, `Suspense`, `renderToString` | `renderToReadableStream`, `renderToPipeableStream`, `renderToStringWithHead`, `generateHydrationScript`, `markFunctionComponent`, `configureApp`, `capabilities` |
+| `client` | `createElement`, `Suspense`, `createRoot`, `hydrateRoot`                            | `configureApp`                                                                                                                                                   |
 
+- The development server and `farm build` check the server module's required exports when they load
+  it, and fail with one error that names every missing export.
 - `createFarmRendererPlugin({ ssr, buildLifetime, rendererOptions })` returns a Vite plugin, an
   array of plugins, or a promise of either. `rendererOptions` is the descriptor's `options`.
-- FARMJS composes every route tree with `createElement()`: layouts, the page, and the boundaries for
-  loading, error, and not-found files. The server and client modules must build the same tree from
+- FARMJS composes every route tree with `createElement()`: layouts, the page, loading boundaries,
+  and the error and not-found pages. The server and client modules must build the same tree from
   the same calls.
+- A page that throws under an `error.*` file renders that file inside its layouts as the route's
+  error page, with the error's status, in development and in production. FARMJS no longer reads an
+  `ErrorBoundary` export from the server module.
 - `renderToString()` may return a promise.
 - `createRoot()` and `hydrateRoot()` return a root with `render(element)` and `unmount()`, plus the
   optional `renderRoute()` described under [Re-render behavior](#re-render-behavior).
@@ -447,7 +452,7 @@ that suspends with its streaming renderer and waits for every boundary before se
 Keep product and server behavior outside the component runtime whenever possible:
 
 ```ts
-import { createEndpoint } from "@farm.js/core";
+import { createEndpoint } from "@farm.js/core/api";
 import { createServerFn } from "@farm.js/core/server-fn";
 import { z } from "zod";
 
@@ -470,6 +475,13 @@ export const POST = createEndpoint(
 React, Preact, Solid, Vue, and Svelte components can call this endpoint through the same generated client.
 Database access, secrets, validation, cache invalidation, middleware, and the server-function
 handler remain on the server.
+
+Import from a subpath such as `@farm.js/core/api` rather than `@farm.js/core`: the root entry
+imports React, which an app on another renderer doesn't install. `notFound()`, `redirect()`, and
+`permanentRedirect()` from `@farm.js/core/navigation` work with every renderer. Its
+`useRouter()`, `usePathname()`, and `useSearchParams()` are React hooks: Preact runs them through
+`preact/compat`, and with Solid, Vue, Svelte, or a custom renderer they throw, so read the route
+from the renderer's bindings instead.
 
 ## Switch renderers deliberately
 

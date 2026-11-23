@@ -99,7 +99,7 @@ function findImportChain(
   const chainTo = (file: string, last: string) => {
     const chain = [last];
     for (let current: string | null = file; current; current = parent.get(current) ?? null) {
-      chain.unshift(path.relative(SRC, current));
+      chain.unshift(path.relative(SRC, current).split(path.sep).join("/"));
     }
     return chain;
   };
@@ -132,6 +132,7 @@ describe("browser entries", () => {
 const RENDERER_NEUTRAL_ENTRIES = [
   "renderer-client.ts",
   "store-core.ts",
+  "navigation-neutral.ts",
   "islx/actions-client.ts",
   "islx/actions-server.ts",
 ];
@@ -152,6 +153,14 @@ describe("renderer-neutral entries", () => {
     expect(findImportChain("islx/client.ts", isReactPackage)).toEqual([
       "islx/client.ts",
       "@farm.js/islx/react/client",
+    ]);
+  });
+
+  it("finds the React import in the navigation entry other renderers do not load", () => {
+    expect(findImportChain("navigation.ts", isReactPackage)).toEqual([
+      "navigation.ts",
+      "client/router.ts",
+      "react",
     ]);
   });
 });

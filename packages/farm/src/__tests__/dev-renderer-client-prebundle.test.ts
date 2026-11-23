@@ -76,8 +76,10 @@ export function hydrateRoot() { return createRoot(); }
     await fs.mkdir(path.dirname(file), { recursive: true });
     await fs.writeFile(file, source);
   }
+  // The app resolves Farm from its own node_modules, as an installed app does.
+  await fs.mkdir(path.join(root, "node_modules/@farm.js"), { recursive: true });
+  await fs.symlink(packageRoot, path.join(root, "node_modules/@farm.js/core"), "junction");
   if (linked) {
-    await fs.mkdir(path.join(root, "node_modules"), { recursive: true });
     await fs.symlink(
       path.join(root, rendererDir),
       path.join(root, "node_modules/plain-renderer"),
@@ -110,6 +112,21 @@ describe("the development dependency optimizer", () => {
     expect(await discoveredDependencies(await createApp({ linked: true }))).not.toContain(
       "plain-renderer/client",
     );
+  }, 60_000);
+
+  // Farm's browser entry imports the first three on every page, and Vite's scan skips the API
+  // client because the development server excludes `@farm.js/core/api`. Found on the first
+  // request instead, they made Vite bundle again and reload the page while it loaded.
+  it("pre-bundles Farm's browser modules before the first request", async () => {
+    const discovered = await discoveredDependencies(await createApp());
+    for (const entry of [
+      "@farm.js/core/internal/client-runtime",
+      "@farm.js/core/internal/spa-router",
+      "@farm.js/core/router",
+      "@farm.js/core/api/client",
+    ]) {
+      expect(discovered).toContain(entry);
+    }
   }, 60_000);
 
   it("leaves out a client module given as a file path", () => {

@@ -93,7 +93,10 @@ including a type annotation or an export list. A value FARMJS can't read without
 such as an expression, an import, or a re-export, fails the build with an error that names the file.
 
 FARMJS server-renders the SFC with `createSSRApp` and Vue's native Node or WHATWG Web stream, then
-uses `createSSRApp` again to claim the existing browser markup.
+uses `createSSRApp` again to claim the existing browser markup. Output starts once the render waits
+on unfinished work, such as an `await` in `<script setup>`. A `redirect()`, `notFound()`, or error
+thrown before that sets the response status, in development and production. One thrown after it
+arrives once the response has started, so the status stays 200.
 
 ## Call FARMJS server code
 

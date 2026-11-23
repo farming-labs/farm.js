@@ -1,6 +1,7 @@
 import fs from "fs";
 import path from "path";
 import React from "react";
+import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
 import { isReactRenderer, REACT_RENDERER } from "../renderer";
 
@@ -104,6 +105,21 @@ describe("production async page detection", () => {
 
     expect(calls).toBe(1);
     expect(pageTree.props.children.type).toBe("main");
+  });
+
+  // Development hands the renderer what an async page returned. Production wrapped anything
+  // that was not an element in a <div> as a string, so a page that returned null rendered
+  // "null" and a page that returned text gained a wrapper only in production.
+  it("renders what an async page returned, as development does", async () => {
+    for (const [result, html] of [
+      [null, ""],
+      [undefined, ""],
+      ["plain text", "plain text"],
+      [42, "42"],
+    ] as const) {
+      const { pageTree } = await runRenderPageElement(async () => result);
+      expect(renderToStaticMarkup(pageTree.props.children), String(result)).toBe(html);
+    }
   });
 
   it("propagates errors thrown by async components instead of silently re-rendering", async () => {
