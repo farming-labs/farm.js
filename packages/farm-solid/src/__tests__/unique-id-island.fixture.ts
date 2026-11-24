@@ -15,3 +15,14 @@ export const UNIQUE_ID_ISLAND_HTML =
 export const SERVER_LAYOUT_ISLAND_HTML =
   '<section data-hk="01"><p>a@example.com</p><div data-hk="030" id="__farm_page__" data-farm-segment="page" data-farm-client="true" data-farm-island="page" data-farm-solid-render-id="02">' +
   '<button data-hk="021" type="button" id="020">count: <!--$-->0<!--/--></button></div></section>';
+
+/**
+ * Server HTML for a root render whose outermost element is its eleventh host
+ * element. Farm's Solid runtime creates children before their parent, so the
+ * outermost key is `a100`: Solid writes counts from 10 as a letter that says
+ * how many digits follow, then the digits.
+ */
+export const ROOT_RENDER_HTML =
+  '<div data-hk="a100" id="root" >' +
+  Array.from({ length: 10 }, (_, index) => `<span data-hk="${index}0" >${index}</span>`).join("") +
+  "</div>";

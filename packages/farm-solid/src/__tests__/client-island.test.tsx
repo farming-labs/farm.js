@@ -1,7 +1,11 @@
 import { createSignal, createUniqueId, sharedConfig } from "solid-js";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import * as clientRuntime from "../client";
-import { SERVER_LAYOUT_ISLAND_HTML, UNIQUE_ID_ISLAND_HTML } from "./unique-id-island.fixture";
+import {
+  ROOT_RENDER_HTML,
+  SERVER_LAYOUT_ISLAND_HTML,
+  UNIQUE_ID_ISLAND_HTML,
+} from "./unique-id-island.fixture";
 
 interface SolidHydrationBootstrap {
   events: Array<[Element, Event]> | null;
@@ -96,6 +100,31 @@ describe("Solid island hydration", () => {
     expect(button).toBe(serverButton);
     button.click();
     expect(button.textContent).toBe("count: 1");
+
+    root.unmount();
+  });
+
+  it("hydrates a root render whose outermost key ends in 00 without naming a render id", () => {
+    // a100 is the root context's eleventh id, a10, then its element, 0: not
+    // render id a1 followed by 00.
+    const host = document.createElement("div");
+    host.innerHTML = ROOT_RENDER_HTML;
+    document.body.append(host);
+    const serverRoot = host.firstElementChild!;
+    const serverSpans = [...host.querySelectorAll("span")];
+
+    const root = clientRuntime.hydrateRoot(
+      host,
+      clientRuntime.createElement(
+        "div",
+        { id: "root" },
+        ...serverSpans.map((_, index) => clientRuntime.createElement("span", null, String(index))),
+      ),
+    );
+
+    expect(host.firstElementChild).toBe(serverRoot);
+    expect([...host.querySelectorAll("span")]).toEqual(serverSpans);
+    expect(host.querySelectorAll("span")).toHaveLength(10);
 
     root.unmount();
   });

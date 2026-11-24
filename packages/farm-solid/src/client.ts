@@ -73,14 +73,39 @@ function createSolidRouteElement(readState: () => FarmRendererRouteState): unkno
   return initialState.wrap ? initialState.wrap(routeElement) : routeElement;
 }
 
+/**
+ * The ids a Solid hydration key is built from, one per context. Solid writes a
+ * count below 10 as its digit and a larger one as a letter that says how many
+ * digits follow, then the digits: 7, a10, b100. Undefined for a key that does
+ * not parse.
+ */
+function hydrationKeySegments(key: string): string[] | undefined {
+  const segments: string[] = [];
+  for (let index = 0; index < key.length; ) {
+    const extraDigits = key.charCodeAt(index) - 96;
+    const length = extraDigits >= 1 && extraDigits <= 25 ? extraDigits + 2 : 1;
+    const segment = key.slice(index, index + length);
+    if (!/^(?:[a-y]\d+|\d)$/.test(segment) || segment.length !== length) return undefined;
+    segments.push(segment);
+    index += length;
+  }
+  return segments;
+}
+
 function inferHydrationRenderId(firstHydratableElement: HTMLElement | null): string | undefined {
   const hydrationKey = firstHydratableElement?.dataset.hk;
+  const segments = hydrationKey ? hydrationKeySegments(hydrationKey) : undefined;
 
   // FARMJS creates host elements through Solid's Dynamic component. Solid
   // allocates one context id for Dynamic and another for its host element, so
   // the first key is `${renderId}00`. Recover the owning render id rather than
-  // resuming inside Dynamic's already-serialized component context.
-  return hydrationKey?.endsWith("00") ? hydrationKey.slice(0, -2) : undefined;
+  // resuming inside Dynamic's already-serialized component context. Compare
+  // whole ids: a100 is the eleventh id, a10, then 0, not render id a1.
+  if (!segments || segments.length < 2) return undefined;
+  if (segments[segments.length - 1] !== "0" || segments[segments.length - 2] !== "0") {
+    return undefined;
+  }
+  return segments.slice(0, -2).join("");
 }
 
 interface SolidHydrationEvents {
