@@ -298,7 +298,10 @@ async function watchLocalPreviewTarget(
  * sending a request, so it never runs the app's routes or shows up in the app's analytics, and a
  * page that renders slowly doesn't count as a stopped app.
  */
-function isLocalPreviewTargetReachable(targetUrl: string, timeoutMs: number): Promise<boolean> {
+export function isLocalPreviewTargetReachable(
+  targetUrl: string,
+  timeoutMs: number,
+): Promise<boolean> {
   const url = new URL(targetUrl);
   const host = url.hostname.replace(/^\[(.*)\]$/, "$1");
   const port = Number(url.port) || (url.protocol === "https:" ? 443 : 80);

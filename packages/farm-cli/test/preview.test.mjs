@@ -645,18 +645,13 @@ test("treats an explicit native tunnel stop as a normal shutdown", async () => {
   assert.equal(process.listeners("SIGTERM").includes(stop), false);
 });
 
-test("treats an unexpected managed native disconnect as a fallback signal", async () => {
+test("treats an unexpected managed native disconnect as a fallback signal", async (t) => {
   const plan = {
     provider: "farm-gateway",
     gatewayUrl: "https://preview.farmjs.dev",
     relayUrl: "wss://preview.farmjs.dev/agent",
     expiresAt: Date.now() + 10 * 60_000,
-    target: {
-      localUrl: "http://localhost:3000",
-      host: "localhost",
-      port: 3000,
-      source: "port",
-    },
+    target: await listeningLocalTarget(t),
     requestedName: "reconnect",
     requestedHostname: "reconnect.preview.farmjs.dev",
     requestedPublicUrl: "https://reconnect.preview.farmjs.dev",
@@ -685,14 +680,14 @@ test("treats an unexpected managed native disconnect as a fallback signal", asyn
   }
 });
 
-test("reconnects a long-lived native tunnel the relay drops, at the same URL", async () => {
+test("reconnects a long-lived native tunnel the relay drops, at the same URL", async (t) => {
   // Vercel ends the relay's connections after the function's maximum duration and on deploys.
   // The preview used to fall back to a polling session the gateway refused, and exit.
   const plan = {
     provider: "farm-gateway",
     gatewayUrl: "https://preview.farmjs.dev",
     relayUrl: "wss://preview.farmjs.dev/agent",
-    target: { localUrl: "http://localhost:3000", host: "localhost", port: 3000, source: "port" },
+    target: await listeningLocalTarget(t),
     requestedName: "long-lived",
     requestedHostname: "long-lived.preview.farmjs.dev",
     requestedPublicUrl: "https://long-lived.preview.farmjs.dev",
@@ -742,12 +737,12 @@ test("reconnects a long-lived native tunnel the relay drops, at the same URL", a
   assert.deepEqual(calls.at(-1), ["stop", "second"]);
 });
 
-test("falls back when a dropped native tunnel cannot reconnect", async () => {
+test("falls back when a dropped native tunnel cannot reconnect", async (t) => {
   const plan = {
     provider: "farm-gateway",
     gatewayUrl: "https://preview.farmjs.dev",
     relayUrl: "wss://preview.farmjs.dev/agent",
-    target: { localUrl: "http://localhost:3000", host: "localhost", port: 3000, source: "port" },
+    target: await listeningLocalTarget(t),
     requestedName: "gone",
     requestedHostname: "gone.preview.farmjs.dev",
     requestedPublicUrl: "https://gone.preview.farmjs.dev",
@@ -772,6 +767,43 @@ test("falls back when a dropped native tunnel cannot reconnect", async () => {
     /disconnected unexpectedly/,
   );
   assert.equal(starts, 3);
+});
+
+test("ends the native tunnel without reconnecting when the local app stops", async () => {
+  // The agent closes the same way when the local app stops as when the relay drops it. A stopped
+  // app used to look like a relay failure: the CLI reconnected or fell back to polling.
+  const target = await closedLocalTarget();
+  const plan = {
+    provider: "farm-gateway",
+    gatewayUrl: "https://preview.farmjs.dev",
+    relayUrl: "wss://preview.farmjs.dev/agent",
+    target,
+    requestedName: "stopped-app",
+    requestedHostname: "stopped-app.preview.farmjs.dev",
+    requestedPublicUrl: "https://stopped-app.preview.farmjs.dev",
+  };
+  let starts = 0;
+  const runtime = {
+    async startPreviewAgent() {
+      starts += 1;
+      if (starts > 1) throw new Error("reconnected to a stopped app");
+      return { sessionId: "stopped-app", publicUrl: plan.requestedPublicUrl };
+    },
+    async stopPreviewAgent() {
+      return true;
+    },
+    async waitPreviewAgentExit() {
+      return {};
+    },
+  };
+
+  const session = await runNativePreviewTunnel(plan, {
+    runtime,
+    minConnectedMs: 0,
+    reconnectDelaysMs: [0, 0],
+  });
+  assert.equal(session.sessionId, "stopped-app");
+  assert.equal(starts, 1);
 });
 
 test("uses the relay close reason for hosted expiry despite client clock skew", async () => {
@@ -1995,3 +2027,21 @@ test("finds the preview URL after a noisy tunnel prologue", async () => {
   const publicUrl = await runPreviewTunnel(plan, 10_000);
   assert.equal(publicUrl, "https://noisy-preview.trycloudflare.com");
 });
+
+/** A local target whose port was just released, so nothing accepts connections on it. */
+async function closedLocalTarget() {
+  const server = createServer();
+  await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
+  const { port } = server.address();
+  await new Promise((resolve) => server.close(resolve));
+  return { localUrl: `http://127.0.0.1:${port}`, host: "127.0.0.1", port, source: "port" };
+}
+
+/** A local target that accepts connections until the test ends. */
+async function listeningLocalTarget(t) {
+  const server = createServer((_request, response) => response.end());
+  await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
+  t.after(() => new Promise((resolve) => server.close(resolve)));
+  const { port } = server.address();
+  return { localUrl: `http://127.0.0.1:${port}`, host: "127.0.0.1", port, source: "port" };
+}
