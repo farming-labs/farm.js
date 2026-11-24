@@ -91,6 +91,24 @@ export function useMemo(compute, deps) {
   return current("useMemo").useMemo(compute, deps);
 }
 
+/**
+ * A value the components below its `Provider` read with `useContext`, without a prop at each
+ * level. A component reads the value of the nearest Provider above it as it renders.
+ */
+export function createContext(defaultValue) {
+  const context = { defaultValue };
+  function Provider(props) {
+    return props.children ?? null;
+  }
+  Provider.context = context;
+  context.Provider = Provider;
+  return context;
+}
+
+export function useContext(context) {
+  return current("useContext").useContext(context);
+}
+
 export function useCallback(callback, deps) {
   return current("useCallback").useMemo(() => callback, deps);
 }

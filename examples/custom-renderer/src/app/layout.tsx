@@ -23,6 +23,7 @@ export default function RootLayout(props: LayoutProps) {
           <Link href="/about">About</Link>
           <Link href="/crops/wheat">Wheat</Link>
           <Link href="/notes">Notes</Link>
+          <Link href="/islands">Islands</Link>
           <Link href="/streaming">Streaming</Link>
         </nav>
         <button type="button" id="layout-counter" onClick={() => setVisits((n) => n + 1)}>

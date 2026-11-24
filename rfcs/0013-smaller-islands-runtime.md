@@ -330,7 +330,7 @@ throttling, medians of 21, in ms:
 
 What changed:
 
-- Core depends on islx 0.0.28 (#89 and #91), which loads its reviving code on demand.
+- islx 0.0.28 (#89 and #91) loads its reviving code on demand. `main` has since moved to 0.0.30.
 - The islands runtime imports islx's server trees from `internal/islands-server-tree` with a
   page's first one. The preload manifest lists that entry's chunks (`serverTrees`), and a
   document whose markup holds a `<script type="f/tree">` preloads them with the renderer.

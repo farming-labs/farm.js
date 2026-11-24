@@ -69,6 +69,7 @@ describe("renderer configuration", () => {
       reconcilesRerenders: false,
       functionComponents: false,
       hydrationFallback: false,
+      islands: false,
     });
     expect(
       getFarmRendererCapabilities({
@@ -79,6 +80,7 @@ describe("renderer configuration", () => {
       reconcilesRerenders: false,
       functionComponents: false,
       hydrationFallback: false,
+      islands: false,
     });
     expect(
       getFarmRendererCapabilities({
@@ -89,7 +91,9 @@ describe("renderer configuration", () => {
       reconcilesRerenders: true,
       functionComponents: false,
       hydrationFallback: false,
+      islands: false,
     });
+    expect(getFarmRendererCapabilities({ capabilities: { islands: true } }).islands).toBe(true);
   });
 
   it("resolves target-dependent streaming without changing legacy booleans", () => {
