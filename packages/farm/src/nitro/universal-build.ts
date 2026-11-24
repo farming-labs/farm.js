@@ -6956,7 +6956,11 @@ async function buildSSRInMemory(
   const instrumentationPath = resolveFarmInstrumentationFile(root, config.srcDir || "src");
 
   // Check for custom not-found page
-  const notFoundPath = resolveFarmNotFoundComponentPath(config, appDirs);
+  const notFoundPath = resolveFarmNotFoundComponentPath(
+    config,
+    appDirs,
+    routeManager.getRendererNotFoundPath(),
+  );
   if (notFoundPath) logger.info(`📋 Found custom 404 page: ${notFoundPath}`);
 
   // Sort layouts by depth (root first)

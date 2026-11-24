@@ -4671,11 +4671,20 @@ window.__FARM_I18N__ = ${getFarmI18nClientSnapshot() ? serializeInlineValue(getF
       : url;
   }
 
+  /**
+   * The not-found page the renderer's `routes()` mapped, or undefined when the renderer has no route
+   * rules and the not-found lookup scans `src/app` as before.
+   */
+  private getRendererNotFoundPath(): string | null | undefined {
+    return this.config.renderer?.routes ? this.routeManager.getRendererNotFoundPath() : undefined;
+  }
+
   /** The app's not-found component, or null when it relies on the built-in page. */
   private async loadNotFoundModule(): Promise<Record<string, any> | null> {
     const notFoundPath = resolveFarmNotFoundComponentPath(
       this.config,
       getFarmAppDirectories(this.config),
+      this.getRendererNotFoundPath(),
     );
     if (!notFoundPath) return null;
     return (await this.routeManager.loadRouteModule(notFoundPath)) as Record<string, any>;
@@ -4783,9 +4792,14 @@ window.__FARM_I18N__ = ${getFarmI18nClientSnapshot() ? serializeInlineValue(getF
     const appDir = path.join(this.config.root, this.config.srcDir, "app");
     const notFoundExtensions = getFarmRendererComponentExtensions(this.config.renderer);
     let layoutModule: Record<string, any> | null = null;
+    // A renderer's route rules can put the root layout anywhere; the route table has it.
+    const rendererRootLayout = this.config.renderer?.routes
+      ? this.routeManager.getLayouts().get("/")?.modulePath
+      : undefined;
     try {
-      for (const ext of notFoundExtensions) {
-        const layoutPath = path.join(appDir, `layout${ext}`);
+      for (const layoutPath of rendererRootLayout
+        ? [rendererRootLayout]
+        : notFoundExtensions.map((ext) => path.join(appDir, `layout${ext}`))) {
         if (fs.existsSync(layoutPath)) {
           layoutModule = (await this.routeManager.loadLayoutModule(layoutPath)) as Record<
             string,
@@ -4799,6 +4813,7 @@ window.__FARM_I18N__ = ${getFarmI18nClientSnapshot() ? serializeInlineValue(getF
       const notFoundPath = resolveFarmNotFoundComponentPath(
         this.config,
         getFarmAppDirectories(this.config),
+        this.getRendererNotFoundPath(),
       );
 
       if (notFoundPath) {

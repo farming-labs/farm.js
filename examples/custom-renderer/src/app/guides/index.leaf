@@ -1,0 +1,11 @@
+<script>
+// guides/index.leaf is /guides. A file that starts with `_` isn't a page, so _tip.leaf is only
+// this component.
+import Tip from "./_tip.leaf";
+</script>
+
+<section>
+  <h1 id="guides">Guides</h1>
+  <p>Each .leaf file in this folder is a page.</p>
+  <Tip />
+</section>

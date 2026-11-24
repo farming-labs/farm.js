@@ -256,6 +256,7 @@ export async function resolveFarmMobileApp(
     srcDir: config.srcDir,
     sourceRoots: getFarmSourceRoots(config),
     componentExtensions: getFarmRendererComponentExtensions(config.renderer),
+    renderer: config.renderer,
     platformFiles: true,
   });
   const routes = [...scan.pages, ...scan.nativeOnlyPages].sort();

@@ -218,3 +218,89 @@ test("API routes answer next to leaf pages", async ({ request }) => {
   expect(response.status()).toBe(200);
   expect(await response.json()).toEqual({ crops: ["wheat", "barley", "rye"], renderer: "leaf" });
 });
+
+// src/app/guides uses flat files instead of folders: farm-leaf's `routes()` maps them, and its
+// `hydration` reads leaf's own `// @hydrate` pragma.
+
+/** Whether the server marked the page to hydrate, read from the HTML it sent. */
+async function readPageHydration(path: string, baseURL: string | undefined) {
+  const response = await fetch(`${baseURL}${path}`);
+  expect(response.status).toBe(200);
+  const html = await response.text();
+  return html.match(/id="__farm_page__"[^>]*data-farm-client="(true|false)"/)?.[1];
+}
+
+test("flat .leaf files are pages inside the folder's _layout.leaf", async ({ page }) => {
+  const response = await gotoHydrated(page, "/guides");
+  expect(response?.status()).toBe(200);
+  await expect(page.locator("#guides-layout #guides")).toHaveText("Guides");
+  // _tip.leaf is a component the page imports, not a route.
+  await expect(page.locator("#guides-tip")).toHaveText(
+    "Files that start with an underscore aren't pages.",
+  );
+  // The root layout still wraps the folder's layout.
+  await expect(page.locator(".shell #guides-layout")).toBeVisible();
+
+  const crop = await gotoHydrated(page, "/guides/wheat");
+  expect(crop?.status()).toBe(200);
+  await expect(page.locator("#guides-layout #guide-crop")).toHaveText("Growing wheat");
+  await expect(page).toHaveTitle("Growing wheat");
+});
+
+test("files the route rules skip answer 404", async ({ request }) => {
+  for (const path of [
+    "/guides/_tip",
+    "/guides/_layout",
+    "/guides/watering.client",
+    "/guides/corn",
+  ]) {
+    const response = await request.get(path);
+    expect(response.status(), path).toBe(404);
+  }
+});
+
+test("a rule's hydrate flag and leaf's pragma hydrate their pages; the rest stay server-only", async ({
+  page,
+  baseURL,
+}) => {
+  expect(await readPageHydration("/guides", baseURL)).toBe("false");
+  expect(await readPageHydration("/guides/wheat", baseURL)).toBe("false");
+  // watering.client.leaf: the `.client` rule. harvest.leaf: `// @hydrate interaction`.
+  expect(await readPageHydration("/guides/watering", baseURL)).toBe("true");
+  expect(await readPageHydration("/guides/harvest", baseURL)).toBe("true");
+
+  await gotoHydrated(page, "/guides/watering");
+  const watering = page.locator("#watering-counter");
+  await watering.click();
+  await expect(watering).toHaveText("Checked 1 times");
+
+  await gotoHydrated(page, "/guides/harvest");
+  const harvest = page.locator("#harvest-counter");
+  await harvest.click();
+  await expect(harvest).toHaveText("Baskets: 1");
+});
+
+test("the guides layout's Links navigate between flat pages on the client", async ({ page }) => {
+  await gotoHydrated(page, "/guides");
+  await markDocument(page);
+  const layoutCounter = page.locator("#layout-counter");
+  await layoutCounter.click();
+  await expect(layoutCounter).toHaveText("Layout clicks: 1");
+
+  const guides = page.getByRole("navigation", { name: "Guides" });
+  await guides.getByRole("link", { name: "Wheat" }).click();
+  await expect(page).toHaveURL(/\/guides\/wheat$/);
+  await expect(page.locator("#guide-crop")).toHaveText("Growing wheat");
+  await expect(page).toHaveTitle("Growing wheat");
+
+  await guides.getByRole("link", { name: "Watering" }).click();
+  await expect(page).toHaveURL(/\/guides\/watering$/);
+  const watering = page.locator("#watering-counter");
+  await watering.click();
+  await expect(watering).toHaveText("Checked 1 times");
+
+  await guides.getByRole("link", { name: "All guides" }).click();
+  await expect(page.locator("#guides")).toHaveText("Guides");
+  await expect(layoutCounter).toHaveText("Layout clicks: 1");
+  expect(await readDocumentMark(page)).toBe("first");
+});
