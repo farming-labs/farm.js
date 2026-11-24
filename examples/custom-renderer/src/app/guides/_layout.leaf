@@ -1,0 +1,14 @@
+<script>
+// guides/_layout.leaf: farm-leaf's route rules make it the layout of every page in guides/.
+import { Link } from "farm-leaf/bindings";
+</script>
+
+<div className="guides" id="guides-layout">
+  <nav aria-label="Guides">
+    <Link href="/guides">All guides</Link>
+    <Link href="/guides/wheat">Wheat</Link>
+    <Link href="/guides/watering">Watering</Link>
+    <Link href="/guides/harvest">Harvest</Link>
+  </nav>
+  {props.children}
+</div>

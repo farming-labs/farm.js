@@ -6,7 +6,8 @@ import type { ParsedRoute } from "../types";
 import { discoverProgrammaticRoutePaths } from "../routes.server";
 import type { FarmSourceRoot } from "../layers";
 import { writeFileIfChanged } from "../write-file-if-changed";
-import { resolveFarmComponentExtensions } from "../renderer";
+import { resolveFarmComponentExtensions, type FarmRenderer } from "../renderer";
+import { resolveFarmRendererRoutes } from "./renderer-routes";
 
 function routeSegmentsToTsTypeLiteral(segments: string[]): string {
   if (segments.length === 0) return '"/"';
@@ -72,6 +73,8 @@ export interface GenerateRouteTypesOptions {
   suppressLintOnLink?: boolean;
   /** Additional renderer-owned component extensions, such as `.vue` or `.svelte`. */
   componentExtensions?: readonly string[];
+  /** The renderer, whose `routes()` (when it has one) decides which files are routes. */
+  renderer?: Pick<FarmRenderer, "name" | "routes" | "componentExtensions">;
 }
 
 const DEFAULT_OUT_FILE = "farm-routes.d.ts";
@@ -214,19 +217,19 @@ const PLATFORM_FILE =
 export async function scanRoutePatterns(
   options: Pick<
     GenerateRouteTypesOptions,
-    "root" | "srcDir" | "sourceRoots" | "componentExtensions"
+    "root" | "srcDir" | "sourceRoots" | "componentExtensions" | "renderer"
   > & { platformFiles: true },
 ): Promise<ScannedPlatformRoutePatterns>;
 export async function scanRoutePatterns(
   options: Pick<
     GenerateRouteTypesOptions,
-    "root" | "srcDir" | "sourceRoots" | "componentExtensions"
+    "root" | "srcDir" | "sourceRoots" | "componentExtensions" | "renderer"
   > & { platformFiles?: false },
 ): Promise<ScannedRoutePatterns>;
 export async function scanRoutePatterns(
   options: Pick<
     GenerateRouteTypesOptions,
-    "root" | "srcDir" | "sourceRoots" | "componentExtensions"
+    "root" | "srcDir" | "sourceRoots" | "componentExtensions" | "renderer"
   > & { platformFiles?: boolean },
 ): Promise<ScannedRoutePatterns | ScannedPlatformRoutePatterns> {
   const { root, srcDir = "src" } = options;
@@ -244,11 +247,32 @@ export async function scanRoutePatterns(
   const { glob } = await import("tinyglobby");
   for (const source of sourceRoots) {
     const appDir = path.join(source.root, source.srcDir, "app");
+    // A renderer's route rules list the route files, each named as Farm's folders would name it.
+    const rendererRoutes = options.renderer
+      ? await resolveFarmRendererRoutes({
+          renderer: options.renderer,
+          root: source.root,
+          srcDir: source.srcDir,
+        })
+      : null;
+    if (rendererRoutes) {
+      for (const entry of rendererRoutes.entries) {
+        if (entry.kind === "not-found") continue;
+        const pattern = createRoutePattern(parseRoutePath(entry.routeFile));
+        modules.add(pattern);
+        if (entry.kind === "page") {
+          pages.add(pattern);
+          if (options.platformFiles) pageFiles.set(pattern, entry.modulePath);
+        }
+      }
+    }
     if (fs.existsSync(appDir)) {
-      const routeModuleFiles = await glob(
-        `**/{page,layout,loading,error}.{${componentExtensions.join(",")},md,mdx}`,
-        { cwd: appDir, expandDirectories: false },
-      );
+      const routeModuleFiles = rendererRoutes
+        ? []
+        : await glob(`**/{page,layout,loading,error}.{${componentExtensions.join(",")},md,mdx}`, {
+            cwd: appDir,
+            expandDirectories: false,
+          });
 
       for (const file of routeModuleFiles) {
         if (parseRouteSlotFile(file)) continue;

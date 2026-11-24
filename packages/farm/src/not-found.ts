@@ -10,9 +10,14 @@ interface FarmNotFoundPathConfig {
   };
 }
 
+/**
+ * The app's not-found page: `notFound.component`, else the one the renderer's route rules mapped
+ * (`discovered`, when the renderer has `routes()`), else `not-found.*` in an app directory.
+ */
 export function resolveFarmNotFoundComponentPath(
   config: FarmNotFoundPathConfig,
   appDirs: readonly string[],
+  discovered?: string | null,
 ): string | null {
   const extensions = getFarmRendererComponentExtensions(config.renderer);
   const configuredPath = config.notFound?.component?.trim();
@@ -31,6 +36,7 @@ export function resolveFarmNotFoundComponentPath(
     }
     return componentPath;
   }
+  if (discovered !== undefined) return discovered;
 
   let discoveredPath: string | null = null;
   for (const appDir of appDirs) {

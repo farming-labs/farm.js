@@ -26,6 +26,11 @@ reads again when that function invalidates its key, a page that streams past an 
 inside `<Suspense>`, not-found and error pages, and a page whose hydration throws, which Farm renders
 in the browser instead.
 
+`src/app/guides/` uses flat files instead of folders. farm-leaf's `routes()` maps them: `_layout.leaf`
+is the folder's layout, `index.leaf` is its page, `[crop].leaf` is a dynamic page, other `_` files
+are components, and `watering.client.leaf` hydrates. Its `hydration.resolve()` reads leaf's own
+`// @hydrate` pragma, which `harvest.leaf` uses.
+
 ```bash
 pnpm --filter farm-custom-renderer-example dev
 pnpm --filter farm-leaf test

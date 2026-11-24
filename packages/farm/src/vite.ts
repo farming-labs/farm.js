@@ -2338,6 +2338,7 @@ export function farmPlugin(
             extraRoutes: getExtraRouteTypes(),
             suppressLintOnLink: farmConfig.suppressLintOnLink,
             componentExtensions: farmConfig.renderer.componentExtensions,
+            renderer: farmConfig.renderer,
             i18nConfig: farmConfig.i18n,
             ...selection,
           });
@@ -2416,6 +2417,10 @@ export function farmPlugin(
       };
       const isAppRuntimeFile = (file: string) =>
         isFarmAppRuntimeFile(file, appDirSlugs, routeModuleExtensions);
+      // A file under a renderer's route directory (its `routes()`) can be a route whatever its name.
+      const isRendererRouteFile = (file: string) =>
+        routeModuleExtensions.has(path.extname(file).toLowerCase()) &&
+        farmApp?.getRouteManager().isRendererRouteFile(file) === true;
       const isStaticMetadataImageFile = (file: string) =>
         /\/(?:opengraph-image|twitter-image)(?:\.(?:png|jpg|jpeg|gif|webp)|\.alt\.txt)$/.test(
           file.replace(/\\/g, "/"),
@@ -2462,7 +2467,9 @@ export function farmPlugin(
           const typeArtifacts: TypeArtifactSelection = configChanged
             ? ALL_TYPE_ARTIFACTS
             : {
-                routes: (ev !== "change" && isRouteModuleFile(file)) || programmaticRouteChanged,
+                routes:
+                  (ev !== "change" && (isRouteModuleFile(file) || isRendererRouteFile(file))) ||
+                  programmaticRouteChanged,
                 api: isApiRouteFile(file) || programmaticRouteChanged,
                 env: false,
                 images: false,
@@ -2481,6 +2488,7 @@ export function farmPlugin(
           const isRouteRefreshEvent =
             (ev !== "change" || isStaticMetadataImageFile(file)) &&
             (isAppRuntimeFile(file) ||
+              isRendererRouteFile(file) ||
               isProgrammaticRouteFile(file) ||
               (isProgrammaticRouteSourceFile(file) &&
                 (ev === "unlink" || fileContainsProgrammaticPageRoute(file))));
@@ -6256,7 +6264,11 @@ if (import.meta.hot) {
         }
       }
 
-      if (normalizedFile.includes("/app/")) {
+      // A renderer's route rules can put route files outside src/app, under any name. Other files
+      // in that directory, such as stylesheets and components, keep their hot updates.
+      const rendererRouteFile =
+        farmApp?.getRouteManager().isRendererRouteModule(normalizedFile) === true;
+      if (normalizedFile.includes("/app/") || rendererRouteFile) {
         // Hot reload middleware changes
         if (normalizedFile.includes("middleware.")) {
           if (middlewareManager) {
@@ -6284,7 +6296,11 @@ if (import.meta.hot) {
           server.moduleGraph.invalidateModule(manifestModule);
         }
 
-        if (normalizedFile.includes("page.") || normalizedFile.includes("layout.")) {
+        if (
+          normalizedFile.includes("page.") ||
+          normalizedFile.includes("layout.") ||
+          rendererRouteFile
+        ) {
           const shortPath = normalizedFile.split("/app/")[1] || normalizedFile;
           logUpdate("PAGE", `updated ${shortPath}`);
 

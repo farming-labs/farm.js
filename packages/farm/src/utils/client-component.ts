@@ -31,6 +31,7 @@ import {
   PackageInspectionTrace,
 } from "./package-client-boundary-cache";
 import { formatFarmHydrateExportError, readFarmHydrateExport } from "./hydrate-export";
+import { resolveFarmRendererModuleHydration } from "./renderer-hydration";
 import { getFarmProjectSourceDir } from "./source-dir";
 import {
   farmSourceSnapshotPathKey,
@@ -703,6 +704,23 @@ function parseClientModuleMetadata(
   // export something else by that name.
   if (inspectIslandExport && hydrate && hydrate.value === null) {
     throw new Error(formatFarmHydrateExportError(hydrate, sourcePath));
+  }
+  // A renderer's defaults, its route rule for the file, and its own syntax (`hydration` and
+  // `routes()` on the descriptor) apply to the route's own page or layout.
+  const rendererHydration =
+    inspectIslandExport && sourcePath
+      ? resolveFarmRendererModuleHydration(content, sourcePath, () => ({
+          hydrate: typeof hydrate?.value === "boolean" ? hydrate.value : undefined,
+          strategy: getIslandStrategyExport(content),
+          clientDirective: isClientComponent,
+        }))
+      : null;
+  if (rendererHydration) {
+    return {
+      isClientComponent,
+      hasHydrateExport: rendererHydration.hydrate,
+      islandStrategy: rendererHydration.strategy,
+    };
   }
   const hasHydrate = hydrate?.value === true;
   return {
