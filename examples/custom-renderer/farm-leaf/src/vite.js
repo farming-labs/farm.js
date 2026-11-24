@@ -15,7 +15,7 @@ export function createFarmRendererPlugin() {
     async transform(code, id) {
       const file = id.split("?")[0];
       if (!file.endsWith(".leaf")) return null;
-      const result = await transformWithOxc(compileLeaf(code, componentName(file)), `${file}.tsx`, {
+      const result = await transformWithOxc(compileLeaf(code, componentName(file), file), `${file}.tsx`, {
         lang: "tsx",
         jsx: JSX,
         sourcemap: true,

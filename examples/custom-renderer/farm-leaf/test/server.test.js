@@ -96,7 +96,7 @@ describe("leaf files", () => {
       'import { useState } from "leaf";',
       "const [count] = useState(1);",
       "</script>",
-      "<p>{count}</p>",
+      "<p>{{ count }}</p>",
     ].join("\n");
     const compiled = compileLeaf(source, componentName("src/app/[name]/page.leaf"));
     expect(compiled).toMatch(/^import \{ useState \} from "leaf";/);

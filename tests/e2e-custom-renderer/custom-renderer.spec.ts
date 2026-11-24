@@ -132,9 +132,20 @@ test("a .leaf page compiles, renders its .leaf component, and hydrates", async (
   expect(response?.status()).toBe(200);
   await expect(page).toHaveTitle("Notes in a .leaf file");
   await expect(page.locator("#badge")).toHaveText("compiled by farm-leaf/vite");
+  // <leaf:for> repeats its children for each item, with the index it names.
+  await expect(page.locator("#notes-crops li")).toHaveText(["wheat", "barley", "rye"]);
+  await expect(page.locator("#notes-crops li").last()).toHaveAttribute("data-position", "2");
+
+  // <leaf:if> and <leaf:else> switch as the state changes.
   const notes = page.locator("#notes-counter");
+  await expect(page.locator("#notes-few")).toBeVisible();
   await notes.click();
   await expect(notes).toHaveText("Notes: 1");
+  await notes.click();
+  await notes.click();
+  await expect(notes).toHaveText("Notes: 3");
+  await expect(page.locator("#notes-many")).toHaveText("That's a lot of notes.");
+  await expect(page.locator("#notes-few")).toHaveCount(0);
 });
 
 test("a browser module calls a server function, which runs on the server", async ({ page }) => {
