@@ -140,6 +140,27 @@ describe(".leaf markup", () => {
     );
     expect(html).toBe('<span class="ripe">Wheat</span>');
   });
+
+  it('keeps a module script\'s "use client" as the first statement, ahead of the imports', () => {
+    const code = compileLeaf(
+      `<script module>
+  "use client";
+  export const island = "idle";
+</script>
+<script>
+  import { useState } from "leaf";
+  const [count] = useState(0);
+</script>
+<p>{{ count }}</p>`,
+      "Test",
+      "test.leaf",
+    );
+    expect(code.split("\n").slice(0, 3)).toEqual([
+      '"use client";',
+      'import { useState } from "leaf";',
+      'export const island = "idle";',
+    ]);
+  });
 });
 
 describe(".leaf errors", () => {

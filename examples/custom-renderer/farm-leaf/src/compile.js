@@ -14,6 +14,7 @@
 // It compiles to JSX against leaf's runtime, so a `.leaf` component and a `.tsx` one are the same
 // thing once built.
 
+const DIRECTIVES = /^(?:\s*(["'])[^"'\n]*\1;?[ \t]*(?=\n|$))+/;
 const SCRIPT = /<script(\s+module)?\s*>([\s\S]*?)<\/script>/g;
 const IMPORT = /^[ \t]*import\s(?:[^;'"]*?\sfrom\s*)?(["'])[^"'\n]+\1;?[ \t]*$/gm;
 const TAG_NAME = /^[A-Za-z][\w.:-]*/;
@@ -72,9 +73,13 @@ export function compileLeaf(source, name = "LeafComponent", file = "component.le
   const jsx = emitChildren(parseMarkup(markup, file), file).trim();
   // A component that awaits renders on the server only, as an async component does in leaf.
   const isAsync = /\bawait\b/.test(body);
+  // A directive such as "use client" only counts as the module's first statement, so it stays
+  // ahead of the imports.
+  const directives = DIRECTIVES.exec(moduleScript)?.[0] ?? "";
   return [
+    ...(directives.trim() ? [directives.trim()] : []),
     ...imports,
-    moduleScript.trim(),
+    moduleScript.slice(directives.length).trim(),
     `export default ${isAsync ? "async " : ""}function ${name}(props) {`,
     body.trim(),
     `  return (<>${jsx}</>);`,

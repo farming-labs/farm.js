@@ -13,9 +13,10 @@ import {
  * hydration from each page and layout's source text before any compiler runs
  * (`client-component.ts`); this is what that reading consults for the levels the text can't hold:
  * the renderer's defaults, the rule `routes()` returned for the file, and the renderer's own syntax.
+ * A renderer's `compile()` turns its own files into the code that reading sees.
  */
 interface FarmRendererHydrationScope {
-  renderer: Pick<FarmRenderer, "name" | "hydration" | "componentExtensions">;
+  renderer: Pick<FarmRenderer, "name" | "hydration" | "componentExtensions" | "compile">;
   /** The renderer's own extensions, lowercase: the files its `hydration.resolve()` reads. */
   extensions: ReadonlySet<string>;
   /** Each page and layout file the scan found, by real path. */
@@ -36,12 +37,12 @@ function realPath(file: string): string {
 
 /**
  * Records what a route scan found for `roots`, replacing the last scan's record. A renderer with no
- * `hydration` and no route rule that sets any leaves nothing recorded, so the reading stays as it
- * was. Returns the reverse: forgetting the record if no later scan replaced it.
+ * `hydration`, no `compile()`, and no route rule that sets any leaves nothing recorded, so the
+ * reading stays as it was. Returns the reverse: forgetting the record if no later scan replaced it.
  */
 export function setFarmRendererHydrationScope(
   roots: readonly string[],
-  renderer: Pick<FarmRenderer, "name" | "hydration" | "componentExtensions">,
+  renderer: Pick<FarmRenderer, "name" | "hydration" | "componentExtensions" | "compile">,
   routeModules: ReadonlyArray<{
     modulePath: string;
     kind: "page" | "layout";
@@ -52,7 +53,7 @@ export function setFarmRendererHydrationScope(
   const ruleSetsHydration = routeModules.some(
     (entry) => entry.hydration?.hydrate !== undefined || entry.hydration?.strategy !== undefined,
   );
-  if (!renderer?.hydration && !ruleSetsHydration) {
+  if (!renderer?.hydration && !renderer?.compile && !ruleSetsHydration) {
     for (const key of keys) scopes.delete(key);
     return () => {};
   }
@@ -170,4 +171,47 @@ function readOwnHydration(
     );
   }
   return readFarmRendererHydration(value as Record<string, unknown>, where);
+}
+
+/**
+ * Whether a renderer's `compile()` may apply to `file`, by its extension alone: a quick check
+ * before the source reading looks the file's scope up.
+ */
+export function mayCompileFarmRendererSource(file: string): boolean {
+  if (scopes.size === 0) return false;
+  const extension = path.extname(file).toLowerCase();
+  for (const scope of scopes.values()) {
+    if (scope.renderer.compile && scope.extensions.has(extension)) return true;
+  }
+  return false;
+}
+
+/**
+ * A file's code as Farm's source reading sees it: for a file with one of the renderer's own
+ * extensions, the module its `compile()` returns; otherwise the source as it is.
+ */
+export function compileFarmRendererSource(content: string, sourcePath: string): string {
+  if (scopes.size === 0) return content;
+  const file = realPath(sourcePath);
+  const scope = findScope(file);
+  const compile = scope?.renderer.compile;
+  if (!scope || !compile || !scope.extensions.has(path.extname(file).toLowerCase())) {
+    return content;
+  }
+  const where = `Renderer \`${scope.renderer.name}\` compile() for ${file}`;
+  let value: unknown;
+  try {
+    value = compile.call(scope.renderer, content, file);
+  } catch (error) {
+    throw createFarmRendererHookError(
+      `${where} threw: ${error instanceof Error ? error.message : String(error)}`,
+      error,
+    );
+  }
+  if (typeof value !== "string") {
+    throw new TypeError(
+      `${where} returned ${value === null ? "null" : typeof value}. Return the module the file compiles to, as JavaScript or TSX source.`,
+    );
+  }
+  return value;
 }

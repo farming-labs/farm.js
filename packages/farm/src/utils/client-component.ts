@@ -31,7 +31,11 @@ import {
   PackageInspectionTrace,
 } from "./package-client-boundary-cache";
 import { formatFarmHydrateExportError, readFarmHydrateExport } from "./hydrate-export";
-import { resolveFarmRendererModuleHydration } from "./renderer-hydration";
+import {
+  compileFarmRendererSource,
+  mayCompileFarmRendererSource,
+  resolveFarmRendererModuleHydration,
+} from "./renderer-hydration";
 import { getFarmProjectSourceDir } from "./source-dir";
 import {
   farmSourceSnapshotPathKey,
@@ -41,7 +45,21 @@ import {
 
 export { traceFarmSourceReads, withFarmSourceSnapshot } from "./source-snapshot";
 
+/**
+ * A module's code as the plan reads it: a file in the renderer's own format is read as the module
+ * its `compile()` returns.
+ */
 function readIfExists(filePath: string): string | null {
+  const source = readSourceIfExists(filePath);
+  if (source === null || !mayCompileFarmRendererSource(filePath)) return source;
+  // By path and source, so an edited file compiles again.
+  return memoizeInFarmSourceSnapshot("compiled-source", `${filePath}\0${source}`, () =>
+    compileFarmRendererSource(source, filePath),
+  );
+}
+
+/** A file's source as written. */
+function readSourceIfExists(filePath: string): string | null {
   // Client references are written while a plan runs, so they are read from disk every time.
   if (filePath.replace(/\\/g, "/").includes(FARM_CLIENT_REFERENCE_DIRECTORY)) {
     return readSourceFile(filePath);
@@ -709,11 +727,16 @@ function parseClientModuleMetadata(
   // `routes()` on the descriptor) apply to the route's own page or layout.
   const rendererHydration =
     inspectIslandExport && sourcePath
-      ? resolveFarmRendererModuleHydration(content, sourcePath, () => ({
-          hydrate: typeof hydrate?.value === "boolean" ? hydrate.value : undefined,
-          strategy: getIslandStrategyExport(content),
-          clientDirective: isClientComponent,
-        }))
+      ? // The renderer's own syntax is read from the file as written, before its `compile()`.
+        resolveFarmRendererModuleHydration(
+          (mayCompileFarmRendererSource(sourcePath) && readSourceIfExists(sourcePath)) || content,
+          sourcePath,
+          () => ({
+            hydrate: typeof hydrate?.value === "boolean" ? hydrate.value : undefined,
+            strategy: getIslandStrategyExport(content),
+            clientDirective: isClientComponent,
+          }),
+        )
       : null;
   if (rendererHydration) {
     return {

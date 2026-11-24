@@ -1,12 +1,13 @@
 // The renderer descriptor an app passes to `renderer` in farm.config.ts.
 
 import { defineRenderer } from "@farm.js/core/renderer";
+import { compileLeaf, componentName } from "./compile.js";
 
 export function leaf() {
   return defineRenderer({
     name: "leaf",
     // Code that runs in the app is named by module id, so each module resolves from the app's own
-    // node_modules. routes() and hydration.resolve() below run while Farm scans the app.
+    // node_modules. routes(), hydration.resolve() and compile() below run while Farm scans the app.
     vite: "farm-leaf/vite",
     server: "farm-leaf/server",
     client: "farm-leaf/client",
@@ -55,6 +56,11 @@ export function leaf() {
         if (pragma[1] === "false") return { hydrate: false };
         return pragma[1] ? { hydrate: true, strategy: pragma[1] } : { hydrate: true };
       },
+    },
+    // Farm reads a .leaf file as the module farm-leaf/vite compiles it to, so it finds the
+    // "use client" in a component's module script and plans that component as an island.
+    compile(source, file) {
+      return compileLeaf(source, componentName(file), file);
     },
   });
 }
