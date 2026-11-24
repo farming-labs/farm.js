@@ -289,6 +289,7 @@ import {
   generateFarmDocsAdapterClientRuntime,
   getFarmDocsAdapterConfigModule,
 } from "./docs/adapter-client";
+import { getFarmDocsAdapterUIModule, hasFarmDocsRuntimeAdapter } from "./docs/adapter-descriptor";
 import { isFarmDocsClientConfigModule, redactFarmDocsClientConfig } from "./docs/client-config";
 import { resolveFarmDocsFontAssets, toFarmDocsPublicFontAssets } from "./docs/fonts";
 import {
@@ -2700,6 +2701,7 @@ export function farmPlugin(
               root: farmConfig.root,
               srcDir: farmConfig.srcDir,
               clientEntry: "/@farm/client.js",
+              rendererServer: farmConfig.renderer.server,
               resolveLayoutFonts: resolveDocsLayoutFonts,
               fontStylesheetHref: "/@farm/fonts.css",
               globalStylesheetHref: resolveDevGlobalStylesheetHref(
@@ -5422,9 +5424,7 @@ export function farmPlugin(
         const integrations = resolvedConfig?.integrations || options.integrations;
         const root = resolvedConfig?.root || server?.config.root || process.cwd();
         const docs = resolvedConfig?.docs;
-        const adapterOwnsDocsRuntime = Boolean(
-          isReactRenderer(renderer) && docs?.adapter?.server && docs.adapter.react,
-        );
+        const adapterOwnsDocsRuntime = hasFarmDocsRuntimeAdapter(docs);
         const devtools = resolvedConfig?.devtools ?? resolveFarmDevtoolsConfig(false, "production");
         const [docsRuntime, docsSearchRuntime, devtoolsClientRuntime] = await Promise.all([
           docs?.enabled ? loadFarmDocsDevRuntime() : null,
@@ -5473,7 +5473,7 @@ export function farmPlugin(
           root,
           resolvedConfig?.srcDir || options.srcDir || "src",
           resolvedConfig?.publicRuntimeConfig || options.publicRuntimeConfig,
-          isReactRenderer(renderer) ? docs?.adapter?.react : undefined,
+          adapterOwnsDocsRuntime ? getFarmDocsAdapterUIModule(docs?.adapter) : undefined,
           renderer,
           isolatedHydrationMode === "enabled" ||
             (isReactRenderer(renderer) &&
@@ -5486,7 +5486,7 @@ export function farmPlugin(
           generateClientCachePersistenceCode(
             resolveFarmClientCacheAdapterEntry(root, resolvedConfig?.cache),
           ),
-          isReactRenderer(renderer) ? getFarmDocsAdapterConfigModule(docs) : undefined,
+          adapterOwnsDocsRuntime ? getFarmDocsAdapterConfigModule(docs) : undefined,
           resolveFarmServerComponentsMode(resolvedConfig?.experimental?.serverComponents) ===
             "islands",
         );
@@ -7002,7 +7002,7 @@ function generateClientCode(
   root = process.cwd(),
   srcDir = "src",
   publicRuntimeConfig: Record<string, unknown> | undefined = undefined,
-  docsAdapterReact?: string,
+  docsAdapterUI?: string,
   renderer: FarmRenderer = REACT_RENDERER,
   isolatedHydrationEnabled = false,
   trailingSlash = false,
@@ -7036,8 +7036,10 @@ function generateClientCode(
     ? `${islandValues ? "import { createFarmIsolatedHydrationRuntime, createFarmServerPageBoundary, wrapFarmIsolatedClientGraph, createFarmServerTreeElement, createFarmServerTreeLayout } from '@farm.js/core/internal/islands-runtime'" : "import { createFarmIsolatedHydrationRuntime, createFarmServerPageBoundary, wrapFarmIsolatedClientGraph } from '@farm.js/core/internal/isolated-boundary'\nimport { createFarmServerTreeElement } from '@farm.js/core/internal/server-tree'"}`
     : "";
   const docsAdapterImportBlock = generateFarmDocsAdapterClientRuntime(
-    docsAdapterReact,
+    docsAdapterUI,
     docsConfigModule,
+    // Config resolution keeps an adapter to its UI's renderer, so this is the UI's renderer too.
+    isReactRenderer(renderer) ? undefined : renderer.client,
   );
   const isolatedHydrationRuntime = isolatedHydrationEnabled
     ? `const farmIsolatedHydrationRuntime = createFarmIsolatedHydrationRuntime({
