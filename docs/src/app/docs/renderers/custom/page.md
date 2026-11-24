@@ -881,8 +881,10 @@ too: the example's Playwright tests run the same checks against both.
 - **Route rules cover pages, layouts, and their boundaries.** API routes, middleware, metadata
   files, and named slots stay in `src/app` folders.
 - **React Server Components and islands are React-only.**
-- **Some UI integrations are React-oriented.** The docs adapter and most integration UI providers
-  render React components today.
+- **Some UI integrations are React-oriented.** Most integration UI providers render React
+  components today. `withDocs()` builds docs pages with your renderer, and
+  `@farming-labs/farmjs/testing` checks that it writes and hydrates them; see
+  [Docs adapters on any renderer](/docs/docs-engine#docs-adapters-on-any-renderer).
 - **No static shell without `findStaticShellBoundary()`.** Partial prerendering needs it to know
   where the dynamic part of a streamed page begins.
 - **React hooks from core throw.** `useRouter()`, `usePathname()`, and `useSearchParams()` from
