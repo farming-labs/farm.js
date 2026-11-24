@@ -22,7 +22,11 @@ import {
   renderToReadableStream,
   renderToString,
 } from "../server";
-import { SERVER_LAYOUT_ISLAND_HTML, UNIQUE_ID_ISLAND_HTML } from "./unique-id-island.fixture";
+import {
+  ROOT_RENDER_HTML,
+  SERVER_LAYOUT_ISLAND_HTML,
+  UNIQUE_ID_ISLAND_HTML,
+} from "./unique-id-island.fixture";
 
 defineRendererDescriptorConformance({
   name: "solid",
@@ -198,6 +202,18 @@ describe("Solid renderer", () => {
     );
 
     expect(html).toBe(UNIQUE_ID_ISLAND_HTML);
+  });
+
+  it("keys a root render's outermost element after its children", async () => {
+    const html = await renderToString(
+      createElement(
+        "div",
+        { id: "root" },
+        ...Array.from({ length: 10 }, (_, index) => createElement("span", null, String(index))),
+      ),
+    );
+
+    expect(html).toBe(ROOT_RENDER_HTML);
   });
 
   describe("server-only segments", () => {
