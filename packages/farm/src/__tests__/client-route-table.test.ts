@@ -11,9 +11,11 @@ import {
 import {
   generateClientPageDirectorySource,
   generateFarmClientBootRoutesServerSource,
+  generateFarmClientRouteMatchSource,
   generateFarmClientRouteTableRuntime,
+  getFarmClientLayoutMatch,
 } from "../nitro/universal-build";
-import { createFarmRouter } from "../router";
+import { createFarmRouter, isFarmRouteActive, matchFarmRoute } from "../router";
 import { AmbiguousRouteError } from "../routing/specificity";
 
 const page = (
@@ -453,5 +455,178 @@ describe("the client route table", () => {
     expect(client.load()).toBeNull();
     expect(client.matcher.match("/")).toBeNull();
     expect(createServer([])("/")).toBeUndefined();
+  });
+});
+
+// Islands mode's web client loads the matcher with the table; until then the entry answers for the
+// document's own path from what the document names (generateFarmClientRouteTableRuntime).
+describe("the route matcher that loads with the table", () => {
+  const layouts = [
+    "/",
+    "/blog",
+    "/(home)",
+    "/(home)/blog",
+    "/(docs)/docs",
+    "/docs",
+    "/files/[...path]",
+  ];
+  const layoutRoutes = () =>
+    layouts.map((pattern) => ({ ...getFarmClientLayoutMatch(pattern), shouldHydrate: false }));
+  const matcher = { createFarmRouter, isFarmRouteActive, matchFarmRoute };
+
+  function createMatchingClient(options: {
+    pathname: string;
+    lazy: boolean;
+    boot?: unknown;
+    importTable: () => Promise<Record<string, unknown>>;
+  }) {
+    vi.stubGlobal("window", {
+      location: { pathname: options.pathname },
+      __FARM_CLIENT_ROUTES__: options.boot,
+    });
+    vi.stubGlobal("document", { addEventListener: () => {}, removeEventListener: () => {} });
+    const runtime = generateFarmClientRouteTableRuntime({
+      table: true,
+      docs: true,
+      streamNavigations: options.lazy,
+      lazyMatcher: options.lazy,
+    }).replace(`import("./${FARM_CLIENT_ROUTE_TABLE_MODULE}")`, "__importTable()");
+    // The lazy runtime declares the matcher it loads; the eager one imports it.
+    const injected = options.lazy ? {} : { createFarmRouter, isFarmRouteActive };
+    return new Function(
+      ...Object.keys(injected),
+      "getFarmRoutePathname",
+      "farmClientRouteLoaders",
+      "__importTable",
+      "layoutRoutes",
+      `${runtime}
+${generateClientPageDirectorySource()}
+${generateFarmClientRouteMatchSource({ lazyMatcher: options.lazy })}
+return {
+  boot: farmClientRoutesBoot,
+  load: loadFarmClientRouteTable,
+  match(pathname) {
+    const matched = matchRoute(pathname);
+    return matched && { pattern: matched.route.pattern, params: matched.params };
+  },
+  layouts(pathname) {
+    return getApplicableLayouts(pathname).map(function(layout) { return layout.pattern; });
+  },
+};`,
+    )(
+      ...Object.values(injected),
+      (pathname: string) => pathname,
+      [],
+      options.importTable,
+      layoutRoutes(),
+    ) as {
+      boot: Promise<void> | null;
+      load: () => Promise<void> | null;
+      match: (pathname: string) => { pattern: string; params: Record<string, string> } | null;
+      layouts: (pathname: string) => string[];
+    };
+  }
+
+  const getBootRoutes = (pathname: string) =>
+    new Function(
+      "createFarmRouter",
+      "isFarmRouteActive",
+      `${generateFarmClientBootRoutesServerSource(
+        JSON.stringify(JSON.stringify(table)),
+        layouts.map(getFarmClientLayoutMatch),
+      )}
+return getFarmClientBootRoutes;`,
+    )(
+      createFarmRouter,
+      isFarmRouteActive,
+    )(pathname);
+
+  it("names, for every path, the route, params and layouts the client finds with the whole table", async () => {
+    const full = createMatchingClient({
+      pathname: "/elsewhere",
+      lazy: false,
+      importTable: async () => ({ default: table }),
+    });
+    await full.boot;
+
+    for (const pathname of PATHS) {
+      const boot = getBootRoutes(pathname);
+      const client = createMatchingClient({
+        pathname,
+        lazy: true,
+        boot: JSON.parse(JSON.stringify(boot)),
+        importTable: () => {
+          throw new Error("the document named this page's route");
+        },
+      });
+      expect(client.boot).toBeNull();
+      expect(client.match(pathname), pathname).toEqual(full.match(pathname));
+      expect(client.layouts(pathname), pathname).toEqual(full.layouts(pathname));
+    }
+    // A grouped layout covers only the pages in its group directory.
+    expect(full.layouts("/blog")).toEqual(["/", "/blog", "/(home)", "/(home)/blog"]);
+    expect(full.layouts("/blog/hello")).toEqual(["/", "/blog"]);
+  });
+
+  it("matches another path only once the table and its matcher have loaded", async () => {
+    const importTable = vi.fn(async () => ({ default: table, ...matcher }));
+    const client = createMatchingClient({
+      pathname: "/blog/hello",
+      lazy: true,
+      boot: getBootRoutes("/blog/hello"),
+      importTable,
+    });
+    expect(client.match("/blog/hello")).toEqual({
+      pattern: "/blog/[slug]",
+      params: { slug: "hello" },
+    });
+    expect(() => client.match("/files/a")).toThrow(
+      "/files/a cannot be matched before the client route table loads.",
+    );
+    expect(() => client.layouts("/files/a")).toThrow(
+      "/files/a cannot be matched before the client route table loads.",
+    );
+    expect(importTable).not.toHaveBeenCalled();
+
+    await client.load();
+    expect(client.match("/files/a/b")).toEqual({
+      pattern: "/files/[...path]",
+      params: { path: "a/b" },
+    });
+    expect(client.layouts("/files/a/b")).toEqual(["/", "/files/[...path]"]);
+  });
+
+  it("matches nothing when the document named no route and the table did not load", async () => {
+    vi.spyOn(console, "warn").mockImplementation(() => {});
+    const client = createMatchingClient({
+      pathname: "/blog",
+      lazy: true,
+      importTable: async () => {
+        throw new Error("Failed to fetch dynamically imported module");
+      },
+    });
+    await client.boot;
+    expect(client.match("/blog")).toBeNull();
+  });
+
+  it("waits for the table when the document named a route without its params and layouts", async () => {
+    const importTable = vi.fn(async () => ({ default: table, ...matcher }));
+    const { params, layouts: _layouts, ...older } = getBootRoutes("/blog");
+    const client = createMatchingClient({
+      pathname: "/blog",
+      lazy: true,
+      boot: older,
+      importTable,
+    });
+    expect(importTable).toHaveBeenCalledTimes(1);
+    await client.boot;
+    expect(client.match("/blog")).toEqual({ pattern: "/blog", params });
+  });
+
+  it("puts the matcher in the table's module", () => {
+    expect(generateFarmClientRouteTableModule(table, { matcher: true })).toMatch(
+      /^export \{ createFarmRouter, isFarmRouteActive, matchFarmRoute \} from "@farm\.js\/core\/router";\n/,
+    );
+    expect(generateFarmClientRouteTableModule(table)).not.toContain("@farm.js/core/router");
   });
 });
