@@ -54,8 +54,10 @@ import {
   FARM_CLIENT_BOOT_SRC_PLACEHOLDER,
   FARM_CLIENT_CSS_HREF_PLACEHOLDER,
   FARM_CLIENT_JS_SRC_PLACEHOLDER,
+  FARM_CLIENT_STYLESHEET_PLACEHOLDER,
   findFingerprintedClientEntry,
   resolveClientBootSrc,
+  resolveClientStylesheetLinkHref,
   resolveHashedClientCssHref,
   resolveHashedClientJsSrc,
 } from "./client-css-href";
@@ -10127,7 +10129,7 @@ function createFarmErrorDocument(html, title, routePathname) {
       '  <meta name="viewport" content="width=device-width, initial-scale=1">\\n' +
       '  <link rel="icon" href="data:,">\\n' +
       '  <title>' + escapedTitle + '</title>\\n' +
-      '  <link rel="stylesheet" href="/__farm_client_css_href__">' + renderFarmClientModulePreloads(html) + '\\n' +
+      '  ' + renderFarmClientStylesheet() + renderFarmClientModulePreloads(html) + '\\n' +
       renderFarmRendererHydrationScript() + '\\n' +
       '</head>\\n<body>\\n' +
       '  <div id="root">' + html + '</div>\\n' +
@@ -10138,7 +10140,7 @@ function createFarmErrorDocument(html, title, routePathname) {
 
   let fullHtml = ensureFarmDocumentRoot(ensureFarmDocumentHead(fullDocument));
   fullHtml = fullHtml
-    .replace(/<head([^>]*)>/i, function(match, attrs) { return '<head' + attrs + '>\\n  <link rel="stylesheet" href="/__farm_client_css_href__">' + renderFarmClientModulePreloads(fullDocument); })
+    .replace(/<head([^>]*)>/i, function(match, attrs) { return '<head' + attrs + '>\\n  ' + renderFarmClientStylesheet() + renderFarmClientModulePreloads(fullDocument); })
     // Function replacements: dynamic markup may contain $-sequences ($&, $', $$)
     // that a string replacement would expand, corrupting the document.
     .replace(/<\\/head>/i, function() { return renderFarmRendererHydrationScript() + '\\n</head>'; })
@@ -10160,6 +10162,23 @@ function createFarmErrorDocument(html, title, routePathname) {
   return fullHtml.trim().startsWith("<!DOCTYPE")
     ? fullHtml
     : "<!DOCTYPE html>\\n" + fullHtml;
+}
+
+// The client stylesheet a document links, filled in from the client build once it has finished
+// (see buildNitroUniversal): null for an app without CSS, whose empty stylesheet would still hold
+// the first paint for a round trip. Parsed at runtime, so the bundler cannot fold the stand-in.
+const farmClientStylesheetHref = (() => {
+  try {
+    return JSON.parse("${FARM_CLIENT_STYLESHEET_PLACEHOLDER}");
+  } catch {
+    return "${FARM_CLIENT_CSS_HREF_PLACEHOLDER}";
+  }
+})();
+
+function renderFarmClientStylesheet() {
+  return farmClientStylesheetHref
+    ? '<link rel="stylesheet" href="' + farmClientStylesheetHref + '">'
+    : "";
 }
 
 // The client modules a page needs before it hydrates, filled in from the client
@@ -11317,8 +11336,8 @@ ${
     }
     html = html.replace(/<[/]head>/i, function() { return renderedRoot.head + "\\n</head>"; });
   }
-  if (!html.includes('href="/__farm_client_css_href__"')) {
-    const clientStylesheet = '  <link rel="stylesheet" href="/__farm_client_css_href__">\\n';
+  if (farmClientStylesheetHref && !html.includes('href="' + farmClientStylesheetHref + '"')) {
+    const clientStylesheet = '  ' + renderFarmClientStylesheet() + '\\n';
     const firstStyleIndex = html.search(/<style(?:\\s|>)/i);
     html =
       firstStyleIndex >= 0
@@ -12949,7 +12968,7 @@ ${
           );
           composed = composed
             // Inject CSS link after opening head tag or first meta tag
-            .replace(/<head([^>]*)>/i, function(match, attrs) { return '<head' + attrs + '>\\n  <link rel="stylesheet" href="/__farm_client_css_href__">' + (farmBootsClient ? "" : renderFarmClientModulePreloads(composed, route.clientModule, farmNavigationRequest)); })
+            .replace(/<head([^>]*)>/i, function(match, attrs) { return '<head' + attrs + '>\\n  ' + renderFarmClientStylesheet() + (farmBootsClient ? "" : renderFarmClientModulePreloads(composed, route.clientModule, farmNavigationRequest)); })
             .replace(/<\\/head>/i, () => renderFarmRendererHydrationScript() + '\\n' + renderFarmPreHydrationHoldScript() + '</head>')
             // Explicit metadata wins over renderer and layout titles. Without
             // explicit metadata, a renderer title wins over the layout title.
@@ -13022,7 +13041,7 @@ ${
             (hasFavicon ? '' : '  <link rel="icon" href="data:,">\\n') +
             (suppressDefaultTitle ? '' : '  <title>' + title + '</title>') + metaTags +
             (rendererHead ? '\\n  ' + rendererHead : '') + '\\n' +
-            '  <link rel="stylesheet" href="/__farm_client_css_href__">\\n' +
+            '  ' + renderFarmClientStylesheet() + '\\n' +
             '  <link rel="modulepreload" href="/__farm_client_js_src__">' + renderFarmClientModulePreloads(null, route.clientModule) + '\\n' +
             renderFarmRendererHydrationScript() + '\\n' +
             renderFarmPreHydrationHoldScript() +
@@ -13180,7 +13199,7 @@ ${
   \${viewportTags}
   \${hasFavicon ? "" : '<link rel="icon" href="data:,">'}
   \${suppressDefaultTitle ? "" : "<title>" + title + "</title>"}\${metaTags}\${rendererHead ? "\\n  " + rendererHead : ""}
-  <link rel="stylesheet" href="/__farm_client_css_href__">\${farmBootsClient ? "" : renderFarmClientModulePreloads(html, route.clientModule, farmNavigationRequest)}
+  \${renderFarmClientStylesheet()}\${farmBootsClient ? "" : renderFarmClientModulePreloads(html, route.clientModule, farmNavigationRequest)}
   \${renderFarmRendererHydrationScript()}
 \${renderFarmPreHydrationHoldScript()}</head>
 <body>
@@ -13557,7 +13576,7 @@ ${
           "<head" + attrs + ">" +
           headContent.replace(/<title\\b[^>]*>[\\s\\S]*?<\\/title>\\s*/gi, "") +
           "\\n  <title>" + notFoundMetadata.title + "</title>" + notFoundMetadata.tags + "\\n</head>")
-        .replace(/<head([^>]*)>/i, function(match, attrs) { return '<head' + attrs + '>\\n  <link rel="stylesheet" href="/__farm_client_css_href__">' + renderFarmClientModulePreloads(fullDocument); })
+        .replace(/<head([^>]*)>/i, function(match, attrs) { return '<head' + attrs + '>\\n  ' + renderFarmClientStylesheet() + renderFarmClientModulePreloads(fullDocument); })
         .replace(/<\\/head>/i, () => renderFarmRendererHydrationScript() + '\\n</head>')
         .replace(
           /<\\/body>/i,
@@ -13575,7 +13594,7 @@ ${
   <meta charset="UTF-8">
   \${notFoundMetadata.viewport}
   \${notFoundMetadata.hasFavicon ? "" : '<link rel="icon" href="data:,">'}
-  <link rel="stylesheet" href="/__farm_client_css_href__">\${renderFarmClientModulePreloads(html)}
+  \${renderFarmClientStylesheet()}\${renderFarmClientModulePreloads(html)}
   <title>\${notFoundMetadata.title}</title>\${notFoundMetadata.tags}
   \${renderFarmRendererHydrationScript()}
 </head>
@@ -14418,6 +14437,9 @@ async function buildNitroUniversal(
   const encodedDocsModulePreloads = encodeFarmDocsModulePreloads(docsModulePreloads);
   const encodedClientModulePreloads = encodeFarmClientModulePreloads(clientModulePreloads);
   const encodedClientRouteTable = encodeFarmBuildJSONPlaceholder(clientRouteTable);
+  const encodedClientStylesheet = encodeFarmBuildJSONPlaceholder(
+    await resolveClientStylesheetLinkHref(clientOutputDir, clientCssHref),
+  );
   const encodedMobileShellClient = shouldBuildFarmMobileClient(config)
     ? encodeFarmMobileShellClient(
         await finalizeFarmMobileClient({
@@ -14454,6 +14476,11 @@ async function buildNitroUniversal(
     }
     // split/join rather than replaceAll: the package's lib target predates
     // ES2021, and a fixed token needs no regex escaping either way.
+    if (output.code.includes(FARM_CLIENT_STYLESHEET_PLACEHOLDER)) {
+      output.code = output.code
+        .split(FARM_CLIENT_STYLESHEET_PLACEHOLDER)
+        .join(encodedClientStylesheet);
+    }
     if (output.code.includes(FARM_CLIENT_CSS_HREF_PLACEHOLDER)) {
       output.code = output.code.split(FARM_CLIENT_CSS_HREF_PLACEHOLDER).join(clientCssHref);
     }

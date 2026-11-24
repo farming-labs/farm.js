@@ -11,6 +11,8 @@ export const FARM_CLIENT_CSS_HREF_PLACEHOLDER = "/__farm_client_css_href__";
 export const FARM_CLIENT_JS_SRC_PLACEHOLDER = "/__farm_client_js_src__";
 /** Islands mode's boot entry (RFC 0003, section 10). */
 export const FARM_CLIENT_BOOT_SRC_PLACEHOLDER = "/__farm_client_boot_src__";
+/** The stylesheet a document links, as JSON: its href, or null for an app without CSS. */
+export const FARM_CLIENT_STYLESHEET_PLACEHOLDER = "__farm_client_stylesheet__";
 
 async function hashAndCopy(
   sourcePath: string,
@@ -50,6 +52,25 @@ export async function resolveHashedClientCssHref(clientOutputDir: string): Promi
     (hash) => `farm-client-h${hash}.css`,
   );
   return name ? `/assets/${name}` : "/farm-client.css";
+}
+
+/**
+ * The href documents link the client stylesheet by, or null when the build has no CSS. A
+ * style-free app still gets an empty farm-client.css, but a link to it would hold the first paint,
+ * and the module scripts after it, for a round trip.
+ */
+export async function resolveClientStylesheetLinkHref(
+  clientOutputDir: string,
+  clientCssHref: string,
+): Promise<string | null> {
+  const fs = await import("fs/promises");
+  try {
+    const stylesheet = await fs.stat(path.join(clientOutputDir, "farm-client.css"));
+    return stylesheet.size > 0 ? clientCssHref : null;
+  } catch {
+    // Nothing to link: validateClientBuildOutput writes the file unless the build failed.
+    return null;
+  }
 }
 
 /**
