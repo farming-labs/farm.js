@@ -137,6 +137,23 @@ describe("packages the server graph bundles", () => {
       { name: "tweet-kit", prebundle: false },
     ]);
   });
+
+  it("include a package that defines fonts, so Farm's font compiler runs on its files", () => {
+    const root = project({
+      // Shaped like @farming-labs/graft: `localFont` called in the package's own module.
+      "node_modules/font-kit/package.json":
+        '{"name":"font-kit","type":"module","exports":{"./sans":"./farm/sans.js"}}',
+      "node_modules/font-kit/farm/sans.js":
+        'import { localFont } from "@farm.js/core/font";\nexport const Sans = localFont({ src: "../fonts/Sans.woff2", family: "Sans" });\n',
+      "node_modules/plain-kit/package.json": '{"name":"plain-kit","main":"index.js"}',
+      "node_modules/plain-kit/index.js": 'import { definePage } from "@farm.js/core";\n',
+      "src/app/layout.tsx":
+        'import { Sans } from "font-kit/sans";\nimport { definePage } from "plain-kit";\n',
+    });
+    expect(collectFarmServerBundledPackageInfo(root)).toEqual([
+      { name: "font-kit", prebundle: false, fonts: true },
+    ]);
+  });
 });
 
 describe("test files", () => {
@@ -211,6 +228,24 @@ describe("client pre-bundling under React Server Components", () => {
     expect(resolveFarmClientOptimizeDeps(path.join(root, "src"), root)).toEqual({
       include: ["rq > rq-core"],
       exclude: ["rq", "ui"],
+    });
+  });
+
+  it("leaves out a package that defines fonts, which only Farm's font compiler can build", () => {
+    const root = project({
+      "node_modules/font-kit/package.json":
+        '{"name":"font-kit","type":"module","exports":{"./mono":"./farm/mono.js"}}',
+      "node_modules/font-kit/farm/mono.js":
+        'import { localFont } from "@farm.js/core/font";\nexport const Mono = localFont({ src: "../fonts/Mono.woff2", family: "Mono" });\n',
+      "node_modules/plain-kit/package.json":
+        '{"name":"plain-kit","type":"module","main":"index.js"}',
+      "node_modules/plain-kit/index.js": "export const plain = 1;\n",
+      "src/badge.tsx":
+        '"use client";\nimport { Mono } from "font-kit/mono";\nimport { plain } from "plain-kit";\n',
+    });
+    expect(resolveFarmClientOptimizeDeps(path.join(root, "src"), root)).toEqual({
+      include: ["plain-kit"],
+      exclude: ["font-kit"],
     });
   });
 });

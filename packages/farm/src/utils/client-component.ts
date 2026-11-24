@@ -2918,7 +2918,8 @@ export function getFarmClientReachableModules(directory: string, root: string): 
  * `collectFarmClientPackageImports`, except packages whose `react-server` build re-exports a
  * `"use client"` module. The RSC plugin loads that module straight from the package, so those
  * packages stay out of the pre-bundle (their own dependencies stay in, through `pkg > dep`) and
- * the browser gets one copy of each.
+ * the browser gets one copy of each. A package that defines fonts stays out too, so Farm's font
+ * compiler transforms it.
  */
 export function resolveFarmClientOptimizeDeps(
   directory: string,
@@ -2929,6 +2930,11 @@ export function resolveFarmClientOptimizeDeps(
   const exclude = new Set<string>();
   const imports = scanFarmPackageImports(directory, root);
   for (const specifier of imports.client) {
+    const fonts = findFarmServerBundledPackage(importer, specifier);
+    if (fonts?.fonts) {
+      exclude.add(fonts.name);
+      continue;
+    }
     const manifest = findFarmPackageManifest(importer, specifier);
     if (
       manifest &&
