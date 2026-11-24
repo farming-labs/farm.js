@@ -50,11 +50,21 @@ export declare function depsChanged(
   next: readonly unknown[] | null | undefined,
 ): boolean;
 
+export interface Context<T> {
+  readonly defaultValue: T;
+  /** Gives the components below it `value`. */
+  readonly Provider: Component<{ value: T; children?: Children }>;
+}
+export declare function createContext<T>(defaultValue: T): Context<T>;
+/** The value of the nearest `Provider` above the component, or the context's default. */
+export declare function useContext<T>(context: Context<T>): T;
+
 export interface Dispatcher {
   useState<T>(initial: T | (() => T)): [T, SetState<T>];
   useEffect(effect: () => void | (() => void), deps?: readonly unknown[]): void;
   useRef<T>(initial: T): { current: T };
   useMemo<T>(compute: () => T, deps?: readonly unknown[]): T;
+  useContext<T>(context: Context<T>): T;
 }
 export declare const internals: {
   render<P>(component: Component<P>, props: P, dispatcher: Dispatcher): Children;

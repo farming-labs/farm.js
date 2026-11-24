@@ -1,7 +1,12 @@
 import path from "node:path";
 import type { UserConfig as ViteUserConfig } from "vite";
 import { isPackageSpecifier } from "../build/node-module-bundle";
-import { isFarmRendererDisabled, isReactRenderer, type FarmRenderer } from "../renderer";
+import {
+  getFarmRendererCapabilities,
+  isFarmRendererDisabled,
+  isReactRenderer,
+  type FarmRenderer,
+} from "../renderer";
 import { findFarmAppPackageDir } from "../server-components-status";
 
 const FARM_CLIENT_ENTRY_PATTERN =
@@ -74,6 +79,13 @@ export function getFarmClientOptimizeDepsInclude(renderer?: FarmRenderer, root?:
       isPackageSpecifier(renderer.client) &&
       isInstalledPackage(root, renderer.client)
         ? [renderer.client]
+        : []),
+      // The islands runtime of a renderer that declares `islands`, which only Farm's entry imports.
+      ...(renderer && !isReactRenderer(renderer) && getFarmRendererCapabilities(renderer).islands
+        ? [
+            "@farm.js/core/internal/renderer-islands",
+            "@farm.js/core > @farm.js/islx/islands/client",
+          ]
         : []),
     ]),
   );

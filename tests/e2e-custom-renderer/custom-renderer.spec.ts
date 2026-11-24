@@ -218,3 +218,83 @@ test("API routes answer next to leaf pages", async ({ request }) => {
   expect(response.status()).toBe(200);
   expect(await response.json()).toEqual({ crops: ["wheat", "barley", "rye"], renderer: "leaf" });
 });
+
+test("client components in a server page hydrate as islands, each when its strategy says", async ({
+  page,
+}) => {
+  const errors: string[] = [];
+  page.on("pageerror", (error) => errors.push(error.message));
+  page.on("console", (message) => {
+    if (message.type() === "error") errors.push(message.text());
+  });
+  const response = await page.goto("/islands");
+  const html = await response!.text();
+  // The module's `island` export is the default; client:* overrides it where a Counter is used.
+  expect(html).toContain('export="Counter" props="fi0" strategy="load"');
+  expect(html).toContain('export="Counter" props="fi1" strategy="idle"');
+  expect(html).toContain('export="Counter" props="fi2" strategy="visible"');
+  expect(html).not.toContain("client:");
+
+  await expect(page.locator(".shell")).toHaveAttribute("data-hydrated", "true");
+  const load = page.locator("#island-load");
+  const idle = page.locator("#island-idle");
+  const visible = page.locator("#island-visible");
+  await expect(load).toHaveAttribute("data-hydrated", "true");
+  await expect(idle).toHaveAttribute("data-hydrated", "true");
+  // Props crossed through Farm's codec: the Date and the Map arrive as themselves.
+  await expect(load.locator(".props")).toHaveText("2026-03-01, 2 crops");
+  // Below the fold, the third waits for the page to scroll to it.
+  await expect(visible.locator(".props")).toHaveText("server");
+  await expect(visible).not.toHaveAttribute("data-hydrated", "true");
+
+  // Each island is its own root, apart from the layout's.
+  await load.getByRole("button").click();
+  await load.getByRole("button").click();
+  await expect(load.getByRole("button")).toHaveText("Starts at once: 2");
+  await expect(idle.getByRole("button")).toHaveText("Starts when the browser is idle: 0");
+  await page.locator("#layout-counter").click();
+  await expect(page.locator("#layout-counter")).toHaveText("Layout clicks: 1");
+  await expect(load.getByRole("button")).toHaveText("Starts at once: 2");
+
+  await visible.scrollIntoViewIfNeeded();
+  await expect(visible).toHaveAttribute("data-hydrated", "true");
+  await visible.getByRole("button").click();
+  await expect(visible.getByRole("button")).toHaveText("Starts when scrolled to: 1");
+  expect(errors).toEqual([]);
+});
+
+test("a client navigation starts a server page's islands, and leaving it ends them", async ({
+  page,
+}) => {
+  const errors: string[] = [];
+  page.on("pageerror", (error) => errors.push(error.message));
+  page.on("console", (message) => {
+    if (message.type() === "error") errors.push(message.text());
+  });
+  await gotoHydrated(page, "/about");
+  await markDocument(page);
+  const layoutCounter = page.locator("#layout-counter");
+  await layoutCounter.click();
+
+  await page.getByRole("link", { name: "Islands" }).click();
+  await expect(page).toHaveURL(/\/islands$/);
+  const load = page.locator("#island-load");
+  await expect(load).toHaveAttribute("data-hydrated", "true");
+  await load.getByRole("button").click();
+  await expect(load.getByRole("button")).toHaveText("Starts at once: 1");
+  await expect(layoutCounter).toHaveText("Layout clicks: 1");
+
+  await page.getByRole("link", { name: "About" }).click();
+  await expect(page.locator("#about")).toBeVisible();
+  await expect(load).toHaveCount(0);
+
+  // Back on the page, its islands start again from the server's HTML.
+  await page.getByRole("link", { name: "Islands" }).click();
+  await expect(load).toHaveAttribute("data-hydrated", "true");
+  await expect(load.getByRole("button")).toHaveText("Starts at once: 0");
+  await load.getByRole("button").click();
+  await expect(load.getByRole("button")).toHaveText("Starts at once: 1");
+  await expect(layoutCounter).toHaveText("Layout clicks: 1");
+  expect(await readDocumentMark(page)).toBe("first");
+  expect(errors).toEqual([]);
+});

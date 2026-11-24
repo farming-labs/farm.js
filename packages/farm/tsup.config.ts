@@ -88,6 +88,7 @@ const entry = {
   "internal/islands-action-client": "src/islands-action-client.ts",
   "internal/islands-boot": "src/client/islands-boot.ts",
   "internal/islands-server": "src/client/islands-server.ts",
+  "internal/renderer-islands": "src/client/renderer-islands.ts",
   "internal/islx-client": "src/islx/client.ts",
   "internal/server-fn-transform": "src/server-fn-transform.ts",
   "internal/native-server-fns": "src/mobile/native-server-fns.ts",

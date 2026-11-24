@@ -17,6 +17,7 @@ export type RoutePath =
   | "/about"
   | "/broken"
   | `/crops/${string}`
+  | "/islands"
   | "/notes"
   | "/recovers"
   | "/streaming";
@@ -25,6 +26,7 @@ export type RoutePattern =
   | "/about"
   | "/broken"
   | "/crops/[name]"
+  | "/islands"
   | "/notes"
   | "/recovers"
   | "/streaming";
@@ -33,6 +35,7 @@ export type RouteModulePattern =
   | "/about"
   | "/broken"
   | "/crops/[name]"
+  | "/islands"
   | "/notes"
   | "/recovers"
   | "/streaming";

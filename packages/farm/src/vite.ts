@@ -315,6 +315,7 @@ import {
   REACT_RENDERER,
   resolveFarmComponentExtensions,
   resolveFarmRenderer,
+  usesFarmRendererIslands,
   resolveFarmRendererAppSetup,
 } from "./renderer";
 import type { FarmRenderer } from "./renderer";
@@ -1646,6 +1647,12 @@ export function transformIsolatedClientBoundaryModule(options: {
   inferredInteraction?: boolean;
   /** The specifier the module imports a Farm runtime module by (see farmPlugin's transform). */
   runtimeModule?: (specifier: string) => string;
+  /**
+   * The server module of a renderer that declares `capabilities.islands` (RFC 0012), server build
+   * only: each component export is wrapped with that module's `withIsland` instead of React's
+   * boundary.
+   */
+  withIsland?: string;
 }): string | null {
   const runtimeModule = options.runtimeModule ?? ((specifier: string) => specifier);
   const islxReact = JSON.stringify(runtimeModule("@farm.js/core/internal/islx-react"));
@@ -1690,11 +1697,13 @@ export function transformIsolatedClientBoundaryModule(options: {
     const wrapperName = `__farm_isolated_boundary_${safeName || "default"}__`;
     wrapperStatements.push(
       // Islands mode renders through islx; the older isolated hydration keeps Farm's boundary.
-      options.slots && options.inferredInteraction
-        ? `const ${wrapperName} = __farm_islx_island__(${localName}, ${JSON.stringify(options.moduleReference)}, ${JSON.stringify(exportName)}, "interaction", { inferred: true });`
-        : options.slots
-          ? `const ${wrapperName} = __farm_islx_island__(${localName}, ${JSON.stringify(options.moduleReference)}, ${JSON.stringify(exportName)}, ${JSON.stringify(options.islandStrategy)});`
-          : `const ${wrapperName} = __farm_create_isolated_boundary__(__farm_isolated_react__, ${localName}, ${JSON.stringify(options.moduleReference)}, ${JSON.stringify(exportName)}, ${JSON.stringify(options.islandStrategy)});`,
+      options.withIsland
+        ? `const ${wrapperName} = __farm_with_island__(${localName}, { src: ${JSON.stringify(options.moduleReference)}, export: ${JSON.stringify(exportName)}, strategy: ${JSON.stringify(options.islandStrategy)} });`
+        : options.slots && options.inferredInteraction
+          ? `const ${wrapperName} = __farm_islx_island__(${localName}, ${JSON.stringify(options.moduleReference)}, ${JSON.stringify(exportName)}, "interaction", { inferred: true });`
+          : options.slots
+            ? `const ${wrapperName} = __farm_islx_island__(${localName}, ${JSON.stringify(options.moduleReference)}, ${JSON.stringify(exportName)}, ${JSON.stringify(options.islandStrategy)});`
+            : `const ${wrapperName} = __farm_create_isolated_boundary__(__farm_isolated_react__, ${localName}, ${JSON.stringify(options.moduleReference)}, ${JSON.stringify(exportName)}, ${JSON.stringify(options.islandStrategy)});`,
     );
     wrapperStatements.push(
       isDefault ? `export default ${wrapperName};` : `export { ${wrapperName} as ${exportName} };`,
@@ -1803,11 +1812,14 @@ export function transformIsolatedClientBoundaryModule(options: {
   // Names are a guess: an uppercase export can be a constant (`SURFACES`) or a context, which
   // stay as they are.
   const isComponent = `(value) => typeof value === "function" || (typeof value === "object" && value !== null && [Symbol.for("react.memo"), Symbol.for("react.forward_ref"), Symbol.for("react.lazy")].includes(value.$$typeof))`;
-  const runtimeImport = options.slots
-    ? options.browser
-      ? "const __farm_islx_island__ = (component) => component;"
-      : `import { createIsland as __farm_islx_create_island__ } from ${islxReact};\nconst __farm_is_component__ = ${isComponent};\nconst __farm_islx_island__ = (component, ...rest) => __farm_is_component__(component) ? __farm_islx_create_island__(component, ...rest) : component;`
-    : `import * as __farm_isolated_react__ from "react";\nimport { createFarmIsolatedClientBoundary as __farm_create_boundary__ } from ${isolatedBoundary};\nconst __farm_is_component__ = ${isComponent};\nconst __farm_create_isolated_boundary__ = (react, component, ...rest) => __farm_is_component__(component) ? __farm_create_boundary__(react, component, ...rest) : component;`;
+  const runtimeImport = options.withIsland
+    ? // The renderer's withIsland returns a value that isn't one of its components unchanged.
+      `import { withIsland as __farm_renderer_with_island__ } from ${JSON.stringify(options.withIsland)};\nconst __farm_with_island__ = (component, reference) => component !== null && (typeof component === "function" || typeof component === "object") ? __farm_renderer_with_island__(component, reference) : component;`
+    : options.slots
+      ? options.browser
+        ? "const __farm_islx_island__ = (component) => component;"
+        : `import { createIsland as __farm_islx_create_island__ } from ${islxReact};\nconst __farm_is_component__ = ${isComponent};\nconst __farm_islx_island__ = (component, ...rest) => __farm_is_component__(component) ? __farm_islx_create_island__(component, ...rest) : component;`
+      : `import * as __farm_isolated_react__ from "react";\nimport { createFarmIsolatedClientBoundary as __farm_create_boundary__ } from ${isolatedBoundary};\nconst __farm_is_component__ = ${isComponent};\nconst __farm_create_isolated_boundary__ = (react, component, ...rest) => __farm_is_component__(component) ? __farm_create_boundary__(react, component, ...rest) : component;`;
   return `${runtimeImport}\n${output}\n${wrapperStatements.join("\n")}\nexport const __farm_client_boundary_originals__ = Object.freeze({ ${originalEntries.join(", ")} });\n`;
 }
 
@@ -5769,6 +5781,7 @@ export { manifest };
 
         const currentConfig = (farmApp?.getConfig() ?? options) as FarmVitePluginOptions;
         let isolatedModuleReference: string | null = null;
+        let rendererIslandModule = false;
         const root = currentConfig.root || server?.config.root || process.cwd();
         const cleanId = id.split("?", 1)[0];
         const selectedIsolatedModules =
@@ -5821,6 +5834,33 @@ export { manifest };
             );
           }
           transformedCode = transformedBoundary;
+        } else if (
+          selectedForIsolatedHydration &&
+          usesFarmRendererIslands(currentConfig) &&
+          (isIsolatableClientBoundarySource(clientBoundarySource) ||
+            cleanId.replace(/\\/g, "/").includes(FARM_CLIENT_REFERENCE_DIRECTORY))
+        ) {
+          // A renderer that declares `islands` (RFC 0012): the server graph wraps each export with
+          // the renderer's withIsland, and the browser imports the module as written.
+          rendererIslandModule = true;
+          if (transformOptions?.ssr === true) {
+            const renderer = resolveFarmRenderer(currentConfig.renderer);
+            const transformedBoundary = transformIsolatedClientBoundaryModule({
+              code: transformedCode,
+              moduleReference: toViteModuleId(cleanId, root),
+              islandStrategy: getIslandStrategyExport(clientBoundarySource) ?? "load",
+              parse: (source) => this.parse(source) as unknown as FarmModuleAstNode,
+              withIsland: renderer.server,
+            });
+            if (!transformedBoundary) {
+              this.error(
+                `[Farm.js] Could not compile the island module ${cleanId} for renderer ` +
+                  `\`${renderer.name}\`. Set experimental.isolatedClientHydration = "off" to ` +
+                  `hydrate its routes whole.`,
+              );
+            }
+            transformedCode = transformedBoundary;
+          }
         }
 
         // Store client component for later injection
@@ -5864,9 +5904,12 @@ export { manifest };
         // place across the page and isolated island roots alike. A second
         // accept here would re-render the module's default export as the
         // whole root and do nothing for a module with only named exports.
+        // An island of a renderer that declares `islands` is its own root, which the route's root
+        // doesn't render: its update reloads the page instead.
         const hmrCode =
           transformOptions?.ssr ||
           reactRefreshActive ||
+          rendererIslandModule ||
           !shouldEmitFarmClientRootHmr(currentConfig.renderer)
             ? ""
             : `
@@ -7031,18 +7074,60 @@ function generateClientCode(
       appSetupPath
       ? `import * as __farmRendererClient from ${JSON.stringify(renderer.client)}\nimport { hydrateRoot, createRoot, configureApp as __farmConfigureApp } from ${JSON.stringify(renderer.client)}\nimport __farmAppSetup from ${JSON.stringify(toViteModuleId(appSetupPath, root))}\nconst React = { ...__farmRendererClient }\n__farmConfigureApp(__farmAppSetup)`
       : `import * as __farmRendererClient from ${JSON.stringify(renderer.client)}\nimport { hydrateRoot, createRoot } from ${JSON.stringify(renderer.client)}\nconst React = { ...__farmRendererClient }`;
+  // A renderer that declares `islands` (RFC 0012) starts its islands with islx's runtime through
+  // its own client module, under the same names as React's runtime.
+  const rendererIslands =
+    isolatedHydrationEnabled &&
+    !islandValues &&
+    !isReactRenderer(renderer) &&
+    getFarmRendererCapabilities(renderer).islands;
   // Islands mode runs on islx (internal/islands-runtime), under the same names.
-  const isolatedHydrationImport = isolatedHydrationEnabled
-    ? `${islandValues ? "import { createFarmIsolatedHydrationRuntime, createFarmServerPageBoundary, wrapFarmIsolatedClientGraph, createFarmServerTreeElement, createFarmServerTreeLayout } from '@farm.js/core/internal/islands-runtime'" : "import { createFarmIsolatedHydrationRuntime, createFarmServerPageBoundary, wrapFarmIsolatedClientGraph } from '@farm.js/core/internal/isolated-boundary'\nimport { createFarmServerTreeElement } from '@farm.js/core/internal/server-tree'"}`
-    : "";
+  const isolatedHydrationImport = rendererIslands
+    ? "import { createFarmRendererIslandRuntime } from '@farm.js/core/internal/renderer-islands'"
+    : isolatedHydrationEnabled
+      ? `${islandValues ? "import { createFarmIsolatedHydrationRuntime, createFarmServerPageBoundary, wrapFarmIsolatedClientGraph, createFarmServerTreeElement, createFarmServerTreeLayout } from '@farm.js/core/internal/islands-runtime'" : "import { createFarmIsolatedHydrationRuntime, createFarmServerPageBoundary, wrapFarmIsolatedClientGraph } from '@farm.js/core/internal/isolated-boundary'\nimport { createFarmServerTreeElement } from '@farm.js/core/internal/server-tree'"}`
+      : "";
   const docsAdapterImportBlock = generateFarmDocsAdapterClientRuntime(
     docsAdapterUI,
     docsConfigModule,
     // Config resolution keeps an adapter to its UI's renderer, so this is the UI's renderer too.
     isReactRenderer(renderer) ? undefined : renderer.client,
   );
-  const isolatedHydrationRuntime = isolatedHydrationEnabled
-    ? `const farmIsolatedHydrationRuntime = createFarmIsolatedHydrationRuntime({
+  const isolatedHydrationRuntime = rendererIslands
+    ? `const farmIsolatedHydrationRuntime = createFarmRendererIslandRuntime({
+  renderer: React,
+  load: (reference) => import(/* @vite-ignore */ farmModuleUrl(reference)),
+  schedule: scheduleFarmIslandHydration,
+});
+window.__FARM_ISOLATED_HYDRATION_RUNTIME__ = farmIsolatedHydrationRuntime;
+// A hydrating layout keeps a page that doesn't hydrate as server HTML in a plain element. The
+// renderer's root never renders the page's islands, so the runtime starts them after each render.
+const FarmServerPage = 'div';
+// Island modules reach the browser as written, so a client tree has nothing to mark.
+function wrapFarmIsolatedClientGraph(_React, element) { return element; }
+
+function disposeFarmIsolatedClientBoundaries(scope) {
+  farmIsolatedHydrationRuntime.dispose(scope);
+}
+
+async function hydrateFarmIsolatedClientBoundaries(scope = document, signal) {
+  await farmIsolatedHydrationRuntime.hydrate(scope, signal);
+}
+
+// After a hydrating layout renders another page: release the islands whose markup it replaced,
+// and start the new page's.
+async function hydrateFarmLayoutPageIslands(container) {
+  farmIsolatedHydrationRuntime.prune();
+  await hydrateFarmIsolatedClientBoundaries(container);
+}
+
+async function createFarmServerTreePageElement() { return null; }
+async function buildFarmTreeLayouts() { return true; }
+function getFarmTreeLayoutComponent() { return null; }
+let farmLastRouteState = null;
+function rerenderFarmTreeLayouts() {}`
+    : isolatedHydrationEnabled
+      ? `const farmIsolatedHydrationRuntime = createFarmIsolatedHydrationRuntime({
   ReactRuntime: React,
   hydrateRoot,
   load: (reference) => import(/* @vite-ignore */ farmModuleUrl(reference)),
@@ -7089,7 +7174,7 @@ function rerenderFarmTreeLayouts() {
 }`
     : "async function buildFarmTreeLayouts() { return true; }\nfunction getFarmTreeLayoutComponent() { return null; }\nlet farmLastRouteState = null;\nfunction rerenderFarmTreeLayouts() {}"
 }`
-    : `async function createFarmServerTreePageElement() { return null; }
+      : `async function createFarmServerTreePageElement() { return null; }
 async function buildFarmTreeLayouts() { return true; }
 function getFarmTreeLayoutComponent() { return null; }
 let farmLastRouteState = null;
@@ -8709,6 +8794,7 @@ async function renderPage(pageData, info) {
           loadingModulePath: route.loadingModulePath,
         },
       );
+      ${rendererIslands ? "await hydrateFarmLayoutPageIslands(container);" : ""}
     } else {
       ${isolatedHydrationEnabled ? "let isolatedHydrationScope = container;" : ""}
       ${islandValues ? "const keepValues = keepFarmIslandValues(container);" : ""}
@@ -8740,9 +8826,11 @@ async function renderPage(pageData, info) {
       const hydrationController = new AbortController();
       if (
         shouldHydrate${
-          isolatedHydrationEnabled
-            ? " || (hasIsolatedClientBoundaries && !layoutShouldHydrate)"
-            : ""
+          rendererIslands
+            ? " || hasIsolatedClientBoundaries"
+            : isolatedHydrationEnabled
+              ? " || (hasIsolatedClientBoundaries && !layoutShouldHydrate)"
+              : ""
         }
       ) {
         pendingPageHydrationController = hydrationController;
@@ -8783,7 +8871,7 @@ async function renderPage(pageData, info) {
       }
       ${
         isolatedHydrationEnabled
-          ? `if (hasIsolatedClientBoundaries && !layoutShouldHydrate) {
+          ? `if (hasIsolatedClientBoundaries${rendererIslands ? "" : " && !layoutShouldHydrate"}) {
         await hydrateFarmIsolatedClientBoundaries(
           isolatedHydrationScope,
           hydrationController.signal,
@@ -9018,8 +9106,7 @@ function farmIslandsOnlyDocument() {
       ${
         isolatedHydrationEnabled
           ? `const isolatedHydration =
-        hasIsolatedClientBoundaries &&
-        !layoutShouldHydrate
+        hasIsolatedClientBoundaries${rendererIslands ? "" : " &&\n        !layoutShouldHydrate"}
           ? hydrateFarmIsolatedClientBoundaries(rootContainer, hydrationController.signal)
           : Promise.resolve();
       await Promise.all([pageHydration, isolatedHydration]);`
