@@ -300,4 +300,5 @@ tree helpers on islx 0.0.25's published build, the call path on a split of islx 
 - **The largest piece left** is islx's hydration runtime (`src/react/hydrate.ts`, 1,039 source
   lines). Every page receives its hot module `update`, the `carryOver` of island state across
   navigations, streamed props (`islandPromise`) and the reviver for elements an action returns.
-  Loading those on use is islx work and needs an islx release. Its size is not measured.
+  Removing the update, the carry-over and the reviver outright saves 454 bytes, so loading them
+  on use is not worth an islx release either.
