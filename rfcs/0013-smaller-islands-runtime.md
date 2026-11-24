@@ -189,11 +189,8 @@ from these changes alone; see Open questions.
 
 ## Open questions
 
-- **The other half.** islx's `react/client`, island chunk and decoder are about 30 KB raw. Farm's
-  islands runtime imports islx's server tree helpers (`renderServerTree`,
-  `createServerTreeLayout`, `createServerTreeElement`, `Outlet`) for layouts that hydrate as one
-  root. A page of islands only does not call them, but how much of islx's chunks they hold is not
-  measured yet; islx ships no source maps at function level.
+- **The other half.** Measured: neither the server tree split nor islx's call-path split is worth
+  an islx release. See "What is left" under Results.
 - **The untraced task time.** islands spends 36 ms more in `RunTask` self time on localhost. It
   may be the cost of instantiating eight modules instead of three; that is not verified.
 - **The probe is one page.** The verification plan below adds it to the benchmark, so the
@@ -224,7 +221,8 @@ What changed:
 - A document whose markup holds an action reference (`"$":"a"`, or a server form's `$F_REF_`
   field) lists them with its other modules.
 - A client module's server function reference starts the import when it is created.
-- islx's half (the transport and the codec's encoder) is not done.
+- islx's half (the transport and the codec's encoder) is dropped: it saves 370 bytes. See "What
+  is left" below.
 
 Measured on the probe (`hydration.mjs`, added to the benchmark with the `dash` section), 150 ms
 latency, 4x CPU throttling, interleaved, medians of 11 rounds in ms:
@@ -242,3 +240,64 @@ latency, 4x CPU throttling, interleaved, medians of 11 rounds in ms:
 - **Other sections:** unchanged in bytes and page errors (`measure.mjs`); their pages load the
   runtime only on an interaction.
 - **Remaining gap:** 59 ms to `rsc` at 1.6 Mbit/s.
+
+**Item 3 (#3148).**
+
+What changed:
+
+- Page and layout root rendering moves from the generated entry to a `farm-client-root` chunk. The
+  entry imports it when a route's root hydration is due, and the router imports it for a
+  navigation to a route that hydrates its page or a layout.
+- The preload manifest lists that chunk, and a document that hydrates a root preloads it. A route
+  of islands only never requests it.
+
+Measured against `main`, interleaved with an A/A copy of `main`, 150 ms latency, 4x CPU
+throttling:
+
+- **Bytes:** the entry went from 13.2 KB to 11.4 KB at brotli 11, and the root chunk is 2.5 KB.
+  First-load script on the other four sections went from 27.8 KB to 26.0 KB.
+- **Probe at 1.6 Mbit/s,** medians of 21: 876 ms before, 864 after, 876 for the A/A copy.
+- **First navigation,** medians of 7, in ms. No section is slower than both `main` and its A/A
+  copy:
+
+| Section | `main` | #3148 | A/A |
+| ------- | ------ | ----- | --- |
+| docs    | 76     | 78    | 79  |
+| shop    | 105    | 95    | 107 |
+| blog    | 155    | 150   | 165 |
+| guide   | 154    | 151   | 152 |
+
+**The three together.** #3136 (no stylesheet link when the client CSS is empty), #3143 and #3148
+merged on `main` locally, interleaved with an A/A copy of `main`, medians of 21, in ms:
+
+| Network                  | `rsc` | `islands`, before | `islands`, after | A/A |
+| ------------------------ | ----- | ----------------- | ---------------- | --- |
+| 1.6 Mbit/s, all hydrated | 809   | 885               | 856              | 899 |
+| 1.6 Mbit/s, first paint  | 264   | 408               | 260              | 416 |
+| Unlimited, all hydrated  | 483   | 578               | 506              | 563 |
+| Unlimited, first paint   | 276   | 420               | 284              | 416 |
+
+- **Scripts on the wire:** 66.9 KB for `rsc`, 82.3 KB before, 78.2 KB after.
+- **First paint** does not move with #3148 alone (392 ms before, 396 after). The change comes
+  from #3136 and #3143, which this run does not measure apart.
+- **Remaining gap:** 47 ms at 1.6 Mbit/s, down from 76. Unlimited, 23 ms, down from 95; the A/A
+  pair differed by 15 there.
+
+**What is left.** On the probe the whole difference is script: 81.4 KB on the wire for islands
+against 69.7 KB, with documents within 0.4 KB. Measured with esbuild and brotli 11: the server
+tree helpers on islx 0.0.25's published build, the call path on a split of islx `main` (v0.0.27):
+
+- **Server tree helpers:** `createServerTreeElement` and what only it reaches cost 235 bytes. A
+  split is not worth it.
+- **islx's call path:** moving the transport, the revival of returned elements and the codec's
+  `encode` to a module the first call imports takes 370 bytes off the first load. The decoding
+  they share stays, and the split adds a chunk.
+- **Engine code besides React and the page's components:** 25.2 KB for islands (the entry 11.5 KB,
+  the islands runtime 13.2 KB, the Rolldown runtime 0.5 KB). For `rsc`, its entry is 7.6 KB and
+  its runtime 0.5 KB, and about 5.8 KB of its main chunk is the Flight client and its glue. That
+  last figure is by difference: it assumes React, React DOM and the components cost `rsc` what
+  they cost islands (53.0 KB).
+- **The largest piece left** is islx's hydration runtime (`src/react/hydrate.ts`, 1,039 source
+  lines). Every page receives its hot module `update`, the `carryOver` of island state across
+  navigations, streamed props (`islandPromise`) and the reviver for elements an action returns.
+  Loading those on use is islx work and needs an islx release. Its size is not measured.
