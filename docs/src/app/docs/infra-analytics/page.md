@@ -95,6 +95,9 @@ Removing `FARMJS_API_KEY` also turns it off.
 - For each registered MCP tool call, including calls to the [docs engine](/docs/docs-engine)'s
   MCP endpoint: the tool name, whether it succeeded, its duration, and its arguments and result,
   linked to its request. See [Tool call payloads](#tool-call-payloads).
+- For each [WebMCP](/docs/plugins/webmcp) tool call a page reports: the same fields, under the
+  route template and path of the page it ran on instead of a request. See
+  [WebMCP tool calls](#webmcp-tool-calls).
 - The kind of client that sent each request, and its name when Farm knows it. See
   [Which client sent a request](#which-client-sent-a-request).
 
@@ -118,6 +121,35 @@ receive them. To stop sending them and keep the rest of the analytics:
 
 ```bash title=".env"
 FARMJS_TOOL_PAYLOADS=off
+```
+
+### WebMCP tool calls
+
+A [WebMCP](/docs/plugins/webmcp) tool runs in the visitor's browser, which the server never sees.
+With `webmcp()` in `plugins`, the page posts each call to its own server at
+`/_farm/webmcp/tool-calls` (below the base path) after the call settles. The server sends it on as
+a tool call marked `source: "webmcp"`, with:
+
+- the tool name, `success` or `error` (an input that fails `validate` is an error), and the time
+  the call took in the browser;
+- the route template and path of the page the tool ran on, matched the way a request for that page
+  is, or `/[unmatched]` when no route matches;
+- the browser that sent the report, such as Chrome, as in
+  [Which client sent a request](#which-client-sent-a-request);
+- the call's arguments and its result, under the same [payload rules](#tool-call-payloads),
+  including `FARMJS_TOOL_PAYLOADS=off`. The browser doesn't send a payload larger than 8 KB.
+
+A report isn't linked to a request and isn't counted as one. Reporting never delays or changes the
+tool's result, and the page stops reporting once the server answers that it takes no reports, as
+it does without `FARMJS_API_KEY`.
+
+The endpoint takes only same-origin JSON, at most 32 KB, with exactly these fields. It's public
+like any page beacon: anyone who can load the site can send a report, so read WebMCP numbers as
+page analytics, not proof that an agent made each call. To stop reporting WebMCP calls and keep
+the rest of the analytics:
+
+```ts title="farm.config.ts"
+webmcp({ analytics: false });
 ```
 
 ### Which client sent a request
@@ -295,7 +327,8 @@ Only requests that reach Farm's server runtime are counted. Pages served as stat
 cache or blocked by a firewall before reaching the app, aren't. Turning analytics on doesn't make a
 static page dynamic. Unhandled exceptions with no final response aren't given an invented status.
 
-It runs on Node-compatible server runtimes. Edge runtimes are not supported yet.
+It runs on Node-compatible server runtimes. Edge runtimes are not supported yet, and pages there
+don't report WebMCP tool calls.
 
 This is separate from Farm's own [product telemetry](/docs/telemetry), which is controlled by the
 `telemetry` option, and from [OpenTelemetry](/docs/observability).

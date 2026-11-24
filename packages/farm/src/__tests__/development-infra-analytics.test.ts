@@ -117,6 +117,82 @@ describe("built-in Farm Infra analytics in development", () => {
     ]);
   }, 30_000);
 
+  it("sends the WebMCP calls a page reports under the page's route, and answers 404 unlinked", async () => {
+    const report = (port: number, pathname: string) =>
+      fetch(`http://localhost:${port}/_farm/webmcp/tool-calls`, {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          origin: `http://localhost:${port}`,
+          "sec-fetch-site": "same-origin",
+          "sec-fetch-dest": "empty",
+          "user-agent":
+            "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
+        },
+        body: JSON.stringify({
+          tool: "lookup_user",
+          outcome: "success",
+          durationMs: 7,
+          path: pathname,
+          arguments: { id: "ada-42", password: "private-password" },
+          result: { name: "Ada" },
+        }),
+      });
+    // webmcp() is named by its plugin name; the fixture can't import the package.
+    const config = `export default { plugins: [{ name: "farm:webmcp" }] };`;
+    const port = await listen(receiver);
+    const root = await createFixture(
+      `FARMJS_API_KEY=fti_${"w".repeat(43)}\nFARMJS_API_URL=http://127.0.0.1:${port}\n`,
+      config,
+    );
+    const server = await createServer({ root, images: { provider: "none" } });
+    servers.add(server);
+    await server.listen(0);
+    const address = server.httpServer?.address();
+    if (!address || typeof address === "string") throw new Error("Missing dev server address");
+    const response = await report(address.port, "/users/ada-42");
+    expect(`${response.status} ${await response.text()}`).toBe("204 ");
+    await Promise.all([...servers].map((value) => value.close()));
+    servers.clear();
+
+    const events = received.flatMap(({ body }) => JSON.parse(body).events);
+    expect(events).toEqual([
+      {
+        id: expect.any(String),
+        timestamp: expect.any(String),
+        kind: "mcp.tool",
+        source: "webmcp",
+        durationMs: 7,
+        route: "/users/[id]",
+        path: "/users/ada-42",
+        agent: {
+          family: "unknown",
+          category: "browser",
+          identity: "self-reported",
+          name: "Chrome",
+        },
+        tool: "lookup_user",
+        outcome: "success",
+        arguments: { id: "ada-42", password: "[redacted]" },
+        result: { name: "Ada" },
+      },
+    ]);
+
+    // Without FARMJS_API_KEY nothing takes reports, so the page stops sending them. loadConfig
+    // copied the first fixture's .env into process.env.
+    for (const name of INFRA_VARIABLES) delete process.env[name];
+    const unlinked = await createFixture("", config);
+    const unlinkedServer = await createServer({ root: unlinked, images: { provider: "none" } });
+    servers.add(unlinkedServer);
+    await unlinkedServer.listen(0);
+    const unlinkedAddress = unlinkedServer.httpServer?.address();
+    if (!unlinkedAddress || typeof unlinkedAddress === "string")
+      throw new Error("Missing dev server address");
+    const refused = await report(unlinkedAddress.port, "/users/ada-42");
+    await refused.arrayBuffer();
+    expect(refused.status).toBe(404);
+  }, 60_000);
+
   it("reports built-in endpoints and Markdown mirrors by a route template", async () => {
     const port = await listen(receiver);
     const root = await createFixture(

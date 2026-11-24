@@ -164,6 +164,7 @@ confirmation flow in the application.
 webmcp({
   unsupported: "warn",
   debug: true,
+  analytics: true,
 });
 ```
 
@@ -173,11 +174,31 @@ Adding `webmcp()` to `plugins` enables the browser adapter. Remove it from the a
 | ------------- | ----------------------------------- | -------------------------------------------------------------- |
 | `unsupported` | `"warn"` in dev, `"ignore"` in prod | Warn, ignore, or report an unavailable browser API.            |
 | `debug`       | `true` in dev, `false` in prod      | Expose `window.__FARM_WEBMCP__` and log tool execution errors. |
+| `analytics`   | `true`                              | Report each tool call to the app's server for Farm Infra.      |
 
 In debug mode, inspect current metadata with:
 
 ```js
 window.__FARM_WEBMCP__?.getTools();
+```
+
+## Analytics
+
+When the server is linked to [Farm Infra analytics](/docs/infra-analytics) with `FARMJS_API_KEY`,
+each tool call shows up in Farm Infra next to the app's MCP tools. After a call settles, the page
+posts the tool name, whether it succeeded, its duration, the page's path, and the call's arguments
+and result to its own server. The server matches the page's route, redacts secret-looking keys, and
+sends it on. See [WebMCP tool calls](/docs/infra-analytics#webmcp-tool-calls) for exactly what
+is sent.
+
+Reporting never delays or changes a tool's result, and it logs nothing. Without `FARMJS_API_KEY`
+the server answers 404 and the page stops reporting until it reloads.
+
+Reports come from visitors' browsers and aren't authenticated, like any page analytics: anyone who
+can load the site can send one. Turn reporting off with:
+
+```ts title="farm.config.ts"
+webmcp({ analytics: false });
 ```
 
 ## Browser testing
