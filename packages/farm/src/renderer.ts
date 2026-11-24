@@ -3,7 +3,7 @@ import { createRequire } from "node:module";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
 import type { FarmPresetRuntime } from "./deployment";
-import { isFarmIslandStrategy, type FarmIslandStrategy } from "./island";
+import type { FarmIslandStrategy } from "./island";
 
 /**
  * A rendering-library integration used by Farm's compiler, server renderer,
@@ -612,6 +612,22 @@ export function defineRenderer<const TRenderer extends FarmRenderer>(
   return renderer;
 }
 
+// A record, so the type-check fails until a strategy added to `FarmIslandStrategy` is added here.
+// No local module is imported at runtime: the renderer capability matrix test loads this file alone.
+const FARM_RENDERER_STRATEGIES: Readonly<Record<FarmIslandStrategy, true>> = {
+  load: true,
+  idle: true,
+  visible: true,
+  interaction: true,
+};
+
+function isFarmRendererStrategy(value: unknown): value is FarmIslandStrategy {
+  return (
+    typeof value === "string" &&
+    Object.prototype.hasOwnProperty.call(FARM_RENDERER_STRATEGIES, value)
+  );
+}
+
 export function resolveFarmRenderer(renderer?: FarmRenderer | false): FarmRenderer {
   // `renderer: false`, or a config that already resolved it, which config resolution runs again.
   if (renderer === false || isFarmRendererDisabled(renderer)) renderer = NO_RENDERER;
@@ -646,7 +662,7 @@ export function resolveFarmRenderer(renderer?: FarmRenderer | false): FarmRender
           issues.push(`\`hydration.${key}\` must be true or false.`);
         }
       }
-      if (options.strategy !== undefined && !isFarmIslandStrategy(options.strategy)) {
+      if (options.strategy !== undefined && !isFarmRendererStrategy(options.strategy)) {
         issues.push(
           `\`hydration.strategy\` must be "load", "idle", "visible", or "interaction"; got ${JSON.stringify(options.strategy)}.`,
         );
@@ -698,7 +714,7 @@ export function readFarmRendererHydration(
     result.hydrate = value.hydrate;
   }
   if (value.strategy !== undefined) {
-    if (!isFarmIslandStrategy(value.strategy)) {
+    if (!isFarmRendererStrategy(value.strategy)) {
       throw new TypeError(
         `${where} returned \`strategy: ${JSON.stringify(value.strategy)}\`. Return "load", "idle", "visible", or "interaction", or leave it out.`,
       );
