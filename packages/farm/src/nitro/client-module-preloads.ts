@@ -44,6 +44,13 @@ export interface FarmClientModulePreloadManifest {
    */
   actions?: number[];
   /**
+   * The chunks of islands mode's server trees, which rebuild a page or layout root in the browser,
+   * and their static imports outside `entry` and `renderer`. The islands runtime imports them with
+   * the first one (RFC 0013); a document whose markup holds a server tree loads them with its other
+   * modules.
+   */
+  serverTrees?: number[];
+  /**
    * Each dynamically imported module's chunk and that chunk's static imports outside
    * `entry`, by the module id the client loads it with (`/src/app/page.tsx`).
    */
@@ -79,6 +86,7 @@ export function collectFarmClientModulePreloads(
     rootModules?: string[];
     rendererModules?: string[];
     actionModules?: string[];
+    serverTreeModules?: string[];
   },
 ): FarmClientModulePreloadManifest | null {
   const chunks = Object.values(bundle).filter(
@@ -151,6 +159,8 @@ export function collectFarmClientModulePreloads(
   const rootFiles = dynamicFiles(options.rootModules);
   // A call needs a hydrated island, so the renderer has loaded before it.
   const actionFiles = dynamicFiles(options.actionModules, rendererFiles);
+  // A server tree rebuilds inside a root the renderer renders.
+  const serverTreeFiles = dynamicFiles(options.serverTreeModules, rendererFiles);
 
   return {
     files,
@@ -159,6 +169,7 @@ export function collectFarmClientModulePreloads(
     ...(rendererFiles.length > 0 ? { renderer: rendererFiles.map(index) } : {}),
     ...(rootFiles.length > 0 ? { root: rootFiles.map(index) } : {}),
     ...(actionFiles.length > 0 ? { actions: actionFiles.map(index) } : {}),
+    ...(serverTreeFiles.length > 0 ? { serverTrees: serverTreeFiles.map(index) } : {}),
     modules,
   };
 }
@@ -183,6 +194,8 @@ export function createFarmClientModulePreloadPlugin(options: {
   rendererImports?: string[];
   /** Specifiers of islands mode's action client, resolved from `rendererImporter`. */
   actionImports?: string[];
+  /** Specifiers of islands mode's server trees, resolved from `rendererImporter`. */
+  serverTreeImports?: string[];
   rendererImporter?: string;
 }) {
   return {
@@ -206,11 +219,17 @@ export function createFarmClientModulePreloadPlugin(options: {
       };
       const rendererModules = await resolve(options.rendererImports);
       const actionModules = await resolve(options.actionImports);
+      const serverTreeModules = await resolve(options.serverTreeImports);
       await fs.mkdir(options.buildDir, { recursive: true });
       await fs.writeFile(
         path.join(options.buildDir, FARM_CLIENT_MODULE_PRELOADS_FILE),
         JSON.stringify(
-          collectFarmClientModulePreloads(bundle, { ...options, rendererModules, actionModules }),
+          collectFarmClientModulePreloads(bundle, {
+            ...options,
+            rendererModules,
+            actionModules,
+            serverTreeModules,
+          }),
         ),
       );
     },

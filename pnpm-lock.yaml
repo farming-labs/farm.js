@@ -2404,8 +2404,8 @@ importers:
   packages/farm:
     dependencies:
       '@farm.js/islx':
-        specifier: 0.0.25
-        version: 0.0.25(react-dom@19.2.8)(react@19.2.8)(vite@8.3.4)
+        specifier: 0.0.30
+        version: 0.0.30(react-dom@19.2.8)(react@19.2.8)(vite@8.3.4)
       '@farming-labs/orm':
         specifier: 0.0.66
         version: 0.0.66
@@ -6987,8 +6987,8 @@ packages:
     requiresBuild: true
     optional: true
 
-  /@farm.js/islx@0.0.25(react-dom@19.2.8)(react@19.2.8)(vite@8.3.4):
-    resolution: {integrity: sha512-sB8efeUkS6N4MIY8yStxOTqjDi7EaBPiokKTPETj0Z1ImDuJa4aenvrn8dA4sRPvmoXTYAj8JKk93NHK9sQBVA==}
+  /@farm.js/islx@0.0.30(react-dom@19.2.8)(react@19.2.8)(vite@8.3.4):
+    resolution: {integrity: sha512-Bz8Z3mMNDF69MYNhhJebW5YaO9DyCpTHjuWPZYwoaW2O6eXLj3ZIb2tei6J/E05e/aZIZO/4f1cQEehrH0cGog==}
     engines: {node: ^20.19.0 || >=22.12.0}
     peerDependencies:
       '@tanstack/react-router': '>=1.170'
@@ -20809,7 +20809,7 @@ packages:
   /is-reference@3.0.3:
     resolution: {integrity: sha512-ixkJoqQvAP88E6wLydLGGqCJsrFUnqoH6HnaczB8XmDH1oaWU+xxdptvikTgaEhtZ53Ky6YXiBuUI2WXLMCwjw==}
     dependencies:
-      '@types/estree': 1.0.8
+      '@types/estree': 1.0.10
 
   /is-regex@1.2.1:
     resolution: {integrity: sha512-MjYsKHO5O7mCsmRGxWcLWheFqN9DJ/2TmngvjKXihe6efViPqc274+Fx/4fYj/r03+ESvBdTXK0V6tA3rgez1g==}

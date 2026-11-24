@@ -4,6 +4,7 @@ import path from "node:path";
 import { pathToFileURL } from "node:url";
 import type { FarmPresetRuntime } from "./deployment";
 import type { FarmIslandStrategy } from "./island";
+import type { FarmIslandReference } from "./renderer-islands";
 
 /**
  * A rendering-library integration used by Farm's compiler, server renderer,
@@ -205,6 +206,16 @@ export interface FarmRendererCapabilities {
    * hydration leaves the server's markup there.
    */
   hydrationFallback: boolean;
+  /**
+   * Whether the server module exports `withIsland`, so a client component rendered from server
+   * output hydrates as its own island when the app sets
+   * `experimental.isolatedClientHydration: "enabled"`. Experimental.
+   *
+   * Farm wraps each export of a client module in the server graph with `withIsland`, and the
+   * browser starts each island with the client module's `createElement` and `hydrateRoot`.
+   * Without it, those apps take the path they take today.
+   */
+  islands: boolean;
 }
 
 export interface FarmRendererCapabilitiesInput {
@@ -214,6 +225,8 @@ export interface FarmRendererCapabilitiesInput {
   reconcilesRerenders?: boolean;
   functionComponents?: boolean;
   hydrationFallback?: boolean;
+  /** The server module exports `withIsland`. Experimental; see `FarmRendererCapabilities`. */
+  islands?: boolean;
 }
 
 /** A client layout participating in a renderer-owned route update. */
@@ -284,6 +297,7 @@ const DEFAULT_RENDERER_CAPABILITIES: Readonly<FarmRendererCapabilities> = Object
   reconcilesRerenders: false,
   functionComponents: false,
   hydrationFallback: false,
+  islands: false,
 });
 
 export function getFarmRendererCapabilities(
@@ -322,6 +336,7 @@ export function getFarmRendererCapabilities(
       DEFAULT_RENDERER_CAPABILITIES.functionComponents,
     hydrationFallback:
       renderer?.capabilities?.hydrationFallback ?? DEFAULT_RENDERER_CAPABILITIES.hydrationFallback,
+    islands: renderer?.capabilities?.islands ?? DEFAULT_RENDERER_CAPABILITIES.islands,
   };
 }
 
@@ -357,12 +372,20 @@ function isMissingServerExport(key: string, value: unknown): boolean {
  */
 export function assertFarmRendererServerModule(
   runtime: unknown,
-  renderer: { readonly name: string; readonly server: string },
+  renderer: {
+    readonly name: string;
+    readonly server: string;
+    readonly capabilities?: Pick<FarmRendererCapabilitiesInput, "islands">;
+  },
 ): void {
   const exports = (runtime ?? {}) as Record<string, unknown>;
-  const missing = FARM_RENDERER_SERVER_EXPORTS.filter((key) =>
+  const missing: string[] = FARM_RENDERER_SERVER_EXPORTS.filter((key) =>
     isMissingServerExport(key, exports[key]),
   );
+  // A declared capability that's incomplete fails here, rather than as islands that never start.
+  if (renderer.capabilities?.islands === true && typeof exports.withIsland !== "function") {
+    missing.push("withIsland");
+  }
   if (missing.length === 0) return;
   const names = missing.map((key) => `\`${key}\``);
   const list =
@@ -371,6 +394,9 @@ export function assertFarmRendererServerModule(
       : `${names.slice(0, -1).join(", ")}${names.length > 2 ? "," : ""} and ${names[names.length - 1]}`;
   throw new Error(
     `Renderer \`${renderer.name}\` server module \`${renderer.server}\` does not export ${list}. ` +
+      (missing.includes("withIsland")
+        ? "Its descriptor declares `capabilities.islands`, which needs `withIsland`. "
+        : "") +
       `Export ${missing.length === 1 ? "it" : "them"} by name from that module: ` +
       "https://farmjs.dev/docs/renderers#renderer-modules",
   );
@@ -468,6 +494,14 @@ export interface FarmServerRendererRuntime {
   isolateServerPageGraph?(element: unknown): unknown;
   /** Resolves an async page below a hydrating layout into a tree the browser rebuilds there. */
   renderServerTreePage?(element: unknown, options?: { values?: boolean }): Promise<unknown>;
+  /**
+   * Wraps a client component so that, rendered from server output, it starts an island: it calls
+   * `resolveFarmIsland` and renders the result around the component. Inside a tree that
+   * `wrapClientGraph` marks, it renders the component plain. Farm calls it on each export of a
+   * client module in the server graph. Required when the descriptor declares
+   * `capabilities.islands`.
+   */
+  withIsland?(component: unknown, reference: FarmIslandReference): unknown;
   /**
    * Optional: tag a plain function component so a renderer that compiles its
    * own components can tell the two apart. Renderers without the hook treat
