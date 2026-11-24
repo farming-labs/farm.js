@@ -1,6 +1,7 @@
+import { setTimeout as delay } from "node:timers/promises";
 import { logger } from "@farm.js/core/internal/cli-runtime";
 import type { PreviewAgentExit, PreviewAgentSession } from "@farm.js/tunnel";
-import type { PreviewGatewayPlan } from "./preview-gateway";
+import { isLocalPreviewTargetReachable, type PreviewGatewayPlan } from "./preview-gateway";
 
 export interface NativeTunnelRuntime {
   startPreviewAgent(
@@ -14,24 +15,43 @@ export interface NativeTunnelRuntime {
 
 export interface RunNativePreviewTunnelOptions {
   runtime?: NativeTunnelRuntime;
+  /**
+   * How long a connection must have lasted before an unexpected disconnect is retried instead
+   * of ending the tunnel. A relay that drops the agent sooner is treated as unavailable.
+   */
+  minConnectedMs?: number;
+  /** Waits before each reconnection attempt. */
+  reconnectDelaysMs?: readonly number[];
 }
+
+// The hosted relay runs on Vercel Functions, which end every connection after their maximum
+// duration (30 minutes) and on each deploy. The relay keeps the name reserved for its owner, so
+// the agent reconnects to the same public URL.
+const DEFAULT_MIN_CONNECTED_MS = 30_000;
+const DEFAULT_RECONNECT_DELAYS_MS = [500, 1_000, 2_000, 4_000, 8_000];
+const LOCAL_TARGET_CHECK_TIMEOUT_MS = 1_000;
 
 export async function runNativePreviewTunnel(
   plan: PreviewGatewayPlan,
   options: RunNativePreviewTunnelOptions = {},
 ): Promise<PreviewAgentSession> {
   const runtime = options.runtime || (await loadNativeTunnel());
-  const session = await runtime.startPreviewAgent(
-    createNativeRelayUrl(plan.relayUrl, plan.relayToken),
-    plan.requestedName,
-    plan.target.localUrl,
-  );
+  const minConnectedMs = options.minConnectedMs ?? DEFAULT_MIN_CONNECTED_MS;
+  const reconnectDelaysMs = options.reconnectDelaysMs ?? DEFAULT_RECONNECT_DELAYS_MS;
+  const start = () =>
+    runtime.startPreviewAgent(
+      createNativeRelayUrl(plan.relayUrl, plan.relayToken),
+      plan.requestedName,
+      plan.target.localUrl,
+    );
+  const session = await start();
+  let current = session;
   let stopping = false;
 
   const stop = () => {
     if (stopping) return;
     stopping = true;
-    void runtime.stopPreviewAgent(session.sessionId);
+    void runtime.stopPreviewAgent(current.sessionId);
   };
 
   process.once("SIGINT", stop);
@@ -47,22 +67,69 @@ export async function runNativePreviewTunnel(
   logger.info("Forwarding requests through the native tunnel until Ctrl+C.");
 
   try {
-    const exit = await runtime.waitPreviewAgentExit(session.sessionId);
-    if (stopping) {
-      return session;
+    for (;;) {
+      const connectedAt = Date.now();
+      const exit = await runtime.waitPreviewAgentExit(current.sessionId);
+      if (stopping) {
+        return session;
+      }
+      if (!exit) {
+        throw new Error(
+          "The native preview tunnel stopped before its lifecycle could be observed.",
+        );
+      }
+      if (isHostedPreviewExpiry(exit)) {
+        return session;
+      }
+      await runtime.stopPreviewAgent(current.sessionId).catch(() => false);
+      // The agent closes the same way when the local app stops as when the relay drops it.
+      if (
+        !(await isLocalPreviewTargetReachable(plan.target.localUrl, LOCAL_TARGET_CHECK_TIMEOUT_MS))
+      ) {
+        logger.warn(
+          `Local preview target ${plan.target.localUrl} is no longer reachable. Closing preview session.`,
+        );
+        return session;
+      }
+      if (Date.now() - connectedAt < minConnectedMs) {
+        throw new Error("The native preview relay disconnected unexpectedly.");
+      }
+      logger.warn("The preview relay closed the connection. Reconnecting...");
+      const next = await reconnect(start, reconnectDelaysMs, () => stopping);
+      if (!next) {
+        if (stopping) return session;
+        throw new Error("The native preview relay disconnected unexpectedly.");
+      }
+      current = next;
+      if (stopping) {
+        await runtime.stopPreviewAgent(current.sessionId).catch(() => false);
+        return session;
+      }
+      if (next.publicUrl === session.publicUrl) logger.success("Reconnected.");
+      else logger.warn(`Reconnected at a new URL: ${next.publicUrl}`);
     }
-    if (!exit) {
-      throw new Error("The native preview tunnel stopped before its lifecycle could be observed.");
-    }
-    if (isHostedPreviewExpiry(exit)) {
-      return session;
-    }
-    throw new Error("The native preview relay disconnected unexpectedly.");
   } finally {
     process.removeListener("SIGINT", stop);
     process.removeListener("SIGTERM", stop);
-    await runtime.stopPreviewAgent(session.sessionId).catch(() => false);
+    await runtime.stopPreviewAgent(current.sessionId).catch(() => false);
   }
+}
+
+async function reconnect(
+  start: () => Promise<PreviewAgentSession>,
+  delaysMs: readonly number[],
+  stopped: () => boolean,
+): Promise<PreviewAgentSession | undefined> {
+  for (const delayMs of delaysMs) {
+    await delay(delayMs);
+    if (stopped()) return undefined;
+    try {
+      return await start();
+    } catch {
+      // The relay may still be starting after a deploy; try again after the next wait.
+    }
+  }
+  return undefined;
 }
 
 function isHostedPreviewExpiry(exit: PreviewAgentExit) {

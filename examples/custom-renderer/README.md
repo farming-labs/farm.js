@@ -23,7 +23,8 @@ a page that ships no JavaScript, a dynamic route with metadata, a page and compo
 `.leaf` file format, an API route, a button that calls a validated `createServerFn` imported
 straight into the page (`experimental.serverActions`) through `useAction`, a `useServerQuery` that
 reads again when that function invalidates its key, a page that streams past an async component
-inside `<Suspense>`, and not-found and error pages.
+inside `<Suspense>`, not-found and error pages, and a page whose hydration throws, which Farm renders
+in the browser instead.
 
 ```bash
 pnpm --filter farm-custom-renderer-example dev

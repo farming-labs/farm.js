@@ -718,6 +718,43 @@ test("article sidebar tracks native navigation, reading position, pointer, and k
   await expect(indicator).toHaveCSS("transition-duration", "0.22s");
 });
 
+test("article sidebar moves straight to a clicked section while the page scrolls smoothly", async ({
+  page,
+}) => {
+  await page.emulateMedia({ reducedMotion: "no-preference" });
+  await page.goto("/blog/0.1.0");
+  await expect(page.locator("html")).toHaveCSS("scroll-behavior", "smooth");
+  const nav = page.locator(".blog-contents-links").first();
+  const viby = nav.getByRole("link", { name: "Built with Farm: Viby" });
+  await expect(nav).toHaveAttribute("data-highlight-ready", "true");
+  // Record each section the sidebar marks current, frame by frame, from before the click until the
+  // smooth scroll has been still for longer than the sidebar waits before measuring again.
+  const marked = page.evaluate(
+    () =>
+      new Promise<string[]>((resolve) => {
+        const links = document.querySelector(".blog-contents-links")!;
+        const seen: string[] = [];
+        let lastY = scrollY;
+        let moved = false;
+        let stillFrames = 0;
+        function frame() {
+          const current = links.querySelector('[aria-current="location"]')?.getAttribute("href");
+          if (current && seen.at(-1) !== current) seen.push(current);
+          if (scrollY !== lastY) moved = true;
+          stillFrames = scrollY === lastY ? stillFrames + 1 : 0;
+          lastY = scrollY;
+          if (moved && stillFrames >= 45) resolve(seen);
+          else requestAnimationFrame(frame);
+        }
+        requestAnimationFrame(frame);
+      }),
+  );
+  await viby.click();
+  expect(await marked).toEqual(["#what-stable-means", "#built-with-farm-viby"]);
+  await expect(page).toHaveURL(/#built-with-farm-viby$/);
+  await expect(viby).toHaveAttribute("aria-current", "location");
+});
+
 test("agents page connects the blog, planned capabilities, and Markdown", async ({ page }) => {
   const errors: string[] = [];
   page.on("pageerror", (error) => errors.push(error.message));

@@ -100,6 +100,24 @@ test("the router reads the request's path while the server renders a page", asyn
   expect(await response.text()).toContain('<p id="crop-path">path: /crops/wheat</p>');
 });
 
+test("a page whose hydration throws is rendered in the browser instead", async ({ page }) => {
+  const errors: string[] = [];
+  page.on("console", (message) => {
+    if (message.type() === "error") errors.push(message.text());
+  });
+  // The page's first browser render throws, so hydrateRoot() fails. Development and production
+  // both render the route with createRoot() then, so the layout's effect runs and the page works.
+  await gotoHydrated(page, "/recovers");
+  expect(
+    errors.some((text) =>
+      text.includes("[Farm.js] Hydration error; rendering the page on the client instead:"),
+    ),
+  ).toBe(true);
+  const counter = page.locator("#recovers-counter");
+  await counter.click();
+  await expect(counter).toHaveText("Clicked 1 times");
+});
+
 test("a page navigated to on the client is interactive", async ({ page }) => {
   await gotoHydrated(page, "/about");
   await page.getByRole("link", { name: "Home" }).click();

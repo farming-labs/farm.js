@@ -3,7 +3,10 @@
 //
 //   node benchmarks/server-components-payload/first-navigation.mjs [--modes rsc,islands]
 //     [--latency 50] [--down <kbit/s>] [--cpu 4] [--hover 100 | --tap | --tap-hold 80] [--rounds 5]
-//     [--http1]
+//     [--http1] [--paint]
+//
+// `--paint` times the cold visit itself instead: its first contentful paint, from the start of
+// the navigation, under the same network and CPU.
 //
 // Uses the production builds measure.mjs leaves in app/.farm; a mode names a build directory
 // (`.output-<mode>`), so a copy of one (`.output-islands-before`) can run beside it. Each round
@@ -50,6 +53,7 @@ const hover = Number(option("--hover", "100"));
 const tapHold = args.includes("--tap-hold") ? Number(option("--tap-hold", "80")) : null;
 const tap = args.includes("--tap") || tapHold !== null;
 const http1 = args.includes("--http1");
+const paint = args.includes("--paint");
 const FIRST_PAGES = { docs: "/docs/p", shop: "/shop/s", blog: "/blog/b", guide: "/guide/b" };
 
 async function serve(mode, port) {
@@ -128,6 +132,37 @@ async function proxy(port, upstream, credentials) {
     server.close();
     agent.destroy();
   };
+}
+
+/** Milliseconds from the start of a cold visit to its first contentful paint. */
+async function firstPaint(browser, origin, section) {
+  const context = await browser.newContext({ ignoreHTTPSErrors: true });
+  try {
+    const page = await context.newPage();
+    const cdp = await context.newCDPSession(page);
+    await cdp.send("Emulation.setCPUThrottlingRate", { rate: cpu });
+    await cdp.send("Network.enable");
+    await cdp.send("Network.emulateNetworkConditions", {
+      offline: false,
+      latency,
+      downloadThroughput: down === null ? -1 : (down * 1000) / 8,
+      uploadThroughput: -1,
+    });
+    await page.goto(`${origin}${FIRST_PAGES[section]}0`, { waitUntil: "load" });
+    return Math.round(
+      await page.evaluate(
+        () =>
+          new Promise((resolve) =>
+            new PerformanceObserver((list) => {
+              const entry = list.getEntriesByName("first-contentful-paint")[0];
+              if (entry) resolve(entry.startTime);
+            }).observe({ type: "paint", buffered: true }),
+          ),
+      ),
+    );
+  } finally {
+    await context.close();
+  }
 }
 
 /** Milliseconds from the click to the new page painted, for one cold visit. */
@@ -236,7 +271,7 @@ try {
     for (const section of sections) {
       for (const mode of round % 2 ? [...modes].reverse() : modes) {
         (samples[`${section} ${mode}`] ??= []).push(
-          await firstNavigation(browser, origins[mode], section),
+          await (paint ? firstPaint : firstNavigation)(browser, origins[mode], section),
         );
       }
     }
@@ -244,10 +279,12 @@ try {
   const median = (values) => [...values].sort((a, b) => a - b)[Math.floor(values.length / 2)];
   const rows = Object.entries(samples).map(([key, values]) => {
     const [section, mode] = key.split(" ");
-    return { section, mode, "first navigation (ms)": median(values), samples: values.join(" ") };
+    const metric = paint ? "first paint (ms)" : "first navigation (ms)";
+    return { section, mode, [metric]: median(values), samples: values.join(" ") };
   });
-  const input =
-    tapHold !== null
+  const input = paint
+    ? "a cold visit's first contentful paint"
+    : tapHold !== null
       ? `a tap held ${tapHold} ms`
       : tap
         ? "a tap"

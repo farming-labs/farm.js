@@ -323,4 +323,23 @@ click come together, went from 111, 115, 134 and 144 ms to 95, 105, 131 and 135 
 2.4 KB), and a page request for a press that does not end in a click, such as a scroll that starts
 on a link. `Link`'s own prefetch sends that request on a touch too, once the runtime runs.
 
+Measured again 2026-11-23 once a document stopped linking the client stylesheet when the app has
+no CSS. This app has none, but every `islands` document linked the empty `farm-client.css`, and
+the browser waited a round trip for it before its first paint. The `rsc` engine links no
+stylesheet here. First contentful paint of a cold visit (`first-navigation.mjs --paint`), 150 ms
+of latency, interleaved with `rsc`, the build from just before it, and an A/A copy of that build,
+medians of 9 rounds in ms:
+
+| Section | `rsc`, unlimited | `islands`, before | `islands` | `rsc`, 1.6 Mbit/s | `islands`, before | `islands` |
+| ------- | ---------------- | ----------------- | --------- | ----------------- | ----------------- | --------- |
+| docs    | 280              | 396               | 268       | 236               | 420               | 288       |
+| shop    | 240              | 384               | 240       | 256               | 412               | 248       |
+| blog    | 280              | 404               | 264       | 264               | 440               | 268       |
+| guide   | 272              | 404               | 276       | 276               | 432               | 272       |
+
+The first paint comes 128 to 172 ms sooner, and level with `rsc` or ahead of it except docs at
+1.6 Mbit/s. The A/A copy was within 4 ms of the build before on the unlimited network (load average
+8 to 10) and within 16 ms at 1.6 Mbit/s, which ran under a load average of up to 56. An app with
+CSS links its stylesheet as before.
+
 `results/latest.json` has the per-page numbers of the last run.

@@ -173,7 +173,9 @@ applies.
 `cronRoute()` verifies `Authorization: Bearer <CRON_SECRET>` whenever `CRON_SECRET` exists.
 The standard authentication scheme is case-insensitive, so schedulers may send either `Bearer` or
 `bearer`. Outside development and test it fails closed when the secret is missing, so a forgotten
-environment variable does not silently expose a mutating route.
+environment variable does not silently expose a mutating route. Development without a secret stays
+open only on your own machine: a request through a [`farm preview`](/docs/preview) URL still needs
+the secret or Farm.js Infra's signature.
 
 Set the same value in the application and scheduler environment:
 
