@@ -144,6 +144,11 @@ Take the paths a page does not run off its load. No configuration and no public 
    client's matcher and layout selection over the same tables. The matcher (`createFarmRouter`,
    pattern parsing and its checks, `isFarmRouteActive`) moves to the table's chunk, which the
    router loads before it matches another path.
+5. **Reviving code loads with the first value that needs it.** islx 0.0.28 splits its React
+   runtime by module: the code that revives slots, server trees, actions, promises, streams and
+   tagged values loads with the first island, form state or action result that needs it (islx
+   #89). Farm's islands runtime imports islx's server trees with a page's first one, and a
+   document whose markup holds one preloads them with the renderer, as it does the action client.
 
 Estimated savings on the probe, at brotli 11, from removing the mapped bytes of a built bundle and
 compressing the rest:
@@ -169,6 +174,9 @@ from these changes alone; see Open questions.
   After that, the listener holds the submit until the transport has loaded.
 - **Roots.** A route that hydrates a page or a layout loads root hydration with the renderer,
   before anything renders. A route of islands only never calls it.
+- **Server trees.** A document that holds one preloads their code with the renderer, so its root
+  hydrates as before. A navigation's response that holds one lists them with its modules. After a
+  failed import, the next tree imports them again.
 
 ## Costs
 
@@ -318,12 +326,49 @@ throttling, medians of 21, in ms:
   table's chunk went from 143 to 2,268 bytes). A page that doesn't navigate loads 1,685 fewer.
 - **Remaining gap:** 37 ms at 1.6 Mbit/s, with islx 0.0.25 as `main` pins it.
 
+**Item 5 (#3155).**
+
+What changed:
+
+- islx 0.0.28 (#89 and #91) loads its reviving code on demand. `main` has since moved to 0.0.30.
+- The islands runtime imports islx's server trees from `internal/islands-server-tree` with a
+  page's first one. The preload manifest lists that entry's chunks (`serverTrees`), and a
+  document whose markup holds a `<script type="f/tree">` preloads them with the renderer.
+
+Measured against `main`, interleaved with an A/A copy of `main`, 150 ms latency, 4x CPU
+throttling, medians of 21, in ms:
+
+| Network                  | `rsc` | `main` | this change | A/A |
+| ------------------------ | ----- | ------ | ----------- | --- |
+| 1.6 Mbit/s, all hydrated | 776   | 816    | 789         | 817 |
+| Unlimited, all hydrated  | 414   | 422    | 423         | 424 |
+
+- **Bytes on the probe:** scripts on the wire went from 76.6 KB to 69.6 KB (`rsc`: 66.9 KB). The
+  islands runtime's chunk went from 13.1 KB to 4.9 KB at brotli 11, plus islx's element reviver
+  (1.2 KB).
+- **Unlimited:** within the A/A pair's spread.
+- **Remaining gap:** 13 ms at 1.6 Mbit/s, down from 40.
+- **After `main` moved to islx 0.0.30,** 41 rounds at 1.6 Mbit/s: `rsc` 778, `main` 814, this
+  change 783, A/A 813. This change was faster than `main` in all 41 rounds, and the gap went from
+  36 ms to 5. Unlimited, medians of 21: 418, 428, 429, 427. `main` still sends 76.5 KB of script:
+  islx's split alone changes nothing while the islands runtime imports the server trees up front.
+  First-load script on the other four sections is 26.6 KB in both builds.
+- **The other four sections:**
+  - First-load script went from 26.5 KB to 26.6 KB: the entry names one more chunk (33 bytes),
+    and Rolldown's runtime gains the namespace helper islx's actions chunk needs (55 bytes).
+  - Docs and blog hold no server tree; their renderer's islx code went from 13.1 KB to 6.1 KB.
+  - Shop and guide hold server trees and preload them with the renderer: 14.0 KB, 842 bytes more
+    than the one chunk before, from islx's split.
+  - First navigation at 1.6 Mbit/s, medians of 11: no section is more than 1 ms slower than both
+    `main` and its A/A copy, after a hover or a tap. The A/A pair differs by up to 4 ms.
+
 **What is left.** On the probe the whole difference is script: 81.4 KB on the wire for islands
 against 69.7 KB, with documents within 0.4 KB. Measured with esbuild and brotli 11: the server
 tree helpers on islx 0.0.25's published build, the call path on a split of islx `main` (v0.0.27):
 
-- **Server tree helpers:** `createServerTreeElement` and what only it reaches cost 235 bytes. A
-  split is not worth it.
+- **Server tree helpers:** `createServerTreeElement` and what only it reaches cost 235 bytes on
+  0.0.25's one-chunk build. With 0.0.28's split, the server trees reach islx's reviving code, and
+  loading them with the first one is item 5.
 - **islx's call path:** moving the transport, the revival of returned elements and the codec's
   `encode` to a module the first call imports takes 370 bytes off the first load. The decoding
   they share stays, and the split adds a chunk.

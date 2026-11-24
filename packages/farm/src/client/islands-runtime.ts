@@ -22,9 +22,9 @@ import {
 import {
   createHydrationRuntime,
   createServerHtml,
-  createServerTreeElement,
-  createServerTreeLayout,
   endStreamedContent,
+  type createServerTreeElement,
+  type createServerTreeLayout,
 } from "@farm.js/islx/react/client";
 import type { FarmIslandStrategy } from "../island";
 import { FARM_ISLAND_ELEMENT, getFarmIslandValuesServer } from "./island-value-protocol";
@@ -150,6 +150,20 @@ export function renderFarmServerTreePage(
   });
 }
 
+let serverTrees: Promise<typeof import("./islands-server-tree")> | undefined;
+
+/**
+ * islx's server trees, imported with a page's first one: a page of islands only never loads them
+ * or the reviving code they import (RFC 0013). After a failed import, the next call imports them
+ * again.
+ */
+function loadServerTrees(): Promise<typeof import("./islands-server-tree")> {
+  return (serverTrees ??= import("./islands-server-tree").catch((error: unknown) => {
+    serverTrees = undefined;
+    throw error;
+  }));
+}
+
 /** Rebuilds a server-tree page in the browser, inside the layout's React root. */
 export function createFarmServerTreeElement(
   _React: typeof React,
@@ -160,11 +174,13 @@ export function createFarmServerTreeElement(
     key?: string;
   },
 ): ReturnType<typeof createServerTreeElement> {
-  return createServerTreeElement(source, {
-    load: options.load,
-    ServerHtml: options.ServerHtml,
-    key: options.key,
-  });
+  return loadServerTrees().then((trees) =>
+    trees.createServerTreeElement(source, {
+      load: options.load,
+      ServerHtml: options.ServerHtml,
+      key: options.key,
+    }),
+  );
 }
 
 /**
@@ -200,8 +216,8 @@ export function createFarmServerTreeLayout(
     ServerHtml: React.ComponentType<any>;
     onUpdate?(): void;
   },
-) {
-  return createServerTreeLayout(source, scope, options);
+): ReturnType<typeof createServerTreeLayout> {
+  return loadServerTrees().then((trees) => trees.createServerTreeLayout(source, scope, options));
 }
 
 /**
