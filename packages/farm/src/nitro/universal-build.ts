@@ -2498,7 +2498,9 @@ async function buildClient(
     // The route table the entry imports on its first navigation (client-route-table.ts).
     await fs.writeFile(
       path.join(clientEntryDir, `${FARM_CLIENT_ROUTE_TABLE_MODULE}.tsx`),
-      generateFarmClientRouteTableModule(clientRouteTable),
+      generateFarmClientRouteTableModule(clientRouteTable, {
+        matcher: islandsMode && platform !== "mobile",
+      }),
     );
     if (clientEntry.router !== undefined) {
       await fs.writeFile(path.join(clientEntryDir, "farm-client-router.tsx"), clientEntry.router);
@@ -2970,6 +2972,12 @@ export function generateFarmClientRouteTableRuntime(options: {
   table: boolean;
   docs: boolean;
   streamNavigations?: boolean;
+  /**
+   * Islands mode's web client: the matcher loads with the table (generateFarmClientRouteTableModule)
+   * instead of with the entry. Until then the entry matches only the document's own path, whose
+   * route, params and layouts the document names (getFarmClientBootRoutes).
+   */
+  lazyMatcher?: boolean;
 }): string {
   // A navigation that waits for the table fetches its page meanwhile, as a prefetch it then
   // reads. A navigation that streams would lose its stream to a prefetch, which reads the whole
@@ -2984,18 +2992,31 @@ function loadFarmClientRouteTable() { return null; }
 function prefetchFarmClientRouteTable() {}
 const farmClientRoutesBoot = null;`;
   }
+  const lazy = options.lazyMatcher === true;
+  const toClientRoute = `function(route) {
+    const load = typeof route.loader === "number" ? farmClientRouteLoaders[route.loader] : undefined;
+    return { ...route, navigation: "html-fragment", load: load || null };
+  }`;
   return `${prefetch}
 let clientRoutes = [];
-let clientRouteMatcher = createFarmRouter([]);
-let clientPageRouteMatcher = clientRouteMatcher;
+${
+  lazy
+    ? `// The matcher, which loads with the table. Until then the entry matches only the document's own
+// path (readFarmClientBootRoute).
+let createFarmRouter = null;
+let isFarmRouteActive = null;
+let matchFarmRoute = null;
+let clientRouteMatcher = null;
+let clientPageRouteMatcher = null;
+let farmClientBootRoute = null;`
+    : `let clientRouteMatcher = createFarmRouter([]);
+let clientPageRouteMatcher = clientRouteMatcher;`
+}
 let farmClientRouteTableLoad = null;
 let farmClientRouteTableLoaded = false;
 
 function setFarmClientRoutes(routes) {
-  clientRoutes = routes.map(function(route) {
-    const load = typeof route.loader === "number" ? farmClientRouteLoaders[route.loader] : undefined;
-    return { ...route, navigation: "html-fragment", load: load || null };
-  });
+  clientRoutes = routes.map(${lazy ? "toFarmClientRoute" : toClientRoute});
   clientRouteMatcher = createFarmRouter(clientRoutes.map(function(route) {
     return { path: route.pattern, meta: route };
   }));
@@ -3009,12 +3030,35 @@ function setFarmClientRoutes(routes) {
       : "clientRouteMatcher"
   };
 }
+${
+  lazy
+    ? `
+function toFarmClientRoute(route) {
+  const load = typeof route.loader === "number" ? farmClientRouteLoaders[route.loader] : undefined;
+  return { ...route, navigation: "html-fragment", load: load || null };
+}
 
+// The document's own route, which it names with its params and layouts, until the table loads. A
+// match for another path waits for the table: the router loads it before it matches.
+function readFarmClientBootRoute(path) {
+  if (farmClientBootRoute && farmClientBootRoute.path === path) return farmClientBootRoute;
+  throw new Error("[Farm.js] " + path + " cannot be matched before the client route table loads.");
+}
+`
+    : ""
+}
 // Null once the whole table is in place, else a promise that settles when it is.
 function loadFarmClientRouteTable() {
   if (farmClientRouteTableLoaded) return null;
   return farmClientRouteTableLoad || (farmClientRouteTableLoad = import("./${FARM_CLIENT_ROUTE_TABLE_MODULE}").then(function(module) {
-    setFarmClientRoutes(module.default);
+${
+  lazy
+    ? `    createFarmRouter = module.createFarmRouter;
+    isFarmRouteActive = module.isFarmRouteActive;
+    matchFarmRoute = module.matchFarmRoute;
+`
+    : ""
+}    setFarmClientRoutes(module.default);
     farmClientRouteTableLoaded = true;
   }, function(error) {
     farmClientRouteTableLoad = null;
@@ -3030,8 +3074,15 @@ function prefetchFarmClientRouteTable() {
 
 const farmClientRoutesBoot = (function() {
   const boot = window.__FARM_CLIENT_ROUTES__;
-  if (boot && Array.isArray(boot.routes) && boot.path === getFarmRoutePathname(window.location.pathname)) {
-    setFarmClientRoutes(boot.routes);
+  if (boot && Array.isArray(boot.routes) && boot.path === getFarmRoutePathname(window.location.pathname)${
+    lazy ? " &&\n      boot.params && Array.isArray(boot.layouts)" : ""
+  }) {
+${
+  lazy
+    ? `    clientRoutes = boot.routes.map(toFarmClientRoute);
+    farmClientBootRoute = boot;`
+    : "    setFarmClientRoutes(boot.routes);"
+}
     return null;
   }
   return loadFarmClientRouteTable().catch(function(error) {
@@ -3055,13 +3106,124 @@ for (const type of FARM_ROUTE_TABLE_INTENT_EVENTS) {
 }`;
 }
 
+/** The fields of a client layout (`layoutRoutes`) that selectFarmClientLayouts reads. */
+export interface FarmClientLayoutMatch {
+  pattern: string;
+  /** A route group's layout: its URL without the groups, and the group directory it covers. */
+  urlPattern?: string;
+  groupScope?: string;
+}
+
+export function getFarmClientLayoutMatch(pattern: string): FarmClientLayoutMatch {
+  const groupScope = getRouteGroupScope(pattern);
+  return groupScope ? { pattern, urlPattern: stripRouteGroups(pattern), groupScope } : { pattern };
+}
+
+/**
+ * Which of the client's layouts apply at a route path, in table order: each whose URL pattern
+ * covers the path, and a route group's layout only for the pages inside its group directory
+ * (`readDirectory`, read once and only for such a layout). The client entry selects with it, and
+ * in islands mode the server too, for the layouts a document names (getFarmClientBootRoutes).
+ */
+export function generateFarmClientLayoutSelectionSource(): string {
+  return `function selectFarmClientLayouts(layouts, routePathname, readDirectory) {
+  const normalizedPath = routePathname.replace(/\\/$/, '') || '/';
+  let directory;
+  return layouts.filter(function(layout) {
+    // Route groups add no URL segment: match the layout's URL, then keep a
+    // grouped layout to the pages inside its group directory.
+    const urlPattern = layout.urlPattern || layout.pattern;
+    if (urlPattern !== '/' && !isFarmRouteActive(urlPattern, normalizedPath, { exact: false })) return false;
+    if (!layout.groupScope) return true;
+    if (directory === undefined) directory = readDirectory();
+    return typeof directory === 'string' &&
+      (directory === layout.groupScope || directory.startsWith(layout.groupScope + '/'));
+  });
+}`;
+}
+
+/**
+ * The client entry's route matching: `matchRoute`, and the layouts (`layoutRoutes`) that apply at
+ * a path. With `lazyMatcher` (generateFarmClientRouteTableRuntime), both answer for the document's
+ * own path from what it names until the table and its matcher load.
+ */
+export function generateFarmClientRouteMatchSource(
+  options: { lazyMatcher?: boolean } = {},
+): string {
+  const select =
+    "selectFarmClientLayouts(layoutRoutes, path, function() { return getFarmPageDirectory(pathname); })";
+  return `${generateFarmClientLayoutSelectionSource()}
+${
+  options.lazyMatcher
+    ? `
+// The document's own layouts, which it names, until the table loads (readFarmClientBootRoute).
+function readFarmClientBootLayouts(path) {
+  const names = readFarmClientBootRoute(path).layouts;
+  return layoutRoutes.filter(function(layout) { return names.includes(layout.pattern); });
+}
+`
+    : ""
+}
+// Get applicable layouts for a pathname (sorted by depth, root first)
+function getApplicableLayouts(pathname) {
+  const path = getFarmRoutePathname(pathname);
+  const applicable = ${
+    options.lazyMatcher
+      ? `clientRouteMatcher
+    ? ${select}
+    : readFarmClientBootLayouts(path)`
+      : select
+  };
+
+  // Sort by depth (root first)
+  applicable.sort(function(a, b) {
+    const depthA = a.pattern.split('/').filter(Boolean).length;
+    const depthB = b.pattern.split('/').filter(Boolean).length;
+    return depthA - depthB;
+  });
+
+  return applicable;
+}
+
+function hasHydratableLayout(pathname) {
+  return getApplicableLayouts(pathname).some(function(layout) {
+    return layout.shouldHydrate === true;
+  });
+}
+
+// Match pathname to client route
+function matchRoute(pathname) {
+  const path = getFarmRoutePathname(pathname);
+${
+  options.lazyMatcher
+    ? `  if (!clientRouteMatcher) {
+    // Without the document's route either (the table did not load), nothing matches, as with no table.
+    if (!farmClientBootRoute) return null;
+    const boot = readFarmClientBootRoute(path);
+    return clientRoutes.length > 0 ? { route: clientRoutes[0], params: boot.params } : null;
+  }
+`
+    : ""
+}  const matched = clientRouteMatcher.match(path);
+  return matched
+    ? { route: matched.route.meta, params: matched.params }
+    : null;
+}`;
+}
+
 /**
  * The server half of the client route table runtime: `getFarmClientBootRoutes(routePathname)`
  * names the entries a document's page boots with, those the client's `matchRoute` and
  * `getFarmPageDirectory` read for that path, found with the same matcher over the same table.
- * `tableSource` is a JavaScript string expression holding the table as JSON.
+ * `tableSource` is a JavaScript string expression holding the table as JSON. With the client's
+ * `layouts` (islands mode), it names the route's params and the layouts that apply too, selected as
+ * the client selects them, so the client entry boots without the matcher (`lazyMatcher`).
+ * `getFarmClientStatusBootRoutes(routePathname)` names none for a status document.
  */
-export function generateFarmClientBootRoutesServerSource(tableSource: string): string {
+export function generateFarmClientBootRoutesServerSource(
+  tableSource: string,
+  layouts?: readonly FarmClientLayoutMatch[],
+): string {
   return `// The client route table (client-route-table.ts), filled in from the client build. The client
 // loads it on its first navigation; a document names the entries its page boots with, found
 // with the client's own matcher, so its page hydrates without the table.
@@ -3081,18 +3243,50 @@ const farmClientRouteTable = (() => {
     return null;
   }
 })();
+${
+  layouts
+    ? `
+// The client's layouts (layoutRoutes in the client entry), of which a document names those that
+// apply at its path.
+const farmClientLayoutTable = ${JSON.stringify(layouts)};
+${generateFarmClientLayoutSelectionSource()}
 
+// The layouts that apply at a route path, with the page directory the client's
+// getFarmPageDirectory reads from the route matched there.
+function getFarmClientBootLayouts(routePathname, matched, page) {
+  const directory = !matched
+    ? null
+    : matched.route.meta.docs && !matched.route.meta.directory
+      ? page ? page.route.meta.directory || page.route.meta.pattern : null
+      : matched.route.meta.directory || matched.route.meta.pattern;
+  return selectFarmClientLayouts(farmClientLayoutTable, routePathname, function() { return directory; })
+    .map(function(layout) { return layout.pattern; });
+}
+`
+    : ""
+}
 // The entries the client's matchRoute and getFarmPageDirectory read for this route path.
 function getFarmClientBootRoutes(routePathname) {
   if (!farmClientRouteTable || typeof routePathname !== "string") return undefined;
   const routes = [];
   const matched = farmClientRouteTable.routes.match(routePathname);
+  const page = matched && matched.route.meta.docs ? farmClientRouteTable.pages.match(routePathname) : null;
   if (matched) {
     routes.push(matched.route.meta);
-    const page = matched.route.meta.docs ? farmClientRouteTable.pages.match(routePathname) : null;
     if (page) routes.push(page.route.meta);
   }
-  return { path: routePathname, routes: routes };
+  return { path: routePathname, routes: routes${
+    layouts
+      ? ", params: matched ? matched.params : {}, layouts: getFarmClientBootLayouts(routePathname, matched, page)"
+      : ""
+  } };
+}
+
+// A status document's: no route matches at its path.
+function getFarmClientStatusBootRoutes(routePathname) {
+  return { path: routePathname, routes: []${
+    layouts ? ", params: {}, layouts: getFarmClientBootLayouts(routePathname, null, null)" : ""
+  } };
 }`;
 }
 
@@ -4261,6 +4455,9 @@ export function generateClientHydrationEntry(
   // `farm-root` regions, which load through `loadFarmRoot` when such a root first hydrates or a
   // navigation renders one. Client layouts' modules move into them too.
   const lazyRoot = islandValues && platform !== "mobile";
+  // With it, the route matcher loads with the route table, not the entry: a document names its own
+  // route, params and layouts (generateFarmClientRouteTableRuntime).
+  const lazyMatcher = lazyRoot && clientPages.length > 0;
   const rendererClientImports = lazyRenderer
     ? `import { holdFarmIslandInteractions, restorePagePosition, watchFarmIslandTriggers } from "@farm.js/core/internal/client-runtime";`
     : isReactRenderer(renderer)
@@ -4335,9 +4532,9 @@ export function generateClientHydrationEntry(
     if (rendersOnClient && !treeLayout) {
       layoutImportStatements.push(`import Layout${index} from "${relativePath}";`);
     }
-    const groupScope = getRouteGroupScope(layout.pattern);
+    const { urlPattern, groupScope } = getFarmClientLayoutMatch(layout.pattern);
     const groupFields = groupScope
-      ? `, urlPattern: ${JSON.stringify(stripRouteGroups(layout.pattern))}, groupScope: ${JSON.stringify(groupScope)}`
+      ? `, urlPattern: ${JSON.stringify(urlPattern)}, groupScope: ${JSON.stringify(groupScope)}`
       : "";
     const component = rendersOnClient
       ? treeLayout
@@ -4989,7 +5186,7 @@ ${isolatedHydrationImport}
 ${providerClientCode.imports}
 import { createClientCancellation, createClientPluginManager, createPluginlessClientRuntime, getFarmIslandValueHeaders, getHashTargetElement, keepFarmIslandValues, installChunkErrorRecovery, installFarmLinkPrefetch, isFarmBlockedNavigationURL, isFarmExternalNavigationURL, readFarmLinkNavigateOptions, rememberFarmLinkLocale, reconcileFarmDocumentHead, replayFarmQueuedInteraction, runFarmNavigationDelegates, scheduleFarmIslandHydration, createFarmSearchParams, searchParamsToObject, setFarmBasePath, setFarmTrailingSlashPreference, stripFarmBasePath } from "@farm.js/core/internal/client-runtime";
 import { createFarmDeploymentMismatchError, createFarmDeploymentRequestHeaders, isFarmDeploymentMismatchResponse } from "@farm.js/core/deployment";
-import { createFarmRouter, isFarmRouteActive, matchFarmRoute } from "@farm.js/core/router";
+${lazyMatcher ? "" : 'import { createFarmRouter, isFarmRouteActive, matchFarmRoute } from "@farm.js/core/router";'}
 ${clientPluginEntry.imports}
 ${clientCachePersistence.imports}
 ${i18nClientRuntime}
@@ -5014,6 +5211,7 @@ ${generateFarmClientRouteTableRuntime({
   table: clientPages.length > 0,
   docs: clientPages.some((page) => page.docs),
   streamNavigations: islandValues,
+  lazyMatcher,
 })}
 ${generateClientPageDirectorySource()}
 
@@ -5029,42 +5227,7 @@ const layoutRoutes = [
 ${layoutRegistrations.join(",\n")}
 ];
 
-// Get applicable layouts for a pathname (sorted by depth, root first)
-function getApplicableLayouts(pathname) {
-  const applicable = [];
-  const normalizedPath = getFarmRoutePathname(pathname).replace(/\\/$/, '') || '/';
-  let directory;
-  
-  for (const layout of layoutRoutes) {
-    // Route groups add no URL segment: match the layout's URL, then keep a
-    // grouped layout to the pages inside its group directory.
-    const urlPattern = layout.urlPattern || layout.pattern;
-    if (urlPattern !== '/' && !isFarmRouteActive(urlPattern, normalizedPath, { exact: false })) continue;
-    if (layout.groupScope) {
-      if (directory === undefined) directory = getFarmPageDirectory(pathname);
-      if (
-        typeof directory !== 'string' ||
-        (directory !== layout.groupScope && !directory.startsWith(layout.groupScope + '/'))
-      ) continue;
-    }
-    applicable.push(layout);
-  }
-  
-  // Sort by depth (root first)
-  applicable.sort(function(a, b) {
-    const depthA = a.pattern.split('/').filter(Boolean).length;
-    const depthB = b.pattern.split('/').filter(Boolean).length;
-    return depthA - depthB;
-  });
-  
-  return applicable;
-}
-
-function hasHydratableLayout(pathname) {
-  return getApplicableLayouts(pathname).some(function(layout) {
-    return layout.shouldHydrate === true;
-  });
-}
+${generateFarmClientRouteMatchSource({ lazyMatcher })}
 
 ${layoutComponentsRuntime}/*farm-root-start*/
 ${FARM_LAYOUT_ELEMENT_CLIENT_SOURCE}
@@ -5137,14 +5300,6 @@ function prepareFarmTreeLayouts(pathname, params, source) {
 async function prepareFarmTreeLayouts() { return true; }`
 }
 /*farm-root-end*/
-
-// Match pathname to client route
-function matchRoute(pathname) {
-  const matched = clientRouteMatcher.match(getFarmRoutePathname(pathname));
-  return matched
-    ? { route: matched.route.meta, params: matched.params }
-    : null;
-}
 
 /*farm-root-start*/
 async function loadRouteComponent(route) {
@@ -9461,7 +9616,7 @@ function renderFarmClientBootstrapScript(canonicalPath, selectedRouteSlots, page
     };
   // The client boots at the canonical path when the script below moves it there.
   const bootRoutes = statusDocument
-    ? typeof routePathname === "string" ? { path: routePathname, routes: [] } : undefined
+    ? typeof routePathname === "string" ? getFarmClientStatusBootRoutes(routePathname) : undefined
     : getFarmClientBootRoutes(
         typeof canonicalPath === "string" && canonicalPath.startsWith("/")
           ? getFarmRoutePathname(canonicalPath.split(/[?#]/)[0])
@@ -10328,7 +10483,12 @@ const farmClientModulePreloads = (() => {
     return null;
   }
 })();
-${generateFarmClientBootRoutesServerSource(`"${FARM_CLIENT_ROUTE_TABLE_PLACEHOLDER}"`)}
+${generateFarmClientBootRoutesServerSource(
+  `"${FARM_CLIENT_ROUTE_TABLE_PLACEHOLDER}"`,
+  farmIslandsMode
+    ? layoutRoutes.map((layout) => getFarmClientLayoutMatch(layout.pattern))
+    : undefined,
+)}
 
 const farmClientEntryPreloadTags = farmClientModulePreloads
   ? farmClientModulePreloads.entry.map(renderFarmClientModulePreload).join("")
