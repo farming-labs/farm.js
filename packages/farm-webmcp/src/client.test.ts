@@ -339,6 +339,8 @@ describe("webmcp Farm plugin", () => {
     expect(plugin.client?.public).toEqual({
       unsupported: null,
       debug: null,
+      analytics: true,
+      report: "/_farm/webmcp/tool-calls",
     });
     expect(plugin.client?.setup?.toString()).toContain("startWebMCPRuntime");
   });
@@ -349,6 +351,167 @@ describe("webmcp Farm plugin", () => {
       'unsupported must be "ignore", "warn", or "error"',
     );
     expect(() => webmcp({ debug: "yes" as unknown as boolean })).toThrow("debug must be boolean");
+    expect(() => webmcp({ analytics: "off" as unknown as boolean })).toThrow(
+      "webmcp analytics must be boolean; pass `analytics: false`",
+    );
+  });
+
+  it("reports below the base path, and not at all with analytics: false", async () => {
+    const context = { config: {}, isDev: false, isProd: true, lifecycle: { onShutdown() {} } };
+    const plugin = webmcp();
+    await plugin.configure?.({ root: "/app", basePath: "/console" } as never, context as never);
+    expect(plugin.client?.public).toMatchObject({
+      analytics: true,
+      report: "/console/_farm/webmcp/tool-calls",
+    });
+
+    const off = webmcp({ analytics: false });
+    await off.configure?.({ root: "/app", basePath: "/console" } as never, context as never);
+    expect(off.client?.public).toMatchObject({ analytics: false, report: null });
+  });
+});
+
+describe("webmcp tool call reports", () => {
+  const REPORT = "/_farm/webmcp/tool-calls";
+  const signal = () => new AbortController().signal;
+  let send: ReturnType<typeof vi.fn<typeof fetch>>;
+
+  beforeEach(() => {
+    send = vi.fn<typeof fetch>().mockResolvedValue(new Response(null, { status: 204 }));
+    vi.stubGlobal("fetch", send);
+    vi.stubGlobal("location", { pathname: "/docs/webmcp" });
+  });
+
+  const reports = () =>
+    send.mock.calls.map(([url, init]) => {
+      expect(url).toBe(REPORT);
+      expect(init).toMatchObject({
+        method: "POST",
+        keepalive: true,
+        credentials: "same-origin",
+        headers: { "content-type": "application/json" },
+      });
+      return JSON.parse(init!.body as string);
+    });
+  const settle = () => new Promise((resolve) => setTimeout(resolve, 0));
+
+  it("reports a call's outcome, duration, page, arguments and result without changing the result", async () => {
+    const native = installModelContext();
+    const result = { matches: ["tractor"] };
+    register(searchTool(vi.fn(async () => result)));
+    runtime = await startWebMCPRuntime({ report: REPORT });
+
+    await expect(
+      native.tools.get("search_products")?.execute({ query: "tractor" }, { signal: signal() }),
+    ).resolves.toBe(result);
+    expect(reports()).toEqual([
+      {
+        tool: "search_products",
+        outcome: "success",
+        durationMs: expect.any(Number),
+        path: "/docs/webmcp",
+        arguments: { query: "tractor" },
+        result,
+      },
+    ]);
+    expect(reports()[0].durationMs).toBeGreaterThanOrEqual(0);
+  });
+
+  it("reports a failed call and an invalid input as errors, and rethrows the same error", async () => {
+    const native = installModelContext();
+    const failure = new Error("Catalog unavailable");
+    register(
+      searchTool(
+        vi.fn(async () => {
+          throw failure;
+        }),
+      ),
+    );
+    register(
+      defineWebMCPTool({
+        name: "set_quantity",
+        description: "Set the quantity for the selected cart line.",
+        inputSchema: { type: "object" },
+        validate: (value: unknown) => {
+          if (typeof (value as { count?: unknown }).count !== "number") throw new Error("count");
+          return value as { count: number };
+        },
+        execute: async ({ count }) => count,
+      }),
+    );
+    runtime = await startWebMCPRuntime({ report: REPORT });
+
+    await expect(
+      native.tools.get("search_products")?.execute({ query: "x" }, { signal: signal() }),
+    ).rejects.toBe(failure);
+    await expect(
+      native.tools.get("set_quantity")?.execute({ count: "two" }, { signal: signal() }),
+    ).rejects.toBeInstanceOf(WebMCPInputError);
+    const [failed, invalid] = reports();
+    expect(failed).toMatchObject({ tool: "search_products", outcome: "error" });
+    expect(invalid).toMatchObject({
+      tool: "set_quantity",
+      outcome: "error",
+      arguments: { count: "two" },
+    });
+    expect(failed).not.toHaveProperty("result");
+    expect(invalid).not.toHaveProperty("result");
+  });
+
+  it("leaves out a payload larger than Farm Infra keeps", async () => {
+    const native = installModelContext();
+    register(searchTool(vi.fn(async () => ({ text: "x".repeat(9 * 1024) }))));
+    runtime = await startWebMCPRuntime({ report: REPORT });
+
+    await native.tools.get("search_products")?.execute({ query: "boots" }, { signal: signal() });
+    const [report] = reports();
+    expect(report).toMatchObject({ arguments: { query: "boots" }, omitted: ["result"] });
+    expect(report).not.toHaveProperty("result");
+  });
+
+  it("stops reporting for the page once the server takes no reports", async () => {
+    const native = installModelContext();
+    register(searchTool());
+    runtime = await startWebMCPRuntime({ report: REPORT });
+    const invoke = () =>
+      native.tools.get("search_products")?.execute({ query: "x" }, { signal: signal() });
+
+    send.mockResolvedValueOnce(new Response(null, { status: 503 }));
+    await invoke();
+    await settle();
+    send.mockResolvedValueOnce(new Response(null, { status: 404 }));
+    await invoke();
+    await settle();
+    await expect(invoke()).resolves.toEqual({ query: "x" });
+    // A busy server may take the next report; a 404 means analytics is off for good.
+    expect(send).toHaveBeenCalledTimes(2);
+  });
+
+  it("never lets a failed report reach the tool call", async () => {
+    const native = installModelContext();
+    register(searchTool());
+    runtime = await startWebMCPRuntime({ report: REPORT });
+
+    send.mockRejectedValueOnce(new TypeError("Failed to fetch"));
+    await expect(
+      native.tools.get("search_products")?.execute({ query: "x" }, { signal: signal() }),
+    ).resolves.toEqual({ query: "x" });
+    send.mockImplementationOnce(() => {
+      throw new TypeError("keepalive quota");
+    });
+    await expect(
+      native.tools.get("search_products")?.execute({ query: "y" }, { signal: signal() }),
+    ).resolves.toEqual({ query: "y" });
+    await settle();
+  });
+
+  it("sends nothing without a report path, as with analytics: false", async () => {
+    const native = installModelContext();
+    register(searchTool());
+    runtime = await startWebMCPRuntime();
+
+    await native.tools.get("search_products")?.execute({ query: "x" }, { signal: signal() });
+    expect(send).not.toHaveBeenCalled();
   });
 });
 

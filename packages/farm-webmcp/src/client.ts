@@ -36,7 +36,25 @@ export interface StartWebMCPRuntimeOptions {
   unsupported?: WebMCPUnsupportedBehavior;
   /** Expose `window.__FARM_WEBMCP__` and log registration failures. */
   debug?: boolean;
+  /**
+   * The same-origin path that receives each tool call for Farm Infra analytics, set by
+   * `webmcp()` unless `analytics: false`. Reporting never changes a call's result.
+   */
+  report?: string;
 }
+
+/** What the browser reports for one call; the server adds the page's route and the client. */
+interface WebMCPToolCallReport {
+  tool: string;
+  outcome: "success" | "error";
+  durationMs: number;
+  path: string;
+  arguments?: unknown;
+  result?: unknown;
+  omitted?: ("arguments" | "result")[];
+}
+
+type ToolCallReporter = (call: Omit<WebMCPToolCallReport, "path" | "omitted">) => void;
 
 interface NativeWebMCPTool {
   name: string;
@@ -72,6 +90,8 @@ interface ActiveNativeTool {
 }
 
 const TOOL_NAME_PATTERN = /^[A-Za-z0-9_.-]{1,128}$/;
+/** Farm Infra keeps a tool call argument or result up to this size; a larger one isn't sent. */
+const MAX_PAYLOAD_BYTES = 8 * 1024;
 const registrations = new Map<number, RegisteredFarmTool>();
 const registryListeners = new Set<() => void>();
 let nextRegistrationId = 1;
@@ -172,6 +192,7 @@ export async function startWebMCPRuntime(
   const supportedModelContext = modelContext;
 
   const nativeTools = new Map<string, ActiveNativeTool>();
+  const report = options.report ? createToolCallReporter(options.report) : undefined;
   let closed = false;
   let syncQueue = Promise.resolve();
   let unsubscribe = () => {};
@@ -213,7 +234,7 @@ export async function startWebMCPRuntime(
       nativeTools.set(name, { id: registration.id, controller });
       try {
         await supportedModelContext.registerTool(
-          toNativeTool(registration.tool, options.debug === true),
+          toNativeTool(registration.tool, options.debug === true, report),
           { signal: controller.signal },
         );
       } catch (error) {
@@ -305,6 +326,7 @@ function notifyRegistryListeners(): void {
 function toNativeTool(
   tool: WebMCPToolDefinition<object, WebMCPJSONValue>,
   debug: boolean,
+  report: ToolCallReporter | undefined,
 ): NativeWebMCPTool {
   return {
     name: tool.name,
@@ -313,18 +335,85 @@ function toNativeTool(
     inputSchema: tool.inputSchema,
     ...(tool.annotations === undefined ? {} : { annotations: tool.annotations }),
     async execute(input, { signal }) {
+      const startedAt = performance.now();
       try {
         const parsed = tool.validate
           ? await validateInput(tool.name, tool.validate, input)
           : assertInputObject(tool.name, input);
         const result = await tool.execute(parsed, { signal });
         assertJSONValue(result, `Result from WebMCP tool "${tool.name}"`);
+        report?.({
+          tool: tool.name,
+          outcome: "success",
+          durationMs: performance.now() - startedAt,
+          arguments: input,
+          result,
+        });
         return result;
       } catch (error) {
+        report?.({
+          tool: tool.name,
+          outcome: "error",
+          durationMs: performance.now() - startedAt,
+          arguments: input,
+        });
         reportError(`WebMCP tool "${tool.name}" failed`, error, debug);
         throw error;
       }
     },
+  };
+}
+
+/**
+ * Sends each call to `endpoint` without waiting for it. A failure is ignored; an answer that
+ * says the server takes no reports (404 once analytics is off, or any other refusal) ends
+ * reporting for this page.
+ */
+function createToolCallReporter(endpoint: string): ToolCallReporter {
+  let stopped = false;
+  return (call) => {
+    if (stopped || typeof fetch !== "function" || typeof location === "undefined") return;
+    try {
+      const body: WebMCPToolCallReport = {
+        tool: call.tool,
+        outcome: call.outcome,
+        durationMs: Math.max(0, call.durationMs),
+        path: location.pathname,
+      };
+      for (const key of ["arguments", "result"] as const) {
+        if (!(key in call)) continue;
+        const text = JSON.stringify(call[key]);
+        if (text === undefined) continue;
+        if (new TextEncoder().encode(text).length > MAX_PAYLOAD_BYTES) {
+          (body.omitted ??= []).push(key);
+        } else {
+          body[key] = call[key];
+        }
+      }
+      fetch(endpoint, {
+        method: "POST",
+        keepalive: true,
+        credentials: "same-origin",
+        redirect: "error",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify(body),
+      }).then(
+        (response) => {
+          // Busy or failing servers may take the next report; a refusal won't change.
+          if (
+            response.status !== 204 &&
+            response.status !== 408 &&
+            response.status !== 429 &&
+            response.status < 500
+          ) {
+            stopped = true;
+          }
+        },
+        () => {},
+      );
+    } catch {
+      // Reporting never affects the tool call.
+    }
   };
 }
 
