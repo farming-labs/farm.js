@@ -725,7 +725,8 @@ too: the example's Playwright tests run the same checks against both.
 - **One renderer per app.** `renderer` is app-wide, so every page and layout uses the same one.
 - **React Server Components and islands are React-only.**
 - **Some UI integrations are React-oriented.** Most integration UI providers render React
-  components today. A docs adapter runs a docs UI written for your renderer; see
+  components today. `withDocs()` builds docs pages with your renderer, and
+  `@farming-labs/farmjs/testing` checks that it writes and hydrates them; see
   [Docs adapters on any renderer](/docs/docs-engine#docs-adapters-on-any-renderer).
 - **No static shell without `findStaticShellBoundary()`.** Partial prerendering needs it to know
   where the dynamic part of a streamed page begins.

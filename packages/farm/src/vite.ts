@@ -2700,6 +2700,7 @@ export function farmPlugin(
               root: farmConfig.root,
               srcDir: farmConfig.srcDir,
               clientEntry: "/@farm/client.js",
+              rendererServer: farmConfig.renderer.server,
               resolveLayoutFonts: resolveDocsLayoutFonts,
               fontStylesheetHref: "/@farm/fonts.css",
               globalStylesheetHref: resolveDevGlobalStylesheetHref(
@@ -6979,6 +6980,8 @@ function generateClientCode(
   const docsAdapterImportBlock = generateFarmDocsAdapterClientRuntime(
     docsAdapterUI,
     docsConfigModule,
+    // Config resolution keeps an adapter to its UI's renderer, so this is the UI's renderer too.
+    isReactRenderer(renderer) ? undefined : renderer.client,
   );
   const isolatedHydrationRuntime = isolatedHydrationEnabled
     ? `const farmIsolatedHydrationRuntime = createFarmIsolatedHydrationRuntime({

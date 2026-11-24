@@ -4,6 +4,7 @@ import { pathToFileURL } from "node:url";
 import type { DocsConfig } from "@farming-labs/docs";
 import type { FarmLayoutFonts } from "../font";
 import type { FarmMCPServerRegistration } from "../mcp-catalog";
+import type { FarmServerRendererRuntime } from "../renderer";
 import { getFarmDocsAdapterConfigModule } from "./adapter-client";
 import {
   getFarmDocsAdapterRenderer,
@@ -35,6 +36,16 @@ interface FarmDocsAdapterRuntimeHandlerOptions {
    * Adapters written before `loadUIModule` read it.
    */
   loadReactModule?: () => Promise<any>;
+  /**
+   * Loads the app renderer's server module, for a UI that builds its pages with it. Its
+   * `generateHydrationScript()`, when the renderer has one, belongs in the page's head.
+   */
+  loadRenderer?: () => Promise<
+    Pick<
+      FarmServerRendererRuntime,
+      "name" | "createElement" | "Fragment" | "renderToString" | "generateHydrationScript"
+    >
+  >;
   registerMCPServer?: (server: FarmMCPServerRegistration) => () => void;
   /**
    * Builds a complete HTML page's response. The production server passes it: a response built
@@ -90,6 +101,8 @@ export interface FarmDocsAdapterHandlerOptions {
     pathname: string,
   ) => FarmLayoutFonts | undefined | Promise<FarmLayoutFonts | undefined>;
   loadModule: (specifier: string) => Promise<any>;
+  /** The app renderer's server module (`renderer.server`), loaded with `loadModule`. */
+  rendererServer?: string;
   /**
    * Lists the adapter's MCP endpoint in the app's AI catalog. The adapter knows its
    * route, name, and version; older adapters ignore it and older hosts do not pass it.
@@ -383,6 +396,9 @@ export async function createFarmDocsAdapterHandler(
     loadUIModule,
     ...(getFarmDocsAdapterRenderer(docs.adapter) === "react"
       ? { loadReactModule: loadUIModule }
+      : {}),
+    ...(options.rendererServer
+      ? { loadRenderer: () => options.loadModule(options.rendererServer!) }
       : {}),
     ...(options.registerMCPServer ? { registerMCPServer: options.registerMCPServer } : {}),
     ...(options.isPathGuarded && farmDocsAdapterServesGuardedPages(docs)

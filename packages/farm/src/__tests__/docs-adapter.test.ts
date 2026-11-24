@@ -243,6 +243,30 @@ describe("Farm docs runtime adapters", () => {
     expect(hostOptions).not.toHaveProperty("loadReactModule");
   });
 
+  it("hands the adapter the app's renderer, loaded only when its UI asks", async () => {
+    const docs = createSvelteAdapterDocs();
+    const createRuntimeHandler = vi.fn((_config: unknown, _options: any) => async () => null);
+    const rendererModule = { name: "svelte", createElement: vi.fn(), renderToString: vi.fn() };
+    const loadModule = vi.fn(async (specifier: string) => {
+      if (specifier === "docs-svelte/server") {
+        return { createFarmDocsRuntimeHandler: createRuntimeHandler };
+      }
+      if (specifier === "@farm.js/svelte/server") return rendererModule;
+      throw new Error(`Unexpected module: ${specifier}`);
+    });
+
+    await createFarmDocsAdapterHandler(docs, {
+      root: "/workspace/app",
+      clientEntry: "/@farm/client.js",
+      rendererServer: "@farm.js/svelte/server",
+      loadModule,
+    });
+
+    const [, hostOptions] = createRuntimeHandler.mock.calls[0]!;
+    expect(loadModule).not.toHaveBeenCalledWith("@farm.js/svelte/server");
+    await expect(hostOptions.loadRenderer()).resolves.toBe(rendererModule);
+  });
+
   it("runs an adapter only under the renderer its UI is written for", () => {
     expect(() => assertFarmDocsAdapterRenderer(createAdapterDocs(), "react")).not.toThrow();
     expect(() => assertFarmDocsAdapterRenderer(createSvelteAdapterDocs(), "svelte")).not.toThrow();
@@ -274,6 +298,9 @@ describe("Farm docs runtime adapters", () => {
     expect(options).toContain("rootDir: farmDocsRuntimeRoot,");
     expect(options).toContain("immutableContent: true,");
     expect(options).toContain("modulePreloads: farmDocsModulePreloadPaths,");
+    // A UI built with the app's renderer gets it: the renderer module the server entry imports.
+    expect(options).toContain("loadRenderer: async () => farmDocsAppRenderer,");
+    expect(source).toContain(': "__farmRendererServer"');
     // The page list is filled in after the client build; an unfilled one parses to nothing.
     expect(source).toContain('JSON.parse("${FARM_DOCS_MODULE_PRELOADS_PLACEHOLDER}")');
   });

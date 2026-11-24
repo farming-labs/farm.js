@@ -22,9 +22,14 @@ export function getFarmDocsAdapterConfigModule(
   return docs.configPath.endsWith(".json") ? undefined : docs.configPath.replace(/\\/g, "/");
 }
 
+/**
+ * @param rendererClient The app renderer's client module (`renderer.client`), passed to a UI
+ * written for a renderer other than React as `renderer`. A React UI imports React itself.
+ */
 export function generateFarmDocsAdapterClientRuntime(
   uiModule: string | undefined,
   configModule?: string,
+  rendererClient?: string,
 ): string {
   if (!uiModule) {
     return `
@@ -41,9 +46,14 @@ async function hydrateFarmDocsAdapterRuntime() {
   // The docs server flags pages whose config holds what its JSON copy cannot (icons,
   // MDX components, callbacks); the adapter restores those from the module itself.
   // Fetch it alongside the adapter rather than after it: they don't depend on each other.
-  const [FarmDocsAdapterUI, configModule] = await Promise.all([
+  const [FarmDocsAdapterUI, configModule${rendererClient ? ", renderer" : ""}] = await Promise.all([
     import(${JSON.stringify(uiModule)}),
-    runtime.configModule ? ${configModule ? `import(${JSON.stringify(configModule)})` : "undefined"} : undefined,
+    runtime.configModule ? ${configModule ? `import(${JSON.stringify(configModule)})` : "undefined"} : undefined,${
+      rendererClient
+        ? `
+    import(${JSON.stringify(rendererClient)}),`
+        : ""
+    }
   ]);
   if (typeof FarmDocsAdapterUI.hydrateFarmDocs !== "function") {
     throw new Error("The configured Farm docs adapter does not export hydrateFarmDocs().");
@@ -51,7 +61,12 @@ async function hydrateFarmDocsAdapterRuntime() {
   FarmDocsAdapterUI.hydrateFarmDocs({
     config: runtime.config || {},
     data: runtime.data,
-    ...(configModule ? { configModule: configModule.default ?? configModule } : {}),
+    ...(configModule ? { configModule: configModule.default ?? configModule } : {}),${
+      rendererClient
+        ? `
+    renderer,`
+        : ""
+    }
   });
   return true;
 }

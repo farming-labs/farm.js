@@ -115,8 +115,8 @@ store from `createStore` in `@farm.js/core/renderer-client`, to an accessor; see
 navigates and prefetches like the React one; see [Link in Solid, Vue, and Svelte](/docs/routing#link-in-solid-vue-and-svelte).
 `useAction(fn).Form` renders a form that submits through the action; see
 [action forms](/docs/renderers#action-forms). Fetchers and integration providers remain
-React-oriented today. A docs adapter needs a docs UI written for Solid; `@farming-labs/farmjs` ships a
-React one. See [Docs adapters on any renderer](/docs/docs-engine#docs-adapters-on-any-renderer). Markdown and MDX pages and [programmatic UI routes](/docs/routing#programmatic-routes) render with Solid, and so
+React-oriented today. `withDocs()` from `@farming-labs/farmjs` builds docs pages with Solid;
+see [Docs adapters on any renderer](/docs/docs-engine#docs-adapters-on-any-renderer). Markdown and MDX pages and [programmatic UI routes](/docs/routing#programmatic-routes) render with Solid, and so
 do [generated metadata images](/docs/routing#generated-metadata-images) written in Solid JSX.
 
 The Better Auth starter includes native Solid routes, signals, and forms:

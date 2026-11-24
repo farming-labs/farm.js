@@ -4331,7 +4331,12 @@ function isFarmDocsPath() {
   return false;
 }
 `;
-  const docsAdapterRuntime = generateFarmDocsAdapterClientRuntime(docsAdapterUI, docsConfigModule);
+  const docsAdapterRuntime = generateFarmDocsAdapterClientRuntime(
+    docsAdapterUI,
+    docsConfigModule,
+    // Config resolution keeps an adapter to its UI's renderer, so this is the UI's renderer too.
+    isReactRenderer(renderer) ? undefined : renderer.client,
+  );
 
   if (
     clientPages.length === 0 &&
@@ -9031,7 +9036,17 @@ const farmDocsModulePreloadPaths = farmDocsModulePreloads
       ),
     }
   : undefined;
-const farmDocsHandler = ${
+${
+  adapterOwnsDocsRuntime && !hasPrecompiledDocs
+    ? `// The renderer contract's server exports, for a docs UI that builds its pages with them.
+const farmDocsAppRenderer = ${
+        isReactRenderer(config.renderer)
+          ? '{ name: "react", createElement: React.createElement, Fragment: React.Fragment, renderToString: ReactDOMServer.renderToString }'
+          : "__farmRendererServer"
+      };
+`
+    : ""
+}const farmDocsHandler = ${
     config.docs?.enabled
       ? hasPrecompiledDocs
         ? "farmDocsPrecompiledRuntime.handleDocsRequest"
@@ -9052,7 +9067,9 @@ const farmDocsHandler = ${
     resolveFarmLayoutFonts(
       getApplicableLayouts(getFarmRoutePathname(pathname)).map((layout) => layout.module),
     ),
-  loadUIModule: async () => FarmDocsAdapterUI,${
+  loadUIModule: async () => FarmDocsAdapterUI,
+  // The app's renderer, for a UI that builds its pages with it.
+  loadRenderer: async () => farmDocsAppRenderer,${
     getFarmDocsAdapterRenderer(config.docs.adapter!) === "react"
       ? `
   loadReactModule: async () => FarmDocsAdapterUI,`

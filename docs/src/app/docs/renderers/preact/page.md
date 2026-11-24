@@ -107,8 +107,8 @@ second UI runtime. On the server, Farm's own modules, `@farm.js/preact`, and you
 imports `react` still loads React on the server. Compatibility for third-party React integration
 providers still depends on each provider, so verify provider UI before relying on it in production.
 
-React Server Components remain React-only. A docs adapter needs a docs UI written for Preact;
-`@farming-labs/farmjs` ships a React one. See [Docs adapters on any renderer](/docs/docs-engine#docs-adapters-on-any-renderer). Integration UI providers should be
+React Server Components remain React-only. `withDocs()` from `@farming-labs/farmjs` builds docs
+pages with Preact; see [Docs adapters on any renderer](/docs/docs-engine#docs-adapters-on-any-renderer). Integration UI providers should be
 treated as compatibility surfaces until their Preact paths are covered by dedicated tests. Markdown
 and MDX pages, [generated metadata images](/docs/routing#generated-metadata-images), and
 [programmatic UI routes](/docs/routing#programmatic-routes) render with Preact.
