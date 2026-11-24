@@ -86,6 +86,9 @@ const entry = {
   "internal/islands-runtime": "src/client/islands-runtime.ts",
   // Its own file, so the islands runtime's import of it and the preload manifest name the same one.
   "internal/islands-action-client": "src/islands-action-client.ts",
+  // Its own file too: the runtime imports it with a page's first server tree, and the preload
+  // manifest names the same one.
+  "internal/islands-server-tree": "src/client/islands-server-tree.ts",
   "internal/islands-boot": "src/client/islands-boot.ts",
   "internal/islands-server": "src/client/islands-server.ts",
   "internal/islx-client": "src/islx/client.ts",

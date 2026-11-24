@@ -1,9 +1,12 @@
 import fs from "node:fs";
+import os from "node:os";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
 import {
   collectFarmClientModulePreloads,
+  createFarmClientModulePreloadPlugin,
   encodeFarmClientModulePreloads,
+  readFarmClientModulePreloads,
   type FarmClientModulePreloadManifest,
 } from "../nitro/client-module-preloads";
 
@@ -142,6 +145,54 @@ describe("client module preloads", () => {
     ).toBeUndefined();
   });
 
+  it("lists the server trees' chunks outside the entry's and the renderer's", async () => {
+    const reactDom = path.join(root, "node_modules/react-dom/client.js");
+    const serverTrees = path.join(
+      root,
+      "node_modules/@farm.js/core/dist/internal/islands-server-tree.mjs",
+    );
+    const buildDir = fs.mkdtempSync(path.join(os.tmpdir(), "farm-preloads-"));
+    try {
+      const plugin = createFarmClientModulePreloadPlugin({
+        root,
+        buildDir,
+        entryName: "farm-client",
+        rendererImports: ["react-dom/client"],
+        serverTreeImports: ["@farm.js/core/internal/islands-server-tree"],
+        rendererImporter: path.join(root, ".farm/tmp/client-entry-1/farm-client.tsx"),
+      });
+      const resolved: Record<string, string> = {
+        "react-dom/client": reactDom,
+        "@farm.js/core/internal/islands-server-tree": serverTrees,
+      };
+      await plugin.generateBundle.call(
+        { resolve: async (source: string) => (resolved[source] ? { id: resolved[source] } : null) },
+        undefined,
+        {
+          ...bundle,
+          "chunks/client.js": chunk("chunks/client.js", ["chunks/react.js"], { module: reactDom }),
+          "chunks/server-tree.js": chunk(
+            "chunks/server-tree.js",
+            ["chunks/revive.js", "chunks/client.js"],
+            { module: serverTrees },
+          ),
+          "chunks/revive.js": chunk("chunks/revive.js", ["chunks/react.js"]),
+        },
+      );
+      const manifest = (await readFarmClientModulePreloads(buildDir))!;
+      expect(manifest.serverTrees!.map((index) => manifest.files[index])).toEqual([
+        "chunks/server-tree.js",
+        "chunks/revive.js",
+      ]);
+    } finally {
+      fs.rmSync(buildDir, { recursive: true, force: true });
+    }
+    // A build without server trees has none to list.
+    expect(
+      collectFarmClientModulePreloads(bundle, { root, entryName: "farm-client" })!.serverTrees,
+    ).toBeUndefined();
+  });
+
   it("lists the action client's chunks outside the entry's and the renderer's", () => {
     const reactDom = path.join(root, "node_modules/react-dom/client.js");
     const actions = path.join(
@@ -259,6 +310,48 @@ return { renderFarmClientModulePreloads, renderFarmClientBootPreloads };`,
     expect(hrefs(renderFarmClientModulePreloads(null, undefined, true, true))).toEqual([
       "chunks/react.js",
     ]);
+  });
+
+  it("lists the server trees with the renderer for a document that holds one", () => {
+    const preloads = create({
+      files: [
+        "chunks/react.js",
+        "chunks/router.js",
+        "chunks/react-dom.js",
+        "chunks/root.js",
+        "chunks/server-tree.js",
+        "chunks/revive.js",
+      ],
+      entry: [0],
+      router: [1],
+      renderer: [2],
+      root: [3],
+      serverTrees: [4, 5],
+      modules: {},
+    });
+    const tree = '<div id="__farm_page__"><p>Cart</p></div><script type="f/tree">[]</script>';
+    expect(
+      preloads.renderFarmClientBootPreloads(tree, undefined, "root", "interaction", false),
+    ).toBe(
+      ' data-farm-preload="chunks/react.js"' +
+        ' data-farm-preload-router="chunks/router.js"' +
+        ' data-farm-preload-renderer="chunks/react-dom.js chunks/server-tree.js chunks/revive.js"' +
+        ' data-farm-preload-root="chunks/root.js"',
+    );
+    // A navigation's response, whose tree the router rebuilds.
+    expect(hrefs(preloads.renderFarmClientModulePreloads(tree, undefined, true, false))).toEqual([
+      "chunks/react.js",
+      "chunks/server-tree.js",
+      "chunks/revive.js",
+    ]);
+    // A page of islands only never loads them.
+    const islands = '<f-island src="/src/counter.tsx"></f-island>';
+    expect(preloads.renderFarmClientBootPreloads(islands, undefined, "", "", false)).not.toContain(
+      "server-tree.js",
+    );
+    expect(
+      hrefs(preloads.renderFarmClientModulePreloads(islands, undefined, false, false)),
+    ).not.toContain("chunks/server-tree.js");
   });
 
   it("fetches the root's code with the boot's entry, or on a click in a root that waits for one", () => {

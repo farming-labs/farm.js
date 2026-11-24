@@ -2631,6 +2631,9 @@ async function buildClient(
                       ],
                       // What a call's result is handled with, imported on the first (RFC 0013).
                       actionImports: ["@farm.js/core/internal/islands-action-client"],
+                      // What a root rebuilds a server tree with, imported with the first (RFC
+                      // 0013). A build without server trees has no chunk for it.
+                      serverTreeImports: ["@farm.js/core/internal/islands-server-tree"],
                       rendererImporter: clientEntryPath,
                     }
                   : {}),
@@ -10510,6 +10513,8 @@ const FARM_CLIENT_MODULE_REFERENCE_PATTERN = /<f-island src="([^"]+)"([^>]*)>|"r
 // A server action reference in a document's markup: an action in an island's or a client
 // component's props (islx's \`{"$":"a",...}\`), or a server form posting one (its \`$F_REF_\` field).
 const FARM_ACTION_REFERENCE_PATTERN = /"\\$":"a"|name="\\$F_REF_/;
+// A server tree in a document's markup: the payload a page or layout root rebuilds from.
+const FARM_SERVER_TREE_PATTERN = /<script type="f\\/tree"/;
 
 function renderFarmClientModulePreload(index) {
   return '\\n  <link rel="modulepreload" href="/' +
@@ -10549,6 +10554,14 @@ function collectFarmClientActionModules(markup, listed) {
   return actions.filter((index) => !listed.has(index) && listed.add(index));
 }
 
+// The manifest indexes of islands mode's server trees (RFC 0013), for a document whose markup holds
+// one, leaving out those already listed. The islands runtime imports them with the first otherwise.
+function collectFarmClientServerTreeModules(markup, listed) {
+  const trees = farmClientModulePreloads.serverTrees;
+  if (!trees || typeof markup !== "string" || !FARM_SERVER_TREE_PATTERN.test(markup)) return [];
+  return trees.filter((index) => !listed.has(index) && listed.add(index));
+}
+
 // The modulepreload links for a document: the entry's static imports and, unless it answers a
 // client navigation, the renderer and, when a page or layout root hydrates in it (\`hydratesRoot\`),
 // the code that renders it; then the modules its hydrating page and its markup load.
@@ -10562,6 +10575,7 @@ function renderFarmClientModulePreloads(markup, pageModule, navigation, hydrates
     (hydratesRoot && !navigation ? farmClientRootPreloadTags : "") +
     collectFarmClientDocumentModules(markup, pageModule, listed)
       .concat(collectFarmClientActionModules(markup, listed))
+      .concat(collectFarmClientServerTreeModules(markup, listed))
       .map(renderFarmClientModulePreload)
       .join("");
 }
@@ -10594,11 +10608,14 @@ function renderFarmClientBootPreloads(markup, pageModule, root, rootStrategy, na
       )
     : [];
   const waitsForClick = rootStrategy === "interaction";
-  // A call needs a hydrated island, so the action client comes with the renderer.
+  // A call needs a hydrated island, so the action client comes with the renderer, as do the server
+  // trees a root rebuilds.
+  const listed = new Set(entry.concat(rootModules));
   const renderer = navigation
     ? []
     : (farmClientModulePreloads.renderer || []).concat(
-        collectFarmClientActionModules(markup, new Set(entry.concat(rootModules))),
+        collectFarmClientActionModules(markup, listed),
+        collectFarmClientServerTreeModules(markup, listed),
       );
   return attribute("data-farm-preload", waitsForClick ? entry : entry.concat(rootModules)) +
     attribute("data-farm-preload-router", farmClientModulePreloads.router || []) +

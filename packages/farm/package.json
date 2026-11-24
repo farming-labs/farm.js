@@ -764,6 +764,11 @@
       "import": "./dist/internal/islands-action-client.mjs",
       "require": "./dist/internal/islands-action-client.cjs"
     },
+    "./internal/islands-server-tree": {
+      "types": "./dist/internal/islands-server-tree.d.ts",
+      "import": "./dist/internal/islands-server-tree.mjs",
+      "require": "./dist/internal/islands-server-tree.cjs"
+    },
     "./internal/islands-boot": {
       "types": "./dist/internal/islands-boot.d.ts",
       "import": "./dist/internal/islands-boot.mjs",
@@ -871,7 +876,7 @@
     "clean": "rm -rf dist"
   },
   "dependencies": {
-    "@farm.js/islx": "0.0.25",
+    "@farm.js/islx": "0.0.28",
     "@farming-labs/orm": "0.0.66",
     "@farming-labs/orm-runtime": "0.0.66",
     "@farming-labs/orm-sql": "0.0.66",
