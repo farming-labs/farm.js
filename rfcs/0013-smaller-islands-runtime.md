@@ -348,6 +348,11 @@ throttling, medians of 21, in ms:
   (1.2 KB).
 - **Unlimited:** within the A/A pair's spread.
 - **Remaining gap:** 13 ms at 1.6 Mbit/s, down from 40.
+- **After `main` moved to islx 0.0.30,** 41 rounds at 1.6 Mbit/s: `rsc` 778, `main` 814, this
+  change 783, A/A 813. This change was faster than `main` in all 41 rounds, and the gap went from
+  36 ms to 5. Unlimited, medians of 21: 418, 428, 429, 427. `main` still sends 76.5 KB of script:
+  islx's split alone changes nothing while the islands runtime imports the server trees up front.
+  First-load script on the other four sections is 26.6 KB in both builds.
 - **The other four sections:**
   - First-load script went from 26.5 KB to 26.6 KB: the entry names one more chunk (33 bytes),
     and Rolldown's runtime gains the namespace helper islx's actions chunk needs (55 bytes).
