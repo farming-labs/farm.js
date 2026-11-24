@@ -113,6 +113,40 @@ const partner = remoteFont({
 });
 ```
 
+## Fonts from a package
+
+A package can ship its own font declarations, so an app imports a ready font in one line:
+
+```tsx title="src/app/layout.tsx"
+import { defineLayoutFonts } from "@farm.js/core/font";
+import { BrandSans } from "brand-fonts/farm/sans";
+
+export const fonts = defineLayoutFonts({ body: BrandSans });
+
+export default function RootLayout({ children }) {
+  return (
+    <html lang="en" className={BrandSans.variable}>
+      <body className={BrandSans.className}>{children}</body>
+    </html>
+  );
+}
+```
+
+The package exports a module that calls `localFont` at module scope, with `src` relative to that module:
+
+```js title="node_modules/brand-fonts/farm/sans.js"
+import { localFont } from "@farm.js/core/font";
+
+export const BrandSans = localFont({
+  src: "../fonts/BrandSans-Variable.woff2",
+  family: "Brand Sans",
+  weight: "100 900",
+  variable: "--font-brand-sans",
+});
+```
+
+Farm finds packages that import `@farm.js/core/font` and compiles them with the app's own modules, on the server and in the browser, in development and in production builds. Ship the module as ES module JavaScript and list `@farm.js/core` as a peer dependency.
+
 ## Returned values
 
 Every loader returns:

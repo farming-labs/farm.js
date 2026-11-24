@@ -669,12 +669,17 @@ export function farmServerOnlyEntriesPlugin(
         : {};
       persistPackageScanCache();
       return {
-        optimizeDeps: { rolldownOptions: { plugins: [farmBrowserBuiltinsOptimizerPlugin()] } },
+        optimizeDeps: {
+          // A package that defines fonts is served unbundled, so Farm's font compiler sees it.
+          exclude: bundledPackages.filter(({ fonts }) => fonts).map(({ name }) => name),
+          rolldownOptions: { plugins: [farmBrowserBuiltinsOptimizerPlugin()] },
+        },
         ssr: {
           noExternal: [
             // Resolve `server-only` here rather than in Node, which would load its throwing build.
             SERVER_ONLY_PACKAGE,
-            // Packages Node cannot load as a bundler does (stylesheet imports, `module`-only ESM).
+            // Packages Node cannot load as a bundler does (stylesheet imports, `module`-only ESM,
+            // fonts that only Farm's font compiler can build).
             ...bundledPackages.map(({ name }) => name),
           ],
           ...prebundle,
