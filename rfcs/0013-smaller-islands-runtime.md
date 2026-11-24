@@ -402,6 +402,50 @@ throttling, all hydrated, in ms:
   blog's A/A pair alone is -1 ms (-8 to 14).
 - **Remaining gap:** none at 1.6 Mbit/s; 5 ms without a bandwidth limit.
 
+**Item 7: React compiled as it streams in.** Without a bandwidth limit the gap is main-thread time,
+not network: both engines request every script about 162 ms in and have them all by about 320 ms
+(resource timing, medians of 15 visits). A trace of the visit (Chrome tracing, medians of 9, wall clock
+under 4x CPU throttling) has islands' main thread busy for 243 ms before the page has hydrated,
+against `rsc`'s 208, and both spend close to 28 ms of it in V8's lazy compilation, which parses and
+compiles each function on the main thread the first time it runs. Most of what hydration runs is
+React DOM, and since item 6 it is a chunk that loads only when an island is due and runs as soon as
+it arrives.
+
+What changed:
+
+- The React chunk starts with `//# allFunctionsCalledOnLoad`, V8's explicit compile hint: Chrome
+  compiles every function of the script on a background thread while it streams in. Other engines
+  ignore it as a comment.
+- It goes in with Rolldown's `postBanner`, after minification, so it stays the chunk's first line and
+  the chunk's source map accounts for it, and only where item 6's chunk exists. Every other chunk is
+  unchanged: Rolldown adds a line after any `postBanner` string, an empty one too, so other chunks
+  get none.
+
+With the hint, the trace's main thread spends 19.2 ms parsing functions instead of 27.4, and
+3.8 ms compiling bytecode instead of 11.5. Measured against `main`, interleaved with an A/A copy of
+`main`, 150 ms latency, 4x CPU throttling, all hydrated, in ms:
+
+| Network                   | `rsc` | `main` | this change | A/A |
+| ------------------------- | ----- | ------ | ----------- | --- |
+| 1.6 Mbit/s, medians of 41 | 797   | 789    | 773         | 789 |
+| Unlimited, medians of 31  | 425   | 434    | 417         | 433 |
+
+- **1.6 Mbit/s:** paired by round, this change was faster than `main` in 35 of the 41 rounds, by a
+  median of 18 ms (bootstrap 95% interval 15 to 22), and faster than `rsc` in 37, by 25 ms (17 to
+  30). The A/A pair differs by 2 ms (-7 to 3).
+- **Unlimited:** faster than `main` in 27 of the 31 rounds, by 13 ms (9 to 23), and faster than
+  `rsc` in 23, by 7 ms (6 to 12). The A/A pair differs by 1 ms (-6 to 8).
+- **Bytes:** the hint is 29 bytes raw and nothing at brotli; the other four sections' documents,
+  first-load script and navigation data are unchanged (`measure.mjs`).
+- **The other four sections' first navigation,** 1.6 Mbit/s, paired by round with `main`: after a
+  tap (21 rounds), every section is within 2 ms and every interval includes zero. After a 100 ms
+  hover (11 rounds), only shop measured later than both `main` and its A/A copy, by 1 ms (paired -2
+  ms, -32 to 3), and no section's cold visit painted later than both.
+- **Remaining gap:** none on this page. Islands hydrates it first on both networks.
+- **Cost:** Chrome also compiles the React functions hydration never runs, on a background thread,
+  and keeps their bytecode. Chrome's CPU throttling slows the main thread, so the probe doesn't show
+  what that compile costs a slow phone's other cores.
+
 **What is left.** On the probe the whole difference is script: 81.4 KB on the wire for islands
 against 69.7 KB, with documents within 0.4 KB. Measured with esbuild and brotli 11: the server
 tree helpers on islx 0.0.25's published build, the call path on a split of islx `main` (v0.0.27):

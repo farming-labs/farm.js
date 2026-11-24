@@ -7,8 +7,9 @@ import { fileURLToPath } from "node:url";
 import { rolldown, type OutputChunk } from "rolldown";
 import { afterEach, describe, expect, it } from "vitest";
 import {
+  FARM_EAGER_COMPILE_HINT,
   configuresFarmClientChunks,
-  createFarmIslandsReactChunkGroup,
+  createFarmIslandsReactOutput,
 } from "../nitro/islands-react-chunk";
 
 const packageRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
@@ -20,7 +21,7 @@ afterEach(async () => {
 
 const REACT_PACKAGE = /[\\/]node_modules[\\/](react|react-dom|scheduler)[\\/]/;
 
-/** Bundles `files` with the group, as islands mode's client build does, with the real React. */
+/** Bundles `files` with islands mode's output for React, as its client build does, with the real React. */
 async function bundle(files: Record<string, string>): Promise<OutputChunk[]> {
   const dir = await mkdtemp(path.join(tmpdir(), "farm-islands-react-chunk-"));
   dirs.push(dir);
@@ -40,7 +41,8 @@ async function bundle(files: Record<string, string>): Promise<OutputChunk[]> {
   const build = await rolldown({ input: path.join(dir, "entry.mjs"), platform: "browser" });
   const { output } = await build.generate({
     format: "esm",
-    codeSplitting: { groups: [createFarmIslandsReactChunkGroup()] },
+    sourcemap: true,
+    ...createFarmIslandsReactOutput(),
   });
   await build.close();
   return output.filter((chunk): chunk is OutputChunk => chunk.type === "chunk");
@@ -89,6 +91,13 @@ describe("islands mode's React chunk", () => {
       true,
     );
     expect(reactPackages(loadedWithEntry(chunks))).toEqual([]);
+    // Compiled as it streams in, with the source map still pointing at React's code.
+    const hinted = chunks.filter((chunk) => chunk.code.startsWith(FARM_EAGER_COMPILE_HINT));
+    expect(hinted.map((chunk) => chunk.fileName)).toEqual([holding[0]!.fileName]);
+    expect(holding[0]!.code.startsWith(`${FARM_EAGER_COMPILE_HINT}\n`)).toBe(true);
+    expect(holding[0]!.map?.mappings.startsWith(";")).toBe(true);
+    // The other chunks start as they would without it.
+    expect(chunks.filter((chunk) => /^\s/.test(chunk.code))).toEqual([]);
   });
 
   it("stays out of an entry that imports React, which would load React DOM with every page", async () => {
@@ -101,6 +110,7 @@ export const load = () => Promise.all([import("./runtime.mjs"), import("./island
     // The bundler's own split: React with the entry, React DOM in a chunk of its own.
     expect(reactPackages(loadedWithEntry(chunks))).toEqual(["react"]);
     expect(chunks.filter((chunk) => reactPackages([chunk]).includes("react-dom"))).toHaveLength(1);
+    expect(chunks.some((chunk) => chunk.code.includes(FARM_EAGER_COMPILE_HINT))).toBe(false);
   });
 
   it("leaves chunks to an app whose Vite config splits them", () => {
