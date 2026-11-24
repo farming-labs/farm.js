@@ -970,6 +970,22 @@ export default function farmRsc(options: FarmRscPluginOptions = {}): Plugin[] {
     rscPrivateClientSourcemaps(),
     createFarmRscMobileClientManifestPlugin(() => mobileClientRoot) as unknown as Plugin,
     {
+      // The mobile entry runs the shell's bridge code and then the browser entry. With a strict
+      // signature, Rolldown can't merge the web client's shared code into its chunk, which web
+      // pages would then load, running that bridge code too.
+      name: "@farm.js/plugin/rsc:mobile-client-entry",
+      apply: "build",
+      buildStart() {
+        if (!mobileClientRoot || this.environment?.name !== "client") return;
+        this.emitFile({
+          type: "chunk",
+          id: RSC_MOBILE_CLIENT_ENTRY,
+          name: FARM_RSC_MOBILE_CLIENT_ENTRY_NAME,
+          preserveSignature: "strict",
+        });
+      },
+    },
+    {
       // A Worker bundles React and has no NODE_ENV of its own, and `wrangler pages dev` defines it
       // as "development": keep only React's production builds, as core's Workers builds do.
       ...createReactProductionModePlugin(),
@@ -1698,12 +1714,8 @@ export default function farmRsc(options: FarmRscPluginOptions = {}): Plugin[] {
               build: {
                 outDir: `${outDir}/client`,
                 rollupOptions: {
-                  input: {
-                    index: entryClient,
-                    ...(mobileClient === "entry"
-                      ? { [FARM_RSC_MOBILE_CLIENT_ENTRY_NAME]: RSC_MOBILE_CLIENT_ENTRY }
-                      : {}),
-                  },
+                  // The mobile entry is emitted by `rsc:mobile-client-entry`.
+                  input: { index: entryClient },
                 },
               },
               resolve: { conditions: ["browser", "import"] },

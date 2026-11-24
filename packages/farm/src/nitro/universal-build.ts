@@ -4567,6 +4567,9 @@ ${layoutImports}
     defaultLocale: i18nConfig.defaultLocale,
     routing: i18nConfig.routing,
   };
+  // Only an app with i18n renders a `Link` to another locale (`data-farm-locale`), so only its
+  // click handler remembers one, and other apps' entries leave the locale code out.
+  const rememberLinkLocale = i18nConfig.enabled ? "\n  rememberFarmLinkLocale(anchor);" : "";
   const i18nClientRuntime = i18nConfig.enabled
     ? `
 import { stripFarmLocaleFromPathname } from "@farm.js/core/i18n";
@@ -4938,8 +4941,7 @@ document.addEventListener("click", function(e) {
   if (e.button !== 0) return;
   if (e.defaultPrevented) return;
   
-  e.preventDefault();
-  rememberFarmLinkLocale(anchor);
+  e.preventDefault();${rememberLinkLocale}
   spaRouter.navigate(href, readFarmLinkNavigateOptions(anchor));
 });
 
@@ -5564,7 +5566,11 @@ function resetRouteSlotRoots() {
 }
 
 /*farm-router-end*/
-function renderClientRouteSlot(slot, registration, mode) {
+${
+  // Without a route slot that has client components, no slot renders or hydrates in the browser
+  // (findClientRouteSlot finds none), so the entry leaves that code out.
+  routeSlotEntries.length > 0
+    ? `function renderClientRouteSlot(slot, registration, mode) {
   const container = document.getElementById(slot.containerId);
   if (!container || !registration?.Component) return false;
   const key = routeSlotKey(slot);
@@ -5629,7 +5635,14 @@ function hydrateInitialRouteSlots() {
     }
   }
 }
+`
+    : `function renderClientRouteSlot() {
+  return false;
+}
 
+function hydrateInitialRouteSlots() {}
+`
+}
 /*farm-router-start*/
 function renderRouteInterception(slot, registration, from, nextDocument) {
   const container = document.getElementById(slot.containerId);
@@ -6747,8 +6760,7 @@ document.addEventListener("click", function(e) {
   if (e.button !== 0) return;
   if (e.defaultPrevented) return;
   
-  e.preventDefault();
-  rememberFarmLinkLocale(anchor);
+  e.preventDefault();${rememberLinkLocale}
   spaRouter.navigate(href, readFarmLinkNavigateOptions(anchor));
 });
 

@@ -337,3 +337,41 @@ tree helpers on islx 0.0.25's published build, the call path on a split of islx 
   navigations, streamed props (`islandPromise`) and the reviver for elements an action returns.
   Removing the update, the carry-over and the reviver outright saves 454 bytes, so loading them
   on use is not worth an islx release either.
+
+**Entry code an app can't run (#3159).** Found by mapping the entry's bytes to their sources after
+item 4:
+
+- `document-head.ts` built its selector with a top-level `[...].join(",")`. A bundler keeps a
+  module with a top-level call in the chunk that imports it first, so the head helpers sat in
+  the entry, though only the router calls them. The call is marked pure, and they load with the
+  router.
+- The click handler remembers a `Link`'s locale only in an app with i18n: no other app renders a
+  link to another locale, and the call pulled the locale cookie and snapshot code into the entry.
+- The entry renders and hydrates route slots only in an app with a slot that has client
+  components. Without one, no slot can match.
+- With the head helpers free of side effects, Rolldown merged the web client's shared code into
+  the mobile entry of an `rsc` app with a `mobile` block, so web pages imported that entry and ran
+  the shell's bridge code. The RSC plugin now emits the mobile entry with a strict signature, which
+  keeps its chunk to its own code.
+
+Measured against `main`, interleaved with an A/A copy of `main`, 150 ms latency, 4x CPU
+throttling, medians of 21, in ms:
+
+| Network                  | `rsc` | `main` | this change | A/A |
+| ------------------------ | ----- | ------ | ----------- | --- |
+| 1.6 Mbit/s, all hydrated | 778   | 816    | 806         | 816 |
+| Unlimited, all hydrated  | 426   | 434    | 431         | 430 |
+
+- **Bytes:** the entry went from 9,738 to 8,930 bytes at brotli 11, and the router, which loads
+  on a navigation's intent, from 10,114 to 10,414. Scripts on the wire went from 76.6 KB to
+  75.8 KB. First-load script on the other four sections went from 26.5 KB to 25.9 KB; their
+  documents and navigation data are unchanged.
+- **Unlimited:** the 3 ms is within the A/A pair's spread.
+- **Rerun at 1.6 Mbit/s,** 41 rounds: `rsc` 780, `main` 815, this change 808, A/A 815. This change
+  was faster than `main` in 35 of the 41 rounds. The i18n and slot changes alone measured 815, the
+  same as `main`: the head helpers carry the gain.
+- **First navigation:** at 150 ms latency and 1.6 Mbit/s, medians of 11, no section is more than
+  1 ms slower than both `main` and its A/A copy, after a tap or a hover. Docs after a hover is
+  bimodal in all three builds (about 45 or 80 ms, as the router does or doesn't load within the
+  hover).
+- **Remaining gap:** 28 ms at 1.6 Mbit/s with islx 0.0.25 as `main` pins it.

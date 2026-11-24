@@ -245,6 +245,77 @@ describe("Link navigation options without hydration", () => {
   );
 });
 
+// What an app can't run stays out of its client entry (RFC 0013).
+describe("client entry code an app doesn't use", () => {
+  const i18n: NonNullable<Parameters<typeof generateClientHydrationEntry>[9]> = {
+    enabled: true,
+    basePath: "/",
+    locales: ["en", "de"],
+    defaultLocale: "en",
+    messages: "",
+    routing: "prefix-except-default",
+    detection: [],
+    fallbackLocale: "en",
+    strict: false,
+    cookie: { name: "farm_locale", maxAge: 0, path: "/", sameSite: "lax", secure: false },
+    direction: {},
+  };
+  const slot = {
+    name: "modal",
+    ownerPattern: "/",
+    pattern: "/photo/[id]",
+    modulePath: "/app/src/app/@modal/photo/[id]/page.tsx",
+    containerId: "farm-slot-modal",
+    interception: true,
+    fallback: false,
+  };
+  const generateWith = (
+    options: { clientPages?: boolean; i18n?: typeof i18n; slots?: (typeof slot)[] } = {},
+  ) =>
+    generateClientHydrationEntry(
+      options.clientPages ? [clientPage] : [],
+      [],
+      options.slots ?? [],
+      "/app",
+      "src",
+      false,
+      undefined,
+      undefined,
+      undefined,
+      options.i18n,
+      [],
+      undefined,
+      undefined,
+      false,
+      [],
+      "/",
+      undefined,
+      undefined,
+      options.clientPages === true,
+    );
+
+  it.each([false, true])(
+    "remembers a Link's locale on click only with i18n (client pages: %s)",
+    (clientPages) => {
+      // Only an app with i18n renders a Link to another locale.
+      const remember = "rememberFarmLinkLocale(anchor);";
+      expect(generateWith({ clientPages })).not.toContain(remember);
+      expect(generateWith({ clientPages, i18n })).toContain(remember);
+    },
+  );
+
+  it("renders and hydrates route slots only with a slot that has client components", () => {
+    // Without one, findClientRouteSlot finds nothing, so no slot renders or hydrates.
+    const { entry } = splitFarmClientEntry(generateWith({ clientPages: true }));
+    expect(entry).toContain("function hydrateInitialRouteSlots() {}");
+    expect(entry).toContain("hydrateInitialRouteSlots();");
+    expect(entry).not.toContain("replayPreHydrationClicks");
+    const withSlot = splitFarmClientEntry(generateWith({ clientPages: true, slots: [slot] }));
+    expect(withSlot.entry).toContain('renderClientRouteSlot(slot, registration, "hydrate")');
+    expect(withSlot.entry).toContain("replayPreHydrationClicks(document.getElementById");
+  });
+});
+
 describe("the islands web entry's renderer (RFC 0010)", () => {
   const islandPage = {
     pattern: "/",

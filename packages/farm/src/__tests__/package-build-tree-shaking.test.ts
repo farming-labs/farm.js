@@ -49,4 +49,36 @@ export { unusedResolver };
     const withKeepNames = `${KEEP_NAMES_HELPER}${core}__name(unusedResolver, "unusedResolver");\n`;
     expect(await bundleAppImport(withKeepNames)).toContain("UNUSED_CORE_CODE");
   });
+
+  // An islands client entry imports core's client runtime, and only the router it loads on a
+  // navigation reconciles the document head. A module with a top-level side effect runs with the
+  // chunk that imports it first, so the head helpers stay out of the entry only while they have
+  // none (RFC 0013).
+  it("lets an app's bundler keep navigation's head helpers out of the entry", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "farm-core-navigation-chunk-"));
+    dirs.push(dir);
+    const head = join(import.meta.dirname, "../client/document-head.ts");
+    await writeFile(
+      join(dir, "runtime.mjs"),
+      `export { reconcileFarmDocumentHead } from ${JSON.stringify(head)};\nexport function boot() { return "BOOT"; }\n`,
+    );
+    await writeFile(
+      join(dir, "entry.mjs"),
+      'import { boot } from "./runtime.mjs";\nconsole.log(boot());\nimport("./router.mjs").then((router) => router.swap(document));\n',
+    );
+    await writeFile(
+      join(dir, "router.mjs"),
+      'import { reconcileFarmDocumentHead } from "./runtime.mjs";\nexport const swap = reconcileFarmDocumentHead;\n',
+    );
+    const bundle = await rolldown({ input: join(dir, "entry.mjs") });
+    const { output } = await bundle.generate({ format: "esm" });
+    await bundle.close();
+    const chunks = output.filter((chunk) => chunk.type === "chunk");
+    const entry = chunks.find((chunk) => chunk.isEntry)!;
+    expect(entry.code).toContain("BOOT");
+    expect(entry.code).not.toContain("meta[http-equiv]");
+    expect(chunks.some((chunk) => !chunk.isEntry && chunk.code.includes("meta[http-equiv]"))).toBe(
+      true,
+    );
+  });
 });

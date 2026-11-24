@@ -200,14 +200,16 @@ describe("a server components app on the RSC pipeline", () => {
       await expect(fs.stat(path.join(root, manifest.clientDir, file))).resolves.toBeTruthy();
     }
     // The mobile entry hands navigations to the shell and then runs the web entry; the web entry
-    // only consults delegates, of which a browser has none, and no chunk it shares with the mobile
-    // entry carries the shell's delegate.
+    // only consults delegates, of which a browser has none. No chunk it shares with the mobile
+    // entry carries the shell's delegate, or imports the mobile entry, which would run it on the
+    // web.
     const mobileEntry = await fs.readFile(path.join(publicDir, manifest.entry), "utf8");
     expect(mobileEntry).toContain("offerNavigation");
     expect(mobileEntry).toContain(path.basename(manifest.webEntry));
     for (const file of manifest.files.filter((file) => file !== manifest.entry)) {
       const source = await fs.readFile(path.join(publicDir, file), "utf8");
       expect(source, file).not.toContain("offerNavigation");
+      expect(source, file).not.toContain(path.basename(manifest.entry));
     }
 
     const port = await startServer(root);

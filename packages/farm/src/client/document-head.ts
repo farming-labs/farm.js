@@ -1,4 +1,6 @@
-export const FARM_NAVIGATION_HEAD_SELECTOR = [
+// Pure: otherwise a bundler treats the call as a side effect and keeps this module in an islands
+// client entry, though only navigation reads it (RFC 0013).
+export const FARM_NAVIGATION_HEAD_SELECTOR = /* @__PURE__ */ [
   "meta[name]",
   "meta[property]",
   "meta[http-equiv]",
