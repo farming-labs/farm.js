@@ -298,7 +298,9 @@ export function createFarmRendererPlugin() {
     async transform(code, id) {
       const file = id.split("?")[0];
       if (!file.endsWith(".leaf")) return null;
-      const result = await transformWithOxc(compileLeaf(code, componentName(file)), `${file}.tsx`, {
+      // compileLeaf() turns the markup into JSX, which oxc compiles against leaf like any .tsx file.
+      const source = compileLeaf(code, componentName(file), file);
+      const result = await transformWithOxc(source, `${file}.tsx`, {
         lang: "tsx",
         jsx: JSX,
         sourcemap: true,
@@ -595,6 +597,28 @@ A renderer with its own component format, like `.vue` or `.svelte`, does two thi
    routes.
 2. Compiles the format to a JavaScript module in its Vite plugin, with the component as the default
    export, as the Vite module above does.
+
+The example's `.leaf` files are HTML with `{{ values }}`, `@event` handlers, and `<leaf:if>` and
+`<leaf:for>` tags. `farm-leaf/src/compile.js` turns that markup into JSX:
+
+```vue
+<script module>
+export const hydrate = true;
+</script>
+
+<script>
+import { useState } from "leaf";
+const [count, setCount] = useState(0);
+</script>
+
+<button @click="setCount((n) => n + 1)">Clicked {{ count }} times</button>
+<leaf:if test="count > 3">
+  <p>That's a lot of clicks.</p>
+</leaf:if>
+```
+
+Throw from the plugin when a file can't compile, with the file, the line, and the fix in the
+message. `farm build` fails with that message, and `farm dev` logs it and answers the page with a 500.
 
 Farm decides whether a page or layout hydrates before your compiler runs: it reads `"use client"` or
 a `hydrate` export from the file as written. So in any format, `hydrate` must be the literal `true`

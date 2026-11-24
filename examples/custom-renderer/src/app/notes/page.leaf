@@ -1,19 +1,33 @@
 <script module>
-// Module scope: Farm reads `hydrate` from the file as written.
-export const hydrate = true;
-export const metadata = { title: "Notes in a .leaf file" };
+  // Module scope: Farm reads `hydrate` from the file as written.
+  export const hydrate = true;
+  export const metadata = { title: "Notes in a .leaf file" };
 </script>
 
 <script>
-// Runs on every render.
-import { useState } from "leaf";
-import Badge from "../../components/badge.leaf";
+  // Runs on every render.
+  import { useState } from "leaf";
+  import Badge from "../../components/badge.leaf";
 
-const [notes, setNotes] = useState(0);
+  const [notes, setNotes] = useState(0);
+  const crops = ["wheat", "barley", "rye"];
 </script>
 
 <section>
   <h1>Notes</h1>
   <Badge label="compiled by farm-leaf/vite" />
-  <button type="button" id="notes-counter" onClick={() => setNotes((n) => n + 1)}>Notes: {notes}</button>
+  <button type="button" id="notes-counter" @click="setNotes((n) => n + 1)">
+    Notes: {{ notes }}
+  </button>
+  <leaf:if test="notes >= 3">
+    <p id="notes-many">That's a lot of notes.</p>
+  </leaf:if>
+  <leaf:else>
+    <p id="notes-few">Click to add a note.</p>
+  </leaf:else>
+  <ul id="notes-crops">
+    <leaf:for each="crop" in="crops" index="position">
+      <li data-position="{{ position }}">{{ crop }}</li>
+    </leaf:for>
+  </ul>
 </section>

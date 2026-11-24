@@ -9,7 +9,7 @@ KinfeMichael Tariku · Nov 2026
 
 Farm ships five renderers: React, Preact, Solid, Vue, and Svelte. This post is about the sixth, the one you write.
 
-To find out what that takes, I wrote leaf, a small React-like UI library Farm had never heard of, and plugged it in. It now runs a whole Farm app: server rendering, hydration, client navigation, server functions, its own file format, and components from a component library. Every snippet below comes from that app, and you can run it:
+To find out what that takes, I wrote leaf, a small UI library Farm had never heard of, and plugged it in. It now runs a whole Farm app: server rendering, hydration, client navigation, server functions, its own file format, and components from a component library. Every snippet below comes from that app, and you can run it:
 
 ```bash
 git clone https://github.com/farming-labs/leaf
@@ -231,26 +231,27 @@ export function useRouter() {
 }
 ```
 
-A page uses it like any hook:
+A page uses it like any hook. leaf's pages are `.leaf` files, which [step 7](#step-7-optional-your-own-file-format) covers:
 
-```tsx
-// app/src/app/page.tsx
-"use client";
+```vue
+<!-- app/src/app/page.leaf (abridged) -->
+<script module>
+export const hydrate = true;
+</script>
 
+<script>
 import { useRouter } from "farm-leaf/bindings";
 import { useState } from "leaf";
 
-export default function HomePage() {
-  const [count, setCount] = useState(0);
-  const router = useRouter();
-  return (
-    <section>
-      <p>path: {router.pathname}</p>
-      <button onClick={() => setCount((n) => n + 1)}>Clicked {count} times</button>
-      <button onClick={() => router.push("/about")}>Go to about</button>
-    </section>
-  );
-}
+const [count, setCount] = useState(0);
+const router = useRouter();
+</script>
+
+<section>
+  <p>path: {{ router.pathname }}</p>
+  <button @click="setCount((n) => n + 1)">Clicked {{ count }} times</button>
+  <button @click="router.push('/about')">Go to about</button>
+</section>
 ```
 
 `createRendererTheme()` and `createRendererI18n()` wrap the same way. The action and query stores get their own hooks in [step 6](#step-6-server-functions). For links, `resolveLinkAttributes()` returns the attributes Farm's router looks for. A `Link` component only has to render an `<a>` with them, and Farm handles the click. leaf's bindings, all five hooks and `Link`, are 77 lines.
@@ -325,23 +326,23 @@ export function useServerQuery<TInput, TData>(query: ServerQuery<TInput, TData>,
 
 Then a page uses both:
 
-```tsx
-// app/src/app/page.tsx (abridged)
+```vue
+<!-- app/src/app/page.leaf (abridged) -->
+<script>
 const plant = useAction(plantCrop);
 const total = useServerQuery(plantedCount, undefined);
 // A failed call lands in plant.error, which the page renders.
 const plantBarley = () => plant.submit({ name: "barley" }).catch(() => {});
+</script>
 
-return (
-  <section>
-    <button disabled={plant.pending} onClick={plantBarley}>
-      Plant barley
-    </button>
-    <p>{plant.data?.message ?? "Nothing planted yet."}</p>
-    {plant.error && <p role="alert">{plant.error.message}</p>}
-    <p>Planted so far: {total.data?.planted ?? "…"}</p>
-  </section>
-);
+<section>
+  <button disabled="{{ plant.pending }}" @click="plantBarley">Plant barley</button>
+  <p>{{ plant.data?.message ?? "Nothing planted yet." }}</p>
+  <leaf:if test="plant.error">
+    <p role="alert">{{ plant.error.message }}</p>
+  </leaf:if>
+  <p>Planted so far: {{ total.data?.planted ?? "…" }}</p>
+</section>
 ```
 
 The browser gets references, not handlers. Each call posts its input to the current page, and the server validates it, runs the handler, and sends back the result. The query reads after hydration, and Farm keeps its result in the same browser cache React's `useServerQuery` uses. When `plantCrop` invalidates `["planted"]`, the query reads again, and "Planted so far" goes up without a reload. Your renderer does none of this. Without the flag, a browser import of a server function stops the build with `CLIENT_SERVER_FUNCTION`.
@@ -352,7 +353,7 @@ The browser gets references, not handlers. Each call posts its input to the curr
 
 Svelte and Vue routes aren't `.tsx` files, and yours don't have to be either. leaf has `.leaf` files:
 
-```svelte
+```vue
 <!-- app/src/app/notes/page.leaf -->
 <script module>
 // Module scope: Farm reads these exports.
@@ -366,15 +367,27 @@ import { useState } from "leaf";
 import Badge from "../../components/badge.leaf";
 
 const [notes, setNotes] = useState(0);
+const crops = ["wheat", "barley", "rye"];
 </script>
 
 <section>
   <Badge label="compiled by farm-leaf/vite" />
-  <button onClick={() => setNotes((n) => n + 1)}>Notes: {notes}</button>
+  <button @click="setNotes((n) => n + 1)">Notes: {{ notes }}</button>
+  <leaf:if test="notes >= 3">
+    <p>That's a lot of notes.</p>
+  </leaf:if>
+  <leaf:else>
+    <p>Click to add a note.</p>
+  </leaf:else>
+  <ul>
+    <leaf:for each="crop" in="crops">
+      <li>{{ crop }}</li>
+    </leaf:for>
+  </ul>
 </section>
 ```
 
-It looks like Svelte because I copied Svelte. It doesn't have to. Farm asks two things of a file format:
+The markup is HTML. `{{ }}` holds a value, `@click` an event handler, and `<leaf:if>` and `<leaf:for>` hold conditions and lists. The format is leaf's to choose. Farm asks two things of it:
 
 1. **List the extension** in `componentExtensions`. That's how Farm's route scanner knows `page.leaf` is a page.
 2. **Compile each file** in your Vite plugin into an ordinary module, whose default export is the component:
@@ -384,9 +397,9 @@ It looks like Svelte because I copied Svelte. It doesn't have to. Farm asks two 
 async transform(code, id) {
   const file = id.split("?")[0]!;
   if (!file.endsWith(".leaf")) return null;
-  // compileLeaf() turns the file into: imports, module exports, and
-  // `export default function Notes(props) { ...; return (<>markup</>); }`
-  const result = await transformWithOxc(compileLeaf(code, componentName(file)), `${file}.tsx`, {
+  // compileLeaf() turns the markup into JSX: imports, module exports, and
+  // `export default function Page(props) { ...; return (<>jsx</>); }`
+  const result = await transformWithOxc(compileLeaf(code, componentName(file), file), `${file}.tsx`, {
     lang: "tsx",
     jsx: JSX,
     sourcemap: true,
@@ -395,7 +408,7 @@ async transform(code, id) {
 },
 ```
 
-leaf's compiler is 43 lines of string handling. A template language, Markdown, or something nobody has invented yet works the same way, as long as it compiles to that shape. `.leaf` files then work as pages, layouts, dynamic segments, and error and not-found pages, next to `.tsx` routes in the same app.
+leaf's compiler is 429 lines. It parses the markup, writes the JSX, and turns a mistake, such as JSX's `onClick={...}`, into a build error with the file, the line, and the `.leaf` spelling. A template language, Markdown, or something nobody has invented yet works the same way, as long as it compiles to that shape. `.leaf` files then work as pages, layouts, dynamic segments, and error and not-found pages, next to `.tsx` routes in the same app.
 
 There's one exception: Farm reads `hydrate` from the file as written, before your compiler runs. So `hydrate` must be the literal `true` or `false`. A value Farm can't read without running your code, like `!0`, stops the build with an error that names the file.
 
@@ -527,7 +540,7 @@ defineRendererClientConformance({ name: "leaf", client, server, reconcilesRerend
 
 The suite checks the exports, renders and hydrates real trees, and checks that a re-render keeps the DOM when you say it does.
 
-Unit tests don't prove the build works, so the repo also runs one Playwright spec against `farm dev` and against a production build. It covers hydration keeping the server's DOM, client navigation, a server function call, the `.leaf` page, and 404 and 500 pages:
+Unit tests don't prove the build works, so the repo also runs one Playwright spec against `farm dev` and against a production build. It covers hydration keeping the server's DOM, client navigation, a server function call, `<leaf:if>` and `<leaf:for>`, and 404 and 500 pages:
 
 ```bash
 pnpm test          # conformance and unit tests

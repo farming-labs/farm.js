@@ -1,1 +1,1 @@
-<span className="badge" id="badge">{props.label}</span>
+<span class="badge" id="badge">{{ props.label }}</span>
