@@ -3,12 +3,9 @@ import * as path from "path";
 import type { IncomingMessage, ServerResponse } from "http";
 import type { ViteDevServer } from "vite";
 
-/**
- * Set on every request that `farm preview` tunnels into the development server. The preview relay
- * and the polling gateway client both overwrite any value a visitor sent, so its presence means
- * the request came from the public preview URL, not from the developer's machine.
- */
-export const FARM_PREVIEW_REQUEST_HEADER = "x-farm-preview";
+import { FARM_PREVIEW_REQUEST_HEADER } from "./preview-request";
+
+export { FARM_PREVIEW_REQUEST_HEADER };
 
 export function isFarmPreviewTunnelRequest(headers: IncomingMessage["headers"]): boolean {
   return headers[FARM_PREVIEW_REQUEST_HEADER] !== undefined;

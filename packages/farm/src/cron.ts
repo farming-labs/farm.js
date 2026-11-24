@@ -1,4 +1,5 @@
 import type { TypedEndpoint } from "./api/endpoint";
+import { FARM_PREVIEW_REQUEST_HEADER } from "./preview-request";
 import { farmSecretsMatch } from "./secret-compare";
 import { toPosixPath } from "./utils";
 import {
@@ -402,7 +403,12 @@ export function isCronRequestAuthorized(
   const secret = options.secret || readEnvironmentValue(secretEnv);
   if (!secret) {
     return (
-      options.allowUnsecured === true || (!getFarmRuntimeBindings() && isExplicitDevelopmentEnv())
+      options.allowUnsecured === true ||
+      (!getFarmRuntimeBindings() &&
+        isExplicitDevelopmentEnv() &&
+        // Development stays open for the developer's own machine, not for visitors to a
+        // `farm preview` URL. The preview marks every request it tunnels in.
+        !request.headers.get(FARM_PREVIEW_REQUEST_HEADER))
     );
   }
 
