@@ -1,6 +1,6 @@
 {
   "name": "@farm.js/renderer-tests",
-  "version": "0.1.0-beta.2",
+  "version": "0.1.0-beta.3",
   "description": "Conformance tests for Farm.js renderers",
   "license": "MIT",
   "repository": {
