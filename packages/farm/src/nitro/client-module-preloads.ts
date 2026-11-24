@@ -32,6 +32,12 @@ export interface FarmClientModulePreloadManifest {
    */
   renderer?: number[];
   /**
+   * The chunks of the module that renders a page or layout root, which islands mode's entry imports
+   * when one hydrates or a navigation renders one (RFC 0013), and their static imports outside
+   * `entry`.
+   */
+  root?: number[];
+  /**
    * Each dynamically imported module's chunk and that chunk's static imports outside
    * `entry`, by the module id the client loads it with (`/src/app/page.tsx`).
    */
@@ -50,6 +56,7 @@ interface ClientBundleChunk {
   isEntry?: boolean;
   isDynamicEntry?: boolean;
   facadeModuleId?: string | null;
+  moduleIds?: string[];
   imports?: string[];
 }
 
@@ -63,6 +70,7 @@ export function collectFarmClientModulePreloads(
     root: string;
     entryName: string;
     routerModules?: string[];
+    rootModules?: string[];
     rendererModules?: string[];
   },
 ): FarmClientModulePreloadManifest | null {
@@ -116,12 +124,14 @@ export function collectFarmClientModulePreloads(
     const into: string[] = [];
     const loaded = new Set(entryLoaded);
     for (const moduleId of moduleIds ?? []) {
-      const chunk = chunks.find(
-        (candidate) =>
-          candidate.isDynamicEntry &&
-          candidate.facadeModuleId &&
-          path.resolve(candidate.facadeModuleId.split("?")[0]!) === path.resolve(moduleId),
-      );
+      const is = (id: string) => path.resolve(id.split("?")[0]!) === path.resolve(moduleId);
+      const chunk =
+        chunks.find(
+          (candidate) =>
+            candidate.isDynamicEntry && candidate.facadeModuleId && is(candidate.facadeModuleId),
+        ) ??
+        // A module another dynamic import shares can land in a common chunk without a facade.
+        chunks.find((candidate) => !candidate.isEntry && candidate.moduleIds?.some(is));
       if (!chunk || loaded.has(chunk.fileName)) continue;
       loaded.add(chunk.fileName);
       into.push(chunk.fileName);
@@ -130,12 +140,14 @@ export function collectFarmClientModulePreloads(
     return into;
   };
   const rendererFiles = dynamicFiles(options.rendererModules);
+  const rootFiles = dynamicFiles(options.rootModules);
 
   return {
     files,
     entry: entryFiles.map(index),
     router: dynamicFiles(options.routerModules).map(index),
     ...(rendererFiles.length > 0 ? { renderer: rendererFiles.map(index) } : {}),
+    ...(rootFiles.length > 0 ? { root: rootFiles.map(index) } : {}),
     modules,
   };
 }
@@ -155,6 +167,7 @@ export function createFarmClientModulePreloadPlugin(options: {
   buildDir: string;
   entryName: string;
   routerModules?: string[];
+  rootModules?: string[];
   /** Specifiers the entry imports its renderer with, resolved from `rendererImporter`. */
   rendererImports?: string[];
   rendererImporter?: string;
