@@ -1,17 +1,19 @@
 <script module>
-// @hydrate interaction
+  // @hydrate interaction
 </script>
 
 <script>
-// The pragma above is leaf's own syntax, read by farm-leaf's `hydration.resolve()`. It says what
-// `export const hydrate = true` and `export const island = "interaction"` would. The root layout
-// hydrates too and declares no strategy, so this route still hydrates on load.
-import { useState } from "leaf";
+  // The pragma above is leaf's own syntax, read by farm-leaf's `hydration.resolve()`. It says what
+  // `export const hydrate = true` and `export const island = "interaction"` would. The root layout
+  // hydrates too and declares no strategy, so this route still hydrates on load.
+  import { useState } from "leaf";
 
-const [baskets, setBaskets] = useState(0);
+  const [baskets, setBaskets] = useState(0);
 </script>
 
 <section>
   <h1 id="harvest">Harvest</h1>
-  <button type="button" id="harvest-counter" onClick={() => setBaskets((n) => n + 1)}>Baskets: {baskets}</button>
+  <button type="button" id="harvest-counter" @click="setBaskets((n) => n + 1)">
+    Baskets: {{ baskets }}
+  </button>
 </section>
