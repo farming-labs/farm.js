@@ -194,10 +194,10 @@ export default withDocs(defineConfig({ renderer: leaf() }));
 ```
 
 The pages keep the React UI's layout and stylesheet. Their Markdown compiles to HTML on the server,
-so `react` stays a server dependency and no React reaches the browser. This UI has no search box,
-table of contents, or client navigation between docs pages, and theme components such as tabs
-render as static HTML. It runs on the Node.js runtime: edge builds stop because it has no edge
-compiler.
+so `react` stays a server dependency and no React reaches the browser. This UI has no search box
+or client navigation between docs pages. Its table of contents shows on wide screens, with no
+popover on narrow ones, and theme components such as tabs render as static HTML. It runs on the
+Node.js runtime: edge builds stop because it has no edge compiler.
 
 A renderer checks that it writes and hydrates these pages as the UI expects with the suite in
 `@farming-labs/farmjs/testing`, run from a Vitest file with a DOM environment:
