@@ -1,7 +1,7 @@
 import { setTimeout as delay } from "node:timers/promises";
 import { logger } from "@farm.js/core/internal/cli-runtime";
 import type { PreviewAgentExit, PreviewAgentSession } from "@farm.js/tunnel";
-import type { PreviewGatewayPlan } from "./preview-gateway";
+import { isLocalPreviewTargetReachable, type PreviewGatewayPlan } from "./preview-gateway";
 
 export interface NativeTunnelRuntime {
   startPreviewAgent(
@@ -29,6 +29,7 @@ export interface RunNativePreviewTunnelOptions {
 // the agent reconnects to the same public URL.
 const DEFAULT_MIN_CONNECTED_MS = 30_000;
 const DEFAULT_RECONNECT_DELAYS_MS = [500, 1_000, 2_000, 4_000, 8_000];
+const LOCAL_TARGET_CHECK_TIMEOUT_MS = 1_000;
 
 export async function runNativePreviewTunnel(
   plan: PreviewGatewayPlan,
@@ -81,6 +82,15 @@ export async function runNativePreviewTunnel(
         return session;
       }
       await runtime.stopPreviewAgent(current.sessionId).catch(() => false);
+      // The agent closes the same way when the local app stops as when the relay drops it.
+      if (
+        !(await isLocalPreviewTargetReachable(plan.target.localUrl, LOCAL_TARGET_CHECK_TIMEOUT_MS))
+      ) {
+        logger.warn(
+          `Local preview target ${plan.target.localUrl} is no longer reachable. Closing preview session.`,
+        );
+        return session;
+      }
       if (Date.now() - connectedAt < minConnectedMs) {
         throw new Error("The native preview relay disconnected unexpectedly.");
       }
