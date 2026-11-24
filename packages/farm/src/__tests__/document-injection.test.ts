@@ -69,7 +69,13 @@ const MODULE_PRELOAD_TAGS =
 const BOOT_SCRIPT =
   '<script type="module" src="/__farm_client_boot_src__" data-farm-runtime="/__farm_client_js_src__"></script>';
 
-function createInjector(viewportTags = renderViewportHead(undefined), bootsClient = false) {
+const STYLESHEET_TAG = '<link rel="stylesheet" href="/__farm_client_css_href__">';
+
+function createInjector(
+  viewportTags = renderViewportHead(undefined),
+  bootsClient = false,
+  stylesheetTag = STYLESHEET_TAG,
+) {
   const inject = new Function(
     "html",
     "title",
@@ -100,6 +106,8 @@ function createInjector(viewportTags = renderViewportHead(undefined), bootsClien
       'const renderFarmDeferredDataScript = () => "";\n' +
       // The pre-hydration hold has its own production test.
       'const renderFarmPreHydrationHoldScript = () => "";\n' +
+      // The client stylesheet's link, or nothing for an app without CSS.
+      `const renderFarmClientStylesheet = () => ${JSON.stringify(stylesheetTag)};\n` +
       "const farmEntryScript = farmBootsClient ? " +
       JSON.stringify(BOOT_SCRIPT) +
       " : renderFarmClientEntryScript();\n" +
@@ -295,9 +303,27 @@ describe("generated full-document injection", () => {
     );
     expect(head).toContain('<meta name="theme-color" content="#fff" data-farm-metadata>');
     // The client entry's module preloads follow the stylesheet in the layout's own head.
-    expect(head).toContain(
-      '<link rel="stylesheet" href="/__farm_client_css_href__">' + MODULE_PRELOAD_TAGS,
+    expect(head).toContain(STYLESHEET_TAG + MODULE_PRELOAD_TAGS);
+  });
+
+  it("links no stylesheet in a layout's document when the app has no CSS", () => {
+    const fullHtml = createInjector(undefined, false, "")(
+      "<html><head><title>App</title></head><body><main>page</main></body></html>",
+      "Farm.js App",
+      "",
+      "",
+      false,
+      { hasExplicitTitle: false },
+      {},
+      [],
+      {},
+      renderFarmClientBootstrapScript,
+      () => "",
     );
+
+    const head = fullHtml.slice(fullHtml.indexOf("<head>"), fullHtml.indexOf("</head>"));
+    expect(head).not.toContain('rel="stylesheet"');
+    expect(head).toContain(MODULE_PRELOAD_TAGS);
   });
 
   it("keeps the charset and viewport a layout's document writes itself", () => {

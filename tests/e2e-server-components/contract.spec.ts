@@ -1345,6 +1345,20 @@ test("a client navigation's response leaves out the renderer's chunks, which its
   }
 });
 
+test("a page that holds a server action loads what handles its result with its other modules", async ({
+  request,
+}) => {
+  test.skip(mode !== "islands" || dev, "islands mode's production client imports it on a call");
+  // RFC 0013: the code that handles a call's result loads on the first call, or with the page.
+  const actionClient = /chunks\/islands-action-client-h[0-9a-f]+\.js/;
+  // An action in an island's props, and a server form that posts one.
+  for (const pathname of ["/action-props", "/action"]) {
+    expect(await (await request.get(pathname)).text(), pathname).toMatch(actionClient);
+  }
+  // Islands that call nothing.
+  expect(await (await request.get("/timing")).text()).not.toMatch(actionClient);
+});
+
 test("a streamed first navigation renders before the renderer loads, and its islands keep a click", async ({
   page,
   request,

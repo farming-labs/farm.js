@@ -9,11 +9,18 @@ import {
   createFarmInfraAnalyticsRecorder as createRecorder,
 } from "./plugins/infra-analytics";
 
+/** Accepting the WebMCP tool calls the app's pages report; see FarmInfraAnalyticsWebMCPOptions. */
+interface RuntimeOptions {
+  webmcp?: { route?(pathname: string): object | null | undefined };
+}
+
 /** Farm's analytics plugin when the environment links the app to Farm Infra, else null. */
-export const createFarmInfraAnalyticsPlugin: () => { name: string } | null = createPlugin;
+export const createFarmInfraAnalyticsPlugin: (
+  options?: RuntimeOptions,
+) => { name: string } | null = (options) => createPlugin(undefined, undefined, options);
 
 /** The same reporting for a server without a plugin runtime, else null. */
-export const createFarmInfraAnalyticsRecorder: () => {
+export const createFarmInfraAnalyticsRecorder: (options?: RuntimeOptions) => {
   record(
     request: Request,
     options: { kind?: string; route?: { pattern?: string } },
@@ -21,4 +28,4 @@ export const createFarmInfraAnalyticsRecorder: () => {
     handler: () => Promise<Response>,
   ): Promise<Response>;
   close(): Promise<void>;
-} | null = createRecorder;
+} | null = (options) => createRecorder(undefined, undefined, options);

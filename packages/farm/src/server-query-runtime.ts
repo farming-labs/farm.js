@@ -3,7 +3,14 @@
 import { createFarmCacheKey } from "./cache-key";
 import { getFarmClientDataCache, trackFarmClientCacheInvalidations } from "./client-cache";
 import type { ServerQuery } from "./server-query";
+import {
+  FARM_SERVER_QUERY_CLIENT_STATE,
+  beginFarmServerQueryAction,
+  type FarmServerQueryActionInvocation,
+} from "./server-query-call";
 import { isFarmServerQueryResult, type FarmServerQueryResult } from "./server-query-protocol";
+
+export { beginFarmServerQueryAction, type FarmServerQueryActionInvocation };
 
 export type ServerQueryFetchOptions = {
   /** Used only when a non-Farm transport returns plain data. Farm transports use the declaration. */
@@ -12,13 +19,6 @@ export type ServerQueryFetchOptions = {
   swr?: boolean;
   /** Always wait for a new result. */
   force?: boolean;
-};
-
-export type FarmServerQueryActionInvocation = {
-  actionId: string;
-  args: readonly unknown[];
-  provisionalKey?: string;
-  owner?: object;
 };
 
 type ActiveServerQueryInvocation = {
@@ -39,7 +39,6 @@ type ServerQueryClientState = {
   owners: Set<ServerQueryOwner>;
 };
 
-const FARM_SERVER_QUERY_CLIENT_STATE = Symbol.for("farm.serverQueryClientState");
 const serverQueryClientGlobal = globalThis as typeof globalThis & {
   [FARM_SERVER_QUERY_CLIENT_STATE]?: ServerQueryClientState;
 };
@@ -109,19 +108,6 @@ function assertNotRawServerQueryInBrowser(query: unknown): void {
       "or call the query from server code / an API route (createAPIClient) instead.",
     ].join("\n"),
   );
-}
-
-export function beginFarmServerQueryAction(
-  actionId: string,
-  args: readonly unknown[],
-): FarmServerQueryActionInvocation {
-  const active = serverQueryClientState.active.at(-1);
-  return {
-    actionId,
-    args,
-    provisionalKey: active?.provisionalKey,
-    owner: active?.owner,
-  };
 }
 
 export function completeFarmServerQueryAction<TData>(

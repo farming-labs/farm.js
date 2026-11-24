@@ -38,6 +38,12 @@ export interface FarmClientModulePreloadManifest {
    */
   root?: number[];
   /**
+   * The chunks of islands mode's action client, which handles a server action call's result, and
+   * their static imports outside `entry` and `renderer`. The entry imports it on the first call
+   * (RFC 0013); a document whose markup holds an action reference loads it with its other modules.
+   */
+  actions?: number[];
+  /**
    * Each dynamically imported module's chunk and that chunk's static imports outside
    * `entry`, by the module id the client loads it with (`/src/app/page.tsx`).
    */
@@ -72,6 +78,7 @@ export function collectFarmClientModulePreloads(
     routerModules?: string[];
     rootModules?: string[];
     rendererModules?: string[];
+    actionModules?: string[];
   },
 ): FarmClientModulePreloadManifest | null {
   const chunks = Object.values(bundle).filter(
@@ -119,10 +126,11 @@ export function collectFarmClientModulePreloads(
     ].map(index);
   }
 
-  // The chunks of these dynamically imported modules, and their static imports outside `entry`.
-  const dynamicFiles = (moduleIds: string[] | undefined) => {
+  // The chunks of these dynamically imported modules, and their static imports outside `entry` and
+  // what `before` holds.
+  const dynamicFiles = (moduleIds: string[] | undefined, before: string[] = []) => {
     const into: string[] = [];
-    const loaded = new Set(entryLoaded);
+    const loaded = new Set([...entryLoaded, ...before]);
     for (const moduleId of moduleIds ?? []) {
       const is = (id: string) => path.resolve(id.split("?")[0]!) === path.resolve(moduleId);
       const chunk =
@@ -141,6 +149,8 @@ export function collectFarmClientModulePreloads(
   };
   const rendererFiles = dynamicFiles(options.rendererModules);
   const rootFiles = dynamicFiles(options.rootModules);
+  // A call needs a hydrated island, so the renderer has loaded before it.
+  const actionFiles = dynamicFiles(options.actionModules, rendererFiles);
 
   return {
     files,
@@ -148,6 +158,7 @@ export function collectFarmClientModulePreloads(
     router: dynamicFiles(options.routerModules).map(index),
     ...(rendererFiles.length > 0 ? { renderer: rendererFiles.map(index) } : {}),
     ...(rootFiles.length > 0 ? { root: rootFiles.map(index) } : {}),
+    ...(actionFiles.length > 0 ? { actions: actionFiles.map(index) } : {}),
     modules,
   };
 }
@@ -170,6 +181,8 @@ export function createFarmClientModulePreloadPlugin(options: {
   rootModules?: string[];
   /** Specifiers the entry imports its renderer with, resolved from `rendererImporter`. */
   rendererImports?: string[];
+  /** Specifiers of islands mode's action client, resolved from `rendererImporter`. */
+  actionImports?: string[];
   rendererImporter?: string;
 }) {
   return {
@@ -183,15 +196,22 @@ export function createFarmClientModulePreloadPlugin(options: {
       bundle: Record<string, { type: string }>,
     ) {
       // Resolved as the build resolved them, so they name the same files as the chunks' modules.
-      const rendererModules: string[] = [];
-      for (const specifier of options.rendererImports ?? []) {
-        const resolved = await this.resolve(specifier, options.rendererImporter);
-        if (resolved) rendererModules.push(resolved.id);
-      }
+      const resolve = async (specifiers: string[] | undefined) => {
+        const ids: string[] = [];
+        for (const specifier of specifiers ?? []) {
+          const resolved = await this.resolve(specifier, options.rendererImporter);
+          if (resolved) ids.push(resolved.id);
+        }
+        return ids;
+      };
+      const rendererModules = await resolve(options.rendererImports);
+      const actionModules = await resolve(options.actionImports);
       await fs.mkdir(options.buildDir, { recursive: true });
       await fs.writeFile(
         path.join(options.buildDir, FARM_CLIENT_MODULE_PRELOADS_FILE),
-        JSON.stringify(collectFarmClientModulePreloads(bundle, { ...options, rendererModules })),
+        JSON.stringify(
+          collectFarmClientModulePreloads(bundle, { ...options, rendererModules, actionModules }),
+        ),
       );
     },
   };

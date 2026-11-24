@@ -54,8 +54,10 @@ import {
   FARM_CLIENT_BOOT_SRC_PLACEHOLDER,
   FARM_CLIENT_CSS_HREF_PLACEHOLDER,
   FARM_CLIENT_JS_SRC_PLACEHOLDER,
+  FARM_CLIENT_STYLESHEET_PLACEHOLDER,
   findFingerprintedClientEntry,
   resolveClientBootSrc,
+  resolveClientStylesheetLinkHref,
   resolveHashedClientCssHref,
   resolveHashedClientJsSrc,
 } from "./client-css-href";
@@ -297,7 +299,7 @@ import { resolveFarmInstrumentationFile } from "../instrumentation";
 import { getFarmPresetRuntime, resolveCloudflareProcessEnvFlags } from "../deployment";
 import { isFarmPreviewDeploymentEnvironment } from "../deployment-environment";
 import { resolveFarmInstrumentationRuntime } from "../instrumentation-runtime";
-import { FARM_PRERENDER_ENV } from "../plugins/infra-analytics";
+import { _farmWebMCPReportsEnabled, FARM_PRERENDER_ENV } from "../plugins/infra-analytics";
 import { listFarmBuiltInRoutePaths } from "../route-label";
 import {
   getFarmRendererCapabilities,
@@ -2629,6 +2631,8 @@ async function buildClient(
                         "react-dom/client",
                         "@farm.js/core/internal/islands-runtime",
                       ],
+                      // What a call's result is handled with, imported on the first (RFC 0013).
+                      actionImports: ["@farm.js/core/internal/islands-action-client"],
                       rendererImporter: clientEntryPath,
                     }
                   : {}),
@@ -7808,6 +7812,8 @@ function generateVirtualEntryCode(
   // Decided when the server starts, from its environment; see createFarmInfraAnalyticsPlugin.
   const hasInfraAnalyticsRuntime =
     config.analytics !== false && resolveFarmInstrumentationRuntime(preset) === "nodejs";
+  // The app's pages report the WebMCP tool calls they run; see FARM_WEBMCP_REPORT_PATH.
+  const reportsWebMCPCalls = hasInfraAnalyticsRuntime && _farmWebMCPReportsEnabled(config.plugins);
   const hasPrecompiledDocs = Boolean(farmDocsPrecompiledManifest);
   const adapterOwnsDocsRuntime = Boolean(
     isReactRenderer(config.renderer) &&
@@ -8942,11 +8948,22 @@ const integrationRuntimeConfig = Object.assign({}, ...farmRuntimeConfigs, {
 });
 const farmInfraAnalytics = ${
     hasInfraAnalyticsRuntime
-      ? hasPluginRuntime
-        ? "createFarmInfraAnalyticsPlugin()"
-        : "createFarmInfraAnalyticsRecorder()"
+      ? `${hasPluginRuntime ? "createFarmInfraAnalyticsPlugin" : "createFarmInfraAnalyticsRecorder"}(${
+          reportsWebMCPCalls ? "{ webmcp: { route: farmWebMCPCallRoute } }" : ""
+        })`
       : "null"
-  };
+  };${
+    reportsWebMCPCalls
+      ? `
+// A WebMCP tool call a page reports goes under that page's route, matched and labeled as a
+// request for the page is.
+function farmWebMCPCallRoute(pathname) {
+  return labelFarmRequestOptions(
+    getFarmPluginRequestOptions(new Request(new URL(pathname, "http://farm.invalid"))),
+  ).route;
+}`
+      : ""
+  }
 const configuredPlugins = [
   ${hasCompressionRuntime && hasPluginRuntime ? "createCompressionPlugin()," : ""}
   ${hasRuntimeIntegrationConfig ? "...resolveIntegrationPlugins(serverRuntimeIntegrations)," : ""}
@@ -10240,7 +10257,7 @@ function createFarmErrorDocument(html, title, routePathname) {
       '  <meta name="viewport" content="width=device-width, initial-scale=1">\\n' +
       '  <link rel="icon" href="data:,">\\n' +
       '  <title>' + escapedTitle + '</title>\\n' +
-      '  <link rel="stylesheet" href="/__farm_client_css_href__">' + renderFarmClientModulePreloads(html) + '\\n' +
+      '  ' + renderFarmClientStylesheet() + renderFarmClientModulePreloads(html) + '\\n' +
       renderFarmRendererHydrationScript() + '\\n' +
       '</head>\\n<body>\\n' +
       '  <div id="root">' + html + '</div>\\n' +
@@ -10251,7 +10268,7 @@ function createFarmErrorDocument(html, title, routePathname) {
 
   let fullHtml = ensureFarmDocumentRoot(ensureFarmDocumentHead(fullDocument));
   fullHtml = fullHtml
-    .replace(/<head([^>]*)>/i, function(match, attrs) { return '<head' + attrs + '>\\n  <link rel="stylesheet" href="/__farm_client_css_href__">' + renderFarmClientModulePreloads(fullDocument); })
+    .replace(/<head([^>]*)>/i, function(match, attrs) { return '<head' + attrs + '>\\n  ' + renderFarmClientStylesheet() + renderFarmClientModulePreloads(fullDocument); })
     // Function replacements: dynamic markup may contain $-sequences ($&, $', $$)
     // that a string replacement would expand, corrupting the document.
     .replace(/<\\/head>/i, function() { return renderFarmRendererHydrationScript() + '\\n</head>'; })
@@ -10273,6 +10290,23 @@ function createFarmErrorDocument(html, title, routePathname) {
   return fullHtml.trim().startsWith("<!DOCTYPE")
     ? fullHtml
     : "<!DOCTYPE html>\\n" + fullHtml;
+}
+
+// The client stylesheet a document links, filled in from the client build once it has finished
+// (see buildNitroUniversal): null for an app without CSS, whose empty stylesheet would still hold
+// the first paint for a round trip. Parsed at runtime, so the bundler cannot fold the stand-in.
+const farmClientStylesheetHref = (() => {
+  try {
+    return JSON.parse("${FARM_CLIENT_STYLESHEET_PLACEHOLDER}");
+  } catch {
+    return "${FARM_CLIENT_CSS_HREF_PLACEHOLDER}";
+  }
+})();
+
+function renderFarmClientStylesheet() {
+  return farmClientStylesheetHref
+    ? '<link rel="stylesheet" href="' + farmClientStylesheetHref + '">'
+    : "";
 }
 
 // The client modules a page needs before it hydrates, filled in from the client
@@ -10303,6 +10337,9 @@ const farmClientRootPreloadTags = farmClientModulePreloads
 // client references of its server tree. An island with a deferred strategy loads its
 // module on its own trigger, so it is not preloaded.
 const FARM_CLIENT_MODULE_REFERENCE_PATTERN = /<f-island src="([^"]+)"([^>]*)>|"r":"(\\/[^"]+)"/g;
+// A server action reference in a document's markup: an action in an island's or a client
+// component's props (islx's \`{"$":"a",...}\`), or a server form posting one (its \`$F_REF_\` field).
+const FARM_ACTION_REFERENCE_PATTERN = /"\\$":"a"|name="\\$F_REF_/;
 
 function renderFarmClientModulePreload(index) {
   return '\\n  <link rel="modulepreload" href="/' +
@@ -10333,6 +10370,15 @@ function collectFarmClientDocumentModules(markup, pageModule, listed) {
   return indexes;
 }
 
+// The manifest indexes of islands mode's action client, which handles a call's result (RFC 0013),
+// for a document whose markup holds an action reference, leaving out those already listed. Its
+// islands import it on their first call otherwise.
+function collectFarmClientActionModules(markup, listed) {
+  const actions = farmClientModulePreloads.actions;
+  if (!actions || typeof markup !== "string" || !FARM_ACTION_REFERENCE_PATTERN.test(markup)) return [];
+  return actions.filter((index) => !listed.has(index) && listed.add(index));
+}
+
 // The modulepreload links for a document: the entry's static imports and, unless it answers a
 // client navigation, the renderer and, when a page or layout root hydrates in it (\`hydratesRoot\`),
 // the code that renders it; then the modules its hydrating page and its markup load.
@@ -10341,9 +10387,11 @@ function renderFarmClientModulePreloads(markup, pageModule, navigation, hydrates
   // response filter manages nonces on script elements only, so CSP nonce mode
   // keeps the documents it had.
   if (!farmClientModulePreloads || (farmSecurityConfig.csp && farmSecurityConfig.csp.nonce)) return "";
+  const listed = new Set();
   return farmClientEntryPreloadTags + (navigation ? "" : farmClientRendererPreloadTags) +
     (hydratesRoot && !navigation ? farmClientRootPreloadTags : "") +
-    collectFarmClientDocumentModules(markup, pageModule, new Set())
+    collectFarmClientDocumentModules(markup, pageModule, listed)
+      .concat(collectFarmClientActionModules(markup, listed))
       .map(renderFarmClientModulePreload)
       .join("");
 }
@@ -10376,9 +10424,15 @@ function renderFarmClientBootPreloads(markup, pageModule, root, rootStrategy, na
       )
     : [];
   const waitsForClick = rootStrategy === "interaction";
+  // A call needs a hydrated island, so the action client comes with the renderer.
+  const renderer = navigation
+    ? []
+    : (farmClientModulePreloads.renderer || []).concat(
+        collectFarmClientActionModules(markup, new Set(entry.concat(rootModules))),
+      );
   return attribute("data-farm-preload", waitsForClick ? entry : entry.concat(rootModules)) +
     attribute("data-farm-preload-router", farmClientModulePreloads.router || []) +
-    attribute("data-farm-preload-renderer", navigation ? [] : farmClientModulePreloads.renderer || []) +
+    attribute("data-farm-preload-renderer", renderer) +
     (waitsForClick ? attribute("data-farm-preload-root", rootModules) : "");
 }
 
@@ -11444,8 +11498,8 @@ ${
     }
     html = html.replace(/<[/]head>/i, function() { return renderedRoot.head + "\\n</head>"; });
   }
-  if (!html.includes('href="/__farm_client_css_href__"')) {
-    const clientStylesheet = '  <link rel="stylesheet" href="/__farm_client_css_href__">\\n';
+  if (farmClientStylesheetHref && !html.includes('href="' + farmClientStylesheetHref + '"')) {
+    const clientStylesheet = '  ' + renderFarmClientStylesheet() + '\\n';
     const firstStyleIndex = html.search(/<style(?:\\s|>)/i);
     html =
       firstStyleIndex >= 0
@@ -13075,7 +13129,7 @@ ${
           );
           composed = composed
             // Inject CSS link after opening head tag or first meta tag
-            .replace(/<head([^>]*)>/i, function(match, attrs) { return '<head' + attrs + '>\\n  <link rel="stylesheet" href="/__farm_client_css_href__">' + (farmBootsClient ? "" : renderFarmClientModulePreloads(composed, route.clientModule, farmNavigationRequest, farmHydratesRoot)); })
+            .replace(/<head([^>]*)>/i, function(match, attrs) { return '<head' + attrs + '>\\n  ' + renderFarmClientStylesheet() + (farmBootsClient ? "" : renderFarmClientModulePreloads(composed, route.clientModule, farmNavigationRequest, farmHydratesRoot)); })
             .replace(/<\\/head>/i, () => renderFarmRendererHydrationScript() + '\\n' + renderFarmPreHydrationHoldScript() + '</head>')
             // Explicit metadata wins over renderer and layout titles. Without
             // explicit metadata, a renderer title wins over the layout title.
@@ -13148,7 +13202,7 @@ ${
             (hasFavicon ? '' : '  <link rel="icon" href="data:,">\\n') +
             (suppressDefaultTitle ? '' : '  <title>' + title + '</title>') + metaTags +
             (rendererHead ? '\\n  ' + rendererHead : '') + '\\n' +
-            '  <link rel="stylesheet" href="/__farm_client_css_href__">\\n' +
+            '  ' + renderFarmClientStylesheet() + '\\n' +
             '  <link rel="modulepreload" href="/__farm_client_js_src__">' + renderFarmClientModulePreloads(null, route.clientModule, false, farmHydratesRoot) + '\\n' +
             renderFarmRendererHydrationScript() + '\\n' +
             renderFarmPreHydrationHoldScript() +
@@ -13305,7 +13359,7 @@ ${
   \${viewportTags}
   \${hasFavicon ? "" : '<link rel="icon" href="data:,">'}
   \${suppressDefaultTitle ? "" : "<title>" + title + "</title>"}\${metaTags}\${rendererHead ? "\\n  " + rendererHead : ""}
-  <link rel="stylesheet" href="/__farm_client_css_href__">\${farmBootsClient ? "" : renderFarmClientModulePreloads(html, route.clientModule, farmNavigationRequest, farmHydratesRoot)}
+  \${renderFarmClientStylesheet()}\${farmBootsClient ? "" : renderFarmClientModulePreloads(html, route.clientModule, farmNavigationRequest, farmHydratesRoot)}
   \${renderFarmRendererHydrationScript()}
 \${renderFarmPreHydrationHoldScript()}</head>
 <body>
@@ -13682,7 +13736,7 @@ ${
           "<head" + attrs + ">" +
           headContent.replace(/<title\\b[^>]*>[\\s\\S]*?<\\/title>\\s*/gi, "") +
           "\\n  <title>" + notFoundMetadata.title + "</title>" + notFoundMetadata.tags + "\\n</head>")
-        .replace(/<head([^>]*)>/i, function(match, attrs) { return '<head' + attrs + '>\\n  <link rel="stylesheet" href="/__farm_client_css_href__">' + renderFarmClientModulePreloads(fullDocument); })
+        .replace(/<head([^>]*)>/i, function(match, attrs) { return '<head' + attrs + '>\\n  ' + renderFarmClientStylesheet() + renderFarmClientModulePreloads(fullDocument); })
         .replace(/<\\/head>/i, () => renderFarmRendererHydrationScript() + '\\n</head>')
         .replace(
           /<\\/body>/i,
@@ -13700,7 +13754,7 @@ ${
   <meta charset="UTF-8">
   \${notFoundMetadata.viewport}
   \${notFoundMetadata.hasFavicon ? "" : '<link rel="icon" href="data:,">'}
-  <link rel="stylesheet" href="/__farm_client_css_href__">\${renderFarmClientModulePreloads(html)}
+  \${renderFarmClientStylesheet()}\${renderFarmClientModulePreloads(html)}
   <title>\${notFoundMetadata.title}</title>\${notFoundMetadata.tags}
   \${renderFarmRendererHydrationScript()}
 </head>
@@ -14543,6 +14597,9 @@ async function buildNitroUniversal(
   const encodedDocsModulePreloads = encodeFarmDocsModulePreloads(docsModulePreloads);
   const encodedClientModulePreloads = encodeFarmClientModulePreloads(clientModulePreloads);
   const encodedClientRouteTable = encodeFarmBuildJSONPlaceholder(clientRouteTable);
+  const encodedClientStylesheet = encodeFarmBuildJSONPlaceholder(
+    await resolveClientStylesheetLinkHref(clientOutputDir, clientCssHref),
+  );
   const encodedMobileShellClient = shouldBuildFarmMobileClient(config)
     ? encodeFarmMobileShellClient(
         await finalizeFarmMobileClient({
@@ -14579,6 +14636,11 @@ async function buildNitroUniversal(
     }
     // split/join rather than replaceAll: the package's lib target predates
     // ES2021, and a fixed token needs no regex escaping either way.
+    if (output.code.includes(FARM_CLIENT_STYLESHEET_PLACEHOLDER)) {
+      output.code = output.code
+        .split(FARM_CLIENT_STYLESHEET_PLACEHOLDER)
+        .join(encodedClientStylesheet);
+    }
     if (output.code.includes(FARM_CLIENT_CSS_HREF_PLACEHOLDER)) {
       output.code = output.code.split(FARM_CLIENT_CSS_HREF_PLACEHOLDER).join(clientCssHref);
     }
