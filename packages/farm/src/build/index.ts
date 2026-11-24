@@ -200,6 +200,7 @@ async function buildWithProductionNodeEnv(inputConfig: ResolvedFarmConfig, optio
       ],
       suppressLintOnLink: config.suppressLintOnLink,
       componentExtensions: config.renderer.componentExtensions,
+      renderer: config.renderer,
       i18nConfig: config.i18n,
     }).catch((error: unknown) => {
       // Non-fatal; type generation is for DX only. But say so: a silently

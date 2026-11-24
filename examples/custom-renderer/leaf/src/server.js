@@ -27,6 +27,20 @@ const serverDispatcher = {
   useMemo: (compute) => compute(),
 };
 
+// The context values above a node: a chain of { context, value, parent } frames, null at the top.
+function readContext(scope, context) {
+  for (let frame = scope; frame; frame = frame.parent) {
+    if (frame.context === context) return frame.value;
+  }
+  return context.defaultValue;
+}
+
+function dispatcherFor(scope) {
+  return scope
+    ? { ...serverDispatcher, useContext: (context) => readContext(scope, context) }
+    : { ...serverDispatcher, useContext: (context) => context.defaultValue };
+}
+
 function renderStyle(style) {
   if (typeof style === "string") return style;
   return Object.entries(style)
@@ -69,7 +83,7 @@ function renderAttributes(type, props) {
 // and the promise an async component returned; whoever drives it sends back the resolved output.
 const FLUSH = Symbol("leaf.flush");
 
-function* renderNode(node) {
+function* renderNode(node, scope) {
   if (typeof node === "string") {
     yield escapeHtml(node);
     return;
@@ -77,17 +91,18 @@ function* renderNode(node) {
   const { type, props } = node;
   if (type === Suspense) {
     yield FLUSH;
-    yield* renderChildren(props.children);
+    yield* renderChildren(props.children, scope);
     return;
   }
   if (typeof type === "function") {
-    let output = internals.render(type, props, serverDispatcher);
+    if (type.context) scope = { context: type.context, value: props.value, parent: scope };
+    let output = internals.render(type, props, dispatcherFor(scope));
     if (output && typeof output.then === "function") output = yield output;
-    yield* renderChildren(output);
+    yield* renderChildren(output, scope);
     return;
   }
   if (type === Fragment) {
-    yield* renderChildren(props.children);
+    yield* renderChildren(props.children, scope);
     return;
   }
   if (typeof type !== "string") {
@@ -100,13 +115,13 @@ function* renderNode(node) {
   } else if (type === "textarea") {
     yield escapeHtml(props.value ?? props.defaultValue ?? "");
   } else {
-    yield* renderChildren(props.children);
+    yield* renderChildren(props.children, scope);
   }
   yield `</${type}>`;
 }
 
-function* renderChildren(children) {
-  for (const child of toChildArray(children)) yield* renderNode(child);
+function* renderChildren(children, scope = null) {
+  for (const child of toChildArray(children)) yield* renderNode(child, scope);
 }
 
 /** Drives the renderer from `step` on, awaiting async components. Yields one chunk per boundary. */

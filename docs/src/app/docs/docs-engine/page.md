@@ -169,6 +169,63 @@ without the capability makes `farm dev` and `farm build` stop with that error on
 upgrade it, move private pages out of the docs folder, or set `docs.adapter: false` to use Farm's
 built-in docs runtime.
 
+## Docs adapters on any renderer
+
+A docs adapter is a docs engine plus a UI. Its descriptor names the UI module `ui` and the renderer
+it runs under `renderer`. Farm loads `ui` on the server through `loadUIModule()`, and in the browser
+calls its `hydrateFarmDocs()` on the pages the adapter rendered. A descriptor without `renderer` has
+a React UI, and one written before `ui` existed names it `react`, which Farm still reads.
+
+Farm hands the UI the app's renderer. On the server, `renderFarmDocsPage()` receives `renderer`:
+its `name`, `createElement()`, `Fragment`, `renderToString()`, and `generateHydrationScript()` when
+the renderer has one, such as Solid. In the browser, `hydrateFarmDocs()` receives the renderer's
+client module, with `createElement()` and `hydrateRoot()`. A UI built from those runs under any
+renderer.
+
+`@farming-labs/farmjs` ships one. On a renderer other than React, a custom one included,
+`withDocs()` alone builds the docs pages with the app's renderer:
+
+```ts
+import { defineConfig } from "@farm.js/core";
+import { withDocs } from "@farming-labs/farmjs/config";
+import { leaf } from "farm-leaf";
+
+export default withDocs(defineConfig({ renderer: leaf() }));
+```
+
+The pages keep the React UI's layout and stylesheet. Their Markdown compiles to HTML on the server,
+so `react` stays a server dependency and no React reaches the browser. This UI has no search box
+or client navigation between docs pages. Its table of contents shows on wide screens, with no
+popover on narrow ones, and theme components such as tabs render as static HTML. It runs on the
+Node.js runtime: edge builds stop because it has no edge compiler.
+
+A renderer checks that it writes and hydrates these pages as the UI expects with the suite in
+`@farming-labs/farmjs/testing`, run from a Vitest file with a DOM environment:
+
+```ts
+// @vitest-environment jsdom
+import { defineFarmDocsRendererConformance } from "@farming-labs/farmjs/testing";
+import * as client from "../src/client.js";
+import * as server from "../src/server.js";
+
+defineFarmDocsRendererConformance({ name: "leaf", server, client });
+```
+
+A renderer that writes attributes for its own hydration lists them in `hydrationAttributes`, such
+as `["data-hk"]` for Solid, so the HTML comparison skips them.
+
+A UI written for one renderer replaces it through `ui`:
+
+```ts
+export default withDocs(defineConfig({ renderer: leaf() }), {
+  ui: { module: "@acme/leaf-docs", renderer: "leaf" },
+});
+```
+
+The app's Vite pipeline compiles the UI and the docs config module with its renderer, so an adapter
+runs only under the renderer its UI names. `farm dev` and `farm build` stop when they differ, and
+name the fix. Farm's built-in renderer (`docs.adapter: false`) serves docs under any renderer.
+
 ## Configure the docs experience
 
 Keep docs configuration alongside the rest of the application in `farm.config.ts`:

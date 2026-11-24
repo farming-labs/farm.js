@@ -2404,8 +2404,8 @@ importers:
   packages/farm:
     dependencies:
       '@farm.js/islx':
-        specifier: 0.0.25
-        version: 0.0.25(react-dom@19.2.8)(react@19.2.8)(vite@8.3.4)
+        specifier: 0.0.30
+        version: 0.0.30(react-dom@19.2.8)(react@19.2.8)(vite@8.3.4)
       '@farming-labs/orm':
         specifier: 0.0.66
         version: 0.0.66
@@ -2851,8 +2851,8 @@ importers:
         specifier: workspace:*
         version: link:../farm
       '@farm.js/tunnel':
-        specifier: 0.1.2
-        version: 0.1.2
+        specifier: 0.1.3
+        version: 0.1.3
       commander:
         specifier: ^11.1.0
         version: 11.1.0
@@ -6987,8 +6987,8 @@ packages:
     requiresBuild: true
     optional: true
 
-  /@farm.js/islx@0.0.25(react-dom@19.2.8)(react@19.2.8)(vite@8.3.4):
-    resolution: {integrity: sha512-sB8efeUkS6N4MIY8yStxOTqjDi7EaBPiokKTPETj0Z1ImDuJa4aenvrn8dA4sRPvmoXTYAj8JKk93NHK9sQBVA==}
+  /@farm.js/islx@0.0.30(react-dom@19.2.8)(react@19.2.8)(vite@8.3.4):
+    resolution: {integrity: sha512-Bz8Z3mMNDF69MYNhhJebW5YaO9DyCpTHjuWPZYwoaW2O6eXLj3ZIb2tei6J/E05e/aZIZO/4f1cQEehrH0cGog==}
     engines: {node: ^20.19.0 || >=22.12.0}
     peerDependencies:
       '@tanstack/react-router': '>=1.170'
@@ -7017,8 +7017,8 @@ packages:
       vite: 8.3.4(@types/node@22.20.5)(esbuild@0.28.1)
     dev: false
 
-  /@farm.js/tunnel-darwin-arm64@0.1.2:
-    resolution: {integrity: sha512-IX/DKuPjZznobkS2+QlLkIkh1b1glotch1XZgR40b2AOUPVsmZCmIqveYfExe1eRxbHmmdKj3ZpeOGbjMIBjIg==}
+  /@farm.js/tunnel-darwin-arm64@0.1.3:
+    resolution: {integrity: sha512-PggIFqwXzoCFnopdDHw5cwAcSy9zkatA3aPnHeMZOrwll6/H7Eh1MIbilmlglIQqZInzBcJ4tIk+XCRQOsWMRA==}
     engines: {node: '>=20.0.0'}
     cpu: [arm64]
     os: [darwin]
@@ -7026,8 +7026,8 @@ packages:
     dev: false
     optional: true
 
-  /@farm.js/tunnel-darwin-x64@0.1.2:
-    resolution: {integrity: sha512-5Ash9dxMH9SSui8y87a592iU81aIfmezKRtDwI9HF7Ij4OUwKTGek7PzQlyg9LBevXFYcO21HaFBLl30oIhyVw==}
+  /@farm.js/tunnel-darwin-x64@0.1.3:
+    resolution: {integrity: sha512-gju4YuXv8FbIrgME7J6Qz8IidXTbNNS07gGqqEYVlLcgiFlRG0dS2fzZQigLdh/QVt+P12PeoNaMuGX2mva9dg==}
     engines: {node: '>=20.0.0'}
     cpu: [x64]
     os: [darwin]
@@ -7035,8 +7035,8 @@ packages:
     dev: false
     optional: true
 
-  /@farm.js/tunnel-linux-arm64-gnu@0.1.2:
-    resolution: {integrity: sha512-9nPL2VcJSTi0PUUyqx/tUt86FyHFN1+O029JJkhUG13FhTki8tYFpD/t6P78B3NVQETg4CHcKIB1kgZ8PUE7+w==}
+  /@farm.js/tunnel-linux-arm64-gnu@0.1.3:
+    resolution: {integrity: sha512-BY88nPAkoHcliTgCsrNwMmgKRhit8N+59okdP9Y6z7alilXqNNDl8QFChFT3Nu1FAQzPq8bCE7pLzY9b5JrGTA==}
     engines: {node: '>=20.0.0'}
     cpu: [arm64]
     os: [linux]
@@ -7044,8 +7044,8 @@ packages:
     dev: false
     optional: true
 
-  /@farm.js/tunnel-linux-arm64-musl@0.1.2:
-    resolution: {integrity: sha512-ackvEXCWUCbfPhVK6AOrI22U0k7rasMbg32xgM7tVtWZ0P3Qg69OP1xVl9DBisXiQbbHZli3WrDHzwff6W089Q==}
+  /@farm.js/tunnel-linux-arm64-musl@0.1.3:
+    resolution: {integrity: sha512-usf76Z78rovJ7crYuNUY5ayzaAMqhJ4HXVTMja+bSbyiZ9La6KG84eotbnW5yxf+0QhIEL6IMu1jRiN7nIBK/A==}
     engines: {node: '>=20.0.0'}
     cpu: [arm64]
     os: [linux]
@@ -7053,8 +7053,8 @@ packages:
     dev: false
     optional: true
 
-  /@farm.js/tunnel-linux-x64-gnu@0.1.2:
-    resolution: {integrity: sha512-8bZU6gqvPlOximP9Raub9IdR/F7HUgPmC8hwPS84Y/lm43eHvfhjOg04wfPc/sBHG6fBwI/dUDLqwCL8EXcqDg==}
+  /@farm.js/tunnel-linux-x64-gnu@0.1.3:
+    resolution: {integrity: sha512-7WhUPVJ/HdyORH7Af8jdiE1ruIZF1bMBjdeI+Z2F15IG1eQS6/oky1fAnArPzmIWSfYvfh5Vg7S84wFWs3w9kA==}
     engines: {node: '>=20.0.0'}
     cpu: [x64]
     os: [linux]
@@ -7062,8 +7062,8 @@ packages:
     dev: false
     optional: true
 
-  /@farm.js/tunnel-linux-x64-musl@0.1.2:
-    resolution: {integrity: sha512-Cs+3MP+1+FMJvFYaqULU7DQ6lLmN7YGrq/UGBgG2OuRb+dA7EV1z60lwG1ocT318MlBluHh+mbNKT0MJLHLbpg==}
+  /@farm.js/tunnel-linux-x64-musl@0.1.3:
+    resolution: {integrity: sha512-Ofpo9CdQ5mlPqy6kWYEvWTXiyk95XWx5vC/YrO0IVQnMm2SxqlCWU7NBMg9QR7WD8IvI+iog9gzD9AM48jY75A==}
     engines: {node: '>=20.0.0'}
     cpu: [x64]
     os: [linux]
@@ -7071,8 +7071,8 @@ packages:
     dev: false
     optional: true
 
-  /@farm.js/tunnel-win32-arm64-msvc@0.1.2:
-    resolution: {integrity: sha512-Ezwuxsu8hrKxPQ6JdfBIyzjxks2TzodesGku+5gyEoSYgETTw2Fq0sTSJBOt2mbfU8J12rDHIKtrFWmxJQGx8g==}
+  /@farm.js/tunnel-win32-arm64-msvc@0.1.3:
+    resolution: {integrity: sha512-lDBwGv0mf8dh0AZ7JRC7K4PSNh/C1Wgog/AyEMR6FjYo2eJ4sBLDWt7mlEVLVkZ+iqB527eXz2A6eMDGAXPmPA==}
     engines: {node: '>=20.0.0'}
     cpu: [arm64]
     os: [win32]
@@ -7080,8 +7080,8 @@ packages:
     dev: false
     optional: true
 
-  /@farm.js/tunnel-win32-x64-msvc@0.1.2:
-    resolution: {integrity: sha512-zmxwZWpwylBwYaAt7cZzx8p4S4fS10GSRnc/L4jj8Jo9a6PpgHH9RTvimcK7U84A9oWaOGsUKBthz7mT+OGnDg==}
+  /@farm.js/tunnel-win32-x64-msvc@0.1.3:
+    resolution: {integrity: sha512-cSykRBprnZwDe2bi1Hime65OJMifWjU1277Fb8OtpOD6Nu9C0dRE/jVMyrghGhNz69phhuCDkJfH7ekYy2jisQ==}
     engines: {node: '>=20.0.0'}
     cpu: [x64]
     os: [win32]
@@ -7089,18 +7089,18 @@ packages:
     dev: false
     optional: true
 
-  /@farm.js/tunnel@0.1.2:
-    resolution: {integrity: sha512-9Rmep2U0eCCWx6zwLb1VAfjbYfsbGtXBsMZusSvYkbCV+3eEcz6+GhfOi7A8gfp7JiAdkiOpmGhmaJnc8wEb1A==}
+  /@farm.js/tunnel@0.1.3:
+    resolution: {integrity: sha512-3Vgq5FEDzdXfmW8cuDvUzif17AEbdSCqlfv6BPbM25miaglwqKeKPJ0xsK17NsDbEC6addtrRDaNu8yIbNf9eA==}
     engines: {node: '>=20.0.0'}
     optionalDependencies:
-      '@farm.js/tunnel-darwin-arm64': 0.1.2
-      '@farm.js/tunnel-darwin-x64': 0.1.2
-      '@farm.js/tunnel-linux-arm64-gnu': 0.1.2
-      '@farm.js/tunnel-linux-arm64-musl': 0.1.2
-      '@farm.js/tunnel-linux-x64-gnu': 0.1.2
-      '@farm.js/tunnel-linux-x64-musl': 0.1.2
-      '@farm.js/tunnel-win32-arm64-msvc': 0.1.2
-      '@farm.js/tunnel-win32-x64-msvc': 0.1.2
+      '@farm.js/tunnel-darwin-arm64': 0.1.3
+      '@farm.js/tunnel-darwin-x64': 0.1.3
+      '@farm.js/tunnel-linux-arm64-gnu': 0.1.3
+      '@farm.js/tunnel-linux-arm64-musl': 0.1.3
+      '@farm.js/tunnel-linux-x64-gnu': 0.1.3
+      '@farm.js/tunnel-linux-x64-musl': 0.1.3
+      '@farm.js/tunnel-win32-arm64-msvc': 0.1.3
+      '@farm.js/tunnel-win32-x64-msvc': 0.1.3
     dev: false
 
   /@farming-labs/docs@0.2.143(react@19.2.8)(supports-color@10.2.2):
@@ -20809,7 +20809,7 @@ packages:
   /is-reference@3.0.3:
     resolution: {integrity: sha512-ixkJoqQvAP88E6wLydLGGqCJsrFUnqoH6HnaczB8XmDH1oaWU+xxdptvikTgaEhtZ53Ky6YXiBuUI2WXLMCwjw==}
     dependencies:
-      '@types/estree': 1.0.8
+      '@types/estree': 1.0.10
 
   /is-regex@1.2.1:
     resolution: {integrity: sha512-MjYsKHO5O7mCsmRGxWcLWheFqN9DJ/2TmngvjKXihe6efViPqc274+Fx/4fYj/r03+ESvBdTXK0V6tA3rgez1g==}

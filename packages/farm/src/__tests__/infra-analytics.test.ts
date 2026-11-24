@@ -18,8 +18,11 @@ import {
   farmInfraAnalyticsPlugin,
   farmInfraAnalyticsRecorder,
   resolveFarmInfraAnalytics,
+  _farmWebMCPReportsEnabled,
+  FARM_WEBMCP_REPORT_PATH,
   type FarmInfraAnalyticsEvent,
 } from "../plugins/infra-analytics";
+import { setFarmRouteLabel } from "../route-label";
 
 const endpoint = "https://infra.example/api/telemetry/v1/events";
 const ingestionKey = `fti_${"a".repeat(43)}`;
@@ -1279,5 +1282,279 @@ describe("bounded sender", () => {
     expect(send).toHaveBeenCalledTimes(2);
     expect(JSON.parse(send.mock.calls[1]![1]!.body as string).events).toEqual([recent]);
     await exporter.close();
+  });
+});
+
+describe("WebMCP tool call reports", () => {
+  const CHROME =
+    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36";
+  // The path @farm.js/webmcp's browser runtime posts to.
+  const reportURL = "https://app.example/_farm/webmcp/tool-calls";
+  const browserHeaders = {
+    "content-type": "application/json",
+    origin: "https://app.example",
+    host: "app.example",
+    "sec-fetch-site": "same-origin",
+    "sec-fetch-dest": "empty",
+    "user-agent": CHROME,
+  };
+  const call = {
+    tool: "search_docs",
+    outcome: "success",
+    durationMs: 12,
+    path: "/docs/webmcp",
+    arguments: { query: "webmcp", apiKey: "private-key" },
+    result: { results: [{ title: "WebMCP" }] },
+  };
+  const report = (body: unknown, init: RequestInit = {}) =>
+    new Request(reportURL, {
+      method: "POST",
+      ...init,
+      headers: { ...browserHeaders, ...(init.headers as Record<string, string>) },
+      body: typeof body === "string" ? body : JSON.stringify(body),
+    });
+  // The route a request for the page would get, labeled as the docs engine labels it. Like
+  // Farm's own matchers, it takes the path with the base path.
+  const route = vi.fn((pathname: string) =>
+    /^(\/console)?\/docs\//.test(pathname)
+      ? setFarmRouteLabel({ pathname, pattern: "/docs" }, "/docs/[...slug]")
+      : undefined,
+  );
+  const managers: PluginManager[] = [];
+  const pluginRuntime = (
+    send: typeof fetch,
+    exporterOptions: typeof options & { toolPayloads?: boolean } = options,
+  ) => {
+    const manager = new PluginManager({ config: {}, isDev: false, isProd: true });
+    manager.addPlugin(farmInfraAnalyticsPlugin(exporterOptions, send, { webmcp: { route } }));
+    managers.push(manager);
+    // What the app answers for a path no route or endpoint claims.
+    const notFound = vi.fn(async () => new Response("not found", { status: 404 }));
+    const run = async (request: Request) => {
+      const work: Promise<unknown>[] = [];
+      const response = await manager.runRuntimeRequest(request, notFound, {
+        kind: "request",
+        route: { pathname: new URL(request.url).pathname },
+        waitUntil: (job) => work.push(job),
+      });
+      await Promise.all(work);
+      return response;
+    };
+    return { run, notFound };
+  };
+  afterEach(async () => {
+    await Promise.all(managers.splice(0).map((value) => value.closeRuntime("test")));
+    route.mockClear();
+    vi.restoreAllMocks();
+    resetFarmObservability();
+  });
+
+  it("sends a call the browser reports as a tool event from that page, and never the report request", async () => {
+    const send = vi.fn<typeof fetch>().mockResolvedValue(new Response(null, { status: 202 }));
+    const { run, notFound } = pluginRuntime(send);
+    const response = await run(report(call));
+    expect(response.status).toBe(204);
+    expect(notFound).not.toHaveBeenCalled();
+    expect(route).toHaveBeenCalledWith("/docs/webmcp");
+    const events = sentEvents(send);
+    expect(events).toEqual([
+      {
+        id: expect.any(String),
+        timestamp: expect.any(String),
+        kind: "mcp.tool",
+        source: "webmcp",
+        durationMs: 12,
+        route: "/docs/[...slug]",
+        path: "/docs/webmcp",
+        agent: {
+          family: "unknown",
+          category: "browser",
+          identity: "self-reported",
+          name: "Chrome",
+        },
+        tool: "search_docs",
+        outcome: "success",
+        arguments: { query: "webmcp", apiKey: "[redacted]" },
+        result: { results: [{ title: "WebMCP" }] },
+      },
+    ]);
+    expect(events[0]).not.toHaveProperty("requestId");
+  });
+
+  it("reports an error, an unknown page and a path Farm Infra would refuse", async () => {
+    const send = vi.fn<typeof fetch>().mockResolvedValue(new Response(null, { status: 202 }));
+    const { run } = pluginRuntime(send);
+    const { result: _result, ...failed } = call;
+    expect((await run(report({ ...failed, outcome: "error", path: "/elsewhere" }))).status).toBe(
+      204,
+    );
+    expect((await run(report({ ...failed, path: `/${"a".repeat(1100)}` }))).status).toBe(204);
+    const [error, long] = sentEvents(send);
+    expect(error).toMatchObject({ outcome: "error", route: "/[unmatched]", path: "/elsewhere" });
+    expect(error).not.toHaveProperty("result");
+    expect(long).not.toHaveProperty("path");
+  });
+
+  it("keeps the payloads the browser left out, and applies Farm Infra's limits again", async () => {
+    const send = vi.fn<typeof fetch>().mockResolvedValue(new Response(null, { status: 202 }));
+    const { run } = pluginRuntime(send);
+    const { arguments: _arguments, ...withoutArguments } = call;
+    await run(report({ ...withoutArguments, omitted: ["arguments"] }));
+    await run(report({ ...call, result: JSON.parse("[".repeat(40) + "]".repeat(40)) }));
+    const [trimmed, deep] = sentEvents(send);
+    expect(trimmed).toMatchObject({ omitted: ["arguments"], result: call.result });
+    expect(trimmed).not.toHaveProperty("arguments");
+    expect(deep).toMatchObject({ omitted: ["result"] });
+    expect(deep).not.toHaveProperty("result");
+  });
+
+  it("sends no payloads with FARMJS_TOOL_PAYLOADS=off", async () => {
+    const send = vi.fn<typeof fetch>().mockResolvedValue(new Response(null, { status: 202 }));
+    const { run } = pluginRuntime(send, { ...options, toolPayloads: false });
+    const { arguments: _arguments, ...withoutArguments } = call;
+    await run(report(call));
+    await run(report({ ...withoutArguments, omitted: ["arguments"] }));
+    for (const event of sentEvents(send)) {
+      expect(event).not.toHaveProperty("arguments");
+      expect(event).not.toHaveProperty("result");
+      expect(event).not.toHaveProperty("omitted");
+    }
+  });
+
+  it("refuses cross-site, non-JSON, oversized and malformed reports", async () => {
+    const send = vi.fn<typeof fetch>().mockResolvedValue(new Response(null, { status: 202 }));
+    const { run } = pluginRuntime(send);
+    const status = async (request: Request) => (await run(request)).status;
+    const big = { ...call, arguments: { text: "x".repeat(40 * 1024) } };
+    const { tool: _tool, ...withoutTool } = call;
+    expect(await status(new Request(reportURL))).toBe(405);
+    expect(
+      await status(
+        report(call, {
+          headers: { origin: "https://evil.example", "sec-fetch-site": "cross-site" },
+        }),
+      ),
+    ).toBe(403);
+    // A form post from another site sends no CORS preflight.
+    expect(
+      await status(
+        report(call, { headers: { origin: "https://evil.example", "content-type": "text/plain" } }),
+      ),
+    ).toBe(403);
+    const anonymous = new Request(reportURL, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(call),
+    });
+    expect(await status(anonymous)).toBe(403);
+    expect(await status(report(call, { headers: { "content-type": "text/plain" } }))).toBe(415);
+    expect(await status(report(big))).toBe(413);
+    // A streamed body is cut off as it is read, without reading the rest.
+    const chunk = new TextEncoder().encode("x".repeat(16 * 1024));
+    let pulled = 0;
+    const streamed = new Request(reportURL, {
+      method: "POST",
+      headers: browserHeaders,
+      body: new ReadableStream({
+        pull(controller) {
+          pulled++;
+          controller.enqueue(chunk);
+        },
+      }),
+      duplex: "half",
+    } as RequestInit);
+    expect(await status(streamed)).toBe(413);
+    expect(pulled).toBeLessThan(5);
+    for (const body of [
+      "{",
+      "[]",
+      withoutTool,
+      { ...call, extra: true },
+      JSON.stringify(call).replace("{", '{"__proto__":{"polluted":true},'),
+      { ...call, tool: "search docs" },
+      { ...call, tool: "a".repeat(129) },
+      { ...call, outcome: "ok" },
+      { ...call, durationMs: -1 },
+      { ...call, durationMs: "12" },
+      { ...call, path: "https://app.example/docs" },
+      { ...call, path: "//evil.example/docs" },
+      { ...call, path: "/docs?query=private" },
+      { ...call, omitted: ["arguments"] },
+      { ...call, omitted: ["input"] },
+    ]) {
+      expect(await status(report(body)), JSON.stringify(body)).toBe(400);
+    }
+    expect(send).not.toHaveBeenCalled();
+  });
+
+  it("answers 404 once Farm Infra refuses the key, so pages stop reporting", async () => {
+    const send = vi.fn<typeof fetch>().mockResolvedValue(new Response(null, { status: 401 }));
+    const { run } = pluginRuntime(send);
+    expect((await run(report(call))).status).toBe(204);
+    expect((await run(report(call))).status).toBe(404);
+    expect(send).toHaveBeenCalledTimes(1);
+  });
+
+  it("takes no reports unless the app's pages send them", async () => {
+    const send = vi.fn<typeof fetch>().mockResolvedValue(new Response(null, { status: 202 }));
+    const manager = new PluginManager({ config: {}, isDev: false, isProd: true });
+    manager.addPlugin(farmInfraAnalyticsPlugin(options, send));
+    managers.push(manager);
+    const work: Promise<unknown>[] = [];
+    const response = await manager.runRuntimeRequest(
+      report(call),
+      async () => new Response("not found", { status: 404 }),
+      { kind: "request", waitUntil: (job) => work.push(job) },
+    );
+    await Promise.all(work);
+    expect(response.status).toBe(404);
+    expect(sentEvents(send).map(({ kind }) => kind)).toEqual(["request"]);
+    expect(new URL(reportURL).pathname).toBe(FARM_WEBMCP_REPORT_PATH);
+    expect(_farmWebMCPReportsEnabled([{ name: "farm:webmcp" }])).toBe(true);
+    expect(
+      _farmWebMCPReportsEnabled([
+        { name: "farm:webmcp", client: { public: { analytics: false } } },
+      ]),
+    ).toBe(false);
+    expect(_farmWebMCPReportsEnabled([{ name: "farm:health" }])).toBe(false);
+    expect(_farmWebMCPReportsEnabled(undefined)).toBe(false);
+  });
+
+  it("takes reports without a plugin runtime, below the base path, never recording them as requests", async () => {
+    const send = vi.fn<typeof fetch>().mockResolvedValue(new Response(null, { status: 202 }));
+    const recorder = farmInfraAnalyticsRecorder(options, send, { webmcp: { route } });
+    const handler = vi.fn(async () => new Response("page"));
+    const work: Promise<unknown>[] = [];
+    setFarmBasePath("/console");
+    try {
+      const request = new Request("https://app.example/console/_farm/webmcp/tool-calls", {
+        method: "POST",
+        headers: browserHeaders,
+        body: JSON.stringify({ ...call, path: "/console/docs/webmcp" }),
+      });
+      const response = await recorder.record(
+        request,
+        { kind: "request" },
+        (job) => work.push(job),
+        handler,
+      );
+      expect(response.status).toBe(204);
+    } finally {
+      setFarmBasePath("");
+    }
+    await Promise.all(work);
+    await recorder.close();
+    expect(handler).not.toHaveBeenCalled();
+    expect(route).toHaveBeenCalledWith("/console/docs/webmcp");
+    const events = sentEvents(send);
+    expect(events).toHaveLength(1);
+    expect(events[0]).toMatchObject({
+      kind: "mcp.tool",
+      source: "webmcp",
+      route: "/docs/[...slug]",
+      path: "/docs/webmcp",
+      tool: "search_docs",
+    });
+    expect(events[0]).not.toHaveProperty("requestId");
   });
 });

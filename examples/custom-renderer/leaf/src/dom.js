@@ -169,6 +169,14 @@ function createDispatcher(instance) {
       }
       return hook.value;
     },
+    useContext(context) {
+      for (let parent = instance.parent; parent; parent = parent.parent) {
+        if (parent.kind === "component" && parent.type === context.Provider) {
+          return parent.props.value;
+        }
+      }
+      return context.defaultValue;
+    },
   };
 }
 

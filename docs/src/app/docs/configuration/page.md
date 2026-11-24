@@ -957,6 +957,10 @@ The mode applies to synchronous pages and layouts, which have a route-wide alter
 page or layout has none, so its eligible client components always hydrate as islands, in every
 mode. See [Async pages and client components](/docs/server-rendering#async-pages-and-client-components).
 
+With another renderer, `"enabled"` hydrates islands only when the renderer declares
+`capabilities.islands`. Each island then hydrates through that renderer; see
+[Islands](/docs/renderers/custom#islands) for what it implements.
+
 An eligible boundary is a local, statically analyzable `"use client"` module with a default or
 named capitalized component export and serializable props. Farm preserves its server-rendered HTML,
 emits the client component as a separate browser chunk, and hydrates that leaf as its own React

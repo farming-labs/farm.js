@@ -84,8 +84,14 @@ const entry = {
   "internal/island-codec": "src/client/island-codec.ts",
   "internal/server-tree": "src/client/server-tree.ts",
   "internal/islands-runtime": "src/client/islands-runtime.ts",
+  // Its own file, so the islands runtime's import of it and the preload manifest name the same one.
+  "internal/islands-action-client": "src/islands-action-client.ts",
+  // Its own file too: the runtime imports it with a page's first server tree, and the preload
+  // manifest names the same one.
+  "internal/islands-server-tree": "src/client/islands-server-tree.ts",
   "internal/islands-boot": "src/client/islands-boot.ts",
   "internal/islands-server": "src/client/islands-server.ts",
+  "internal/renderer-islands": "src/client/renderer-islands.ts",
   "internal/islx-client": "src/islx/client.ts",
   "internal/server-fn-transform": "src/server-fn-transform.ts",
   "internal/native-server-fns": "src/mobile/native-server-fns.ts",
@@ -111,7 +117,7 @@ const entry = {
   "internal/cli-runtime": "src/cli-runtime.ts",
   "internal/request-cookies": "src/request-cookies.ts",
   config: "src/config-entry.ts",
-  renderer: "src/renderer.ts",
+  renderer: "src/renderer-entry.ts",
   "renderer/react/server": "src/renderer/react/server.ts",
   "renderer/react/client": "src/renderer/react/client.ts",
   "renderer/react/vite": "src/renderer/react/vite.ts",

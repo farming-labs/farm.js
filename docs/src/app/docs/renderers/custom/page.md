@@ -1,6 +1,6 @@
 ---
 title: "Custom Renderers"
-description: "Render Farm pages with a UI library of your own: the renderer descriptor, its server, client, and Vite modules, streaming, client hooks over Farm's stores, a Link, file formats, and the conformance suite."
+description: "Render Farm pages with a UI library of your own: the renderer descriptor, its server, client, and Vite modules, streaming, client hooks over Farm's stores, a Link, file formats, route files, hydration, and the conformance suite."
 section: "Core"
 ---
 
@@ -31,8 +31,8 @@ The renderer does the rest:
 - **Hooks or bindings** that let components read Farm's client state.
 
 A custom renderer gets the same Farm features as Solid, Vue, and Svelte. The
-[feature table](/docs/renderers#feature-support) lists them. React Server Components and islands
-are React-only.
+[feature table](/docs/renderers#feature-support) lists them. React Server Components are
+React-only; islands work with any renderer that declares them (see [Islands](#islands)).
 
 ## How Farm uses a renderer
 
@@ -132,7 +132,11 @@ export default defineConfig({
 ```
 
 `defineRenderer()` returns its argument and types it as `FarmRenderer`. Farm checks the descriptor
-when it resolves the config.
+when it resolves the config, and reports every bad field at once.
+
+The module specifiers are what the app's server and browser code import. `routes()` and
+`hydration` are different: they're build-time hooks that run in Node while Farm scans the app, and
+never reach the browser.
 
 - **`name`** (required): the renderer's id in errors and generated manifests.
 - **`vite`**, **`server`**, **`client`** (required): the three module specifiers. Each must be a
@@ -143,6 +147,10 @@ when it resolves the config.
 - **`componentExtensions`**: extensions of your own file format, such as `[".leaf"]`. Route files
   with them become pages and layouts, next to `.ts`, `.tsx`, `.js`, and `.jsx`. See
   [Your own file format](#your-own-file-format).
+- **`routes(context)`**: which files are routes and the URL each one serves, for a library with a
+  convention other than Farm's folders. See [Route files](#route-files).
+- **`hydration`**: which pages and layouts hydrate when they say nothing, and a reader for your
+  format's own syntax for it. See [Hydration](#hydration).
 - **`dedupe`**: packages that must resolve to one copy in the app, passed to Vite's
   `resolve.dedupe`. List a runtime whose hooks keep module-level state.
 - **`optimizeDeps`**: packages Vite pre-bundles in development before the first page load. Farm adds
@@ -152,9 +160,10 @@ when it resolves the config.
   process-global mutable caches; the official Vue renderer does, because `@vitejs/plugin-vue` shares
   them between plugin instances.
 - **`capabilities`**: what the renderer supports: `streaming`, `reconcilesRerenders`,
-  `functionComponents`, and `hydrationFallback`. Each defaults to off. Streaming is covered under
-  [Streaming](#streaming); the next two under [Components](#components) and
-  [Route updates](#route-updates); `hydrationFallback` under [The client module](#the-client-module).
+  `functionComponents`, `hydrationFallback`, and `islands`. Each defaults to off. Streaming is
+  covered under [Streaming](#streaming); the next two under [Components](#components) and
+  [Route updates](#route-updates); `hydrationFallback` under [The client module](#the-client-module);
+  `islands` under [Islands](#islands).
 - **`options`**: serializable options your Vite module receives as `rendererOptions`. Use them for
   compiler modes, so the descriptor function can take options from the app.
 - **`appSetup`**: a module path, relative to the project root, that configures each app instance
@@ -222,9 +231,10 @@ browser blocks a script without it.
 - **`capabilities`**: a copy of the descriptor's capabilities. Farm checks that what the module
   declares covers what the descriptor declares.
 
-`wrapClientGraph()`, `isolateServerPageGraph()`, and `renderServerTreePage()` serve React Server
-Components; leave them out. Farm no longer reads an `ErrorBoundary` export: a page that throws under
-an `error.*` file renders that file as the route's error page.
+`withIsland()`, `wrapClientGraph()`, and `isolateServerPageGraph()` are for [islands](#islands).
+`renderServerTreePage()` serves React Server Components; leave it out. Farm no longer reads an
+`ErrorBoundary` export: a page that throws under an `error.*` file renders that file as the route's
+error page.
 
 ## The client module
 
@@ -630,6 +640,134 @@ or `false`:
 </script>
 ```
 
+To give the format a syntax of its own instead, read it in `hydration.resolve()`. See
+[Hydration](#hydration).
+
+## Route files
+
+Farm's folders decide routes by default: `about/page.leaf` is `/about`, and `layout.leaf` lays out
+its folder. When your library has another convention, give the descriptor a `routes()` method. It
+returns a resolver, and Farm calls it once per file:
+
+```js
+// src/index.js, in defineRenderer({ ... })
+routes({ defaults }) {
+  const url = (segments) => `/${segments.join("/")}`;
+  return {
+    resolve(file) {
+      // Farm's folders keep working next to the flat files.
+      const folderRoute = defaults.resolve(file);
+      if (folderRoute || file.segments[0] !== "guides" || file.extension !== ".leaf") {
+        return folderRoute;
+      }
+      if (file.name === "_layout") return { kind: "layout", pattern: url(file.segments) };
+      if (file.name.startsWith("_")) return null;
+      const name = file.name.replace(/\.client$/, "");
+      return {
+        kind: "page",
+        pattern: url(name === "index" ? file.segments : [...file.segments, name]),
+        ...(name === file.name ? {} : { hydrate: true }),
+      };
+    },
+  };
+},
+```
+
+```text
+src/app/guides/
+  _layout.leaf           layout of /guides
+  index.leaf             /guides
+  [crop].leaf            /guides/[crop]
+  watering.client.leaf   /guides/watering, hydrates
+  _tip.leaf              not a route: a component index.leaf imports
+```
+
+`routes(context)` may be async. Farm calls it when `farm dev` starts and again when a file under
+its directory is added or removed, in every `farm build`, and in `farm generate`. It gets:
+
+- **`root`**: the project root, or a layer's root when the app extends one. Farm scans each.
+- **`defaults`**: Farm's folder rules as a resolver over the same directory. Return
+  `defaults.resolve(file)` for a file to keep them.
+
+It returns:
+
+- **`dir`**: the directory to scan, relative to `root`. Defaults to `src/app` (`<srcDir>/app`), and
+  must stay inside the project.
+- **`resolve(file)`**: called for each file under `dir` with a component extension (`.ts`, `.tsx`,
+  `.js`, `.jsx`, and yours), `.md`, or `.mdx`, in sorted order. Return a route, or `null` when the
+  file isn't one.
+
+The file Farm passes, for `src/app/guides/watering.client.leaf`:
+
+| Field       | Value                                                     |
+| ----------- | --------------------------------------------------------- |
+| `path`      | `"guides/watering.client.leaf"`, with `/` on every system |
+| `segments`  | `["guides"]`                                              |
+| `name`      | `"watering.client"`                                       |
+| `extension` | `".leaf"`                                                 |
+
+The route you return:
+
+| Field      | Value                                                                           |
+| ---------- | ------------------------------------------------------------------------------- |
+| `kind`     | `"page"`, `"layout"`, `"loading"`, `"error"`, or `"not-found"`                  |
+| `pattern`  | The URL in Farm's folder syntax: `"/"`, `"/blog/[slug]"`, `"/docs/[...path]"`   |
+| `hydrate`  | Optional. Whether the file hydrates; see [Hydration](#hydration)                |
+| `strategy` | Optional. When it hydrates: `"load"`, `"idle"`, `"visible"`, or `"interaction"` |
+
+A rule Farm can't serve fails the scan with the file's path and the fix:
+
+- `pattern` must start with `/`, and can't have an empty, `.`, `..`, or `@name` segment, or a `\`,
+  `?`, or `#`.
+- `not-found` only takes `pattern: "/"`. Farm renders one not-found page.
+- Two files can't map to the same kind and pattern. The error names both.
+- A `resolve()` that throws fails the scan, naming the file it was resolving.
+
+Some files stay with Farm. It finds `route.ts` handlers, `middleware`, `instrumentation`, metadata
+files (`sitemap`, `robots`, `manifest`, `llms`, `opengraph-image`, `twitter-image`), and named slots
+(`@name` folders) in `src/app` as before, and never passes them to `resolve()`.
+
+Generated route types follow the same rules, so `farm generate` lists `/guides/watering` and a
+`Link` to it type-checks.
+
+## Hydration
+
+Farm decides whether each page and layout hydrates before your compiler runs. The descriptor's
+`hydration` sets what applies when a file says nothing, and can read your format's own syntax:
+
+```js
+// src/index.js, in defineRenderer({ ... })
+hydration: {
+  pages: false, // the default: a page that says nothing renders on the server only
+  layouts: false,
+  strategy: "visible", // when a hydrating page or layout loads, unless it says
+  // `// @hydrate`, `// @hydrate idle`, or `// @hydrate false` in a .leaf file's module script.
+  resolve(source) {
+    const pragma = /^\s*\/\/ @hydrate(?: (load|idle|visible|interaction|false))?\s*$/m.exec(source);
+    if (!pragma) return undefined;
+    if (pragma[1] === "false") return { hydrate: false };
+    return pragma[1] ? { hydrate: true, strategy: pragma[1] } : { hydrate: true };
+  },
+},
+```
+
+For each page and layout, the most specific setting wins:
+
+1. **The file.** `"use client"`, `export const hydrate`, `export const island`, or what
+   `hydration.resolve()` reads. `"use client"` always hydrates.
+2. **Its route rule.** The `hydrate` and `strategy` that `routes()` returned for it.
+3. **The renderer's defaults.** `hydration.pages` or `hydration.layouts`, and `hydration.strategy`.
+4. Otherwise the file renders on the server only.
+
+`resolve(source, file)` gets the file as written, and only for files with your
+`componentExtensions`. `.tsx` and the other built-in extensions keep Farm's reading. Return
+`{ hydrate?, strategy? }`, or nothing to leave the file to Farm. When a file both exports `hydrate`
+or `island` and uses your syntax, and the two disagree, the scan fails and names the file: keep one.
+
+A route's page and the hydrating layouts above it hydrate as one root, so they share one strategy.
+When they declare different ones, or a hydrating layout declares none, the route hydrates on
+`"load"`.
+
 ## Components
 
 ### Plain function components
@@ -681,6 +819,99 @@ interface FarmRendererRouteState {
 
 The official Solid renderer keeps the layouts whose `pattern` matches mounted and updates the page
 slot and params through signals. See [Re-render behavior](/docs/renderers#re-render-behavior).
+
+## Islands
+
+With `experimental.isolatedClientHydration: "enabled"`, a client component rendered from a server
+page hydrates on its own, as an island, instead of hydrating the whole route. A renderer opts in
+with `capabilities.islands: true` and one server export, `withIsland()`. It writes no browser code:
+Farm's island runtime hydrates each island with the client module's `createElement()` and
+`hydrateRoot()`, and calls `unmount()` on its root when a navigation removes it.
+
+```js
+// src/server.js
+import { resolveFarmIsland } from "@farm.js/core/renderer";
+import { Fragment, createElement } from "leaf";
+
+const withoutClientAttributes = (props) =>
+  Object.fromEntries(Object.entries(props).filter(([key]) => !key.startsWith("client:")));
+
+function script({ attributes, text }) {
+  // `text` is escaped for a script element already: write it raw.
+  return createElement("script", { ...attributes, dangerouslySetInnerHTML: { __html: text } });
+}
+
+export function withIsland(component, reference) {
+  if (typeof component !== "function") return component;
+  return function Island(props) {
+    const island = resolveFarmIsland(props, reference);
+    if (!island) return createElement(component, withoutClientAttributes(props));
+    return createElement(
+      Fragment,
+      null,
+      ...island.values.map(script),
+      createElement(
+        island.element.tag,
+        island.element.attributes,
+        createElement(component, island.props),
+      ),
+      script(island.script),
+    );
+  };
+}
+```
+
+- **`withIsland(component, reference)`**: Farm wraps each export of a `"use client"` module with it
+  in the server graph. `reference` is `{ src, export, strategy }`: the module the browser imports,
+  the export, and the module's `island` strategy. Return a value that isn't one of your components
+  as it is.
+- **`resolveFarmIsland(props, reference)`**: the parts to write, for the props the component got
+  where it's used. Write `values` first, then `element` with the component inside, rendered with
+  `island.props`, then `script`. Attributes are unescaped; escape them as you write any attribute.
+  It returns `undefined` when a prop can't reach the browser, such as a function that isn't a
+  server action. Farm logs which prop, once; render the component without an island, and its server
+  HTML stays without client code.
+
+An island starts when its strategy says: `load`, `idle`, `visible`, or `interaction`. A module's
+`export const island = "idle"` sets the default for its components, and a `client:*` attribute
+sets it where one is used:
+
+```tsx
+<Counter label="Plant" client:visible />
+```
+
+`resolveFarmIsland()` removes `client:*` from the props, and throws for an attribute that isn't a
+strategy, has a value, or is one of two on the same element. Type the attributes by extending your
+JSX namespace's `IntrinsicAttributes` with `FarmIslandAttributes`:
+
+```ts
+// src/index.d.ts
+import type { FarmIslandAttributes } from "@farm.js/core/renderer";
+
+declare module "leaf/jsx-runtime" {
+  namespace JSX {
+    interface IntrinsicAttributes extends FarmIslandAttributes {}
+  }
+}
+```
+
+Props go through the same codec as islands mode: JSON values, `Date`, `Map`, `Set`, `BigInt`, typed
+arrays, and server actions. A value several islands of one response share is sent once.
+
+A layout with `"use client"` hydrates as one root, and keeps a server page under it as HTML. Two more
+server exports tell your `withIsland()` which is which, with the same element in and out:
+
+- **`wrapClientGraph(element)`**: Farm wraps a tree that hydrates as one root. A client component
+  inside it is part of that root: render it plain, without an island.
+- **`isolateServerPageGraph(element)`**: Farm wraps a server page such a root keeps as HTML. Client
+  components inside it are islands again.
+
+A context your `withIsland()` reads is enough; the leaf example's `farm-leaf/src/server.js` uses
+one. Farm starts the page's islands after the layout's root renders a navigation, and unmounts
+the ones whose markup it replaced.
+
+`farm dev` and `farm build` fail when the descriptor declares `islands` and the server module
+doesn't export `withIsland`.
 
 ## Test a renderer
 
@@ -766,9 +997,18 @@ too: the example's Playwright tests run the same checks against both.
 ## Limits
 
 - **One renderer per app.** `renderer` is app-wide, so every page and layout uses the same one.
-- **React Server Components and islands are React-only.**
-- **Some UI integrations are React-oriented.** The docs adapter and most integration UI providers
-  render React components today.
+- **Route rules cover pages, layouts, and their boundaries.** API routes, middleware, metadata
+  files, and named slots stay in `src/app` folders.
+- **React Server Components are React-only.** So is islands mode
+  (`experimental.serverComponents: { mode: "islands" }`); a renderer that declares `islands` gets
+  islands through isolated client hydration.
+- **Islands take data.** An element passed as `children` or another prop, or a promise, can't
+  reach the browser, so that island keeps its server HTML without hydrating. Integration
+  providers don't wrap islands, and an edit to an island's module reloads the page in development.
+- **Some UI integrations are React-oriented.** Most integration UI providers render React
+  components today. `withDocs()` builds docs pages with your renderer, and
+  `@farming-labs/farmjs/testing` checks that it writes and hydrates them; see
+  [Docs adapters on any renderer](/docs/docs-engine#docs-adapters-on-any-renderer).
 - **No static shell without `findStaticShellBoundary()`.** Partial prerendering needs it to know
   where the dynamic part of a streamed page begins.
 - **React hooks from core throw.** `useRouter()`, `usePathname()`, and `useSearchParams()` from

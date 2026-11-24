@@ -4,6 +4,20 @@ export interface FarmDocsAdapterDescriptor {
   id: string;
   protocol: number;
   server: string;
+  /**
+   * The module with the docs UI. The adapter's server renders its pages with it, loaded through
+   * `loadUIModule()`, and the browser calls its `hydrateFarmDocs()` on the docs pages it serves.
+   */
+  ui?: string;
+  /**
+   * The Farm renderer `ui` is written for, by name: `"react"`, `"svelte"`, `"vue"`, or a custom
+   * renderer's. Farm runs the adapter only in an app with that renderer. Defaults to `"react"`.
+   */
+  renderer?: string;
+  /**
+   * @deprecated Use `ui` (and `renderer: "react"`). Farm reads it when `ui` is absent, as every
+   * release before `ui` did.
+   */
   react?: string;
   vite?: string;
   /**

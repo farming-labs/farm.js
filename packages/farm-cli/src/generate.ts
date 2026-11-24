@@ -186,6 +186,7 @@ export async function generateFarmArtifacts(options: GenerateFarmOptions = {}) {
     extraRoutes,
     suppressLintOnLink: resolvedConfig.suppressLintOnLink,
     componentExtensions: resolvedConfig.renderer.componentExtensions,
+    renderer: resolvedConfig.renderer,
     i18nConfig: resolvedConfig.i18n,
     check: options.check,
   });

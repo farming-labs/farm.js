@@ -5,7 +5,7 @@ import {
   defineRendererServerConformance,
 } from "@farm.js/renderer-tests";
 import { createElement } from "leaf";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { compileLeaf, componentName } from "../src/compile.js";
 import { leaf } from "../src/index.js";
 import * as server from "../src/server.js";
@@ -23,6 +23,7 @@ defineRendererDescriptorConformance({
       reconcilesRerenders: true,
       functionComponents: true,
       hydrationFallback: true,
+      islands: true,
     },
   },
 });
@@ -103,5 +104,66 @@ describe("leaf files", () => {
     expect(compiled).toContain("export default function Page(props) {");
     expect(compiled).toContain("const [count] = useState(1);");
     expect(compiled).toContain("return (<><p>{count}</p></>);");
+  });
+});
+
+describe("leaf islands", () => {
+  function Counter(props) {
+    return createElement("button", null, `${props.label}: 0`);
+  }
+  const reference = { src: "/src/components/counter.tsx", export: "Counter", strategy: "idle" };
+  const Island = server.withIsland(Counter, reference);
+
+  it("writes a client component from server output as an island, with its strategy", async () => {
+    const html = await server.renderToString(
+      createElement(Island, { label: "Plant", "client:visible": true }),
+    );
+    expect(html).toMatch(
+      /^<f-island src="\/src\/components\/counter\.tsx" export="Counter" props="(fi-?\d+)" strategy="visible" style="display:contents"><button>Plant: 0<\/button><\/f-island><script type="[^"]+" for="\1">/,
+    );
+    // client:* sets the strategy and never reaches the component.
+    expect(html).toContain('{"label":"Plant"}');
+  });
+
+  it("uses the module's strategy without a client:* attribute", async () => {
+    const html = await server.renderToString(createElement(Island, { label: "Plant" }));
+    expect(html).toContain('strategy="idle"');
+  });
+
+  it("renders the component plain inside a tree that hydrates as one root", async () => {
+    const html = await server.renderToString(
+      server.wrapClientGraph(createElement(Island, { label: "Plant", "client:load": true })),
+    );
+    expect(html).toBe("<button>Plant: 0</button>");
+  });
+
+  it("starts islands again in a server page that root keeps as HTML", async () => {
+    const html = await server.renderToString(
+      server.wrapClientGraph(
+        createElement(
+          "main",
+          null,
+          server.isolateServerPageGraph(createElement(Island, { label: "Plant" })),
+        ),
+      ),
+    );
+    expect(html).toMatch(/^<main><f-island [^>]*><button>Plant: 0<\/button><\/f-island><script /);
+  });
+
+  it("keeps the server HTML without an island when a prop can't reach the browser", async () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    try {
+      const html = await server.renderToString(
+        createElement(Island, { label: "Plant", onPlant: function onPlant() {} }),
+      );
+      expect(html).toBe("<button>Plant: 0</button>");
+      expect(warn).toHaveBeenCalledWith(expect.stringContaining("onPlant"));
+    } finally {
+      warn.mockRestore();
+    }
+  });
+
+  it("leaves an export that isn't a component as it is", () => {
+    expect(server.withIsland("idle", reference)).toBe("idle");
   });
 });

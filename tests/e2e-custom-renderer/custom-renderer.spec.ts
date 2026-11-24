@@ -229,3 +229,169 @@ test("API routes answer next to leaf pages", async ({ request }) => {
   expect(response.status()).toBe(200);
   expect(await response.json()).toEqual({ crops: ["wheat", "barley", "rye"], renderer: "leaf" });
 });
+
+test("client components in a server page hydrate as islands, each when its strategy says", async ({
+  page,
+}) => {
+  const errors: string[] = [];
+  page.on("pageerror", (error) => errors.push(error.message));
+  page.on("console", (message) => {
+    if (message.type() === "error") errors.push(message.text());
+  });
+  const response = await page.goto("/islands");
+  const html = await response!.text();
+  // The module's `island` export is the default; client:* overrides it where a Counter is used.
+  expect(html).toContain('export="Counter" props="fi0" strategy="load"');
+  expect(html).toContain('export="Counter" props="fi1" strategy="idle"');
+  expect(html).toContain('export="Counter" props="fi2" strategy="visible"');
+  expect(html).not.toContain("client:");
+
+  await expect(page.locator(".shell")).toHaveAttribute("data-hydrated", "true");
+  const load = page.locator("#island-load");
+  const idle = page.locator("#island-idle");
+  const visible = page.locator("#island-visible");
+  await expect(load).toHaveAttribute("data-hydrated", "true");
+  await expect(idle).toHaveAttribute("data-hydrated", "true");
+  // Props crossed through Farm's codec: the Date and the Map arrive as themselves.
+  await expect(load.locator(".props")).toHaveText("2026-03-01, 2 crops");
+  // Below the fold, the third waits for the page to scroll to it.
+  await expect(visible.locator(".props")).toHaveText("server");
+  await expect(visible).not.toHaveAttribute("data-hydrated", "true");
+
+  // Each island is its own root, apart from the layout's.
+  await load.getByRole("button").click();
+  await load.getByRole("button").click();
+  await expect(load.getByRole("button")).toHaveText("Starts at once: 2");
+  await expect(idle.getByRole("button")).toHaveText("Starts when the browser is idle: 0");
+  await page.locator("#layout-counter").click();
+  await expect(page.locator("#layout-counter")).toHaveText("Layout clicks: 1");
+  await expect(load.getByRole("button")).toHaveText("Starts at once: 2");
+
+  await visible.scrollIntoViewIfNeeded();
+  await expect(visible).toHaveAttribute("data-hydrated", "true");
+  await visible.getByRole("button").click();
+  await expect(visible.getByRole("button")).toHaveText("Starts when scrolled to: 1");
+  expect(errors).toEqual([]);
+});
+
+test("a client navigation starts a server page's islands, and leaving it ends them", async ({
+  page,
+}) => {
+  const errors: string[] = [];
+  page.on("pageerror", (error) => errors.push(error.message));
+  page.on("console", (message) => {
+    if (message.type() === "error") errors.push(message.text());
+  });
+  await gotoHydrated(page, "/about");
+  await markDocument(page);
+  const layoutCounter = page.locator("#layout-counter");
+  await layoutCounter.click();
+
+  await page.getByRole("link", { name: "Islands" }).click();
+  await expect(page).toHaveURL(/\/islands$/);
+  const load = page.locator("#island-load");
+  await expect(load).toHaveAttribute("data-hydrated", "true");
+  await load.getByRole("button").click();
+  await expect(load.getByRole("button")).toHaveText("Starts at once: 1");
+  await expect(layoutCounter).toHaveText("Layout clicks: 1");
+
+  await page.getByRole("link", { name: "About" }).click();
+  await expect(page.locator("#about")).toBeVisible();
+  await expect(load).toHaveCount(0);
+
+  // Back on the page, its islands start again from the server's HTML.
+  await page.getByRole("link", { name: "Islands" }).click();
+  await expect(load).toHaveAttribute("data-hydrated", "true");
+  await expect(load.getByRole("button")).toHaveText("Starts at once: 0");
+  await load.getByRole("button").click();
+  await expect(load.getByRole("button")).toHaveText("Starts at once: 1");
+  await expect(layoutCounter).toHaveText("Layout clicks: 1");
+  expect(await readDocumentMark(page)).toBe("first");
+  expect(errors).toEqual([]);
+});
+
+// src/app/guides uses flat files instead of folders: farm-leaf's `routes()` maps them, and its
+// `hydration` reads leaf's own `// @hydrate` pragma.
+
+/** Whether the server marked the page to hydrate, read from the HTML it sent. */
+async function readPageHydration(path: string, baseURL: string | undefined) {
+  const response = await fetch(`${baseURL}${path}`);
+  expect(response.status).toBe(200);
+  const html = await response.text();
+  return html.match(/id="__farm_page__"[^>]*data-farm-client="(true|false)"/)?.[1];
+}
+
+test("flat .leaf files are pages inside the folder's _layout.leaf", async ({ page }) => {
+  const response = await gotoHydrated(page, "/guides");
+  expect(response?.status()).toBe(200);
+  await expect(page.locator("#guides-layout #guides")).toHaveText("Guides");
+  // _tip.leaf is a component the page imports, not a route.
+  await expect(page.locator("#guides-tip")).toHaveText(
+    "Files that start with an underscore aren't pages.",
+  );
+  // The root layout still wraps the folder's layout.
+  await expect(page.locator(".shell #guides-layout")).toBeVisible();
+
+  const crop = await gotoHydrated(page, "/guides/wheat");
+  expect(crop?.status()).toBe(200);
+  await expect(page.locator("#guides-layout #guide-crop")).toHaveText("Growing wheat");
+  await expect(page).toHaveTitle("Growing wheat");
+});
+
+test("files the route rules skip answer 404", async ({ request }) => {
+  for (const path of [
+    "/guides/_tip",
+    "/guides/_layout",
+    "/guides/watering.client",
+    "/guides/corn",
+  ]) {
+    const response = await request.get(path);
+    expect(response.status(), path).toBe(404);
+  }
+});
+
+test("a rule's hydrate flag and leaf's pragma hydrate their pages; the rest stay server-only", async ({
+  page,
+  baseURL,
+}) => {
+  expect(await readPageHydration("/guides", baseURL)).toBe("false");
+  expect(await readPageHydration("/guides/wheat", baseURL)).toBe("false");
+  // watering.client.leaf: the `.client` rule. harvest.leaf: `// @hydrate interaction`.
+  expect(await readPageHydration("/guides/watering", baseURL)).toBe("true");
+  expect(await readPageHydration("/guides/harvest", baseURL)).toBe("true");
+
+  await gotoHydrated(page, "/guides/watering");
+  const watering = page.locator("#watering-counter");
+  await watering.click();
+  await expect(watering).toHaveText("Checked 1 times");
+
+  await gotoHydrated(page, "/guides/harvest");
+  const harvest = page.locator("#harvest-counter");
+  await harvest.click();
+  await expect(harvest).toHaveText("Baskets: 1");
+});
+
+test("the guides layout's Links navigate between flat pages on the client", async ({ page }) => {
+  await gotoHydrated(page, "/guides");
+  await markDocument(page);
+  const layoutCounter = page.locator("#layout-counter");
+  await layoutCounter.click();
+  await expect(layoutCounter).toHaveText("Layout clicks: 1");
+
+  const guides = page.getByRole("navigation", { name: "Guides" });
+  await guides.getByRole("link", { name: "Wheat" }).click();
+  await expect(page).toHaveURL(/\/guides\/wheat$/);
+  await expect(page.locator("#guide-crop")).toHaveText("Growing wheat");
+  await expect(page).toHaveTitle("Growing wheat");
+
+  await guides.getByRole("link", { name: "Watering" }).click();
+  await expect(page).toHaveURL(/\/guides\/watering$/);
+  const watering = page.locator("#watering-counter");
+  await watering.click();
+  await expect(watering).toHaveText("Checked 1 times");
+
+  await guides.getByRole("link", { name: "All guides" }).click();
+  await expect(page.locator("#guides")).toHaveText("Guides");
+  await expect(layoutCounter).toHaveText("Layout clicks: 1");
+  expect(await readDocumentMark(page)).toBe("first");
+});

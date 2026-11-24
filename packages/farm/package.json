@@ -1,6 +1,6 @@
 {
   "name": "@farm.js/core",
-  "version": "0.1.81",
+  "version": "0.1.84",
   "description": "The core of Farm.js, the framework for the web and agents",
   "keywords": [
     "@farm.js/core",
@@ -759,6 +759,16 @@
       "import": "./dist/internal/islands-runtime.mjs",
       "require": "./dist/internal/islands-runtime.cjs"
     },
+    "./internal/islands-action-client": {
+      "types": "./dist/internal/islands-action-client.d.ts",
+      "import": "./dist/internal/islands-action-client.mjs",
+      "require": "./dist/internal/islands-action-client.cjs"
+    },
+    "./internal/islands-server-tree": {
+      "types": "./dist/internal/islands-server-tree.d.ts",
+      "import": "./dist/internal/islands-server-tree.mjs",
+      "require": "./dist/internal/islands-server-tree.cjs"
+    },
     "./internal/islands-boot": {
       "types": "./dist/internal/islands-boot.d.ts",
       "import": "./dist/internal/islands-boot.mjs",
@@ -768,6 +778,11 @@
       "types": "./dist/internal/islands-server.d.ts",
       "import": "./dist/internal/islands-server.mjs",
       "require": "./dist/internal/islands-server.cjs"
+    },
+    "./internal/renderer-islands": {
+      "types": "./dist/internal/renderer-islands.d.ts",
+      "import": "./dist/internal/renderer-islands.mjs",
+      "require": "./dist/internal/renderer-islands.cjs"
     },
     "./internal/islx-client": {
       "types": "./dist/internal/islx-client.d.ts",
@@ -866,7 +881,7 @@
     "clean": "rm -rf dist"
   },
   "dependencies": {
-    "@farm.js/islx": "0.0.25",
+    "@farm.js/islx": "0.0.30",
     "@farming-labs/orm": "0.0.66",
     "@farming-labs/orm-runtime": "0.0.66",
     "@farming-labs/orm-sql": "0.0.66",
