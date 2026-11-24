@@ -18,6 +18,7 @@ export type RoutePath =
   | "/broken"
   | `/crops/${string}`
   | "/notes"
+  | "/recovers"
   | "/streaming";
 export type RoutePattern =
   | "/"
@@ -25,6 +26,7 @@ export type RoutePattern =
   | "/broken"
   | "/crops/[name]"
   | "/notes"
+  | "/recovers"
   | "/streaming";
 export type RouteModulePattern =
   | "/"
@@ -32,6 +34,7 @@ export type RouteModulePattern =
   | "/broken"
   | "/crops/[name]"
   | "/notes"
+  | "/recovers"
   | "/streaming";
 declare module "@farm.js/core/client" {
   interface LinkDefaultRoute {
