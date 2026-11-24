@@ -124,6 +124,7 @@ import {
   setFarmRouteLabel,
 } from "./route-label";
 import { registerFarmMCPServer } from "./mcp-catalog";
+import { _setFarmInfraAnalyticsWebMCPRoute } from "./plugins/infra-analytics";
 import {
   _listFarmRegisteredMCPServerTools,
   _observeFarmRegisteredMCPResponse,
@@ -2776,6 +2777,28 @@ export function farmPlugin(
           });
         }
       }
+      // A WebMCP tool call is reported under the route of the page it ran on, matched as a
+      // request for that page is: a docs page by its docs label, else the app's page route.
+      const farmInfraAnalyticsPlugin = pm
+        ?.getPlugins()
+        .find((plugin) => plugin.name === "farm:infra-analytics");
+      if (farmInfraAnalyticsPlugin) {
+        _setFarmInfraAnalyticsWebMCPRoute(farmInfraAnalyticsPlugin, async (pathname) => {
+          if (farmDocsDevRuntime) {
+            const label = resolveFarmDocsRouteLabel(
+              stripFarmBasePath(pathname, farmConfig.basePath),
+              {
+                path: farmConfig.docs?.entry || "/docs",
+                roots: farmConfig.docs?.roots?.map((root) => root.entry),
+                pages: await getFarmDocsPagePaths(),
+              },
+            );
+            if (label) return setFarmRouteLabel({ pathname }, label);
+          }
+          const match = farmApp.getRouteManager().matchRoute(pathname);
+          return { pathname, pattern: match.route?.pattern || null };
+        });
+      }
       // Docs content outside the app directories is neither a module nor a route file, so Vite
       // matched no module for a change there and the open docs page kept its old content. Reload
       // it with the runtime's page dates read again, as a docs page under src/app reloads.
@@ -2956,6 +2979,41 @@ export function farmPlugin(
               await sendWebResponse(res, imageResponse);
               return;
             }
+          }
+
+          // A plugin endpoint a request with a body reaches (a WebMCP tool call report) answers
+          // before routing with that body, as in production. The routes below build their
+          // Request without one, so an endpoint reached through them would read an empty body.
+          if (
+            pm &&
+            requestMethod !== "GET" &&
+            requestMethod !== "HEAD" &&
+            pm._hasRuntimeEndpoint(requestPathname)
+          ) {
+            let body: Buffer;
+            try {
+              body = await readNodeRequestBody(req as any, currentServerConfig.bodySizeLimit);
+            } catch (error) {
+              res.statusCode = (error as { status?: number }).status ?? 400;
+              res.end();
+              return;
+            }
+            let response: Response;
+            try {
+              const endpointRequest = createRequestFromNodeRequest(req, parsedRequestUrl);
+              response = await pm.runRuntimeRequest(
+                new Request(endpointRequest, { method: requestMethod, body: toRequestBody(body) }),
+                // An endpoint answers before the handler would run.
+                () => new Response(null, { status: 404 }),
+                { kind: "request", route: { pathname: requestPathname } },
+              );
+            } catch {
+              // The runtime reported a hook failure to runtime.error and onError.
+              sendFarmDevRuntimeHookError(res, true);
+              return;
+            }
+            await sendWebResponse(res, response);
+            return;
           }
 
           // Production ships this page as a static file in the client output (see FARM_VIDEO_PLAYER_HTML).

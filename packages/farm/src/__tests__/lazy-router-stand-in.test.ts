@@ -2,7 +2,7 @@
  * @vitest-environment jsdom
  */
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { splitFarmClientRouter } from "../nitro/universal-build";
+import { splitFarmClientEntry } from "../nitro/universal-build";
 
 type Observer = { callback: IntersectionObserverCallback; observed: Element[] };
 
@@ -37,7 +37,7 @@ function createStandIn() {
     (window as any).__FARM_SPA_ROUTER__ = realRouter;
     return { spaRouter: realRouter };
   });
-  const { entry } = splitFarmClientRouter("/*farm-router-stub*/\n");
+  const { entry } = splitFarmClientEntry("/*farm-router-stub*/\n");
   const code = entry
     .replace('import("./farm-client-router")', "__load()")
     .replace(/\nexport \{[^}]*\};\n$/, "\n");

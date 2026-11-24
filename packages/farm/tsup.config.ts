@@ -84,6 +84,8 @@ const entry = {
   "internal/island-codec": "src/client/island-codec.ts",
   "internal/server-tree": "src/client/server-tree.ts",
   "internal/islands-runtime": "src/client/islands-runtime.ts",
+  // Its own file, so the islands runtime's import of it and the preload manifest name the same one.
+  "internal/islands-action-client": "src/islands-action-client.ts",
   "internal/islands-boot": "src/client/islands-boot.ts",
   "internal/islands-server": "src/client/islands-server.ts",
   "internal/islx-client": "src/islx/client.ts",

@@ -68,6 +68,7 @@ describe("renderer configuration", () => {
       streaming: { node: false, web: false },
       reconcilesRerenders: false,
       functionComponents: false,
+      hydrationFallback: false,
     });
     expect(
       getFarmRendererCapabilities({
@@ -77,6 +78,7 @@ describe("renderer configuration", () => {
       streaming: { node: false, web: true },
       reconcilesRerenders: false,
       functionComponents: false,
+      hydrationFallback: false,
     });
     expect(
       getFarmRendererCapabilities({
@@ -86,6 +88,7 @@ describe("renderer configuration", () => {
       streaming: { node: false, web: false },
       reconcilesRerenders: true,
       functionComponents: false,
+      hydrationFallback: false,
     });
   });
 
@@ -183,6 +186,15 @@ describe("renderer configuration", () => {
         .functionComponents,
     ).toBe(true);
     expect(getFarmRendererCapabilities(REACT_RENDERER).functionComponents).toBe(true);
+  });
+
+  it("defaults hydrationFallback off, including for React, until a renderer opts in", () => {
+    // Off keeps the production behavior every renderer had before the capability existed.
+    expect(getFarmRendererCapabilities().hydrationFallback).toBe(false);
+    expect(getFarmRendererCapabilities(REACT_RENDERER).hydrationFallback).toBe(false);
+    expect(
+      getFarmRendererCapabilities({ capabilities: { hydrationFallback: true } }).hydrationFallback,
+    ).toBe(true);
   });
 
   it("consumes renderer Web streams without assuming one chunk type", async () => {

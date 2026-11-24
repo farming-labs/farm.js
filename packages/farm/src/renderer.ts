@@ -113,6 +113,15 @@ export interface FarmRendererCapabilities {
    * handles them.
    */
   functionComponents: boolean;
+  /**
+   * Whether a production page whose `hydrateRoot()` throws is rendered again with `createRoot()`.
+   *
+   * Development always does this. In production, a renderer that leaves this off keeps the
+   * server's markup without event listeners, as before the option existed. Turn it on only when
+   * the client module's `createRoot()` replaces what's already in its container, because the failed
+   * hydration leaves the server's markup there.
+   */
+  hydrationFallback: boolean;
 }
 
 export interface FarmRendererCapabilitiesInput {
@@ -121,6 +130,7 @@ export interface FarmRendererCapabilitiesInput {
   };
   reconcilesRerenders?: boolean;
   functionComponents?: boolean;
+  hydrationFallback?: boolean;
 }
 
 /** A client layout participating in a renderer-owned route update. */
@@ -190,6 +200,7 @@ const DEFAULT_RENDERER_CAPABILITIES: Readonly<FarmRendererCapabilities> = Object
   // otherwise, so callers do not silently rely on reconciliation.
   reconcilesRerenders: false,
   functionComponents: false,
+  hydrationFallback: false,
 });
 
 export function getFarmRendererCapabilities(
@@ -226,6 +237,8 @@ export function getFarmRendererCapabilities(
     functionComponents:
       renderer?.capabilities?.functionComponents ??
       DEFAULT_RENDERER_CAPABILITIES.functionComponents,
+    hydrationFallback:
+      renderer?.capabilities?.hydrationFallback ?? DEFAULT_RENDERER_CAPABILITIES.hydrationFallback,
   };
 }
 

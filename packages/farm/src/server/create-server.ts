@@ -36,7 +36,10 @@ import {
   createRewritesPlugin,
   createCompressionPlugin,
 } from "../plugins";
-import { createFarmInfraAnalyticsPlugin } from "../plugins/infra-analytics";
+import {
+  _farmWebMCPReportsEnabled,
+  createFarmInfraAnalyticsPlugin,
+} from "../plugins/infra-analytics";
 import {
   createFarmClientOptimizeDepsConfig,
   createFarmClientOptimizeDepsEntries,
@@ -355,8 +358,15 @@ export async function createServer(
     pluginManager.addPlugins(resolvedConfig.plugins);
 
     // Only an app whose environment links it to a Farm Infra project gets this plugin.
+    // The Vite plugin gives it the route matcher for WebMCP reports once the routes are known.
     const infraAnalytics =
-      resolvedConfig.analytics !== false ? createFarmInfraAnalyticsPlugin() : null;
+      resolvedConfig.analytics !== false
+        ? createFarmInfraAnalyticsPlugin(
+            undefined,
+            undefined,
+            _farmWebMCPReportsEnabled(resolvedConfig.plugins) ? { webmcp: {} } : undefined,
+          )
+        : null;
     if (infraAnalytics) pluginManager.addPlugin(infraAnalytics);
 
     // Run config hooks
