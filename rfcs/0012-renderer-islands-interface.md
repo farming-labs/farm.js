@@ -1,6 +1,9 @@
 # RFC 0012: An islands interface for renderers
 
-- Status: Draft, open for discussion. Nothing here is implemented.
+- Status: Draft, open for discussion. Nothing in Farm is implemented. It builds on islx's
+  renderer-neutral islands ([farming-labs/islx#91](https://github.com/farming-labs/islx/pull/91),
+  released in islx 0.0.28) and on `resolveIslandMarkup`
+  ([farming-labs/islx#92](https://github.com/farming-labs/islx/pull/92), open).
 - Tracking issue: none yet
 - Scope: core's renderer contract (`@farm.js/core/renderer`) and the client entries Farm generates.
   This RFC only adds an interface that a renderer can choose to implement. It does not change
@@ -39,7 +42,9 @@ export default function Page() {
 ```
 
 In the browser, core reuses the renderer client contract it already calls for route slots:
-`createElement` and `hydrateRoot`. The wire format (`<f-island>` and `f/props`) does not change.
+`createElement` and `hydrateRoot`. islx's renderer-neutral runtime finds and starts the islands,
+so a renderer writes no browser code for them. The wire format (`<f-island>` and `f/props`) does
+not change.
 
 ## Problem
 
@@ -73,6 +78,33 @@ Most of what islands need already works without React:
 
 What's missing is a seam: a place where a renderer renders "this component, as an island", and a
 way for core to know the renderer has one.
+
+### What islx already provides
+
+Farm's islands mode runs on [islx](https://github.com/farming-labs/islx), and islx#91 added two
+entries that don't import React:
+
+- **`@farm.js/islx/islands/server`**: `renderIslandMarkup({ src, export, strategy, id, props, html, sent })`
+  writes `<f-island>` around HTML from any renderer's string renderer, plus its props script.
+  - Props go through islx's codec: JSON, `Date`, `Map`, `Set` and its other tagged types, and server
+    actions. Values are sent once per response.
+  - A function, promise or element prop throws, naming the island.
+- **`@farm.js/islx/islands/client`**: `createIslandRuntime({ renderer, load, schedule })` finds the
+  islands, waits for each one's strategy, decodes its props, and calls the renderer's one
+  function, `hydrate(container, Component, props, island)`.
+  - If `hydrate` throws, the island gets its server HTML back and is reported. It isn't marked
+    hydrated, and held clicks aren't replayed onto it.
+  - `schedule` is required. Farm passes `scheduleFarmIslandHydration`, which has the same
+    signature, so Farm keeps its own scheduler and doesn't need islx's.
+
+islx's `examples/renderers` hydrates a load, an interaction and a visible island on Preact 11.2,
+Vue 3.5, Svelte 5.59 and Solid 1.9 with these entries. Its Chrome e2e suite checks that each
+island keeps the server's DOM nodes, decodes `Date` and `Map` props, replays the click that woke
+it exactly once, and logs no hydration warnings, against both the production build and the dev
+server.
+
+So this RFC doesn't define a wire format, a props serializer or a browser loader. Core connects
+islx to the renderer contract.
 
 ## The rule: core exposes, renderers opt in
 
@@ -192,10 +224,18 @@ export function resolveFarmIsland(
 export interface FarmResolvedIsland {
   /** The component's props, without `client:*`. */
   readonly props: Record<string, unknown>;
+  /** Value scripts written before the island: values this response hasn't sent yet. */
+  readonly values: readonly FarmIslandScript[];
   /** The island element: its tag (`f-island`) and attributes (src, export, props id, strategy, style). */
   readonly element: { readonly tag: string; readonly attributes: Readonly<Record<string, string>> };
-  /** The props script written after it: its attributes and its escaped JSON text. */
-  readonly script: { readonly attributes: Readonly<Record<string, string>>; readonly text: string };
+  /** The props script written after it. */
+  readonly script: FarmIslandScript;
+}
+
+export interface FarmIslandScript {
+  readonly attributes: Readonly<Record<string, string>>;
+  /** Escaped for a script element. Write it raw. */
+  readonly text: string;
 }
 
 /** Attribute types to add to the renderer's `JSX.IntrinsicAttributes`. */
@@ -212,14 +252,22 @@ What `resolveFarmIsland` does:
 - **Removes `client:*` keys** from the props.
 - **Picks the strategy.** The use-site attribute first, then the module's `island` export, then
   `"load"`.
-- **Serializes the props** with the same rules as React's isolated client components: JSON values;
-  a function or an element fails.
-- **Returns `undefined` when the props don't serialize.** Farm logs it once, and the component
-  keeps its server HTML, as with React today.
+- **Names the island** with an id that is unique within the response, from the request's render
+  state, as React's `useId` does for its islands.
+- **Serializes the props through islx**, with one set of sent values per response, so a value
+  shared by several islands goes once. The rules are islx's (see above), which accept more than
+  React's isolated client components do today: `Date`, `Map`, `Set` and server actions as well as
+  JSON.
+- **Returns `undefined` when the props don't serialize.** Farm logs islx's error, which names the
+  island, once, and the component keeps its server HTML, as with React today.
 
-The tag and script type come back in the result, so a renderer never hardcodes the wire format.
+The tag and script types come back in the result, so a renderer never hardcodes the wire format.
 `FarmIslandAttributes` exists because core can't add types to a custom renderer's JSX namespace;
 the renderer's own types include it.
+
+islx#91 only returns the markup as one string (`renderIslandMarkup`). A renderer that builds
+elements, rather than strings, needs the parts. So islx#92 adds `resolveIslandMarkup`, which
+returns the values, element and script that `renderIslandMarkup` joins.
 
 ### 3. What the renderer implements
 
@@ -229,12 +277,20 @@ it does three things:
 1. **Inside a hydrating route, it renders the component plain,** with `client:*` removed. The
    renderer knows it's inside one through its own context, which it sets in `wrapClientGraph`.
    Core already calls that optional export for any renderer.
-2. **Otherwise, it calls `resolveFarmIsland` and renders the result:** the island element around
-   the component, then the script, with the script text written raw.
+2. **Otherwise, it calls `resolveFarmIsland` and renders the result:** the value scripts, the
+   island element around the component, then the props script. Script text is written raw.
 3. **It renders the component so it hydrates as its own root,** matching what
    `hydrateRoot(<f-island>, createElement(component, props))` expects in the browser. A renderer
    with hydration ids or markers handles that itself. For example, it might reset its id context
    for the island's subtree, or render the island separately and insert its HTML.
+
+islx's examples show the second way works for page-wide hydration keys. Its Solid adapter renders
+each island with `renderToString(..., { renderId: island.id })` and hydrates with the same
+`renderId`. In Farm the island's server render is the renderer's own business, and so is how its
+`hydrateRoot` finds the id. farm-solid's `hydrateRoot` already reads `data-farm-solid-render-id`
+from the container and falls back to the first `data-hk`. So a Solid `withIsland` could add that
+attribute to the island element and need nothing new in the browser. That is unverified, and it's
+the first thing the Solid follow-up checks.
 
 ### 4. What core does when a renderer opts in
 
@@ -244,13 +300,34 @@ These steps run only when `capabilities.islands` is true and isolated hydration 
 - **The transform wraps each export** of a client module in the server graph as
   `withIsland(component, reference)`. This is `transformIsolatedClientBoundaryModule` with an
   added branch. React's branch is unchanged.
-- **The generated client entries load a core island loader, in dev and production.** The loader:
-  - finds each `f-island[src]` and schedules it with `scheduleFarmIslandHydration`;
-  - imports the module, reads the props, and calls the renderer client module's
-    `hydrateRoot(island, createElement(Component, props))`;
-  - restores the server HTML if `hydrateRoot` throws. An error after hydration is handled by the
-    renderer, as for a route root.
-- **A navigation unmounts the page's islands.**
+- **The generated client entries start islx's runtime, in dev and production,** with the
+  renderer's `hydrate` built from the client module Farm already imports:
+
+  ```ts
+  import { createIslandRuntime, defineIslandRenderer } from "@farm.js/islx/islands/client";
+  import * as renderer from "<the renderer's client module>";
+
+  const islands = createIslandRuntime({
+    renderer: defineIslandRenderer({
+      hydrate: (container, Component, props) =>
+        renderer.hydrateRoot(
+          container,
+          wrapWithIntegrationProviders(renderer.createElement(Component, props)),
+        ),
+    }),
+    // The same generated loader and scheduler React's isolated hydration runtime gets today.
+    load: loadFarmIsolatedBoundary,
+    schedule: scheduleFarmIslandHydration,
+  });
+  ```
+
+  - `hydrateRoot` returns a `FarmRendererClientRoot`, whose `unmount()` is what islx needs back.
+    The renderer writes no browser code for islands.
+  - If `hydrateRoot` throws, islx restores the server HTML. An error after hydration is the
+    renderer's to handle, as for a route root.
+
+- **A navigation calls `islands.dispose()`,** which unmounts the page's islands and drops the ones
+  still waiting for their strategy. The new page calls `islands.hydrate()`.
 - **The build check runs on server modules.** A `client:*` attribute on a component that isn't a
   client component fails the build, with this message:
   `` `client:visible` on `Chart` in src/app/page.tsx: ./chart.tsx is not a client module. Add "use client" to it, or re-export it from a module that starts with "use client". ``
@@ -261,7 +338,8 @@ React keeps `createFarmIsolatedClientBoundary`, its runtime, and its error bound
 
 ### 5. Composition
 
-- **Props.** JSON values only. A function or an element prop means no island, with a warning.
+- **Props.** islx's codec types and server actions. A function, promise or element prop means no
+  island, with a warning. Promise props stay in `@farm.js/islx/react` for now.
 - **Server output as children.** Not in this RFC. A client component given server-rendered
   children keeps its server HTML, as React's does outside a hydrating layout.
 - **Context.** In the browser, an island sees integration providers and nothing from the server
@@ -284,11 +362,17 @@ React keeps `createFarmIsolatedClientBoundary`, its runtime, and its error bound
   ~90-line `createFarmIsolatedClientBoundary`, and `wrapClientGraph`.
 - **For core:**
   - one branch in the export transform;
-  - one loader in the generated entries, imported only when a renderer declares `islands`;
+  - `resolveFarmIsland`, which wraps islx's `resolveIslandMarkup` with the strategy, the id and
+    the response's sent values;
+  - about ten generated lines that start islx's runtime, imported only when a renderer declares
+    `islands`;
   - the build check, which parses JSX use sites before the renderer compiles them, as
     `farm:island-containers` does. Other template formats need a spike.
-- **Bytes:** not measured. Phase 1 measures a page on the custom renderer example with and
-  without islands.
+- **For islx:** `resolveIslandMarkup` (islx#92) and a release with it. 0.0.28 already ships the
+  islands entries; Farm core pins `@farm.js/islx` 0.0.25 today.
+- **Bytes:** islx#91 measured its islands client at 6.0 KB gzip with rolldown's minifier, and the
+  action client it loads only for an island with an action prop at 2.7 KB. Not measured inside a
+  Farm page. Phase 1 measures a page on the custom renderer example with and without islands.
 
 ## Alternatives considered
 
@@ -297,6 +381,10 @@ React keeps `createFarmIsolatedClientBoundary`, its runtime, and its error bound
 - **Core renders each island separately and splices it into the stream.** This needs no renderer
   export. But it costs a renderer call per island and async splicing, even for a renderer that can
   hydrate a nested container inline. A renderer can still do this inside its own `withIsland`.
+- **Core writes its own wire format, serializer and browser loader.** The first draft of this RFC
+  did, with JSON-only props. islx#91 already has all three without React, with a richer codec,
+  the restore on failure, and browser tests on four renderers. A second copy in core would drift
+  from the one Farm's islands mode already runs on.
 - **Gate on the `withIsland` export instead of a descriptor capability.** Core decides the
   transform and the client entries from config, before it loads the server module. An export
   check alone would mean loading the renderer at config time, and a missing export would quietly
@@ -307,13 +395,16 @@ React keeps `createFarmIsolatedClientBoundary`, its runtime, and its error bound
 
 ## Rollout
 
+0. **islx.** Add `resolveIslandMarkup` (islx#92, the parts `renderIslandMarkup` joins), release
+   islx, and bump Farm core's pin.
 1. **The interface.**
    - Add `capabilities.islands`, `withIsland`, `FarmIslandReference`, `resolveFarmIsland` and
      `FarmIslandAttributes`.
-   - Add the transform branch and the core loader in the dev and production entries, with the
-     `assertFarmRendererServerModule` check.
-   - Unit tests cover `resolveFarmIsland`: strategy precedence, attribute removal, the
-     serialization failure, and Vue's `""`.
+   - Add the transform branch, and start islx's runtime in the dev and production entries, with
+     the `assertFarmRendererServerModule` check.
+   - Unit tests cover `resolveFarmIsland`: strategy precedence, attribute removal, ids unique
+     within a response, a value shared by two islands sent once, the serialization failure, and
+     Vue's `""`.
 2. **The reference implementation.**
    - `examples/custom-renderer` (`farm-leaf`) implements `withIsland` and `wrapClientGraph`.
    - `tests/e2e-custom-renderer` covers it in dev and production.
@@ -325,8 +416,9 @@ React keeps `createFarmIsolatedClientBoundary`, its runtime, and its error bound
 Not part of this RFC, and each needs its own go-ahead:
 
 - **An official renderer adopting the interface.** The interface stays experimental until one
-  renderer with its own hydration ids passes the suite. Solid is the cheapest check, because it
-  already writes `data-farm-solid-render-id` on island containers.
+  renderer with its own hydration ids passes the suite. Solid is the cheapest check: it already
+  writes `data-farm-solid-render-id` on island containers, its `hydrateRoot` reads it, and islx's
+  Solid example hydrates islands with one render id each.
 - **The `client:*` attribute for React.**
 - **`isolatedClientHydration: "enabled"` on Preact, Solid, Vue or Svelte today.** Reading the
   code, that app emits no islands, and its client entry probably throws at startup. This needs a
@@ -345,8 +437,9 @@ Not part of this RFC, and each needs its own go-ahead:
   - The `client:visible` copy requests its chunk only after it scrolls into view, asserted from
     network requests.
   - Each island keeps its own state.
-  - Props round-trip.
+  - Props round-trip, including a `Date`, a `Map` and a server action.
   - A hydration error restores the server HTML.
+  - Navigating away unmounts the islands, and navigating back hydrates them again.
 - **Fail closed.** A renderer that declares `islands` without `withIsland` fails at startup with
   the missing export named. `client:*` on a server component fails the build with the message
   above.
