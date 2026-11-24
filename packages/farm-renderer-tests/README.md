@@ -52,13 +52,13 @@ defineRendererClientConformance({
 });
 ```
 
-| Function                               | What it checks                                                                                                           |
-| -------------------------------------- | ------------------------------------------------------------------------------------------------------------------------ |
-| `defineRendererDescriptorConformance`  | The descriptor names all three modules and returns fresh arrays on each call.                                            |
-| `defineRendererServerConformance`      | Element primitives, escaping, React-style props, function components, error boundaries, and shell errors in each stream. |
-| `defineRendererClientConformance`      | The client exports Farm imports, mounting and updating a root, events, and hydrating in place.                           |
-| `defineRendererServerQueryConformance` | Server renders never share the browser query cache between visitors.                                                     |
-| `defineRendererNativeTreeConformance`  | The mobile native tier reads your server markup the same way as any other renderer's.                                    |
+| Function                               | What it checks                                                                                                                       |
+| -------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------ |
+| `defineRendererDescriptorConformance`  | The descriptor names all three modules and returns fresh arrays on each call.                                                        |
+| `defineRendererServerConformance`      | Element primitives, escaping, React-style props, function components, error boundaries, and shell errors in each stream.             |
+| `defineRendererClientConformance`      | The client exports Farm imports, mounting and updating a root, a new root replacing existing markup, events, and hydrating in place. |
+| `defineRendererServerQueryConformance` | Server renders never share the browser query cache between visitors.                                                                 |
+| `defineRendererNativeTreeConformance`  | The mobile native tier reads your server markup the same way as any other renderer's.                                                |
 
 ## What it doesn't do
 
