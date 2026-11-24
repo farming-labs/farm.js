@@ -11,6 +11,7 @@ node benchmarks/server-components-payload/timing.mjs                 # uses the 
 node benchmarks/server-components-payload/throughput.mjs             # uses the builds above
 node benchmarks/server-components-payload/first-navigation.mjs --latency 150 --tap-hold 80
 node benchmarks/server-components-payload/first-navigation.mjs --latency 150 --down 1600 --tap-hold 80
+node benchmarks/server-components-payload/hydration.mjs --down 1600
 ```
 
 ## The app
@@ -25,6 +26,9 @@ contract example's installed packages (`examples/server-components`), linked by 
   five copy buttons, and a link to the next page.
 - Text comes from a seeded generator over English-like syllables, so it compresses about as much
   as real prose. A small fixed vocabulary would compress five times better and flatter every row.
+- `/dash/[slug]`: 24 client components that each run an effect, so each hydrates with the page.
+  It is the page an RSC engine is built for, and where islands mode needs its whole client
+  runtime at once (`hydration.mjs`).
 
 ## Method
 
@@ -158,6 +162,36 @@ engines, so both see the same load. This run had other work on the machine (load
   React DOM, islx and the layout's modules no longer load on the first hover. Once the layout has
   hydrated, the browser rebuilds a page in its React tree from the payload alone (`F-Render: tree`)
   and the catalog stays out.
+
+### Every component hydrating with the page (`hydration.mjs`)
+
+`hydration.mjs` visits `/dash/p0` cold over HTTP/2. It times the visit from the navigation's start
+to the moment the last of its 24 components has hydrated. Every script is compressed with brotli at
+quality 11 for both engines, so they compare at equal compression (RFC 0013).
+
+Measured 2026-11-23 once islands mode loaded the code that handles a server action's result on the
+first call, or with a page whose markup holds an action reference, instead of with its runtime.
+The islands runtime chunk went from 51.3 KB to 42.1 KB (15.4 KB to 13.1 KB at brotli 11). The
+action client, 9.7 KB (2.8 KB), is a chunk of its own that this page never loads.
+
+The runs use 150 ms of latency and 4x CPU throttling. They are interleaved with `rsc` and the build
+from just before the change (`main` at e9da65cb9), under a load average of 13 to 16. Medians of 11
+rounds in ms:
+
+| Network                | `rsc` | `islands`, before | `islands` |
+| ---------------------- | ----- | ----------------- | --------- |
+| 1.6 Mbit/s             | 801   | 876               | 860       |
+| 1.6 Mbit/s, second run |       | 891               | 864       |
+| Unlimited              | 457   | 540               | 529       |
+
+At 1.6 Mbit/s every component has hydrated 16 and 27 ms sooner, and the scripts on the wire went
+from 82.3 KB to 80.0 KB (`rsc`: 66.8 KB). In the second run, an A/A copy of the build from before
+had the same median, 891 ms. Without a bandwidth limit the 11 ms is within the run's spread (410 to
+672 ms).
+
+`islands` still hydrates this page 59 ms after `rsc`. The rest of RFC 0013 and islx's own runtime
+account for that gap. The first paint here also waits on an empty stylesheet link, which #3136
+removes.
 
 ### First navigation over a network (`first-navigation.mjs`)
 

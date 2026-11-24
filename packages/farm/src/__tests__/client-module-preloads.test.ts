@@ -117,6 +117,38 @@ describe("client module preloads", () => {
     ).toBeUndefined();
   });
 
+  it("lists the action client's chunks outside the entry's and the renderer's", () => {
+    const reactDom = path.join(root, "node_modules/react-dom/client.js");
+    const actions = path.join(
+      root,
+      "node_modules/@farm.js/core/dist/internal/islands-action-client.mjs",
+    );
+    const manifest = collectFarmClientModulePreloads(
+      {
+        ...bundle,
+        "chunks/client.js": chunk("chunks/client.js", ["chunks/react.js", "chunks/scheduler.js"], {
+          module: reactDom,
+        }),
+        "chunks/scheduler.js": chunk("chunks/scheduler.js"),
+        "chunks/actions.js": chunk(
+          "chunks/actions.js",
+          ["chunks/react.js", "chunks/scheduler.js", "chunks/query-cache.js"],
+          { module: actions },
+        ),
+        "chunks/query-cache.js": chunk("chunks/query-cache.js"),
+      },
+      { root, entryName: "farm-client", rendererModules: [reactDom], actionModules: [actions] },
+    )!;
+    expect(manifest.actions!.map((index) => manifest.files[index])).toEqual([
+      "chunks/actions.js",
+      "chunks/query-cache.js",
+    ]);
+    // A build without islands mode's action client has none to list.
+    expect(
+      collectFarmClientModulePreloads(bundle, { root, entryName: "farm-client" })!.actions,
+    ).toBeUndefined();
+  });
+
   it("returns null without the entry", () => {
     expect(
       collectFarmClientModulePreloads(
