@@ -2,6 +2,7 @@ import { readFile } from "node:fs/promises";
 import { createRequire } from "node:module";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
+import { getFarmDocsAdapterUIModule } from "./adapter-descriptor";
 import type { FarmDocsAdapterDescriptor, FarmDocsUserConfig } from "./types";
 
 const FRAMEWORK_PACKAGE = "@farming-labs/farmjs";
@@ -72,8 +73,7 @@ function isSupportedAdapterDescriptor(value: unknown): value is FarmDocsAdapterD
     descriptor.protocol === SUPPORTED_ADAPTER_PROTOCOL &&
     typeof descriptor.server === "string" &&
     descriptor.server.length > 0 &&
-    typeof descriptor.react === "string" &&
-    descriptor.react.length > 0
+    typeof getFarmDocsAdapterUIModule(descriptor) === "string"
   );
 }
 

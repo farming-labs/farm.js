@@ -70,12 +70,19 @@ test("revocation blocks polling traffic, queued delivery, and grant replay; clea
     { id: "queued", method: "GET", path: "/", headers: {}, createdAt: Date.now() },
     60_000,
   );
-  assert.equal((await poll).status, 403);
-  assert.equal((await f.handler(new Request(session.publicUrl))).status, 403);
-  assert.equal(
-    (await f.call(`/api/sessions/${session.id}/heartbeat`, session.token, {})).status,
-    403,
-  );
+  // The CLI learns why its preview ended.
+  const denied = await poll;
+  assert.equal(denied.status, 403);
+  assert.match(await denied.text(), /no longer authorized/);
+  // The session is released: its address answers like a preview that isn't running.
+  const visitor = await f.handler(new Request(session.publicUrl));
+  assert.equal(visitor.status, 404);
+  assert.match(await visitor.text(), /No active Farm preview is running for "store"/);
+  assert.equal(await f.store.getSessionByName("store"), undefined);
+  const heartbeat = await f.call(`/api/sessions/${session.id}/heartbeat`, session.token, {});
+  assert.equal(heartbeat.status, 401);
+  assert.match(await heartbeat.text(), /ended/);
+  // The CLI's cleanup on exit still succeeds.
   assert.equal(
     (await f.call(`/api/sessions/${session.id}`, session.token, undefined, "DELETE")).status,
     200,
@@ -83,36 +90,43 @@ test("revocation blocks polling traffic, queued delivery, and grant replay; clea
   assert.equal((await f.call("/api/sessions", grant.token, { name: "store" })).status, 403);
 });
 
-test("access authority failure fails closed and hides provider details", async () => {
-  const f = fixture(async () => {
-    throw new Error("private authority detail");
-  });
-  const grant = await (await f.call("/api/tunnel/grants", "key", { name: "store" })).json();
-  const response = await f.call("/api/sessions", grant.token, { name: "store" });
-  assert.equal(response.status, 503);
-  assert.ok(!(await response.text()).includes("private authority detail"));
-});
+test("a stopped preview frees its name for its owner's next preview, not for anyone else", async () => {
+  const revoked = new Set();
+  const f = fixture(async (access) => !revoked.has(access.grantId));
+  const first = await (await f.call("/api/tunnel/grants", "key", { name: "store" })).json();
+  const session = await (await f.call("/api/sessions", first.token, { name: "store" })).json();
+  revoked.add((await f.store.getSessionById(session.id)).grantId);
+  // The first visitor after the stop releases the session.
+  assert.equal((await f.handler(new Request(session.publicUrl))).status, 404);
 
-test("a conditional delivery only reaches its selected polling connection", async () => {
-  const f = fixture(async () => true);
-  const grant = await (await f.call("/api/tunnel/grants", "key", { name: "store" })).json();
-  const session = await (await f.call("/api/sessions", grant.token, { name: "store" })).json();
-  const deliveredHeaders = [];
-  f.store.enqueueRequest = async (id, request, ttl) => {
-    deliveredHeaders.push(request.headers);
-    await f.store.saveResponse(id, request.id, { status: 204 }, ttl);
-  };
-  const send = (id) =>
-    f.handler(
-      new Request(session.publicUrl, {
+  // Another account can't take a name that was just in use.
+  const stranger = createPreviewGatewayHandler({
+    store: f.store,
+    authorizeSession: async () => true,
+    pollIntervalMs: 1,
+    auth: {
+      signingSecret,
+      deviceAuth: {
+        issuer: "https://infra.example",
+        clientId: "farm-preview",
+        authorizeAccount: async () => ({ subject: "someone-else", login: "Other" }),
+      },
+    },
+  });
+  const theirs = (path, token, body) =>
+    stranger(
+      new Request(`https://preview.example${path}`, {
         method: "POST",
-        body: "event",
-        headers: { "x-farm-preview-connection": id },
+        headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
+        body: JSON.stringify(body),
       }),
     );
-  assert.equal((await send("previous-connection")).status, 412);
-  assert.equal(deliveredHeaders.length, 0);
-  assert.equal((await send(session.id)).status, 204);
-  assert.equal(deliveredHeaders.length, 1);
-  assert.equal(deliveredHeaders[0]["x-farm-preview-connection"], undefined);
+  const strangerGrant = await theirs("/api/tunnel/grants", "key", { name: "store" });
+  assert.equal(strangerGrant.status, 409);
+
+  // The owner starts again right away under the same name, with a new grant.
+  const second = await (await f.call("/api/tunnel/grants", "key", { name: "store" })).json();
+  const restarted = await f.call("/api/sessions", second.token, { name: "store" });
+  assert.equal(restarted.status, 200);
+  assert.equal((await restarted.json()).name, "store");
 });

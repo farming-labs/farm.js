@@ -1,6 +1,6 @@
 {
   "name": "@farm.js/core",
-  "version": "0.1.81",
+  "version": "0.1.82",
   "description": "The core of Farm.js, the framework for the web and agents",
   "keywords": [
     "@farm.js/core",
@@ -758,6 +758,11 @@
       "types": "./dist/internal/islands-runtime.d.ts",
       "import": "./dist/internal/islands-runtime.mjs",
       "require": "./dist/internal/islands-runtime.cjs"
+    },
+    "./internal/islands-action-client": {
+      "types": "./dist/internal/islands-action-client.d.ts",
+      "import": "./dist/internal/islands-action-client.mjs",
+      "require": "./dist/internal/islands-action-client.cjs"
     },
     "./internal/islands-boot": {
       "types": "./dist/internal/islands-boot.d.ts",

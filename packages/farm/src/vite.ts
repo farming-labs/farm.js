@@ -124,6 +124,7 @@ import {
   setFarmRouteLabel,
 } from "./route-label";
 import { registerFarmMCPServer } from "./mcp-catalog";
+import { _setFarmInfraAnalyticsWebMCPRoute } from "./plugins/infra-analytics";
 import {
   _listFarmRegisteredMCPServerTools,
   _observeFarmRegisteredMCPResponse,
@@ -288,6 +289,7 @@ import {
   generateFarmDocsAdapterClientRuntime,
   getFarmDocsAdapterConfigModule,
 } from "./docs/adapter-client";
+import { getFarmDocsAdapterUIModule, hasFarmDocsRuntimeAdapter } from "./docs/adapter-descriptor";
 import { isFarmDocsClientConfigModule, redactFarmDocsClientConfig } from "./docs/client-config";
 import { resolveFarmDocsFontAssets, toFarmDocsPublicFontAssets } from "./docs/fonts";
 import {
@@ -2699,6 +2701,7 @@ export function farmPlugin(
               root: farmConfig.root,
               srcDir: farmConfig.srcDir,
               clientEntry: "/@farm/client.js",
+              rendererServer: farmConfig.renderer.server,
               resolveLayoutFonts: resolveDocsLayoutFonts,
               fontStylesheetHref: "/@farm/fonts.css",
               globalStylesheetHref: resolveDevGlobalStylesheetHref(
@@ -2773,6 +2776,28 @@ export function farmPlugin(
             farmDocsPagePaths = undefined;
           });
         }
+      }
+      // A WebMCP tool call is reported under the route of the page it ran on, matched as a
+      // request for that page is: a docs page by its docs label, else the app's page route.
+      const farmInfraAnalyticsPlugin = pm
+        ?.getPlugins()
+        .find((plugin) => plugin.name === "farm:infra-analytics");
+      if (farmInfraAnalyticsPlugin) {
+        _setFarmInfraAnalyticsWebMCPRoute(farmInfraAnalyticsPlugin, async (pathname) => {
+          if (farmDocsDevRuntime) {
+            const label = resolveFarmDocsRouteLabel(
+              stripFarmBasePath(pathname, farmConfig.basePath),
+              {
+                path: farmConfig.docs?.entry || "/docs",
+                roots: farmConfig.docs?.roots?.map((root) => root.entry),
+                pages: await getFarmDocsPagePaths(),
+              },
+            );
+            if (label) return setFarmRouteLabel({ pathname }, label);
+          }
+          const match = farmApp.getRouteManager().matchRoute(pathname);
+          return { pathname, pattern: match.route?.pattern || null };
+        });
       }
       // Docs content outside the app directories is neither a module nor a route file, so Vite
       // matched no module for a change there and the open docs page kept its old content. Reload
@@ -2954,6 +2979,41 @@ export function farmPlugin(
               await sendWebResponse(res, imageResponse);
               return;
             }
+          }
+
+          // A plugin endpoint a request with a body reaches (a WebMCP tool call report) answers
+          // before routing with that body, as in production. The routes below build their
+          // Request without one, so an endpoint reached through them would read an empty body.
+          if (
+            pm &&
+            requestMethod !== "GET" &&
+            requestMethod !== "HEAD" &&
+            pm._hasRuntimeEndpoint(requestPathname)
+          ) {
+            let body: Buffer;
+            try {
+              body = await readNodeRequestBody(req as any, currentServerConfig.bodySizeLimit);
+            } catch (error) {
+              res.statusCode = (error as { status?: number }).status ?? 400;
+              res.end();
+              return;
+            }
+            let response: Response;
+            try {
+              const endpointRequest = createRequestFromNodeRequest(req, parsedRequestUrl);
+              response = await pm.runRuntimeRequest(
+                new Request(endpointRequest, { method: requestMethod, body: toRequestBody(body) }),
+                // An endpoint answers before the handler would run.
+                () => new Response(null, { status: 404 }),
+                { kind: "request", route: { pathname: requestPathname } },
+              );
+            } catch {
+              // The runtime reported a hook failure to runtime.error and onError.
+              sendFarmDevRuntimeHookError(res, true);
+              return;
+            }
+            await sendWebResponse(res, response);
+            return;
           }
 
           // Production ships this page as a static file in the client output (see FARM_VIDEO_PLAYER_HTML).
@@ -5364,9 +5424,7 @@ export function farmPlugin(
         const integrations = resolvedConfig?.integrations || options.integrations;
         const root = resolvedConfig?.root || server?.config.root || process.cwd();
         const docs = resolvedConfig?.docs;
-        const adapterOwnsDocsRuntime = Boolean(
-          isReactRenderer(renderer) && docs?.adapter?.server && docs.adapter.react,
-        );
+        const adapterOwnsDocsRuntime = hasFarmDocsRuntimeAdapter(docs);
         const devtools = resolvedConfig?.devtools ?? resolveFarmDevtoolsConfig(false, "production");
         const [docsRuntime, docsSearchRuntime, devtoolsClientRuntime] = await Promise.all([
           docs?.enabled ? loadFarmDocsDevRuntime() : null,
@@ -5415,7 +5473,7 @@ export function farmPlugin(
           root,
           resolvedConfig?.srcDir || options.srcDir || "src",
           resolvedConfig?.publicRuntimeConfig || options.publicRuntimeConfig,
-          isReactRenderer(renderer) ? docs?.adapter?.react : undefined,
+          adapterOwnsDocsRuntime ? getFarmDocsAdapterUIModule(docs?.adapter) : undefined,
           renderer,
           isolatedHydrationMode === "enabled" ||
             (isReactRenderer(renderer) &&
@@ -5428,7 +5486,7 @@ export function farmPlugin(
           generateClientCachePersistenceCode(
             resolveFarmClientCacheAdapterEntry(root, resolvedConfig?.cache),
           ),
-          isReactRenderer(renderer) ? getFarmDocsAdapterConfigModule(docs) : undefined,
+          adapterOwnsDocsRuntime ? getFarmDocsAdapterConfigModule(docs) : undefined,
           resolveFarmServerComponentsMode(resolvedConfig?.experimental?.serverComponents) ===
             "islands",
         );
@@ -6944,7 +7002,7 @@ function generateClientCode(
   root = process.cwd(),
   srcDir = "src",
   publicRuntimeConfig: Record<string, unknown> | undefined = undefined,
-  docsAdapterReact?: string,
+  docsAdapterUI?: string,
   renderer: FarmRenderer = REACT_RENDERER,
   isolatedHydrationEnabled = false,
   trailingSlash = false,
@@ -6978,8 +7036,10 @@ function generateClientCode(
     ? `${islandValues ? "import { createFarmIsolatedHydrationRuntime, createFarmServerPageBoundary, wrapFarmIsolatedClientGraph, createFarmServerTreeElement, createFarmServerTreeLayout } from '@farm.js/core/internal/islands-runtime'" : "import { createFarmIsolatedHydrationRuntime, createFarmServerPageBoundary, wrapFarmIsolatedClientGraph } from '@farm.js/core/internal/isolated-boundary'\nimport { createFarmServerTreeElement } from '@farm.js/core/internal/server-tree'"}`
     : "";
   const docsAdapterImportBlock = generateFarmDocsAdapterClientRuntime(
-    docsAdapterReact,
+    docsAdapterUI,
     docsConfigModule,
+    // Config resolution keeps an adapter to its UI's renderer, so this is the UI's renderer too.
+    isReactRenderer(renderer) ? undefined : renderer.client,
   );
   const isolatedHydrationRuntime = isolatedHydrationEnabled
     ? `const farmIsolatedHydrationRuntime = createFarmIsolatedHydrationRuntime({

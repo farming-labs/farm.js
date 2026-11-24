@@ -24,6 +24,9 @@ The renderer controls component compilation, element creation, server rendering,
 hydration. FARMJS continues to control route discovery, layouts, API routes, middleware, cache and
 storage, integrations, observability, and deployment output.
 
+To render pages with a UI library that isn't listed, write a
+[custom renderer](/docs/renderers/custom).
+
 ## Feature support
 
 The first two tables are checked against the renderer descriptors and their server/client exports,
@@ -237,7 +240,7 @@ data out of it.
 
 A renderer descriptor names three modules by package specifier. FARMJS resolves each one from the
 app and imports its named exports, in development and in production builds. None of them needs a
-default export.
+default export. [Custom renderers](/docs/renderers/custom) walks through each module in detail.
 
 | Module   | Required named exports                                                              | Optional named exports include                                                                                                                                   |
 | -------- | ----------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -258,6 +261,9 @@ default export.
 - `renderToString()` may return a promise.
 - `createRoot()` and `hydrateRoot()` return a root with `render(element)` and `unmount()`, plus the
   optional `renderRoute()` described under [Re-render behavior](#re-render-behavior).
+- A root from `createRoot()` replaces what is already in its container on its first render, as
+  React's does. Farm creates one over the server's markup when hydration throws, and over the last
+  page when a navigation replaces the root.
 - Both modules must export `configureApp()` when the descriptor sets `appSetup`.
 - A renderer with its own file format lists its extensions in `componentExtensions` and compiles
   them in the Vite module. FARMJS reads a route's `hydrate` export from the file as written, before
@@ -512,6 +518,30 @@ pages with their layouts, so it may return a promise and should wait for the ren
 content instead of throwing: the official Preact renderer uses `renderToStringAsync()`, Solid uses
 `renderToStringAsync()`, and Vue's `renderToString()` is already async. React renders a document
 that suspends with its streaming renderer and waits for every boundary before sending it.
+
+### Hydration errors
+
+`hydrationFallback` states what a production build does when `hydrateRoot()` throws.
+
+In development, Farm always logs `[Farm.js] Hydration error; rendering the page on the client
+instead:` and renders the route with `createRoot()`, so the page keeps working while you fix it. In
+production, a renderer opts in to the same behavior:
+
+```ts
+capabilities: {
+  hydrationFallback: true,
+},
+```
+
+Without it, a production page whose hydration throws keeps the server's markup, without event
+listeners, and Farm logs `[Farm.js] Hydration error:`. With it, the page works, but the server's
+DOM, focus, and typed input are replaced.
+
+Opt in only when the client module's `createRoot()` replaces what's in its container on its first
+render. The failed hydration leaves the server's markup there, and a root that renders next to it
+shows the page twice. The field defaults to `false`, and no official renderer sets it, so their
+production behavior is unchanged. React recovers from most hydration errors inside `hydrateRoot()`
+itself.
 
 ## Renderer-neutral server code
 

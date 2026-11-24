@@ -106,6 +106,10 @@ may be restricted to one project slug: pass the matching `--project` when starti
 With the matching Infra access-control gateway, revoking a key also blocks existing
 preview traffic. **Stop preview** in the detail page revokes that grant across reconnects
 without stopping your local app; start a new `farm preview` to get another grant.
+A stopped preview releases its address: visitors get the same 404 as a preview that isn't
+running, the CLI reports that the preview is no longer authorized, and you can start a new
+preview under the same name right away. Other accounts can't claim the name for a short
+reservation window. The dashboard moves the preview from **Active** to **History**.
 Both transports check access before forwarding. WebSocket relays also check idle connections
 every five seconds; authority requests have a five-second timeout and fail closed.
 Work already executed locally cannot be undone. Older gateways without the access hook
@@ -174,7 +178,7 @@ The hosted service may cap the requested duration. The CLI prints the authoritat
 by the service. Heartbeats do not extend it. After expiration, browser visitors see a friendly
 Farm preview-expired page.
 
-The preview lifecycle is tied to the local app. When `farm dev` stops or the configured local target becomes unreachable, the native tunnel closes its hosted relay session and `farm preview` exits. The compatibility path closes its gateway session the same way.
+The preview lifecycle is tied to the local app. When `farm dev` stops or the configured local target becomes unreachable, the native tunnel closes its hosted relay session and `farm preview` exits. The compatibility path closes its gateway session the same way. To tell, the CLI checks every two seconds that the local port still accepts connections. The check opens and closes a connection without sending a request, so it never runs your routes or shows up in your analytics, and a slow page doesn't end the preview. The hosted relay drops its connections at least every 30 minutes and whenever it is redeployed; when that happens to a connection that has been up for a while, the CLI reconnects and keeps the same public URL.
 
 The public URL is invalidated as soon as the session closes. Browser navigation receives an expired
 preview page; API-style requests receive `404`. You do not need to run a separate command to stop or
@@ -500,6 +504,9 @@ The preview URL forwards public internet traffic to your local app. Treat it lik
 - Rotate preview names after sharing sensitive routes.
 - Keep provider secrets in environment variables, not client code.
 - Remember that anyone with the URL can send requests while the session is active.
+- The relay and gateway replace forwarding headers with the public host and protocol, and drop
+  the hosting platform's own headers (`x-vercel-*`, including the gateway's OIDC token), so your
+  app never receives the gateway's credentials.
 
 ### What the preview serves from your machine
 

@@ -175,6 +175,27 @@ describe("docs framework auto-detection", () => {
     expect(warn.mock.calls[0][0]).toContain("protocol 1");
   });
 
+  it("applies a descriptor that names its UI module ui instead of react", async () => {
+    const root = await createAppDir({ declareFramework: true });
+    const adapter = { id: "@farming-labs/farmjs", protocol: 1, server: "x/server", ui: "x/ui" };
+    await installFramework(root, {
+      configSource: `export function withDocs(farmConfig) {
+  return { ...farmConfig, docs: { enabled: true, adapter: ${JSON.stringify(adapter)} } };
+}
+`,
+    });
+    const { log, warn } = detectionLoggers();
+
+    const applied = await applyFarmDocsFrameworkAutoDetection({ root, docs: {} } as any, {
+      root,
+      log,
+      warn,
+    });
+
+    expect(applied.docs.adapter).toEqual(adapter);
+    expect(warn).not.toHaveBeenCalled();
+  });
+
   it("survives a framework config entry that throws", async () => {
     const root = await createAppDir({ declareFramework: true });
     await installFramework(root, {
@@ -231,6 +252,47 @@ describe("resolveConfig docs delegation (#483 phase 1)", () => {
     expect(resolved.docs.enabled).toBe(true);
     expect(resolved.docs.adapter).toBeUndefined();
     expect(warn).not.toHaveBeenCalled();
+  });
+
+  it("stops an adapter whose UI is written for another renderer", async () => {
+    const root = await createAppDir();
+    const svelte = {
+      name: "svelte",
+      vite: "@farm.js/svelte/vite",
+      server: "@farm.js/svelte/server",
+      client: "@farm.js/svelte/client",
+    };
+    const reactAdapter = {
+      id: "@farming-labs/farmjs",
+      protocol: 1,
+      server: "@farming-labs/farmjs/server",
+      react: "@farming-labs/farmjs/react",
+    };
+    const svelteAdapter = {
+      id: "docs-svelte",
+      protocol: 1,
+      server: "docs-svelte/server",
+      ui: "docs-svelte/ui",
+      renderer: "svelte",
+    };
+
+    await expect(
+      resolveConfig(
+        { root, renderer: svelte, docs: { adapter: reactAdapter } } as any,
+        "development",
+      ),
+    ).rejects.toThrow(
+      'The docs adapter "@farming-labs/farmjs" has a "react" UI, and this app\'s renderer is "svelte".',
+    );
+    await expect(
+      resolveConfig({ root, docs: { adapter: svelteAdapter } } as any, "development"),
+    ).rejects.toThrow('has a "svelte" UI, and this app\'s renderer is "react"');
+
+    const resolved = await resolveConfig(
+      { root, renderer: svelte, docs: { adapter: svelteAdapter } } as any,
+      "development",
+    );
+    expect(resolved.docs.adapter).toEqual(svelteAdapter);
   });
 
   it("treats docs.adapter = false as the embedded renderer without notices", async () => {

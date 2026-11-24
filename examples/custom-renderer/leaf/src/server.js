@@ -1,7 +1,10 @@
-// leaf/server: renders an element tree to an HTML string. Effects never run on the server and
-// state keeps its initial value.
+// leaf/server: renders an element tree to HTML, as a string or as a stream. Effects never run on
+// the server and state keeps its initial value.
+//
+// A component may be async in the stream. It sends everything before each <Suspense> boundary as
+// soon as it's rendered, then waits for the async components inside it, in order.
 
-import { Fragment, internals, toChildArray } from "./index.js";
+import { Fragment, Suspense, internals, toChildArray } from "./index.js";
 import {
   RESERVED,
   VOID_ELEMENTS,
@@ -62,38 +65,109 @@ function renderAttributes(type, props) {
   return html;
 }
 
-function renderNode(node) {
-  if (typeof node === "string") return escapeHtml(node);
-  const { type, props } = node;
-  if (typeof type === "function") {
-    const output = internals.render(type, props, serverDispatcher);
-    if (output && typeof output.then === "function") {
-      throw new Error(
-        `leaf can't render async components: ${type.name || "a component"} returned a promise.`,
-      );
-    }
-    return renderChildren(output);
+// The renderer is a generator. It yields HTML strings, FLUSH where a Suspense boundary starts,
+// and the promise an async component returned; whoever drives it sends back the resolved output.
+const FLUSH = Symbol("leaf.flush");
+
+function* renderNode(node) {
+  if (typeof node === "string") {
+    yield escapeHtml(node);
+    return;
   }
-  if (type === Fragment) return renderChildren(props.children);
+  const { type, props } = node;
+  if (type === Suspense) {
+    yield FLUSH;
+    yield* renderChildren(props.children);
+    return;
+  }
+  if (typeof type === "function") {
+    let output = internals.render(type, props, serverDispatcher);
+    if (output && typeof output.then === "function") output = yield output;
+    yield* renderChildren(output);
+    return;
+  }
+  if (type === Fragment) {
+    yield* renderChildren(props.children);
+    return;
+  }
   if (typeof type !== "string") {
     throw new TypeError(`leaf can't render an element whose type is ${String(type)}.`);
   }
-  const open = `<${type}${renderAttributes(type, props)}>`;
-  if (VOID_ELEMENTS.has(type)) return open;
-  const inner = props.dangerouslySetInnerHTML
-    ? String(props.dangerouslySetInnerHTML.__html ?? "")
-    : type === "textarea"
-      ? escapeHtml(props.value ?? props.defaultValue ?? "")
-      : renderChildren(props.children);
-  return `${open}${inner}</${type}>`;
+  yield `<${type}${renderAttributes(type, props)}>`;
+  if (VOID_ELEMENTS.has(type)) return;
+  if (props.dangerouslySetInnerHTML) {
+    yield String(props.dangerouslySetInnerHTML.__html ?? "");
+  } else if (type === "textarea") {
+    yield escapeHtml(props.value ?? props.defaultValue ?? "");
+  } else {
+    yield* renderChildren(props.children);
+  }
+  yield `</${type}>`;
 }
 
-function renderChildren(children) {
+function* renderChildren(children) {
+  for (const child of toChildArray(children)) yield* renderNode(child);
+}
+
+/** Drives the renderer from `step` on, awaiting async components. Yields one chunk per boundary. */
+async function* renderChunks(steps, step = steps.next(), html = "") {
+  while (!step.done) {
+    const value = step.value;
+    if (value === FLUSH) {
+      if (html) yield html;
+      html = "";
+      step = steps.next();
+    } else if (typeof value === "string") {
+      html += value;
+      step = steps.next();
+    } else {
+      step = steps.next(await value);
+    }
+  }
+  if (html) yield html;
+}
+
+/** The HTML as a string. Async components need the stream, which can wait for them. */
+export function renderToString(element) {
   let html = "";
-  for (const child of toChildArray(children)) html += renderNode(child);
+  for (const value of renderChildren(element)) {
+    if (value === FLUSH) continue;
+    if (typeof value !== "string") {
+      // The render fails here with the error below; the component's own result goes unread.
+      value.catch(() => {});
+      throw new Error(
+        "leaf can't render an async component to a string. Render it with renderToReadableStream(), which waits for it.",
+      );
+    }
+    html += value;
+  }
   return html;
 }
 
-export function renderToString(element) {
-  return renderChildren(element);
+const encoder = new TextEncoder();
+
+/** The HTML as a Web stream: everything before a Suspense boundary goes out before what's in it. */
+export function renderToReadableStream(element, options) {
+  const chunks = renderChunks(renderChildren(element));
+  let started = false;
+  return new ReadableStream({
+    async pull(controller) {
+      let result;
+      try {
+        result = await chunks.next();
+      } catch (error) {
+        // Before any output, the error decides the status. After it, the status is already
+        // sent, so report the error and end the document.
+        if (!started) return controller.error(error);
+        options?.onError?.(error);
+        return controller.close();
+      }
+      if (result.done) return controller.close();
+      started = true;
+      controller.enqueue(encoder.encode(result.value));
+    },
+    cancel() {
+      return chunks.return();
+    },
+  });
 }

@@ -12,6 +12,7 @@ import {
   listFarmDocsAdapterPages,
   listFarmDocsPagePaths,
 } from "../docs/adapter";
+import { assertFarmDocsAdapterRenderer } from "../docs/adapter-descriptor";
 import type { FarmDocsResolvedConfig } from "../docs/types";
 
 const tempDirs: string[] = [];
@@ -32,6 +33,20 @@ function createAdapterDocs(): FarmDocsResolvedConfig {
       react: "@farming-labs/farmjs/react",
     },
     config: { entry: "docs" },
+  };
+}
+
+/** An adapter whose UI is written for a renderer other than React. */
+function createSvelteAdapterDocs(): FarmDocsResolvedConfig {
+  return {
+    ...createAdapterDocs(),
+    adapter: {
+      id: "docs-svelte",
+      protocol: 1,
+      server: "docs-svelte/server",
+      ui: "docs-svelte/ui",
+      renderer: "svelte",
+    },
   };
 }
 
@@ -146,10 +161,11 @@ describe("Farm docs runtime adapters", () => {
     expect(await listFarmDocsPagePaths(docs, { root, adapter: true })).toEqual([]);
   });
 
-  it("recognizes only enabled adapters with server and React entrypoints", () => {
+  it("recognizes only enabled adapters with server and UI entrypoints", () => {
     const docs = createAdapterDocs();
 
     expect(hasFarmDocsRuntimeAdapter(docs)).toBe(true);
+    expect(hasFarmDocsRuntimeAdapter(createSvelteAdapterDocs())).toBe(true);
     expect(hasFarmDocsRuntimeAdapter({ ...docs, enabled: false })).toBe(false);
     expect(hasFarmDocsRuntimeAdapter({ ...docs, adapter: undefined })).toBe(false);
     expect(
@@ -198,8 +214,76 @@ describe("Farm docs runtime adapters", () => {
     // Development content changes while the server runs; the adapter must keep
     // reading it.
     expect(hostOptions).not.toHaveProperty("immutableContent");
+    await expect(hostOptions.loadUIModule()).resolves.toBe(reactModule);
     await expect(hostOptions.loadReactModule()).resolves.toBe(reactModule);
     await expect(handler(new Request("https://farm.test/docs"))).resolves.toBe(response);
+  });
+
+  it("loads the UI module of an adapter written for another renderer", async () => {
+    const docs = createSvelteAdapterDocs();
+    const createRuntimeHandler = vi.fn((_config: unknown, _options: any) => async () => null);
+    const uiModule = { hydrateFarmDocs: vi.fn() };
+    const loadModule = vi.fn(async (specifier: string) => {
+      if (specifier === "docs-svelte/server") {
+        return { createFarmDocsRuntimeHandler: createRuntimeHandler };
+      }
+      if (specifier === "docs-svelte/ui") return uiModule;
+      throw new Error(`Unexpected module: ${specifier}`);
+    });
+
+    await createFarmDocsAdapterHandler(docs, {
+      root: "/workspace/app",
+      clientEntry: "/@farm/client.js",
+      loadModule,
+    });
+
+    const [, hostOptions] = createRuntimeHandler.mock.calls[0]!;
+    await expect(hostOptions.loadUIModule()).resolves.toBe(uiModule);
+    // The React loader is for adapters written before loadUIModule, all of them React's.
+    expect(hostOptions).not.toHaveProperty("loadReactModule");
+  });
+
+  it("hands the adapter the app's renderer, loaded only when its UI asks", async () => {
+    const docs = createSvelteAdapterDocs();
+    const createRuntimeHandler = vi.fn((_config: unknown, _options: any) => async () => null);
+    const rendererModule = { name: "svelte", createElement: vi.fn(), renderToString: vi.fn() };
+    const loadModule = vi.fn(async (specifier: string) => {
+      if (specifier === "docs-svelte/server") {
+        return { createFarmDocsRuntimeHandler: createRuntimeHandler };
+      }
+      if (specifier === "@farm.js/svelte/server") return rendererModule;
+      throw new Error(`Unexpected module: ${specifier}`);
+    });
+
+    await createFarmDocsAdapterHandler(docs, {
+      root: "/workspace/app",
+      clientEntry: "/@farm/client.js",
+      rendererServer: "@farm.js/svelte/server",
+      loadModule,
+    });
+
+    const [, hostOptions] = createRuntimeHandler.mock.calls[0]!;
+    expect(loadModule).not.toHaveBeenCalledWith("@farm.js/svelte/server");
+    await expect(hostOptions.loadRenderer()).resolves.toBe(rendererModule);
+  });
+
+  it("runs an adapter only under the renderer its UI is written for", () => {
+    expect(() => assertFarmDocsAdapterRenderer(createAdapterDocs(), "react")).not.toThrow();
+    expect(() => assertFarmDocsAdapterRenderer(createSvelteAdapterDocs(), "svelte")).not.toThrow();
+    // A descriptor written before `renderer` existed has a React UI.
+    expect(() => assertFarmDocsAdapterRenderer(createAdapterDocs(), "svelte")).toThrow(
+      'The docs adapter "@farming-labs/farmjs" has a "react" UI, and this app\'s renderer is "svelte".',
+    );
+    expect(() => assertFarmDocsAdapterRenderer(createSvelteAdapterDocs(), "react")).toThrow(
+      'use an adapter release with a "react" UI',
+    );
+    // Without an adapter, Farm's built-in renderer serves the docs under any renderer.
+    expect(() =>
+      assertFarmDocsAdapterRenderer({ ...createAdapterDocs(), adapter: undefined }, "svelte"),
+    ).not.toThrow();
+    expect(() =>
+      assertFarmDocsAdapterRenderer({ ...createAdapterDocs(), enabled: false }, "svelte"),
+    ).not.toThrow();
   });
 
   it("tells the adapter a production build's content is immutable", async () => {
@@ -214,6 +298,9 @@ describe("Farm docs runtime adapters", () => {
     expect(options).toContain("rootDir: farmDocsRuntimeRoot,");
     expect(options).toContain("immutableContent: true,");
     expect(options).toContain("modulePreloads: farmDocsModulePreloadPaths,");
+    // A UI built with the app's renderer gets it: the renderer module the server entry imports.
+    expect(options).toContain("loadRenderer: async () => farmDocsAppRenderer,");
+    expect(source).toContain(': "__farmRendererServer"');
     // The page list is filled in after the client build; an unfilled one parses to nothing.
     expect(source).toContain('JSON.parse("${FARM_DOCS_MODULE_PRELOADS_PLACEHOLDER}")');
   });

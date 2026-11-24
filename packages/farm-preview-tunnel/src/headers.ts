@@ -17,6 +17,15 @@ const STANDARD_HOP_BY_HOP_HEADERS = [
   "upgrade",
 ] as const;
 
+/**
+ * Headers the gateway's hosting platform adds to each request, such as Vercel's
+ * `x-vercel-oidc-token`, a credential for the gateway's own deployment. They describe the
+ * gateway, not the visitor, so a preview never hands them to the local app.
+ */
+export function isGatewayPlatformHeader(name: string): boolean {
+  return name.toLowerCase().startsWith("x-vercel-");
+}
+
 export function getHopByHopHeaderNames(
   connection: string | string[] | null | undefined,
 ): Set<string> {

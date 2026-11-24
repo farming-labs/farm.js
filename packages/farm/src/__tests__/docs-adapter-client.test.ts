@@ -55,6 +55,28 @@ describe("Farm docs adapter client runtime", () => {
     expect(hydrateFarmDocs).toHaveBeenCalledWith({ config: { entry: "docs" }, data });
   });
 
+  it("passes a UI written for another renderer the app's renderer client module", async () => {
+    const data = { page: "/docs/guide" };
+    (globalThis as { window?: unknown }).window = {
+      __FARM_DOCS_ADAPTER__: { config: { entry: "docs" }, data },
+    };
+    const hydrateFarmDocs = vi.fn();
+    const renderer = { createElement: vi.fn(), hydrateRoot: vi.fn() };
+    const load = vi.fn(async (specifier: string) =>
+      specifier === "farm-leaf/client" ? renderer : { hydrateFarmDocs },
+    );
+    const runtime = generateFarmDocsAdapterClientRuntime(
+      "@farming-labs/farmjs/universal",
+      undefined,
+      "farm-leaf/client",
+    );
+
+    await expect(evaluate(runtime, load)()).resolves.toBe(true);
+    expect(hydrateFarmDocs).toHaveBeenCalledWith({ config: { entry: "docs" }, data, renderer });
+    // A React UI imports React itself, so its runtime loads no renderer module.
+    expect(generateFarmDocsAdapterClientRuntime(ADAPTER)).not.toContain("renderer");
+  });
+
   it("passes the docs config module only when the server flagged the page", async () => {
     const CONFIG = "/app/docs.config.tsx";
     const configModule = { default: { icons: { book: "<svg/>" } } };

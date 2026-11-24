@@ -16,7 +16,10 @@ export function isValidElement(value) {
   return typeof value === "object" && value !== null && value.$$typeof === ELEMENT;
 }
 
-/** Nothing in leaf suspends, so a boundary renders its children. */
+/**
+ * Renders its children. On the server it's also where leaf/server's stream sends what it has
+ * before waiting on the async components inside. The stream is in order, so `fallback` never shows.
+ */
 export function Suspense(props) {
   return props.children ?? null;
 }

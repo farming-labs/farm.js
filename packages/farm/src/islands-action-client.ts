@@ -1,14 +1,18 @@
 /**
- * The browser end of islands mode's server actions (RFC 0003): what the RSC engine's call
+ * @internal The browser end of islands mode's server actions (RFC 0003): what the RSC engine's call
  * transport does around a call, on islx's calls. A server query's result fills the cache under
  * its key, the keys an action invalidated are dropped, and a declared failure is thrown as the
- * `ServerFnFailure` it was on the server.
+ * `ServerFnFailure` it was on the server. Islands mode imports it on the first call, or when the
+ * page holds a reference (RFC 0013); see `islands-action-call.ts`.
  */
 import type { ActionInterceptor } from "@farm.js/islx/client";
 import { applyFarmCacheInvalidations } from "./cache-invalidation";
 import { isFarmIslandsActionResult } from "./islands-action-protocol";
 import {
   beginFarmServerQueryAction,
+  type FarmServerQueryActionInvocation,
+} from "./server-query-call";
+import {
   completeFarmServerQueryAction,
   shouldApplyFarmServerQueryActionResult,
 } from "./server-query-runtime";
@@ -44,12 +48,14 @@ export function createFarmServerFnTransportError(value: unknown): Error {
   return error;
 }
 
-export const farmIslandsActionInterceptor: ActionInterceptor = async (call, next) => {
-  // Taken when the call is made: a server query reads the call it is making at that moment.
-  const invocation = beginFarmServerQueryAction(call.id, call.args);
+/** The value a call made by `invocation` returns, from the islx `response` it got. */
+export async function completeFarmIslandsAction(
+  invocation: FarmServerQueryActionInvocation,
+  response: Promise<unknown>,
+): Promise<unknown> {
   let result: unknown;
   try {
-    result = await next();
+    result = await response;
   } catch (error) {
     // islx answers an undeclared failure with a status; the caller sees what RSC throws.
     if (error instanceof Error && error.message.startsWith("Server action failed")) {
@@ -63,4 +69,8 @@ export const farmIslandsActionInterceptor: ActionInterceptor = async (call, next
     applyFarmCacheInvalidations(invalidations);
   if (error) throw createFarmServerFnTransportError(error);
   return completeFarmServerQueryAction(invocation, result.value);
-};
+}
+
+export const farmIslandsActionInterceptor: ActionInterceptor = (call, next) =>
+  // Taken when the call is made: a server query reads the call it is making at that moment.
+  completeFarmIslandsAction(beginFarmServerQueryAction(call.id, call.args), next());

@@ -1345,6 +1345,20 @@ test("a client navigation's response leaves out the renderer's chunks, which its
   }
 });
 
+test("a page that holds a server action loads what handles its result with its other modules", async ({
+  request,
+}) => {
+  test.skip(mode !== "islands" || dev, "islands mode's production client imports it on a call");
+  // RFC 0013: the code that handles a call's result loads on the first call, or with the page.
+  const actionClient = /chunks\/islands-action-client-h[0-9a-f]+\.js/;
+  // An action in an island's props, and a server form that posts one.
+  for (const pathname of ["/action-props", "/action"]) {
+    expect(await (await request.get(pathname)).text(), pathname).toMatch(actionClient);
+  }
+  // Islands that call nothing.
+  expect(await (await request.get("/timing")).text()).not.toMatch(actionClient);
+});
+
 test("a streamed first navigation renders before the renderer loads, and its islands keep a click", async ({
   page,
   request,
@@ -1453,8 +1467,10 @@ test("a page that hydrates runs the router only when a navigation needs it", asy
   test.skip(mode !== "islands" || dev, "the production islands client entry splits its router");
   const errors = collectErrors(page);
   const routerRequests: string[] = [];
+  const rootRequests: string[] = [];
   page.on("request", (request) => {
     if (request.url().includes("farm-client-router")) routerRequests.push(request.url());
+    if (request.url().includes("farm-client-root")) rootRequests.push(request.url());
   });
   // The boot fetches the router once the page is idle, and runs it on a link's intent. Held back,
   // it never arrives: an island still hydrates and counts without it.
@@ -1478,6 +1494,8 @@ test("a page that hydrates runs the router only when a navigation needs it", asy
   await expect(page.getByRole("heading", { name: "Stream" })).toBeVisible();
   expect(await page.evaluate(() => "__farmSameDocument" in window)).toBe(true);
   expect(routerRequests).toHaveLength(1);
+  // Pages of islands only render no page or layout root, so they never load the code for one.
+  expect(rootRequests).toEqual([]);
   expect(errors).toEqual([]);
 });
 
@@ -1721,6 +1739,10 @@ test("once the page is idle, the boot fetches what a link runs and runs none of 
     (file) => !listed.includes(file),
   );
   expect(rootModules).toContainEqual(expect.stringMatching(/^chunks\/theme-h[0-9a-f]+\.js$/));
+  // The code that renders a root loads with it, not with the entry (RFC 0013).
+  expect(rootModules).toContainEqual(
+    expect.stringMatching(/^chunks\/farm-client-root-h[0-9a-f]+\.js$/),
+  );
   const fetched = [runtime, ...listed.map((file) => `/${file}`)];
   await expect.poll(() => fetched.filter((file) => !requested.includes(file))).toEqual([]);
   await page.waitForLoadState("networkidle");
