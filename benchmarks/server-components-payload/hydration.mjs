@@ -3,7 +3,7 @@
 // (RFC 0013).
 //
 //   node benchmarks/server-components-payload/hydration.mjs [--modes rsc,islands]
-//     [--latency 150] [--down <kbit/s>] [--cpu 4] [--rounds 11]
+//     [--latency 150] [--down <kbit/s>] [--cpu 4] [--rounds 11] [--timeline]
 //
 // Uses the production builds measure.mjs leaves in app/.farm; a mode names a build directory
 // (`.output-<mode>`), so a copy of one (`.output-islands-before`) can run beside it. Each round
@@ -14,7 +14,9 @@
 //   default), and Chrome runs with `--cpu`x throttling;
 // - the time runs from the navigation's start to the moment the last of the page's 24 components
 //   has hydrated (its effect has run); first contentful paint and the script bytes the browser
-//   received are reported beside it.
+//   received are reported beside it;
+// - `--timeline` also prints, per mode, when each script's last byte arrived and when the document
+//   finished, became interactive and ran its deferred scripts, as medians from the same visits.
 //
 // Responses go over HTTP/2 through a local TLS proxy, as in first-navigation.mjs. The proxy
 // compresses every script with brotli at quality 11, as a CDN serving precompressed assets does,
@@ -43,6 +45,7 @@ const rounds = Number(option("--rounds", "11"));
 const latency = Number(option("--latency", "150"));
 const down = args.includes("--down") ? Number(option("--down", "0")) : null;
 const cpu = Number(option("--cpu", "4"));
+const timeline = args.includes("--timeline");
 const PAGE = "/dash/p0";
 const COMPONENTS = 24;
 
@@ -192,11 +195,26 @@ async function visit(browser, origin) {
         );
       });
     await page.waitForLoadState("networkidle");
-    const { hydrated, paint } = await page.evaluate(() => ({
-      hydrated: window.__hydratedAt,
-      paint: performance.getEntriesByName("first-contentful-paint")[0]?.startTime,
-    }));
-    return { hydrated: Math.round(hydrated), paint: Math.round(paint), scriptBytes };
+    const { hydrated, paint, marks } = await page.evaluate(() => {
+      const document = performance.getEntriesByType("navigation")[0];
+      const marks = {
+        "document received": document.responseEnd,
+        "document interactive": document.domInteractive,
+        "deferred scripts run": document.domContentLoadedEventEnd,
+      };
+      for (const script of performance.getEntriesByType("resource")) {
+        if (!script.name.endsWith(".js")) continue;
+        // The chunk's name without its content hash.
+        const name = new URL(script.name).pathname.replace(/-h?[\w-]{8}\.js$/, ".js");
+        marks[`${name} received`] = script.responseEnd;
+      }
+      return {
+        hydrated: window.__hydratedAt,
+        paint: performance.getEntriesByName("first-contentful-paint")[0]?.startTime,
+        marks,
+      };
+    });
+    return { hydrated: Math.round(hydrated), paint: Math.round(paint), scriptBytes, marks };
   } finally {
     await context.close();
   }
@@ -248,6 +266,18 @@ try {
       samples: visits.map((sample) => sample.hydrated).join(" "),
     })),
   );
+  if (timeline) {
+    for (const [mode, visits] of Object.entries(samples)) {
+      const names = [...new Set(visits.flatMap((sample) => Object.keys(sample.marks)))];
+      const rows = [
+        ...names.map((name) => [name, median(visits.map((sample) => sample.marks[name] ?? NaN))]),
+        ["first contentful paint", median(visits.map((sample) => sample.paint))],
+        ["all hydrated", median(visits.map((sample) => sample.hydrated))],
+      ].sort((a, b) => a[1] - b[1]);
+      console.log(`\n${mode}, medians in ms:`);
+      for (const [name, at] of rows) console.log(`${String(Math.round(at)).padStart(6)}  ${name}`);
+    }
+  }
 } finally {
   for (const stop of stops.reverse()) await stop();
   if (certificates) rmSync(certificates, { recursive: true, force: true });

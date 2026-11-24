@@ -362,6 +362,46 @@ throttling, medians of 21, in ms:
   - First navigation at 1.6 Mbit/s, medians of 11: no section is more than 1 ms slower than both
     `main` and its A/A copy, after a hover or a tap. The A/A pair differs by up to 4 ms.
 
+**Item 6 (#3162): React in one chunk.** The probe's timeline (`hydration.mjs --timeline`, 1.6
+Mbit/s, medians of 11) shows what the page waits for. Both engines request their scripts 173 ms in.
+`rsc`'s main chunk, React and React DOM included, arrives at 678 ms, and the page has hydrated at 794. Islands' React DOM chunk arrives at 709 ms and the page has hydrated at 791: islands runs less
+once its last script is in (82 ms against 116), but gets that script later. Chrome's throttling
+shares the link among a page's requests, and islands made ten of them to `rsc`'s three, three for
+React alone: React, its JSX runtime and React DOM. Taking 810 bytes off the entry (#3159) moved
+neither React DOM's arrival nor the page.
+
+What changed:
+
+- In islands mode with React, the client build puts React, its JSX runtime, React DOM and the
+  scheduler in one chunk, with a Rolldown `codeSplitting` group. They load together anyway: the
+  entry imports React and React DOM when an island is due (RFC 0010), and island modules import
+  React and its JSX runtime.
+- When an entry imports any of them statically, as the mobile client's and an app's with client
+  route slots do, the build keeps the bundler's split, since one chunk would load React DOM with
+  every page. So does an app whose own Vite config splits chunks.
+
+Measured against `main`, interleaved with an A/A copy of `main`, 150 ms latency, 4x CPU
+throttling, all hydrated, in ms:
+
+| Network                   | `rsc` | `main` | this change | A/A |
+| ------------------------- | ----- | ------ | ----------- | --- |
+| 1.6 Mbit/s, medians of 41 | 783   | 787    | 771         | 790 |
+| Unlimited, medians of 21  | 425   | 433    | 432         | 432 |
+
+- **1.6 Mbit/s:** paired by round, this change was faster than `main` in 34 of the 41 rounds, by a
+  median of 15 ms (bootstrap 95% interval 12 to 21), and faster than `rsc` in 30, by 12 ms (7 to
+  16). The A/A pair differs by 3 ms (-6 to 8).
+- **Bytes:** the page loads eight scripts instead of ten, 68.5 KB of them instead of 69.6 KB: one
+  chunk compresses better than three.
+- **Unlimited:** within the A/A pair's spread. `rsc` is still 5 ms ahead (1 to 13).
+- **The other four sections:** first-load script went from 26.6 KB to 26.5 KB; their documents and
+  navigation data are unchanged. First navigation at 1.6 Mbit/s, medians of 11: after a tap, no
+  section is more than 1 ms slower than both `main` and its A/A copy, and no section's cold visit
+  paints later than both. After a hover, shop and blog measured 2 and 1 ms slower than both. Rerun
+  with 21 rounds and paired with `main`, shop is -1 ms (-7 to 8) and blog +4 ms (-2 to 10), where
+  blog's A/A pair alone is -1 ms (-8 to 14).
+- **Remaining gap:** none at 1.6 Mbit/s; 5 ms without a bandwidth limit.
+
 **What is left.** On the probe the whole difference is script: 81.4 KB on the wire for islands
 against 69.7 KB, with documents within 0.4 KB. Measured with esbuild and brotli 11: the server
 tree helpers on islx 0.0.25's published build, the call path on a split of islx `main` (v0.0.27):
