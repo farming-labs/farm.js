@@ -81,3 +81,13 @@ describe("leaf in the browser", () => {
     expect(container.textContent).toBe("b1");
   });
 });
+
+describe("farm-leaf's client module", () => {
+  it("renders a new root in place of the markup already in its container", () => {
+    // Farm creates a root over the server's markup when hydrateRoot() throws.
+    const container = document.createElement("div");
+    container.innerHTML = renderToString(createElement("p", null, "Server markup"));
+    client.createRoot(container).render(createElement("span", null, "Client render"));
+    expect(container.innerHTML).toBe("<span>Client render</span>");
+  });
+});

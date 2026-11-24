@@ -115,6 +115,7 @@ export function leaf() {
       streaming: { node: false, web: false },
       reconcilesRerenders: true,
       functionComponents: true,
+      hydrationFallback: true,
     },
   });
 }
@@ -150,9 +151,10 @@ when it resolves the config.
   browser and server graphs at the same time. Set `"serial"` when your compiler plugin keeps
   process-global mutable caches; the official Vue renderer does, because `@vitejs/plugin-vue` shares
   them between plugin instances.
-- **`capabilities`**: what the renderer supports: `streaming`, `reconcilesRerenders`, and
-  `functionComponents`. Each defaults to off. Streaming is covered under [Streaming](#streaming);
-  the other two under [Components](#components) and [Route updates](#route-updates).
+- **`capabilities`**: what the renderer supports: `streaming`, `reconcilesRerenders`,
+  `functionComponents`, and `hydrationFallback`. Each defaults to off. Streaming is covered under
+  [Streaming](#streaming); the next two under [Components](#components) and
+  [Route updates](#route-updates); `hydrationFallback` under [The client module](#the-client-module).
 - **`options`**: serializable options your Vite module receives as `rendererOptions`. Use them for
   compiler modes, so the descriptor function can take options from the app.
 - **`appSetup`**: a module path, relative to the project root, that configures each app instance
@@ -230,19 +232,36 @@ Farm's browser entries import the client module by name. Four exports are requir
 
 ```js
 // src/client.js
+import { createRoot as createLeafRoot } from "leaf/dom";
+
 export { Fragment, Suspense, createElement, isValidElement } from "leaf";
-export { createRoot, hydrateRoot } from "leaf/dom";
+export { hydrateRoot } from "leaf/dom";
+
+// A leaf root renders next to what's already in its container, so empty it first.
+export function createRoot(container) {
+  container.replaceChildren();
+  return createLeafRoot(container);
+}
 ```
 
 - **`createElement()`** and **`Suspense`**: build the route tree in the browser. They must build the
   same tree the server module built from the same calls, or hydration fails to match.
-- **`createRoot(container)`**: a root that renders into `container` from scratch. Farm uses it for a
-  route with no server markup to adopt, such as after a navigation that replaces the root.
+- **`createRoot(container)`**: a root whose first render replaces what's in `container`, as React's
+  does. Farm uses it for a route with no server markup to adopt, after a navigation that replaces
+  the root, and when `hydrateRoot()` throws. The last two leave markup in the container, so a root
+  that renders next to it shows the page twice.
 - **`hydrateRoot(container, element, routeState)`**: a root that adopts the server's markup in
   `container`: the elements already there stay, and gain their event listeners and state. The third
-  argument is the route state described under [Route updates](#route-updates). If
-  `hydrateRoot()` throws, Farm renders the route with `createRoot()` instead.
+  argument is the route state described under [Route updates](#route-updates).
 - **`configureApp(setup)`**: required when the descriptor sets `appSetup`.
+
+If `hydrateRoot()` throws in development, Farm logs
+`[Farm.js] Hydration error; rendering the page on the client instead:` with the error and renders
+the route with `createRoot()`. A production build does the same only when the descriptor sets
+`capabilities.hydrationFallback: true`; otherwise the page keeps the server's markup without event
+listeners. With the fallback the page works, but the server's DOM, focus, and typed input are
+replaced. Set it once your `createRoot()` replaces what's in its container, as farm-leaf's does
+above.
 
 Both functions return a root:
 

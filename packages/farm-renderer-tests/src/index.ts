@@ -17,6 +17,7 @@ export interface RendererDescriptorFixture {
     };
     reconcilesRerenders?: boolean;
     functionComponents?: boolean;
+    hydrationFallback?: boolean;
   };
 }
 

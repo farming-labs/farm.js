@@ -4201,6 +4201,9 @@ export function generateClientHydrationEntry(
         appSetupPath
         ? `import * as __farmRendererClient from ${JSON.stringify(renderer.client)};\nimport { createRoot, hydrateRoot, configureApp as __farmConfigureApp } from ${JSON.stringify(renderer.client)};\nimport __farmAppSetup from ${JSON.stringify(toPosixPath(appSetupPath))};\nconst React = { ...__farmRendererClient };\n__farmConfigureApp(__farmAppSetup);`
         : `import * as __farmRendererClient from ${JSON.stringify(renderer.client)};\nimport { createRoot, hydrateRoot } from ${JSON.stringify(renderer.client)};\nconst React = { ...__farmRendererClient };`;
+  const hydrateFarmRouteCall = isReactRenderer(renderer)
+    ? "return hydrateRoot(container, route.element);"
+    : "return route.layouts.length > 0 ? hydrateRoot(container, route.element, route) : hydrateRoot(container, route.element);";
   const providerClientCode = generateFarmIntegrationProviderClientCode(
     integrationProviders,
     root,
@@ -5166,9 +5169,18 @@ function createFarmRouteState(page, pathname, params, includeLayouts) {
 function hydrateFarmRoute(container, route) {
   farmLastRouteState = route;
   ${
-    isReactRenderer(renderer)
-      ? "return hydrateRoot(container, route.element);"
-      : "return route.layouts.length > 0 ? hydrateRoot(container, route.element, route) : hydrateRoot(container, route.element);"
+    getFarmRendererCapabilities(renderer).hydrationFallback
+      ? `try {
+    ${hydrateFarmRouteCall}
+  } catch (error) {
+    // The renderer opted in with capabilities.hydrationFallback, as development always does. The
+    // page still works, but the server's DOM, focus, and typed input are gone, so say so.
+    console.error("[Farm.js] Hydration error; rendering the page on the client instead:", error);
+    const root = createRoot(container);
+    renderFarmRoute(root, route);
+    return root;
+  }`
+      : hydrateFarmRouteCall
   }
 }
 
