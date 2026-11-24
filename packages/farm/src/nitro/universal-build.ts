@@ -299,7 +299,7 @@ import { resolveFarmInstrumentationFile } from "../instrumentation";
 import { getFarmPresetRuntime, resolveCloudflareProcessEnvFlags } from "../deployment";
 import { isFarmPreviewDeploymentEnvironment } from "../deployment-environment";
 import { resolveFarmInstrumentationRuntime } from "../instrumentation-runtime";
-import { FARM_PRERENDER_ENV } from "../plugins/infra-analytics";
+import { _farmWebMCPReportsEnabled, FARM_PRERENDER_ENV } from "../plugins/infra-analytics";
 import { listFarmBuiltInRoutePaths } from "../route-label";
 import {
   getFarmRendererCapabilities,
@@ -4203,6 +4203,9 @@ export function generateClientHydrationEntry(
         appSetupPath
         ? `import * as __farmRendererClient from ${JSON.stringify(renderer.client)};\nimport { createRoot, hydrateRoot, configureApp as __farmConfigureApp } from ${JSON.stringify(renderer.client)};\nimport __farmAppSetup from ${JSON.stringify(toPosixPath(appSetupPath))};\nconst React = { ...__farmRendererClient };\n__farmConfigureApp(__farmAppSetup);`
         : `import * as __farmRendererClient from ${JSON.stringify(renderer.client)};\nimport { createRoot, hydrateRoot } from ${JSON.stringify(renderer.client)};\nconst React = { ...__farmRendererClient };`;
+  const hydrateFarmRouteCall = isReactRenderer(renderer)
+    ? "return hydrateRoot(container, route.element);"
+    : "return route.layouts.length > 0 ? hydrateRoot(container, route.element, route) : hydrateRoot(container, route.element);";
   const providerClientCode = generateFarmIntegrationProviderClientCode(
     integrationProviders,
     root,
@@ -5168,9 +5171,18 @@ function createFarmRouteState(page, pathname, params, includeLayouts) {
 function hydrateFarmRoute(container, route) {
   farmLastRouteState = route;
   ${
-    isReactRenderer(renderer)
-      ? "return hydrateRoot(container, route.element);"
-      : "return route.layouts.length > 0 ? hydrateRoot(container, route.element, route) : hydrateRoot(container, route.element);"
+    getFarmRendererCapabilities(renderer).hydrationFallback
+      ? `try {
+    ${hydrateFarmRouteCall}
+  } catch (error) {
+    // The renderer opted in with capabilities.hydrationFallback, as development always does. The
+    // page still works, but the server's DOM, focus, and typed input are gone, so say so.
+    console.error("[Farm.js] Hydration error; rendering the page on the client instead:", error);
+    const root = createRoot(container);
+    renderFarmRoute(root, route);
+    return root;
+  }`
+      : hydrateFarmRouteCall
   }
 }
 
@@ -7672,6 +7684,8 @@ function generateVirtualEntryCode(
   // Decided when the server starts, from its environment; see createFarmInfraAnalyticsPlugin.
   const hasInfraAnalyticsRuntime =
     config.analytics !== false && resolveFarmInstrumentationRuntime(preset) === "nodejs";
+  // The app's pages report the WebMCP tool calls they run; see FARM_WEBMCP_REPORT_PATH.
+  const reportsWebMCPCalls = hasInfraAnalyticsRuntime && _farmWebMCPReportsEnabled(config.plugins);
   const hasPrecompiledDocs = Boolean(farmDocsPrecompiledManifest);
   const adapterOwnsDocsRuntime = Boolean(
     isReactRenderer(config.renderer) &&
@@ -8806,11 +8820,22 @@ const integrationRuntimeConfig = Object.assign({}, ...farmRuntimeConfigs, {
 });
 const farmInfraAnalytics = ${
     hasInfraAnalyticsRuntime
-      ? hasPluginRuntime
-        ? "createFarmInfraAnalyticsPlugin()"
-        : "createFarmInfraAnalyticsRecorder()"
+      ? `${hasPluginRuntime ? "createFarmInfraAnalyticsPlugin" : "createFarmInfraAnalyticsRecorder"}(${
+          reportsWebMCPCalls ? "{ webmcp: { route: farmWebMCPCallRoute } }" : ""
+        })`
       : "null"
-  };
+  };${
+    reportsWebMCPCalls
+      ? `
+// A WebMCP tool call a page reports goes under that page's route, matched and labeled as a
+// request for the page is.
+function farmWebMCPCallRoute(pathname) {
+  return labelFarmRequestOptions(
+    getFarmPluginRequestOptions(new Request(new URL(pathname, "http://farm.invalid"))),
+  ).route;
+}`
+      : ""
+  }
 const configuredPlugins = [
   ${hasCompressionRuntime && hasPluginRuntime ? "createCompressionPlugin()," : ""}
   ${hasRuntimeIntegrationConfig ? "...resolveIntegrationPlugins(serverRuntimeIntegrations)," : ""}

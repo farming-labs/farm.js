@@ -1,4 +1,4 @@
-import type { Children, Component, Key, LeafElement, Ref } from "./index.js";
+import type { AsyncComponent, Children, Component, Key, LeafElement, Ref } from "./index.js";
 
 export { Fragment } from "./index.js";
 
@@ -22,7 +22,7 @@ export interface HTMLAttributes {
 
 export declare namespace JSX {
   type Element = LeafElement;
-  type ElementType = string | Component<any>;
+  type ElementType = string | Component<any> | AsyncComponent<any>;
   interface ElementChildrenAttribute {
     children: {};
   }

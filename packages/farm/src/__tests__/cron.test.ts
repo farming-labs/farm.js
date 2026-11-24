@@ -357,6 +357,34 @@ describe("Farm cron", () => {
     expect((await handler(new Request("https://example.com/api/cleanup"))).status).toBe(200);
   });
 
+  it("keeps a development cron route closed to the public preview URL", async () => {
+    // `farm preview` puts the dev server on a public URL and marks every tunnelled request.
+    // Development's no-secret allowance is for the developer's machine, not for visitors.
+    delete process.env.CRON_SECRET;
+    process.env.NODE_ENV = "development";
+    process.env.FARMJS_API_KEY = "farmjs_test_vector_key";
+    const handler = cronRoute(async () => Response.json({ deleted: 3 }));
+    const url = "https://example.com/api/cleanup";
+
+    expect((await handler(new Request(url))).status).toBe(200);
+    expect((await handler(new Request(url, { headers: { "x-farm-preview": "1" } }))).status).toBe(
+      401,
+    );
+
+    // Farm.js Infra's signed calls still reach the route through the preview.
+    const now = Math.floor(Date.now() / 1000);
+    const v1 = await farmCronSignature("farmjs_test_vector_key", now, "/api/cleanup");
+    const signed = new Request(url, {
+      headers: { "x-farm-preview": "1", "farmjs-signature": `t=${now},v1=${v1}` },
+    });
+    expect((await handler(signed)).status).toBe(200);
+
+    const optedIn = cronRoute(async () => Response.json({ deleted: 3 }), { allowUnsecured: true });
+    expect((await optedIn(new Request(url, { headers: { "x-farm-preview": "1" } }))).status).toBe(
+      200,
+    );
+  });
+
   it("still allows an unsecured cron route when opted in explicitly", async () => {
     delete process.env.CRON_SECRET;
     delete process.env.NODE_ENV;

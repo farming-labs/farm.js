@@ -1,3 +1,4 @@
+import { connect } from "node:net";
 import { setTimeout as delay } from "node:timers/promises";
 import { logger } from "@farm.js/core/internal/cli-runtime";
 import type { PreviewFarmOptions, PreviewTarget } from "./preview";
@@ -292,19 +293,29 @@ async function watchLocalPreviewTarget(
   }
 }
 
-async function isLocalPreviewTargetReachable(url: string, timeoutMs: number) {
-  const signal = AbortSignal.timeout(timeoutMs);
-
-  try {
-    const response = await fetch(url, {
-      method: "GET",
-      signal,
-    });
-    await response.body?.cancel();
-    return true;
-  } catch {
-    return false;
-  }
+/**
+ * Whether the local target accepts connections. It opens and closes a TCP connection instead of
+ * sending a request, so it never runs the app's routes or shows up in the app's analytics, and a
+ * page that renders slowly doesn't count as a stopped app.
+ */
+export function isLocalPreviewTargetReachable(
+  targetUrl: string,
+  timeoutMs: number,
+): Promise<boolean> {
+  const url = new URL(targetUrl);
+  const host = url.hostname.replace(/^\[(.*)\]$/, "$1");
+  const port = Number(url.port) || (url.protocol === "https:" ? 443 : 80);
+  return new Promise((resolve) => {
+    const socket = connect({ host, port });
+    const finish = (reachable: boolean) => {
+      clearTimeout(timer);
+      socket.destroy();
+      resolve(reachable);
+    };
+    const timer = setTimeout(() => finish(false), timeoutMs);
+    socket.once("connect", () => finish(true));
+    socket.once("error", () => finish(false));
+  });
 }
 
 export async function createGatewaySession(

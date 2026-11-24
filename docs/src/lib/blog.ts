@@ -154,7 +154,7 @@ export const rendererPost: BlogPost = {
   href: "/blog/bring-your-own-renderer",
   title: "Bring your own renderer",
   description:
-    "I wrote a small React-like library to find out what Farm needs from a renderer: three modules, eleven named exports, and two fixes the official renderers had been hiding.",
+    "How to plug any UI library into Farm, one piece at a time: a descriptor, three small modules, a few hooks, and two ways to use a component library. The working example is farming-labs/leaf.",
   ...AUTHOR,
   date: "Nov 2026",
   dateTime: "2026-11-21",
@@ -162,15 +162,19 @@ export const rendererPost: BlogPost = {
 };
 
 export const rendererSections = [
-  ["what-farm-asks-of-a-renderer", "What Farm asks"],
-  ["meet-leaf", "Meet leaf"],
-  ["the-first-break-a-default-export", "A default export"],
-  ["the-second-break-react-in-the-dev-entry", "React in the dev entry"],
-  ["what-the-fixes-cost", "What the fixes cost"],
-  ["your-own-file-format", "Your own file format"],
-  ["components-for-leaf", "Components for leaf"],
-  ["what-still-needs-work", "What still needs work"],
-  ["write-your-own", "Write your own"],
+  ["what-farm-does-and-what-you-do", "What Farm does"],
+  ["step-1-the-descriptor", "The descriptor"],
+  ["step-2-the-server-module", "The server module"],
+  ["step-3-the-client-module", "The client module"],
+  ["step-4-the-vite-module", "The Vite module"],
+  ["step-5-hooks-over-farms-stores", "Hooks", "Step 5: hooks over Farm's stores"],
+  ["step-6-server-functions", "Server functions"],
+  ["step-7-optional-your-own-file-format", "Your own file format"],
+  ["step-8-optional-streaming", "Streaming"],
+  ["step-9-test-it", "Test it"],
+  ["components-the-ui-sdk-way", "Components with ui-sdk"],
+  ["what-a-custom-renderer-doesnt-get", "Limits", "What a custom renderer doesn't get"],
+  ["what-building-leaf-fixed-in-farm", "What leaf fixed"],
 ] as const satisfies BlogSections;
 
 /** Every post. The index features the first and lists the rest. */
