@@ -261,6 +261,9 @@ default export. [Custom renderers](/docs/renderers/custom) walks through each mo
 - `renderToString()` may return a promise.
 - `createRoot()` and `hydrateRoot()` return a root with `render(element)` and `unmount()`, plus the
   optional `renderRoute()` described under [Re-render behavior](#re-render-behavior).
+- A root from `createRoot()` replaces what is already in its container on its first render, as
+  React's does. Farm creates one over the server's markup when hydration throws, and over the last
+  page when a navigation replaces the root.
 - Both modules must export `configureApp()` when the descriptor sets `appSetup`.
 - A renderer with its own file format lists its extensions in `componentExtensions` and compiles
   them in the Vite module. FARMJS reads a route's `hydrate` export from the file as written, before

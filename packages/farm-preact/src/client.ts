@@ -31,6 +31,11 @@ function createManagedRoot(container: Element): FarmPreactRoot {
 }
 
 export function createRoot(container: Element): FarmPreactRoot {
+  // A new root replaces what's in its container, as React's does. Farm creates one over the
+  // server's markup when hydrateRoot() throws, which also leaves preact's half-built tree on the
+  // container, and render() would diff against both. Unmount that tree, then drop the markup.
+  preactRender(null, container);
+  container.replaceChildren();
   return createManagedRoot(container);
 }
 

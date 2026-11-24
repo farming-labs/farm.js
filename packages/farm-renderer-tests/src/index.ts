@@ -444,6 +444,22 @@ export function defineRendererClientConformance(options: {
       container.remove();
     });
 
+    it("replaces what is already in the container on a new root's first render", async () => {
+      // Farm creates a root over the server's markup when hydrateRoot() throws, and over the last
+      // page when a navigation replaces the root. Neither should stay next to the new render.
+      const container = document.createElement("div");
+      container.innerHTML = "<p>Server markup</p>";
+      document.body.append(container);
+      const root = options.client.createRoot(container);
+
+      root.render(options.client.createElement("span", null, "Client render"));
+      await settleClientRender(() => expect(container.textContent).toBe("Client render"));
+      expect(container.querySelector("p")).toBeNull();
+
+      root.unmount();
+      container.remove();
+    });
+
     it("applies numeric styles with px and wires onDoubleClick to dblclick", async () => {
       const container = document.createElement("div");
       document.body.append(container);
