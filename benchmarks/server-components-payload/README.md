@@ -167,7 +167,9 @@ engines, so both see the same load. This run had other work on the machine (load
 
 `hydration.mjs` visits `/dash/p0` cold over HTTP/2. It times the visit from the navigation's start
 to the moment the last of its 24 components has hydrated. Every script is compressed with brotli at
-quality 11 for both engines, so they compare at equal compression (RFC 0013).
+quality 11 for both engines, so they compare at equal compression (RFC 0013). `--timeline` also
+prints when each script's last byte arrived and when the document ran its deferred scripts, as
+medians of the same visits: the page hydrates soon after its largest script arrives.
 
 Measured 2026-11-23 once islands mode loaded the code that handles a server action's result on the
 first call, or with a page whose markup holds an action reference, instead of with its runtime.

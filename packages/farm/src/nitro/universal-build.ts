@@ -212,6 +212,10 @@ import {
   FARM_CLIENT_MODULE_PRELOADS_PLACEHOLDER,
   readFarmClientModulePreloads,
 } from "./client-module-preloads";
+import {
+  configuresFarmClientChunks,
+  createFarmIslandsReactChunkGroup,
+} from "./islands-react-chunk";
 import { createFarmRouter } from "../router";
 import {
   createFarmClientRouteTable,
@@ -2578,6 +2582,11 @@ async function buildClient(
               entryFileNames: "[name]-h[hash].js",
               chunkFileNames: "chunks/[name]-h[hash].js",
               hashCharacters: "hex",
+              ...(islandsMode &&
+              isReactRenderer(config.renderer) &&
+              !configuresFarmClientChunks(config.vite)
+                ? { codeSplitting: { groups: [createFarmIslandsReactChunkGroup()] } }
+                : {}),
               // Use predictable name for CSS so we can reference it in SSR HTML
               assetFileNames: (assetInfo) => {
                 if (assetInfo.name?.endsWith(".css")) {
