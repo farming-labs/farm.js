@@ -2188,7 +2188,7 @@ export function Chart() {}
 
     expect(source.match(/refresh: function\(options = \{\}\)/g)).toHaveLength(2);
     expect(source).toMatch(
-      /if \(\s*!options\.refresh &&\s*matched\?\.route\.navigation === "client-render" &&/,
+      /!options\.refresh && matched\?\.route\.navigation === "client-render" \? await loadFarmRoot\(\) : null;\s*if \(farmRoot && farmRoot\.farmTreeLayoutsReady\(/,
     );
     expect(source).toContain("options.refresh ? null : matchInterceptedRouteSlot(pathname, from)");
     expect(source).toContain("fetchPage: async function(url, interceptFrom, fresh = false");

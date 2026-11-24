@@ -1,8 +1,10 @@
+import fs from "node:fs";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
 import {
   collectFarmClientModulePreloads,
   encodeFarmClientModulePreloads,
+  type FarmClientModulePreloadManifest,
 } from "../nitro/client-module-preloads";
 
 const root = path.resolve("/app");
@@ -117,6 +119,29 @@ describe("client module preloads", () => {
     ).toBeUndefined();
   });
 
+  it("lists the root module's chunks, also from a common chunk that holds it without a facade", () => {
+    const rootModule = path.join(root, ".farm/tmp/client-entry-1/farm-client-root.tsx");
+    const manifest = collectFarmClientModulePreloads(
+      {
+        ...bundle,
+        // The router imports it by name too, so the bundler can merge it into a shared chunk.
+        "chunks/shared.js": {
+          ...chunk("chunks/shared.js", ["chunks/react.js", "chunks/layout.js"]),
+          moduleIds: [path.join(root, "src/search-params.ts"), `${rootModule}?v=1`],
+        },
+        "chunks/layout.js": chunk("chunks/layout.js", ["chunks/util.js"]),
+      },
+      { root, entryName: "farm-client", rootModules: [rootModule] },
+    )!;
+    expect(manifest.root!.map((index) => manifest.files[index])).toEqual([
+      "chunks/shared.js",
+      "chunks/layout.js",
+    ]);
+    expect(
+      collectFarmClientModulePreloads(bundle, { root, entryName: "farm-client" })!.root,
+    ).toBeUndefined();
+  });
+
   it("lists the action client's chunks outside the entry's and the renderer's", () => {
     const reactDom = path.join(root, "node_modules/react-dom/client.js");
     const actions = path.join(
@@ -167,5 +192,89 @@ describe("client module preloads", () => {
       expect(JSON.parse(decoded)).toEqual(manifest);
     }
     expect(JSON.parse(encodeFarmClientModulePreloads(null))).toBeNull();
+  });
+});
+
+// The production server emits these from a template literal, so the snippet is extracted from the
+// source and un-escaped (\\ -> \, \` -> `, \$ -> $) before it runs as the server bundle runs it.
+describe("the server's client module preloads", () => {
+  const source = fs.readFileSync(
+    path.join(process.cwd(), "src", "nitro", "universal-build.ts"),
+    "utf8",
+  );
+  const start = source.indexOf("const farmClientEntryPreloadTags = farmClientModulePreloads");
+  const bootStart = source.indexOf("function renderFarmClientBootPreloads(", start);
+  const end = source.indexOf("\n}\n", bootStart);
+  const create = (manifest: FarmClientModulePreloadManifest) =>
+    new Function(
+      "farmClientModulePreloads",
+      "farmSecurityConfig",
+      "escapeFarmHtmlAttribute",
+      "FARM_DEFERRED_ISLAND_STRATEGY",
+      `${source.slice(start, end + 2).replace(/\\([\\`$])/g, "$1")}
+return { renderFarmClientModulePreloads, renderFarmClientBootPreloads };`,
+    )(manifest, {}, (value: string) => value, /\sstrategy="(?:interaction|visible|idle)"/) as {
+      renderFarmClientModulePreloads(
+        markup: string | null,
+        pageModule: string | undefined,
+        navigation: boolean,
+        hydratesRoot: boolean,
+      ): string;
+      renderFarmClientBootPreloads(
+        markup: string | null,
+        pageModule: string | undefined,
+        root: string,
+        rootStrategy: string,
+        navigation: boolean,
+      ): string;
+    };
+  const { renderFarmClientModulePreloads, renderFarmClientBootPreloads } = create({
+    files: [
+      "chunks/react.js",
+      "chunks/router.js",
+      "chunks/react-dom.js",
+      "chunks/root.js",
+      "chunks/page.js",
+    ],
+    entry: [0],
+    router: [1],
+    renderer: [2],
+    root: [3],
+    modules: { "/src/app/page.tsx": [4] },
+  });
+  const hrefs = (html: string) => [...html.matchAll(/href="\/([^"]+)"/g)].map((match) => match[1]);
+
+  it("lists the code that renders a root for a document whose page or layout hydrates", () => {
+    expect(hrefs(renderFarmClientModulePreloads(null, "/src/app/page.tsx", false, true))).toEqual([
+      "chunks/react.js",
+      "chunks/react-dom.js",
+      "chunks/root.js",
+      "chunks/page.js",
+    ]);
+    // A page of islands only, and a client navigation's response, which runs no script.
+    expect(hrefs(renderFarmClientModulePreloads(null, undefined, false, false))).toEqual([
+      "chunks/react.js",
+      "chunks/react-dom.js",
+    ]);
+    expect(hrefs(renderFarmClientModulePreloads(null, undefined, true, true))).toEqual([
+      "chunks/react.js",
+    ]);
+  });
+
+  it("fetches the root's code with the boot's entry, or on a click in a root that waits for one", () => {
+    expect(renderFarmClientBootPreloads(null, "/src/app/page.tsx", "root", "visible", false)).toBe(
+      ' data-farm-preload="chunks/react.js chunks/root.js chunks/page.js"' +
+        ' data-farm-preload-router="chunks/router.js"' +
+        ' data-farm-preload-renderer="chunks/react-dom.js"',
+    );
+    expect(
+      renderFarmClientBootPreloads(null, "/src/app/page.tsx", "root", "interaction", false),
+    ).toBe(
+      ' data-farm-preload="chunks/react.js"' +
+        ' data-farm-preload-router="chunks/router.js"' +
+        ' data-farm-preload-renderer="chunks/react-dom.js"' +
+        ' data-farm-preload-root="chunks/root.js chunks/page.js"',
+    );
+    expect(renderFarmClientBootPreloads(null, undefined, "", "", false)).not.toContain("root.js");
   });
 });

@@ -99,8 +99,8 @@ function createInjector(
     "addFarmFallbackIcon",
     "hasFavicon",
     // Set before the composer runs, as the handler does once the whole page has rendered.
-    // A document request, not a client navigation's.
-    `let fullHtml;\nlet farmBootsClient = ${bootsClient};\nconst farmNavigationRequest = false;\nconst routePathname = "/";\n` +
+    // A document request, not a client navigation's, for a page that hydrates no root.
+    `let fullHtml;\nlet farmBootsClient = ${bootsClient};\nconst farmNavigationRequest = false;\nconst farmHydratesRoot = false;\nconst routePathname = "/";\n` +
       // Props without defer() values: prepared as they are, with no snapshot to write.
       "const farmDeferredData = { data: { page: clientPageProps, slots: routeSlotPayload }, records: [] };\n" +
       'const renderFarmDeferredDataScript = () => "";\n' +
