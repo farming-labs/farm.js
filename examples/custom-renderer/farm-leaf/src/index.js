@@ -20,6 +20,9 @@ export function leaf() {
       // After a production hydrateRoot() throws, Farm may render the route with createRoot(): the
       // one in farm-leaf/client empties its container first.
       hydrationFallback: true,
+      // farm-leaf/server exports withIsland: with experimental.isolatedClientHydration enabled, a
+      // client component rendered from a server page hydrates as its own island.
+      islands: true,
     },
     // Which files are routes. Farm's folders still work (`about/page.tsx`, `layout.leaf`), and in
     // `guides/` every .leaf file is a page: `harvest.leaf` is /guides/harvest, `index.leaf` is
