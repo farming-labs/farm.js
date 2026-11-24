@@ -50,6 +50,17 @@ Pass a Zod, Valibot, ArkType, or other Standard Schema validator through `valida
 must also be checked at runtime. Keep `inputSchema` because that JSON Schema is what the browser
 agent sees.
 
+## Analytics
+
+When the app's server is linked to Farm Infra analytics (`FARMJS_API_KEY`), the page reports each
+tool call to its own server after the call settles: the tool name, whether it succeeded, its
+duration, the page's path, and the call's arguments and result (left out above 8 KB). The server
+redacts secret-looking keys and sends it to Farm Infra under the page's route. Reporting never
+delays or changes a tool's result. Without a linked server the page stops after the first 404.
+
+Reports come from visitors' browsers and aren't authenticated, like any page analytics. Turn them
+off with `webmcp({ analytics: false })`.
+
 ## Security boundary
 
 The plugin never scans or exposes Farm server functions. Each tool is an explicit browser-side

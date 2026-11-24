@@ -297,7 +297,7 @@ import { resolveFarmInstrumentationFile } from "../instrumentation";
 import { getFarmPresetRuntime, resolveCloudflareProcessEnvFlags } from "../deployment";
 import { isFarmPreviewDeploymentEnvironment } from "../deployment-environment";
 import { resolveFarmInstrumentationRuntime } from "../instrumentation-runtime";
-import { FARM_PRERENDER_ENV } from "../plugins/infra-analytics";
+import { _farmWebMCPReportsEnabled, FARM_PRERENDER_ENV } from "../plugins/infra-analytics";
 import { listFarmBuiltInRoutePaths } from "../route-label";
 import {
   getFarmRendererCapabilities,
@@ -7682,6 +7682,8 @@ function generateVirtualEntryCode(
   // Decided when the server starts, from its environment; see createFarmInfraAnalyticsPlugin.
   const hasInfraAnalyticsRuntime =
     config.analytics !== false && resolveFarmInstrumentationRuntime(preset) === "nodejs";
+  // The app's pages report the WebMCP tool calls they run; see FARM_WEBMCP_REPORT_PATH.
+  const reportsWebMCPCalls = hasInfraAnalyticsRuntime && _farmWebMCPReportsEnabled(config.plugins);
   const hasPrecompiledDocs = Boolean(farmDocsPrecompiledManifest);
   const adapterOwnsDocsRuntime = Boolean(
     isReactRenderer(config.renderer) &&
@@ -8816,11 +8818,22 @@ const integrationRuntimeConfig = Object.assign({}, ...farmRuntimeConfigs, {
 });
 const farmInfraAnalytics = ${
     hasInfraAnalyticsRuntime
-      ? hasPluginRuntime
-        ? "createFarmInfraAnalyticsPlugin()"
-        : "createFarmInfraAnalyticsRecorder()"
+      ? `${hasPluginRuntime ? "createFarmInfraAnalyticsPlugin" : "createFarmInfraAnalyticsRecorder"}(${
+          reportsWebMCPCalls ? "{ webmcp: { route: farmWebMCPCallRoute } }" : ""
+        })`
       : "null"
-  };
+  };${
+    reportsWebMCPCalls
+      ? `
+// A WebMCP tool call a page reports goes under that page's route, matched and labeled as a
+// request for the page is.
+function farmWebMCPCallRoute(pathname) {
+  return labelFarmRequestOptions(
+    getFarmPluginRequestOptions(new Request(new URL(pathname, "http://farm.invalid"))),
+  ).route;
+}`
+      : ""
+  }
 const configuredPlugins = [
   ${hasCompressionRuntime && hasPluginRuntime ? "createCompressionPlugin()," : ""}
   ${hasRuntimeIntegrationConfig ? "...resolveIntegrationPlugins(serverRuntimeIntegrations)," : ""}
