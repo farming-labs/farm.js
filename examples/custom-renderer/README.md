@@ -45,8 +45,10 @@ markup, an API route, a button that calls a validated `createServerFn` imported
 straight into the page (`experimental.serverActions`) through `useAction`, a `useServerQuery` that
 reads again when that function invalidates its key, a page that streams past an async component
 inside `<Suspense>`, a server page whose client components hydrate as islands, each when its
-`client:*` attribute says (`experimental.isolatedClientHydration`), not-found and error pages, and
-a page whose hydration throws, which Farm renders in the browser instead.
+`client:*` attribute says (`experimental.isolatedClientHydration`), the same with `.leaf` client
+components in a `.leaf` page (`src/app/islands/leaf`), not-found and error pages, and a page whose
+hydration throws, which Farm renders in the browser instead. The descriptor's `compile()` lets Farm
+read a `.leaf` file as the module it compiles to, so it finds a component's `"use client"`.
 
 `src/app/guides/` uses flat files instead of folders. farm-leaf's `routes()` maps them: `_layout.leaf`
 is the folder's layout, `index.leaf` is its page, `[crop].leaf` is a dynamic page, other `_` files

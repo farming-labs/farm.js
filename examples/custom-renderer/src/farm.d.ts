@@ -22,6 +22,7 @@ export type RoutePath =
   | "/guides/harvest"
   | "/guides/watering"
   | "/islands"
+  | "/islands/leaf"
   | "/notes"
   | "/recovers"
   | "/streaming";
@@ -35,6 +36,7 @@ export type RoutePattern =
   | "/guides/harvest"
   | "/guides/watering"
   | "/islands"
+  | "/islands/leaf"
   | "/notes"
   | "/recovers"
   | "/streaming";
@@ -48,6 +50,7 @@ export type RouteModulePattern =
   | "/guides/harvest"
   | "/guides/watering"
   | "/islands"
+  | "/islands/leaf"
   | "/notes"
   | "/recovers"
   | "/streaming";

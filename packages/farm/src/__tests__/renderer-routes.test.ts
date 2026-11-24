@@ -529,6 +529,120 @@ describe("renderer hydration", () => {
   });
 });
 
+describe("renderer compile()", () => {
+  // A small stand-in for a renderer's own format: a module script, then markup the component
+  // returns. compile() turns it into the TSX module the renderer's Vite plugin would emit.
+  const compile: NonNullable<FarmRenderer["compile"]> = (source) => {
+    const script = /<script module>([\s\S]*?)<\/script>/.exec(source)?.[1]?.trim() ?? "";
+    const markup = source.replace(/<script module>[\s\S]*?<\/script>/, "").trim();
+    return `${script}\nexport default function Component(props) {\n  return (<>${markup}</>);\n}\n`;
+  };
+  const islandsRenderer = (overrides: Partial<FarmRenderer> = {}) =>
+    leafRenderer({ capabilities: { islands: true }, ...overrides });
+  const files = {
+    "src/components/plant.leaf":
+      '<script module>\n"use client";\n</script>\n<button>plant</button>\n',
+    "src/app/page.leaf":
+      '<script module>\nimport Plant from "../components/plant.leaf";\n</script>\n<section><Plant label="a" /></section>\n',
+  };
+
+  async function discoverIslands(root: string, renderer: FarmRenderer) {
+    const manager = new RouteManager({
+      root,
+      srcDir: "src",
+      renderer,
+      experimental: { isolatedClientHydration: "enabled" },
+    } as Required<FarmConfig>);
+    managers.push(manager);
+    await manager.discoverRoutes();
+    return manager;
+  }
+
+  it("plans an island for a client component in the renderer's own format", async () => {
+    const root = await createRoot(files);
+    const plant = path.join(root, "src/components/plant.leaf");
+
+    const compiled = await discoverIslands(root, islandsRenderer({ compile }));
+    expect([...compiled.getIsolatedClientBoundaryModules(root)]).toEqual([plant]);
+
+    // Without compile(), Farm reads the file as written and finds no "use client" in it.
+    const asWritten = await discoverIslands(root, islandsRenderer());
+    expect([...asWritten.getIsolatedClientBoundaryModules(root)]).toEqual([]);
+  });
+
+  it("hands hydration.resolve() the file as written, before compile()", async () => {
+    const page = "<script module>\n// @hydrate visible\n</script>\n<p>home</p>\n";
+    const root = await createRoot({ "src/app/page.leaf": page });
+    const sources: string[] = [];
+    const manager = await discover(
+      root,
+      leafRenderer({
+        // Drops comments, so only the source as written still has the pragma.
+        compile: (source) => compile(source.replace(/\/\/.*$/gm, ""), ""),
+        hydration: {
+          resolve(source) {
+            sources.push(source);
+            return /@hydrate visible/.test(source) ? { hydrate: true, strategy: "visible" } : {};
+          },
+        },
+      }),
+    );
+    expect(hydrationOf(manager, root, "/")).toEqual({
+      shouldHydrate: true,
+      islandStrategy: "visible",
+    });
+    expect(new Set(sources)).toEqual(new Set([page]));
+  });
+
+  it("leaves other extensions to Farm's reader", async () => {
+    const root = await createRoot({
+      "src/app/page.tsx":
+        'export const island = "visible";\nexport const hydrate = true;\nexport default function Page() { return null; }\n',
+    });
+    const manager = await discover(
+      root,
+      leafRenderer({
+        compile: () => {
+          throw new Error("only .leaf files compile");
+        },
+      }),
+    );
+    expect(hydrationOf(manager, root, "/")).toEqual({
+      shouldHydrate: true,
+      islandStrategy: "visible",
+    });
+  });
+
+  it("names the file when compile() throws or returns no source", async () => {
+    const root = await createRoot({ "src/app/page.leaf": component });
+    const page = path.join(root, "src/app/page.leaf");
+    const failure = new Error("unclosed <p>");
+    const throwing = await discover(
+      root,
+      leafRenderer({
+        compile: () => {
+          throw failure;
+        },
+      }),
+    );
+    let thrown: unknown;
+    try {
+      throwing.generateClientManifest(root);
+    } catch (error) {
+      thrown = error;
+    }
+    expect((thrown as Error).message).toBe(
+      `Renderer \`leaf\` compile() for ${page} threw: unclosed <p>`,
+    );
+    expect((thrown as Error & { cause?: unknown }).cause).toBe(failure);
+
+    const empty = await discover(root, leafRenderer({ compile: () => undefined as never }));
+    expect(() => empty.generateClientManifest(root)).toThrow(
+      `Renderer \`leaf\` compile() for ${page} returned undefined. Return the module the file compiles to, as JavaScript or TSX source.`,
+    );
+  });
+});
+
 describe("renderer descriptor checks", () => {
   it("reports every bad routes and hydration field at once", () => {
     expect(() =>
@@ -536,6 +650,7 @@ describe("renderer descriptor checks", () => {
         ...leafRenderer(),
         routes: "src/pages" as never,
         hydration: { pages: "yes", strategy: "soon", resolve: 1 } as never,
+        compile: "leaf" as never,
       }),
     ).toThrow(
       [
@@ -544,17 +659,20 @@ describe("renderer descriptor checks", () => {
         "- `hydration.pages` must be true or false.",
         '- `hydration.strategy` must be "load", "idle", "visible", or "interaction"; got "soon".',
         "- `hydration.resolve` must be a method that reads a file's source.",
+        "- `compile` must be a method that returns a file's JavaScript or TSX.",
       ].join("\n"),
     );
   });
 
-  it("keeps the routes and hydration methods on the resolved renderer", () => {
+  it("keeps the routes, hydration and compile methods on the resolved renderer", () => {
     const routes = flatRoutes!;
     const resolve = () => undefined;
+    const compile = (source: string) => source;
     const resolved = resolveFarmRenderer(
-      leafRenderer({ routes, hydration: { pages: true, resolve } }),
+      leafRenderer({ routes, hydration: { pages: true, resolve }, compile }),
     );
     expect(resolved.routes).toBe(routes);
     expect(resolved.hydration).toEqual({ pages: true, resolve });
+    expect(resolved.compile).toBe(compile);
   });
 });

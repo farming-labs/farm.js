@@ -134,9 +134,9 @@ export default defineConfig({
 `defineRenderer()` returns its argument and types it as `FarmRenderer`. Farm checks the descriptor
 when it resolves the config, and reports every bad field at once.
 
-The module specifiers are what the app's server and browser code import. `routes()` and
-`hydration` are different: they're build-time hooks that run in Node while Farm scans the app, and
-never reach the browser.
+The module specifiers are what the app's server and browser code import. `routes()`, `hydration`,
+and `compile()` are different: they're build-time hooks that run in Node while Farm scans the app,
+and never reach the browser.
 
 - **`name`** (required): the renderer's id in errors and generated manifests.
 - **`vite`**, **`server`**, **`client`** (required): the three module specifiers. Each must be a
@@ -151,6 +151,8 @@ never reach the browser.
   convention other than Farm's folders. See [Route files](#route-files).
 - **`hydration`**: which pages and layouts hydrate when they say nothing, and a reader for your
   format's own syntax for it. See [Hydration](#hydration).
+- **`compile(source, file)`**: the JavaScript or TSX module a file in your format compiles to, which
+  Farm reads to plan what hydrates. See [Your own file format](#your-own-file-format).
 - **`dedupe`**: packages that must resolve to one copy in the app, passed to Vite's
   `resolve.dedupe`. List a runtime whose hooks keep module-level state.
 - **`optimizeDeps`**: packages Vite pre-bundles in development before the first page load. Farm adds
@@ -630,9 +632,29 @@ const [count, setCount] = useState(0);
 Throw from the plugin when a file can't compile, with the file, the line, and the fix in the
 message. `farm build` fails with that message, and `farm dev` logs it and answers the page with a 500.
 
-Farm decides whether a page or layout hydrates before your compiler runs: it reads `"use client"` or
-a `hydrate` export from the file as written. So in any format, `hydrate` must be the literal `true`
-or `false`:
+Farm plans what hydrates before your compiler runs. From each page, layout, and module they import,
+it reads `"use client"`, the `hydrate` and `island` exports, the imports, and the props a page
+passes to each client component. Give the descriptor `compile()` and Farm reads a file in your
+format as the module it compiles to:
+
+```js
+// src/index.js
+import { compileLeaf, componentName } from "./compile.js";
+
+// in defineRenderer({ ... })
+compile(source, file) {
+  return compileLeaf(source, componentName(file), file);
+},
+```
+
+Return the same module your Vite plugin compiles the file to, with any `"use client"` as its first
+statement. Farm calls `compile()` only for files with your `componentExtensions`, and only reads
+what it returns; your Vite plugin still compiles the file for the build. When it throws, the scan
+fails with your message and the file.
+
+Without `compile()`, Farm reads the file as written. A page or layout can still say whether it
+hydrates with a literal `hydrate` export, but a component in your format can't be a client
+component, so it never becomes an island:
 
 ```html
 <script module>
@@ -640,7 +662,7 @@ or `false`:
 </script>
 ```
 
-To give the format a syntax of its own instead, read it in `hydration.resolve()`. See
+To give the format a syntax of its own for hydration, read it in `hydration.resolve()`. See
 [Hydration](#hydration).
 
 ## Route files
@@ -759,7 +781,7 @@ For each page and layout, the most specific setting wins:
 3. **The renderer's defaults.** `hydration.pages` or `hydration.layouts`, and `hydration.strategy`.
 4. Otherwise the file renders on the server only.
 
-`resolve(source, file)` gets the file as written, and only for files with your
+`resolve(source, file)` gets the file as written, before `compile()`, and only for files with your
 `componentExtensions`. `.tsx` and the other built-in extensions keep Farm's reading. Return
 `{ hydrate?, strategy? }`, or nothing to leave the file to Farm. When a file both exports `hydrate`
 or `island` and uses your syntax, and the two disagree, the scan fails and names the file: keep one.
@@ -909,6 +931,25 @@ server exports tell your `withIsland()` which is which, with the same element in
 A context your `withIsland()` reads is enough; the leaf example's `farm-leaf/src/server.js` uses
 one. Farm starts the page's islands after the layout's root renders a navigation, and unmounts
 the ones whose markup it replaced.
+
+A client component in your own format is an island too when the descriptor has `compile()`: Farm
+finds its `"use client"` in the module `compile()` returns. In the leaf example,
+`src/components/planter.leaf` puts it first in its module script, and `src/app/islands/leaf/page.leaf`
+renders two:
+
+```vue
+<script module>
+"use client";
+export const island = "load";
+</script>
+
+<script>
+import { useState } from "leaf";
+const [planted, setPlanted] = useState(0);
+</script>
+
+<button @click="setPlanted((n) => n + 1)">{{ props.crop }} planted: {{ planted }}</button>
+```
 
 `farm dev` and `farm build` fail when the descriptor declares `islands` and the server module
 doesn't export `withIsland`.

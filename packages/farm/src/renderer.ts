@@ -12,8 +12,8 @@ import type { FarmIslandReference } from "./renderer-islands";
  *
  * Code that runs in the app (the Vite plugin, the server and client modules) is named by module
  * id, so every module resolves from the application that selected the renderer and Farm can import
- * it from the entries it generates. Build-time hooks (`routes()` and `hydration.resolve()`) are
- * methods: they run in Node while Farm scans the app, and never reach a bundle.
+ * it from the entries it generates. Build-time hooks (`routes()`, `hydration.resolve()` and
+ * `compile()`) are methods: they run in Node while Farm scans the app, and never reach a bundle.
  */
 export interface FarmRenderer {
   /** Stable public identifier used in diagnostics and generated manifests. */
@@ -71,6 +71,14 @@ export interface FarmRenderer {
   routes?(context: FarmRendererRoutesContext): FarmRendererRoutes | Promise<FarmRendererRoutes>;
   /** Which pages and layouts hydrate, and when, by default and in this renderer's own syntax. */
   hydration?: FarmRendererHydrationOptions;
+  /**
+   * The JavaScript or TSX module a file with one of `componentExtensions` compiles to. Farm reads
+   * source files before any compiler runs, to plan what hydrates: which modules are client
+   * components (`"use client"`), what a page imports, and the props each island gets. A file in
+   * the renderer's own format goes through this first. Return the same module your Vite plugin
+   * compiles the file to; Farm only reads it.
+   */
+  compile?(source: string, file: string): string;
 }
 
 /** What Farm passes to a renderer's `routes()`. */
@@ -705,6 +713,9 @@ export function resolveFarmRenderer(renderer?: FarmRenderer | false): FarmRender
         issues.push("`hydration.resolve` must be a method that reads a file's source.");
       }
     }
+  }
+  if (resolved.compile !== undefined && typeof resolved.compile !== "function") {
+    issues.push("`compile` must be a method that returns a file's JavaScript or TSX.");
   }
   if (issues.length > 0) {
     throw new TypeError(

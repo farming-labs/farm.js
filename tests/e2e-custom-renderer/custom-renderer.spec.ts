@@ -310,6 +310,41 @@ test("a client navigation starts a server page's islands, and leaving it ends th
   expect(errors).toEqual([]);
 });
 
+test("client components in .leaf files hydrate as islands from a .leaf server page", async ({
+  page,
+}) => {
+  const errors: string[] = [];
+  page.on("pageerror", (error) => errors.push(error.message));
+  page.on("console", (message) => {
+    if (message.type() === "error") errors.push(message.text());
+  });
+  const response = await page.goto("/islands/leaf");
+  const html = await response!.text();
+  // farm-leaf's compile() lets Farm read planter.leaf's "use client" and `island` export.
+  expect(html).toMatch(
+    /<f-island src="[^"]*\/components\/planter\.leaf" export="default"[^>]* strategy="load"/,
+  );
+  expect(html).toMatch(
+    /<f-island src="[^"]*\/components\/planter\.leaf" export="default"[^>]* strategy="idle"/,
+  );
+  expect(html).not.toContain("client:");
+
+  await expect(page.locator(".shell")).toHaveAttribute("data-hydrated", "true");
+  const wheat = page.locator('[data-crop="wheat"]');
+  const rye = page.locator('[data-crop="rye"]');
+  await expect(wheat).toHaveAttribute("data-hydrated", "true");
+  await expect(rye).toHaveAttribute("data-hydrated", "true");
+  await wheat.getByRole("button").click();
+  await wheat.getByRole("button").click();
+  await expect(wheat.getByRole("button")).toHaveText("wheat planted: 2");
+  // Each island is its own root.
+  await expect(rye.getByRole("button")).toHaveText("rye planted: 0");
+  await rye.getByRole("button").click();
+  await expect(rye.getByRole("button")).toHaveText("rye planted: 1");
+  await expect(wheat.getByRole("button")).toHaveText("wheat planted: 2");
+  expect(errors).toEqual([]);
+});
+
 // src/app/guides uses flat files instead of folders: farm-leaf's `routes()` maps them, and its
 // `hydration` reads leaf's own `// @hydrate` pragma.
 
