@@ -119,6 +119,9 @@ import {
   type FarmRenderer,
 } from "../renderer";
 import type { ApplicationMetadataRouteKind } from "../metadata-route";
+import { resolveFarmRendererRoutes } from "./renderer-routes";
+import { setFarmRendererHydrationScope } from "../utils/renderer-hydration";
+import type { FarmRendererHydration } from "../renderer";
 import {
   AmbiguousRouteError,
   assertUniqueRouteParameters,
@@ -317,6 +320,16 @@ export class RouteManager {
   private programmaticPages: Map<string, ProgrammaticPageRoute> = new Map();
   private programmaticLayouts: Map<string, ProgrammaticLayoutRoute> = new Map();
   private programmaticClientRoutes: ProgrammaticClientRoutes = mergeProgrammaticClientRoutes([]);
+  // The not-found page a renderer's `routes()` found: undefined when the renderer has no route
+  // rules, so Farm's own `not-found` lookup applies.
+  private rendererNotFoundPath: string | null | undefined;
+  // The hydration settings each route rule returned, by file.
+  private rendererRouteHydration = new Map<string, FarmRendererHydration>();
+  private disposeRendererHydration: () => void = () => {};
+  // The directories a renderer's route rules scan, and the files they mapped, absolute with `/`
+  // separators.
+  private rendererRouteDirs: string[] = [];
+  private rendererRouteModules = new Set<string>();
   private discovery: Promise<void> = Promise.resolve();
   private rendererRuntime?: FarmServerRendererRuntime;
   private viteServer?: ViteDevServer;
@@ -393,9 +406,74 @@ export class RouteManager {
         this.programmaticPages = next.programmaticPages;
         this.programmaticLayouts = next.programmaticLayouts;
         this.programmaticClientRoutes = next.programmaticClientRoutes;
+        this.rendererNotFoundPath = next.rendererNotFoundPath;
+        this.rendererRouteHydration = next.rendererRouteHydration;
+        this.rendererRouteDirs = next.rendererRouteDirs;
+        this.rendererRouteModules = next.rendererRouteModules;
+        this.recordRendererHydration();
       });
     this.discovery = discovery;
     return discovery;
+  }
+
+  /**
+   * Hands the client-module reader the renderer's hydration levels for this scan's pages and
+   * layouts (`hydration` and route rules on the renderer descriptor).
+   */
+  private recordRendererHydration(): void {
+    this.disposeRendererHydration();
+    const renderer = this.config.renderer;
+    const routeModules: Array<{
+      modulePath: string;
+      kind: "page" | "layout";
+      hydration?: FarmRendererHydration;
+    }> = [];
+    for (const [kind, entries] of [
+      ["page", this.routes.values()],
+      ["layout", this.layouts.values()],
+    ] as const) {
+      for (const entry of entries) {
+        if (entry.source === "programmatic") continue;
+        routeModules.push({
+          modulePath: entry.modulePath,
+          kind,
+          hydration: this.rendererRouteHydration.get(entry.modulePath),
+        });
+      }
+    }
+    this.disposeRendererHydration = setFarmRendererHydrationScope(
+      getFarmSourceRoots(this.config).map((source) => source.root),
+      renderer,
+      routeModules,
+    );
+  }
+
+  /**
+   * The not-found page a renderer's `routes()` mapped, null when it mapped none, or undefined when
+   * the renderer has no route rules and Farm looks for `src/app/not-found.*` itself.
+   */
+  getRendererNotFoundPath(): string | null | undefined {
+    return this.rendererNotFoundPath;
+  }
+
+  /**
+   * Whether `file` is under a directory a renderer's route rules scan, where adding or removing a
+   * file can change the routes.
+   */
+  isRendererRouteFile(file: string): boolean {
+    if (this.rendererRouteDirs.length === 0) return false;
+    const normalized = file.replace(/\\/g, "/");
+    return this.rendererRouteDirs.some((dir) => normalized.startsWith(`${dir}/`));
+  }
+
+  /**
+   * Whether `file` is a page, layout, loading, error or not-found file a renderer's route rules
+   * mapped, where an edit can change what the route renders or whether it hydrates.
+   */
+  isRendererRouteModule(file: string): boolean {
+    return (
+      this.rendererRouteModules.size > 0 && this.rendererRouteModules.has(file.replace(/\\/g, "/"))
+    );
   }
 
   /** Fill this manager's empty route tables. Only a fresh manager made by discoverRoutes runs it. */
@@ -1453,11 +1531,54 @@ export class RouteManager {
       (extension) => extension.slice(1),
     );
     const componentGlob = componentExtensions.join(",");
-    const pageFiles = await safeGlobFiles(`**/page.{${componentGlob},md,mdx}`, appDir);
+    // A renderer's route rules name the page, layout, loading and error files, and the URL each
+    // one serves. Route parsing reads each as Farm's folders would name it (`blog/[slug]/page.leaf`)
+    // while its module path stays the file itself.
+    const rendererRoutes = await resolveFarmRendererRoutes({
+      renderer: this.config.renderer,
+      root: source.root,
+      srcDir: source.srcDir,
+    });
+    const routeModulePaths = new Map<string, string>();
+    const modulePathOf = (file: string) => routeModulePaths.get(file) ?? path.join(appDir, file);
+    const rendererFiles = (kind: "page" | "layout" | "loading" | "error") =>
+      (rendererRoutes?.entries ?? [])
+        .filter((entry) => entry.kind === kind)
+        .map((entry) => {
+          routeModulePaths.set(entry.routeFile, entry.modulePath);
+          if (entry.hydration.hydrate !== undefined || entry.hydration.strategy !== undefined) {
+            this.rendererRouteHydration.set(entry.modulePath, entry.hydration);
+          }
+          return entry.routeFile;
+        });
+    if (rendererRoutes) {
+      this.rendererRouteDirs.push(rendererRoutes.dir.replace(/\\/g, "/"));
+      for (const entry of rendererRoutes.entries) {
+        this.rendererRouteModules.add(entry.modulePath.replace(/\\/g, "/"));
+      }
+      const notFound = rendererRoutes.entries.find((entry) => entry.kind === "not-found");
+      // A later source root (the app over its layers) replaces an earlier one's page.
+      if (notFound || this.rendererNotFoundPath === undefined) {
+        this.rendererNotFoundPath = notFound?.modulePath ?? null;
+      }
+    }
+    // Named slots stay in src/app's folders either way.
+    const pageFiles = rendererRoutes
+      ? [
+          ...rendererFiles("page"),
+          ...(await safeGlobFiles(`**/@*/**/page.{${componentGlob},md,mdx}`, appDir)),
+        ]
+      : await safeGlobFiles(`**/page.{${componentGlob},md,mdx}`, appDir);
     const slotDefaultFiles = await safeGlobFiles(`**/@*/**/default.{${componentGlob}}`, appDir);
-    const layoutFiles = await safeGlobFiles(`**/layout.{${componentGlob}}`, appDir);
-    const loadingFiles = await safeGlobFiles(`**/loading.{${componentGlob}}`, appDir);
-    const errorFiles = await safeGlobFiles(`**/error.{${componentGlob}}`, appDir);
+    const layoutFiles = rendererRoutes
+      ? rendererFiles("layout")
+      : await safeGlobFiles(`**/layout.{${componentGlob}}`, appDir);
+    const loadingFiles = rendererRoutes
+      ? rendererFiles("loading")
+      : await safeGlobFiles(`**/loading.{${componentGlob}}`, appDir);
+    const errorFiles = rendererRoutes
+      ? rendererFiles("error")
+      : await safeGlobFiles(`**/error.{${componentGlob}}`, appDir);
     const metadataImageFiles = await safeGlobFiles(
       `**/{opengraph-image,twitter-image}.{${componentGlob},png,jpg,jpeg,gif,webp}`,
       appDir,
@@ -1494,14 +1615,14 @@ export class RouteManager {
       if (componentFiles.length > 1) {
         throw new Error(
           `Duplicate page route "${pattern}". Found ${componentFiles
-            .map((file) => path.join(appDir, file))
+            .map(modulePathOf)
             .join(" and ")}.`,
         );
       }
       if (markdownFiles.length > 1) {
         throw new Error(
           `Duplicate markdown representation for page route "${pattern}". Found ${markdownFiles
-            .map((file) => path.join(appDir, file))
+            .map(modulePathOf)
             .join(" and ")}.`,
         );
       }
@@ -1511,7 +1632,7 @@ export class RouteManager {
       const primaryFile = componentFile || markdownFile;
       if (!primaryFile) continue;
 
-      const modulePath = path.join(appDir, primaryFile);
+      const modulePath = modulePathOf(primaryFile);
       const existing = this.routes.get(pattern);
       if (existing?.sourceRoot === source.root) {
         throw new Error(
@@ -1523,7 +1644,7 @@ export class RouteManager {
         modulePath,
         ...(markdownFile
           ? {
-              markdownSourcePath: path.join(appDir, markdownFile),
+              markdownSourcePath: modulePathOf(markdownFile),
             }
           : {}),
         pattern,
@@ -1540,7 +1661,7 @@ export class RouteManager {
     ] as const) {
       for (const file of files) {
         const route = parseRoutePath(file);
-        const modulePath = path.join(appDir, file);
+        const modulePath = modulePathOf(file);
         // Keyed by directory: `(auth)/layout.tsx` and `layout.tsx` share the URL "/".
         const pattern = createRouteDirectoryPattern(route);
         const existing = target.get(pattern);

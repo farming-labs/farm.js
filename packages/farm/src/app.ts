@@ -240,6 +240,8 @@ export class FarmApp {
   }
 
   private async verifyAppStructure(): Promise<void> {
+    // A renderer with route rules decides where route files live; its route scan reports them.
+    if (typeof this.config.renderer?.routes === "function") return;
     const appDirs = getFarmAppDirectories(this.config);
 
     const hasAppDirectory = (await Promise.all(appDirs.map((appDir) => fileExists(appDir)))).some(
