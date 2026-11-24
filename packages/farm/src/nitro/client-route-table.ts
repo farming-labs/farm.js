@@ -122,9 +122,19 @@ function isStatic(segment: RouteSegmentSpecificity): boolean {
   return segment === "static";
 }
 
-/** The table's module. V8 parses a large JSON string faster than the same object literal. */
-export function generateFarmClientRouteTableModule(table: FarmClientRouteTableEntry[]): string {
-  return `export default JSON.parse(${JSON.stringify(JSON.stringify(table))});\n`;
+/**
+ * The table's module. V8 parses a large JSON string faster than the same object literal. With
+ * `matcher` (islands mode's web client), the route matcher loads with it instead of with the entry
+ * (generateFarmClientRouteTableRuntime's `lazyMatcher`).
+ */
+export function generateFarmClientRouteTableModule(
+  table: FarmClientRouteTableEntry[],
+  options: { matcher?: boolean } = {},
+): string {
+  const matcher = options.matcher
+    ? `export { createFarmRouter, isFarmRouteActive, matchFarmRoute } from "@farm.js/core/router";\n`
+    : "";
+  return `${matcher}export default JSON.parse(${JSON.stringify(JSON.stringify(table))});\n`;
 }
 
 export async function writeFarmClientRouteTable(

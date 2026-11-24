@@ -139,6 +139,11 @@ Take the paths a page does not run off its load. No configuration and no public 
    matched route hydrates a page or a layout, or has a slot, and that the router imports for a
    navigation to such a route. The renderer's chunks already load at that moment (RFC 0010), so
    the new chunk joins them.
+4. **The route matcher loads with the route table.** At load, a page matches only its own path.
+   The document names that path's route, params and layouts, which the server finds with the
+   client's matcher and layout selection over the same tables. The matcher (`createFarmRouter`,
+   pattern parsing and its checks, `isFarmRouteActive`) moves to the table's chunk, which the
+   router loads before it matches another path.
 
 Estimated savings on the probe, at brotli 11, from removing the mapped bytes of a built bundle and
 compressing the rest:
@@ -282,6 +287,36 @@ merged on `main` locally, interleaved with an A/A copy of `main`, medians of 21,
   from #3136 and #3143, which this run does not measure apart.
 - **Remaining gap:** 47 ms at 1.6 Mbit/s, down from 76. Unlimited, 23 ms, down from 95; the A/A
   pair differed by 15 there.
+
+**Item 4 (#3153).**
+
+What changed:
+
+- The route table's chunk re-exports the matcher, and the entry no longer imports it.
+- `getFarmClientBootRoutes` names the route's `params` and `layouts` as well. Until the table
+  loads, `matchRoute` and `getApplicableLayouts` answer for the document's own path from them.
+  Another path throws instead of matching against part of the table.
+
+Measured against `main`, interleaved with an A/A copy of `main`, 150 ms latency, 4x CPU
+throttling, medians of 21, in ms:
+
+| Network                  | `rsc` | `main` | this change | A/A |
+| ------------------------ | ----- | ------ | ----------- | --- |
+| 1.6 Mbit/s, all hydrated | 777   | 819    | 814         | 823 |
+| Unlimited, all hydrated  | 419   | 431    | 428         | 431 |
+
+- **Bytes:** the entry went from 11.4 KB to 9.7 KB at brotli 11 (11,423 to 9,738 bytes). The
+  table's chunk, which loads with the router, grew to 2.3 KB. Scripts on the wire went from
+  78.2 KB to 76.6 KB.
+- **Unlimited:** the 3 ms is within the A/A pair's spread.
+- **First navigation:** at 150 ms latency and 1.6 Mbit/s, medians of 11, no section is slower than
+  both `main` and its A/A copy after a tap. After a hover, guide is 162 ms against 161 and 152.
+  At 50 ms latency and unlimited, medians of 15, guide after a hover is 63 ms against 62 and 62,
+  so the matcher costs that navigation about 1 ms. It now parses and runs there instead of at
+  boot.
+- **A page that navigates** loads 440 bytes more over its first load and first navigation (the
+  table's chunk went from 143 to 2,268 bytes). A page that doesn't navigate loads 1,685 fewer.
+- **Remaining gap:** 37 ms at 1.6 Mbit/s, with islx 0.0.25 as `main` pins it.
 
 **What is left.** On the probe the whole difference is script: 81.4 KB on the wire for islands
 against 69.7 KB, with documents within 0.4 KB. Measured with esbuild and brotli 11: the server
