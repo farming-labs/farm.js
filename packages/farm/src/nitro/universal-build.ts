@@ -310,7 +310,6 @@ import {
   loadFarmRendererVitePlugins,
   REACT_RENDERER,
   resolveFarmRendererAppSetup,
-  usesFarmRendererIslands,
 } from "../renderer";
 import {
   appMiddlewareMayHandlePath,
@@ -333,6 +332,7 @@ import {
   type MiddlewareRouteLocation,
 } from "../middleware/path";
 import type { FarmRenderer } from "../renderer";
+import { usesFarmRendererIslands } from "../renderer-islands";
 import { farmPluginMayAffectRuntimePath } from "../plugin-runtime-endpoint";
 
 export { appMiddlewareMayHandlePath, configMiddlewareMayHandlePath };
@@ -6984,7 +6984,11 @@ async function buildSSRInMemory(
   const instrumentationPath = resolveFarmInstrumentationFile(root, config.srcDir || "src");
 
   // Check for custom not-found page
-  const notFoundPath = resolveFarmNotFoundComponentPath(config, appDirs);
+  const notFoundPath = resolveFarmNotFoundComponentPath(
+    config,
+    appDirs,
+    routeManager.getRendererNotFoundPath(),
+  );
   if (notFoundPath) logger.info(`📋 Found custom 404 page: ${notFoundPath}`);
 
   // Sort layouts by depth (root first)

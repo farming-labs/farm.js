@@ -267,7 +267,10 @@ default export. [Custom renderers](/docs/renderers/custom) walks through each mo
 - Both modules must export `configureApp()` when the descriptor sets `appSetup`.
 - A renderer with its own file format lists its extensions in `componentExtensions` and compiles
   them in the Vite module. FARMJS reads a route's `hydrate` export from the file as written, before
-  that compiler runs, so `hydrate` must be the literal `true` or `false` in any format.
+  that compiler runs, so `hydrate` must be the literal `true` or `false` in any format. A renderer
+  can read its own syntax instead with `hydration.resolve()`, and map its own file convention to
+  routes with `routes()`. See [Route files](/docs/renderers/custom#route-files) and
+  [Hydration](/docs/renderers/custom#hydration).
 - A JSX renderer names its runtime package in `jsxImportSource`. In development, Vite's dependency
   scan compiles JSX as React unless the app's tsconfig names a source, so FARMJS passes this one to
   the scan. Without it, an app with no React installed fails the scan and reloads on its first

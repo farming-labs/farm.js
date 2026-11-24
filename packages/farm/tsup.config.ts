@@ -114,7 +114,7 @@ const entry = {
   "internal/cli-runtime": "src/cli-runtime.ts",
   "internal/request-cookies": "src/request-cookies.ts",
   config: "src/config-entry.ts",
-  renderer: "src/renderer.ts",
+  renderer: "src/renderer-entry.ts",
   "renderer/react/server": "src/renderer/react/server.ts",
   "renderer/react/client": "src/renderer/react/client.ts",
   "renderer/react/vite": "src/renderer/react/vite.ts",

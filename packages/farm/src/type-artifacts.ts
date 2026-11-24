@@ -1,4 +1,5 @@
 import { isManagedMount } from "./storage/mount-schema";
+import type { FarmRenderer } from "./renderer";
 import { existsSync, mkdirSync, readFileSync, unlinkSync } from "fs";
 import { dirname, isAbsolute, join, relative, resolve } from "path";
 import { APITypeGenerator, type APIRouteInfo } from "./type-generator";
@@ -38,6 +39,8 @@ export interface GenerateFarmTypeArtifactsOptions {
   layers?: readonly ResolvedFarmLayer[];
   suppressLintOnLink?: boolean;
   componentExtensions?: readonly string[];
+  /** The renderer, whose `routes()` (when it has one) decides which files are routes. */
+  renderer?: Pick<FarmRenderer, "name" | "routes" | "componentExtensions">;
   routeTypesOutFile?: string;
   apiTypesOutFile?: string;
   envTypesOutFile?: string;
@@ -96,6 +99,7 @@ export async function generateFarmTypeArtifacts(
       extraRoutes: options.extraRoutes || [],
       suppressLintOnLink: options.suppressLintOnLink,
       componentExtensions: options.componentExtensions,
+      renderer: options.renderer,
       sourceRoots,
     };
     unifiedSections.push(await createRouteTypeDeclarations(routeOptions, unifiedTypesPath));
@@ -108,6 +112,7 @@ export async function generateFarmTypeArtifacts(
       extraRoutes: options.extraRoutes || [],
       suppressLintOnLink: options.suppressLintOnLink,
       componentExtensions: options.componentExtensions,
+      renderer: options.renderer,
       sourceRoots,
     } satisfies GenerateRouteTypesOptions;
     if (options.check) {

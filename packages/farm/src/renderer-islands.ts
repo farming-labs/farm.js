@@ -6,6 +6,13 @@
  */
 import { resolveIslandMarkup } from "@farm.js/islx/islands/server";
 import { isFarmIslandStrategy, type FarmIslandStrategy } from "./island";
+import {
+  getFarmRendererCapabilities,
+  isReactRenderer,
+  resolveFarmRenderer,
+  type FarmRenderer,
+} from "./renderer";
+import { resolveFarmServerComponentsMode } from "./server-components-mode";
 import { _peekCurrentRequest } from "./server/request-bridge";
 
 /** What `withIsland` gets for each export of a client module. */
@@ -161,4 +168,26 @@ export function resolveFarmIsland(
     }
     return undefined;
   }
+}
+
+/**
+ * Whether the app's islands start through its renderer's `withIsland`: a renderer other than
+ * React that declares `capabilities.islands`, in an app that sets
+ * `experimental.isolatedClientHydration: "enabled"` without server components. Every other app
+ * takes the path it took before.
+ */
+export function usesFarmRendererIslands(config: {
+  readonly renderer?: FarmRenderer | false | undefined;
+  readonly experimental?: {
+    readonly isolatedClientHydration?: string | undefined;
+    readonly serverComponents?: unknown;
+  };
+}): boolean {
+  const renderer = resolveFarmRenderer(config.renderer);
+  return (
+    !isReactRenderer(renderer) &&
+    getFarmRendererCapabilities(renderer).islands &&
+    config.experimental?.isolatedClientHydration === "enabled" &&
+    resolveFarmServerComponentsMode(config.experimental?.serverComponents) === undefined
+  );
 }

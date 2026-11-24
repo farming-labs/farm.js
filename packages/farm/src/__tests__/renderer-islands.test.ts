@@ -1,12 +1,9 @@
 // @vitest-environment node
 
 import { afterEach, describe, expect, it, vi } from "vitest";
-import {
-  assertFarmRendererServerModule,
-  resolveFarmIsland,
-  usesFarmRendererIslands,
-  type FarmIslandReference,
-} from "../renderer";
+import { assertFarmRendererServerModule } from "../renderer";
+import { resolveFarmIsland, type FarmIslandReference } from "../renderer-entry";
+import { usesFarmRendererIslands } from "../renderer-islands";
 import * as reactServer from "../renderer/react/server";
 import { _setCurrentRequestResolver } from "../server/request-bridge";
 import { transformIsolatedClientBoundaryModule } from "../vite";

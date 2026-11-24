@@ -3,16 +3,17 @@ import { createRequire } from "node:module";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
 import type { FarmPresetRuntime } from "./deployment";
+import type { FarmIslandStrategy } from "./island";
 import type { FarmIslandReference } from "./renderer-islands";
-import { resolveFarmServerComponentsMode } from "./server-components-mode";
 
 /**
  * A rendering-library integration used by Farm's compiler, server renderer,
  * and browser hydration runtime.
  *
- * Renderer descriptors intentionally contain module identifiers instead of
- * implementation functions. This keeps farm.config.ts serializable and lets
- * every module resolve from the application that selected the renderer.
+ * Code that runs in the app (the Vite plugin, the server and client modules) is named by module
+ * id, so every module resolves from the application that selected the renderer and Farm can import
+ * it from the entries it generates. Build-time hooks (`routes()` and `hydration.resolve()`) are
+ * methods: they run in Node while Farm scans the app, and never reach a bundle.
  */
 export interface FarmRenderer {
   /** Stable public identifier used in diagnostics and generated manifests. */
@@ -62,6 +63,87 @@ export interface FarmRenderer {
    * the renderer's `configureApp()`, which both renderer runtime modules must export.
    */
   appSetup?: string;
+  /**
+   * Which files are routes, and the URL each one serves. Farm calls it once per route scan, in
+   * `farm dev`, `farm build` and `farm generate`, and builds its one route table from the rules
+   * `resolve()` returns. Leave it out to keep Farm's folders: `src/app/blog/[slug]/page.tsx`.
+   */
+  routes?(context: FarmRendererRoutesContext): FarmRendererRoutes | Promise<FarmRendererRoutes>;
+  /** Which pages and layouts hydrate, and when, by default and in this renderer's own syntax. */
+  hydration?: FarmRendererHydrationOptions;
+}
+
+/** What Farm passes to a renderer's `routes()`. */
+export interface FarmRendererRoutesContext {
+  /** The project root, or a layer's root when Farm scans that layer's routes. */
+  readonly root: string;
+  /** Farm's folder rules (`about/page.tsx` → `/about`), to hand the files you don't map yourself. */
+  readonly defaults: FarmRendererRoutes;
+}
+
+/** A renderer's route rules. */
+export interface FarmRendererRoutes {
+  /** The directory Farm scans, relative to the root. Defaults to `src/app` (`<srcDir>/app`). */
+  dir?: string;
+  /**
+   * The route a file is, or `null` when it isn't one. Called once per file under `dir`, with the
+   * same answer expected for the same file. Farm doesn't pass its own files: `route.ts`,
+   * `middleware.ts`, metadata routes, and named slots stay in `src/app`.
+   */
+  resolve(file: FarmRendererRouteFile): FarmRendererRoute | null | undefined;
+}
+
+/** A file under a renderer's route `dir`. */
+export interface FarmRendererRouteFile {
+  /** Relative to `dir`, with `/` separators: `"blog/[slug].client.leaf"`. */
+  readonly path: string;
+  /** The directories between `dir` and the file: `["blog"]`, or `[]` for a file directly in it. */
+  readonly segments: readonly string[];
+  /** The file name without its extension: `"[slug].client"`. */
+  readonly name: string;
+  /** The extension, lowercase: `".leaf"`. */
+  readonly extension: string;
+}
+
+export type FarmRendererRouteKind = "page" | "layout" | "loading" | "error" | "not-found";
+
+/** A route a file is, with optional hydration settings for it. */
+export interface FarmRendererRoute extends FarmRendererHydration {
+  kind: FarmRendererRouteKind;
+  /**
+   * The URL, written as `src/app` folders write it: `"/"`, `"/blog/[slug]"`,
+   * `"/docs/[...path]"`, `"/(marketing)/pricing"`. A layout, loading or error file applies to
+   * its pattern and everything below it. `"not-found"` takes `"/"`: Farm renders one not-found page.
+   */
+  pattern: string;
+}
+
+/** Hydration settings for a page or layout. A field left out falls back to the next level. */
+export interface FarmRendererHydration {
+  /** Whether the page or layout hydrates, as `export const hydrate = true` says. */
+  hydrate?: boolean;
+  /** When it hydrates, as `export const island = "visible"` says. Takes effect when it hydrates. */
+  strategy?: FarmIslandStrategy;
+}
+
+/**
+ * A renderer's hydration settings. The most specific level wins: a file's own settings, then its
+ * route rule from `routes()`, then these defaults, then Farm's (no hydration, `"load"`).
+ */
+export interface FarmRendererHydrationOptions {
+  /** Whether pages hydrate by default. */
+  pages?: boolean;
+  /** Whether layouts hydrate by default. */
+  layouts?: boolean;
+  /** When a hydrating page or layout that sets no strategy hydrates. */
+  strategy?: FarmIslandStrategy;
+  /**
+   * Reads a page or layout's settings from its source, in this renderer's own syntax. Farm calls
+   * it for files with the descriptor's `componentExtensions`, before any compiler runs. Return
+   * nothing to leave the file to Farm's `export const hydrate` and `export const island`; a file
+   * that says both, and disagrees, fails the build.
+   */
+  resolve?(source: string, file: string): FarmRendererHydration | null | undefined;
 }
 
 export type FarmRendererRuntime = Exclude<FarmPresetRuntime, "unknown">;
@@ -564,6 +646,22 @@ export function defineRenderer<const TRenderer extends FarmRenderer>(
   return renderer;
 }
 
+// A record, so the type-check fails until a strategy added to `FarmIslandStrategy` is added here.
+// No local module is imported at runtime: the renderer capability matrix test loads this file alone.
+const FARM_RENDERER_STRATEGIES: Readonly<Record<FarmIslandStrategy, true>> = {
+  load: true,
+  idle: true,
+  visible: true,
+  interaction: true,
+};
+
+function isFarmRendererStrategy(value: unknown): value is FarmIslandStrategy {
+  return (
+    typeof value === "string" &&
+    Object.prototype.hasOwnProperty.call(FARM_RENDERER_STRATEGIES, value)
+  );
+}
+
 export function resolveFarmRenderer(renderer?: FarmRenderer | false): FarmRenderer {
   // `renderer: false`, or a config that already resolved it, which config resolution runs again.
   if (renderer === false || isFarmRendererDisabled(renderer)) renderer = NO_RENDERER;
@@ -583,6 +681,37 @@ export function resolveFarmRenderer(renderer?: FarmRenderer | false): FarmRender
     throw new TypeError("Farm renderer `appSetup` must be a non-empty module path.");
   }
 
+  const issues: string[] = [];
+  if (resolved.routes !== undefined && typeof resolved.routes !== "function") {
+    issues.push("`routes` must be a method that returns `{ dir?, resolve(file) }`.");
+  }
+  const hydration = resolved.hydration as unknown;
+  if (hydration !== undefined) {
+    if (!hydration || typeof hydration !== "object" || Array.isArray(hydration)) {
+      issues.push("`hydration` must be an object.");
+    } else {
+      const options = hydration as Record<string, unknown>;
+      for (const key of ["pages", "layouts"] as const) {
+        if (options[key] !== undefined && typeof options[key] !== "boolean") {
+          issues.push(`\`hydration.${key}\` must be true or false.`);
+        }
+      }
+      if (options.strategy !== undefined && !isFarmRendererStrategy(options.strategy)) {
+        issues.push(
+          `\`hydration.strategy\` must be "load", "idle", "visible", or "interaction"; got ${JSON.stringify(options.strategy)}.`,
+        );
+      }
+      if (options.resolve !== undefined && typeof options.resolve !== "function") {
+        issues.push("`hydration.resolve` must be a method that reads a file's source.");
+      }
+    }
+  }
+  if (issues.length > 0) {
+    throw new TypeError(
+      `Farm renderer \`${resolved.name}\` is invalid:\n${issues.map((issue) => `- ${issue}`).join("\n")}`,
+    );
+  }
+
   return {
     ...resolved,
     componentExtensions: [...(resolved.componentExtensions || [])],
@@ -592,6 +721,41 @@ export function resolveFarmRenderer(renderer?: FarmRenderer | false): FarmRender
     capabilities: getFarmRendererCapabilities(resolved),
     options: resolved.options ? { ...resolved.options } : undefined,
   };
+}
+
+/** @internal An error a renderer hook caused, with the hook's own error as its `cause`. */
+export function createFarmRendererHookError(message: string, cause: unknown): Error {
+  const error = new Error(message);
+  (error as Error & { cause?: unknown }).cause = cause;
+  return error;
+}
+
+/**
+ * @internal The `hydrate` and `strategy` a renderer hook returned, checked. `where` names the hook
+ * and the file for the error a bad value throws.
+ */
+export function readFarmRendererHydration(
+  value: Readonly<Record<string, unknown>>,
+  where: string,
+): FarmRendererHydration {
+  const result: FarmRendererHydration = {};
+  if (value.hydrate !== undefined) {
+    if (typeof value.hydrate !== "boolean") {
+      throw new TypeError(
+        `${where} returned \`hydrate: ${JSON.stringify(value.hydrate)}\`. Return true or false, or leave it out.`,
+      );
+    }
+    result.hydrate = value.hydrate;
+  }
+  if (value.strategy !== undefined) {
+    if (!isFarmRendererStrategy(value.strategy)) {
+      throw new TypeError(
+        `${where} returned \`strategy: ${JSON.stringify(value.strategy)}\`. Return "load", "idle", "visible", or "interaction", or leave it out.`,
+      );
+    }
+    result.strategy = value.strategy;
+  }
+  return result;
 }
 
 export async function readFarmRendererWebStream(
@@ -682,33 +846,3 @@ export async function loadFarmRendererVitePlugins(
   if (!created) return [];
   return Array.isArray(created) ? [...created] : [created];
 }
-
-/**
- * Whether the app's islands start through its renderer's `withIsland` (RFC 0012): a renderer
- * other than React that declares `capabilities.islands`, in an app that sets
- * `experimental.isolatedClientHydration: "enabled"` without server components. Every other app
- * takes the path it took before.
- */
-export function usesFarmRendererIslands(config: {
-  readonly renderer?: FarmRenderer | false | undefined;
-  readonly experimental?: {
-    readonly isolatedClientHydration?: string | undefined;
-    readonly serverComponents?: unknown;
-  };
-}): boolean {
-  const renderer = resolveFarmRenderer(config.renderer);
-  return (
-    !isReactRenderer(renderer) &&
-    getFarmRendererCapabilities(renderer).islands &&
-    config.experimental?.isolatedClientHydration === "enabled" &&
-    resolveFarmServerComponentsMode(config.experimental?.serverComponents) === undefined
-  );
-}
-
-export {
-  resolveFarmIsland,
-  type FarmIslandAttributes,
-  type FarmIslandReference,
-  type FarmIslandScript,
-  type FarmResolvedIsland,
-} from "./renderer-islands";
