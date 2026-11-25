@@ -410,7 +410,9 @@ async transform(code, id) {
 
 leaf's compiler is 429 lines. It parses the markup, writes the JSX, and turns a mistake, such as JSX's `onClick={...}`, into a build error with the file, the line, and the `.leaf` spelling. A template language, Markdown, or something nobody has invented yet works the same way, as long as it compiles to that shape. `.leaf` files then work as pages, layouts, dynamic segments, and error and not-found pages, next to `.tsx` routes in the same app.
 
-There's one exception: Farm reads `hydrate` from the file as written, before your compiler runs. So `hydrate` must be the literal `true` or `false`. A value Farm can't read without running your code, like `!0`, stops the build with an error that names the file.
+Farm reads hydration settings from the source before your compiler runs. If you use `export const hydrate`, give it a literal `true` or `false`. An expression like `!0` stops the build with an error that names the file.
+
+Your format can also define its own syntax. In Farm's leaf example, the harvest page writes `// @hydrate interaction` in its module script. The renderer's `hydration.resolve(source, file)` reads that comment and returns `{ hydrate: true, strategy: "interaction" }` for the page. [See how Farm combines page and layout hydration settings.](/docs/renderers/custom#hydration)
 
 <span id="step-8-optional-streaming" className="blog-heading-anchor" />
 
