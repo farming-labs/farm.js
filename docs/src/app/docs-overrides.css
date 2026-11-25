@@ -70,7 +70,7 @@
   font-weight: 300;
   line-height: 1.65;
 }
-/* Inline code sits close to the light reading text instead of standing out from it: Geist Mono
+/* Inline code sits close to the light reading text instead of standing out from it: Graft Mono
    like the code panels, a lighter weight, and a hairline border (half a pixel is one device
    pixel on high-density screens, and rounds up to one pixel elsewhere). */
 #farm-docs-root .fd-docs-content :not(pre) > code {
@@ -79,7 +79,7 @@
   border-radius: 3px;
   background: var(--farm-code-bg);
   color: rgb(255 255 255 / 0.78);
-  font-family: var(--font-geist-mono), ui-monospace, monospace;
+  font-family: var(--font-graft-mono), ui-monospace, monospace;
   font-size: 0.84em;
   font-weight: 350;
   -webkit-font-smoothing: antialiased;
@@ -102,7 +102,7 @@
   background: var(--farm-code-bg) !important;
   box-shadow: none !important;
   color: var(--farm-code-text) !important;
-  font-family: var(--font-geist-mono), ui-monospace, monospace;
+  font-family: var(--font-graft-mono), ui-monospace, monospace;
   font-size: 11px;
   font-weight: 400;
   letter-spacing: 0.06em;
@@ -154,7 +154,7 @@
   border: 0 !important;
   background: transparent;
   color: var(--farm-code-legend);
-  font-family: var(--font-geist-mono), ui-monospace, monospace;
+  font-family: var(--font-graft-mono), ui-monospace, monospace;
   font-size: 12px;
   line-height: 22px;
   transform: translateY(-50%);
@@ -306,7 +306,7 @@
   border-radius: 2px !important;
   background: transparent !important;
   color: var(--farm-code-text) !important;
-  font-family: var(--font-geist-mono), ui-monospace, monospace;
+  font-family: var(--font-graft-mono), ui-monospace, monospace;
   font-size: 11px;
   letter-spacing: 0.05em;
   transition:
@@ -342,7 +342,7 @@
   padding-top: 20px;
   border-top: 1px solid var(--farm-code-line);
   color: var(--farm-code-legend);
-  font-family: var(--font-geist-mono), ui-monospace, monospace;
+  font-family: var(--font-graft-mono), ui-monospace, monospace;
   font-size: 11px;
   letter-spacing: 0.06em;
   text-transform: uppercase;
@@ -453,7 +453,7 @@
 }
 #farm-docs-root #nd-docs-layout .fd-page-nav-description {
   color: var(--farm-code-legend) !important;
-  font-family: var(--font-geist-mono), ui-monospace, monospace;
+  font-family: var(--font-graft-mono), ui-monospace, monospace;
   font-size: 10.5px;
   letter-spacing: 0.08em;
   text-transform: uppercase;
@@ -498,7 +498,7 @@
   border-bottom: 1px solid var(--farm-code-line) !important;
   background: rgb(255 255 255 / 0.035) !important;
   color: var(--farm-code-legend);
-  font-family: var(--font-geist-mono), ui-monospace, monospace;
+  font-family: var(--font-graft-mono), ui-monospace, monospace;
   font-size: 11px;
   font-weight: 400;
   letter-spacing: 0.06em;
@@ -575,7 +575,7 @@
   color: var(--farm-code-dim);
 }
 #farm-docs-root .fd-docs-content ol > li::marker {
-  font-family: var(--font-geist-mono), ui-monospace, monospace;
+  font-family: var(--font-graft-mono), ui-monospace, monospace;
   font-size: 0.82em;
 }
 #farm-docs-root .fd-docs-content :is(ol, ul) > li + li {
@@ -595,7 +595,7 @@
 #farm-docs-root #nd-toc #toc-title {
   gap: 8px;
   color: var(--farm-code-legend);
-  font-family: var(--font-geist-mono), ui-monospace, monospace;
+  font-family: var(--font-graft-mono), ui-monospace, monospace;
   font-size: 11px;
   font-weight: 400;
   letter-spacing: 0.08em;
@@ -669,7 +669,7 @@
 #farm-docs-root #nd-sidebar button[style*="calc(2 * var(--spacing))"],
 #farm-docs-root #nd-sidebar-mobile button[style*="calc(2 * var(--spacing))"] {
   color: var(--farm-code-legend) !important;
-  font-family: var(--font-geist-mono), ui-monospace, monospace;
+  font-family: var(--font-graft-mono), ui-monospace, monospace;
   font-size: 11px !important;
   font-weight: 400 !important;
   letter-spacing: 0.08em;
@@ -693,7 +693,7 @@
   align-items: center;
   gap: 0;
   margin: 0 0 22px !important;
-  font-family: var(--font-geist-mono), ui-monospace, monospace;
+  font-family: var(--font-graft-mono), ui-monospace, monospace;
   font-size: 11px !important;
   font-weight: 400;
   letter-spacing: 0.08em;
@@ -750,7 +750,7 @@ html[data-farm-docs-runtime] :is(.omni-close-btn, .omni-kbd-sm) {
   border-radius: 3px !important;
   background: #000 !important;
   color: var(--farm-code-legend) !important;
-  font-family: var(--font-geist-mono), ui-monospace, monospace !important;
+  font-family: var(--font-graft-mono), ui-monospace, monospace !important;
   font-size: 10px !important;
   font-weight: 400 !important;
   letter-spacing: 0.06em;
@@ -761,7 +761,7 @@ html[data-farm-docs-runtime] .omni-close-btn:is(:hover, :focus-visible) {
 }
 html[data-farm-docs-runtime] .omni-group-label {
   color: var(--farm-code-legend) !important;
-  font-family: var(--font-geist-mono), ui-monospace, monospace !important;
+  font-family: var(--font-graft-mono), ui-monospace, monospace !important;
   font-size: 11px !important;
   font-weight: 400 !important;
   letter-spacing: 0.08em;
@@ -782,7 +782,7 @@ html[data-farm-docs-runtime] .omni-item::before {
 }
 html[data-farm-docs-runtime] .omni-item-subtitle {
   color: var(--farm-code-dim) !important;
-  font-family: var(--font-geist-mono), ui-monospace, monospace !important;
+  font-family: var(--font-graft-mono), ui-monospace, monospace !important;
   font-size: 10.5px !important;
   letter-spacing: 0.04em;
 }
@@ -819,7 +819,7 @@ html[data-farm-docs-runtime] .omni-footer {
 }
 html[data-farm-docs-runtime] :is(.omni-footer-hint, .omni-filter-label, .omni-filter-button) {
   color: var(--farm-code-legend) !important;
-  font-family: var(--font-geist-mono), ui-monospace, monospace !important;
+  font-family: var(--font-graft-mono), ui-monospace, monospace !important;
   font-size: 10.5px !important;
   letter-spacing: 0.04em;
 }
@@ -851,7 +851,7 @@ html[data-farm-docs-runtime] .farm-docs-announcement {
   padding: 0 16px;
   border-bottom: 1px solid rgb(255 255 255 / 0.12);
   background: #000;
-  font-family: var(--font-geist-mono), ui-monospace, monospace;
+  font-family: var(--font-graft-mono), ui-monospace, monospace;
   font-size: 10px;
   text-transform: uppercase;
 }
@@ -897,7 +897,7 @@ html[data-farm-docs-runtime] #nd-subnav {
     border-bottom: 1px solid var(--color-fd-border);
     background: color-mix(in srgb, var(--color-fd-background) 94%, transparent);
     color: var(--farm-code-legend);
-    font-family: var(--font-geist-mono), ui-monospace, monospace;
+    font-family: var(--font-graft-mono), ui-monospace, monospace;
     font-size: 11px;
     letter-spacing: 0.08em;
     text-decoration: none;
@@ -940,7 +940,7 @@ html[data-farm-docs-runtime] #nd-subnav {
   html[data-farm-docs-runtime] #nd-subnav button[data-search]::before {
     order: 1;
     content: "Search docs";
-    font-family: var(--font-geist-mono), ui-monospace, monospace;
+    font-family: var(--font-graft-mono), ui-monospace, monospace;
     font-size: 11px;
     letter-spacing: 0.06em;
     text-transform: uppercase;
