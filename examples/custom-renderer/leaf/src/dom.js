@@ -1,10 +1,9 @@
 // leaf/dom: mounts, patches, and hydrates an element tree in the browser.
 //
-// Children match by position: a child of the same type at the same index keeps its DOM node and
-// its state, anything else is replaced. There are no keys and no scheduler. A state change
+// Keyed siblings retain their instances across moves. Unkeyed siblings match by position. A state change
 // re-renders its component in a microtask, and effects run after each commit.
 
-import { depsChanged, internals, toChildArray } from "./index.js";
+import { Fragment, depsChanged, internals, toChildArray } from "./index.js";
 import { RESERVED, attributeName, cssName, eventName, isEventProp, styleValue } from "./props.js";
 
 // ---------------------------------------------------------------------------------------------
@@ -29,6 +28,7 @@ function placeChildren(host) {
   for (const child of host.children) {
     for (const node of domNodes(child)) {
       if (node === cursor) cursor = cursor.nextSibling;
+      else if (node.parentNode === parent && parent.moveBefore) parent.moveBefore(node, cursor);
       else parent.insertBefore(node, cursor);
     }
   }
@@ -41,7 +41,7 @@ function sameType(instance, vnode) {
 
 function elementType(vnode) {
   const { type } = vnode;
-  if (typeof type === "function") return "component";
+  if (type === Fragment || typeof type === "function") return "component";
   if (typeof type === "string") return "host";
   throw new TypeError(`leaf can't render an element whose type is ${String(type)}.`);
 }
@@ -52,6 +52,28 @@ function elementType(vnode) {
 function setRef(ref, value) {
   if (typeof ref === "function") ref(value);
   else if (ref && typeof ref === "object") ref.current = value;
+}
+
+let pendingRefs = [];
+
+function attachRef(instance) {
+  const ref = instance.ref;
+  if (ref)
+    pendingRefs.push(() => {
+      if (instance.mounted && instance.ref === ref) setRef(ref, instance.node);
+    });
+}
+
+function commit(place) {
+  const previous = pendingRefs;
+  pendingRefs = [];
+  try {
+    place();
+    for (const attach of pendingRefs) attach();
+  } finally {
+    pendingRefs = previous;
+  }
+  flushEffects();
 }
 
 function setStyle(node, next, previous) {
@@ -181,6 +203,7 @@ function createDispatcher(instance) {
 }
 
 function renderComponent(instance) {
+  if (instance.type === Fragment) return toChildArray(instance.props.children);
   const output = internals.render(instance.type, instance.props, createDispatcher(instance));
   if (output && typeof output.then === "function") {
     throw new Error(
@@ -212,12 +235,13 @@ function flushUpdates() {
   flushQueued = false;
   const queue = [...dirty].sort((left, right) => left.depth - right.depth);
   dirty.clear();
-  for (const instance of queue) {
-    if (!instance.mounted) continue;
-    instance.children = reconcileChildren(instance, instance.children, renderComponent(instance));
-    placeChildren(hostParent(instance));
-  }
-  flushEffects();
+  commit(() => {
+    for (const instance of queue) {
+      if (!instance.mounted) continue;
+      instance.children = reconcileChildren(instance, instance.children, renderComponent(instance));
+      placeChildren(hostParent(instance));
+    }
+  });
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -227,7 +251,15 @@ function createInstance(vnode, parent) {
   const depth = parent.depth + 1;
   if (typeof vnode === "string") return { kind: "text", text: vnode, node: null, parent, depth };
   const kind = elementType(vnode);
-  const instance = { kind, type: vnode.type, props: vnode.props, parent, depth, children: [] };
+  const instance = {
+    kind,
+    key: vnode.key,
+    type: vnode.type,
+    props: vnode.props,
+    parent,
+    depth,
+    children: [],
+  };
   if (kind === "host") {
     instance.ref = vnode.ref;
     instance.node = null;
@@ -250,7 +282,7 @@ function mount(vnode, parent) {
       instance.children = toChildArray(vnode.props.children).map((child) => mount(child, instance));
       for (const child of instance.children) for (const dom of domNodes(child)) node.append(dom);
     }
-    setRef(instance.ref, node);
+    attachRef(instance);
   } else {
     instance.children = renderComponent(instance).map((child) => mount(child, instance));
   }
@@ -281,22 +313,50 @@ function update(instance, vnode) {
   if (instance.ref !== vnode.ref) {
     setRef(instance.ref, null);
     instance.ref = vnode.ref;
-    setRef(instance.ref, instance.node);
+    attachRef(instance);
   }
 }
 
 function reconcileChildren(parent, previous, vnodes) {
-  const next = vnodes.map((vnode, index) => {
-    const existing = previous[index];
-    if (existing && sameType(existing, vnode)) {
-      update(existing, vnode);
-      return existing;
+  if (
+    !previous.some((child) => child.kind !== "text" && child.key !== null) &&
+    !vnodes.some((vnode) => typeof vnode !== "string" && vnode.key !== null)
+  ) {
+    const next = vnodes.map((vnode, index) => {
+      const existing = previous[index];
+      if (existing && sameType(existing, vnode)) {
+        update(existing, vnode);
+        return existing;
+      }
+      if (existing) unmount(existing, true);
+      return mount(vnode, parent);
+    });
+    for (const extra of previous.slice(vnodes.length)) unmount(extra, true);
+    return next;
+  }
+  const keyed = new Map();
+  for (const child of previous) {
+    if (child.kind !== "text" && child.key !== null) keyed.set(child.key, child);
+  }
+  const retained = new Set();
+  const matches = vnodes.map((vnode, index) => {
+    const key = typeof vnode === "string" ? null : vnode.key;
+    const candidate = key === null ? previous[index] : keyed.get(key);
+    if (!candidate || (candidate.kind !== "text" && candidate.key !== key)) return;
+    if (sameType(candidate, vnode) && !retained.has(candidate)) {
+      retained.add(candidate);
+      return candidate;
     }
-    if (existing) unmount(existing, true);
-    return mount(vnode, parent);
   });
-  for (const extra of previous.slice(vnodes.length)) unmount(extra, true);
-  return next;
+  for (const child of previous) {
+    if (!retained.has(child)) unmount(child, true);
+  }
+  return vnodes.map((vnode, index) => {
+    const existing = matches[index];
+    if (!existing) return mount(vnode, parent);
+    update(existing, vnode);
+    return existing;
+  });
 }
 
 function unmount(instance, removeNodes) {
@@ -365,7 +425,7 @@ function hydrate(vnode, parent, cursor, container) {
       node = next;
     }
   }
-  setRef(instance.ref, existing);
+  attachRef(instance);
   return instance;
 }
 
@@ -375,9 +435,10 @@ function hydrate(vnode, parent, cursor, container) {
 function createRootHandle(root) {
   return {
     render(element) {
-      root.children = reconcileChildren(root, root.children, toChildArray(element));
-      placeChildren(root);
-      flushEffects();
+      commit(() => {
+        root.children = reconcileChildren(root, root.children, toChildArray(element));
+        placeChildren(root);
+      });
     },
     unmount() {
       for (const child of root.children) unmount(child, true);
@@ -393,7 +454,8 @@ export function createRoot(container) {
 export function hydrateRoot(container, element) {
   const root = { kind: "root", node: container, children: [], depth: 0 };
   const cursor = { node: container.firstChild };
-  root.children = toChildArray(element).map((child) => hydrate(child, root, cursor, container));
-  flushEffects();
+  commit(() => {
+    root.children = toChildArray(element).map((child) => hydrate(child, root, cursor, container));
+  });
   return createRootHandle(root);
 }

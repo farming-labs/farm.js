@@ -68,12 +68,15 @@ This copy runs against Farm's source in CI. To start your own renderer, clone
 on published packages, plus ui-sdk components. [Build your own renderer, build your own full-stack
 framework](https://farmjs.dev/blog/bring-your-own-renderer) walks through it step by step.
 
-## What it does not do
+## Keys, refs and streaming
 
-- leaf streams in order: a `<Suspense>` boundary sends what came before it, then waits for the
-  async components inside. It never shows `fallback`, and async components render on the server
-  only, so a page that has one doesn't hydrate.
-- leaf matches children by position and has no keys, so reordering a list re-renders its items.
+Use a stable sibling key, such as `<Crop key={crop.id} />`, to keep each item's DOM nodes and state when it moves. Unkeyed siblings match by position. Host elements accept an object ref or a callback. Leaf assigns the mounted or hydrated node after placement and clears the ref on replacement or unmount.
+
+A pending `<Suspense fallback="Loading…">` streams its fallback and reveals its children when ready. A later sibling can finish first. The reveal script uses the response nonce when supplied. Boundaries without a fallback stream in document order. For consumers that insert HTML without running scripts, `renderToReadableStream(tree, { progressive: false })` produces resolved markup. The Farm streaming page supplies its fallback on document loads and varies the response on `Sec-Fetch-Dest`.
+
+## Current limits
+
+- Async components render on the server. Use the stream for a tree that can suspend.
 - TypeScript doesn't check `.leaf` files. Their scripts may use TypeScript syntax, which the
   compiler strips.
 

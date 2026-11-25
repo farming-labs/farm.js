@@ -3,6 +3,7 @@ import { leaf } from "farm-leaf";
 
 export default defineConfig({
   renderer: leaf(),
+  routeRules: { "/streaming": { render: "dynamic", headers: { Vary: "Sec-Fetch-Dest" } } },
   vite: {
     server: {
       // Deliver the final contents when a tool edits and restores the same file in quick succession.
