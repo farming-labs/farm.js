@@ -1,7 +1,8 @@
 /**
  * `experimental.serverComponents`: which engine renders server components.
  *
- * - `"islands"`: Farm's own engine (RFC 0003), on Farm's pipeline. Experimental. The default.
+ * - `"islands"`: Farm's own engine (RFC 0003), on Farm's pipeline. Experimental. The default. On a
+ *   renderer besides React, that renderer's islands (`capabilities.islands`), without the engine.
  * - `"rsc"`: React's Flight pipeline (`@farm.js/plugin/rsc` on `@vitejs/plugin-rsc`).
  *
  * `true` means `{ mode: "islands" }`; `{ mode: "rsc" }` opts into React's pipeline. Both modes share

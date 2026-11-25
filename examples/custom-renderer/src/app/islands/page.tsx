@@ -4,7 +4,7 @@ import { Counter } from "../../components/counter";
 export const metadata: Metadata = { title: "Islands" };
 
 // No "use client": the page ships HTML, and each Counter in it hydrates as its own island
-// (`experimental.isolatedClientHydration` in farm.config.ts). The layout's root keeps the page as
+// (`experimental.serverComponents` in farm.config.ts). The layout's root keeps the page as
 // server HTML, so the islands keep working under a layout that hydrates.
 export default function IslandsPage() {
   const since = new Date("2026-03-01T00:00:00.000Z");
