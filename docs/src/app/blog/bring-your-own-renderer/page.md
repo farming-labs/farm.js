@@ -14,11 +14,12 @@ Use Node.js 22.13 or later and pnpm 8.12.1 to run the example.
 ```bash
 git clone https://github.com/farming-labs/leaf
 cd leaf
+git checkout --detach 3a84551
 pnpm install --frozen-lockfile
 pnpm dev
 ```
 
-Open the local URL printed by `pnpm dev`. On the home page, click **Plant barley** and watch the planted count update. Visit `/streaming` to see the page arrive before the crop list, then `/islands` to try counters that hydrate independently.
+Open the local URL printed by `pnpm dev`. On the home page, click **Plant barley** and watch the planted count update. Visit `/streaming` to see the page arrive before the crop list, then `/islands/leaf` to try two independently hydrated components written in `.leaf`.
 
 <BlogFigure kind="renderer-seams" caption="A renderer is three modules. Farm compiles routes with the Vite module, renders them to HTML with the server module, and hydrates that HTML with the client module." />
 
@@ -35,9 +36,9 @@ For each request, Farm builds the route as one element tree. It calls your libra
 
 The example has three places to look.
 
-- **The UI library** defines elements, hooks, HTML streaming, and DOM hydration. [Leaf source](https://github.com/farming-labs/leaf/tree/main/packages/leaf/src).
-- **The Farm adapter** describes the library to Farm and exports the server, client, and Vite modules. Start here when you bring your own library. [Adapter source](https://github.com/farming-labs/leaf/tree/main/packages/farm-leaf/src).
-- **The app** exercises the adapter through real routes. The page examples in this tutorial use `.leaf` markup, including equivalents of routes the repository writes in JSX. [App routes](https://github.com/farming-labs/leaf/tree/main/app/src/app).
+- **The UI library** defines elements, hooks, HTML streaming, and DOM hydration. [Leaf source](https://github.com/farming-labs/leaf/tree/3a84551bdd1be5eb359d61fe054635179984e0b3/packages/leaf/src).
+- **The Farm adapter** describes the library to Farm and exports the server, client, and Vite modules. Start here when you bring your own library. [Adapter source](https://github.com/farming-labs/leaf/tree/3a84551bdd1be5eb359d61fe054635179984e0b3/packages/farm-leaf/src).
+- **The app** exercises the adapter through real routes. The page examples in this tutorial use `.leaf` markup, including equivalents of routes the repository writes in JSX. [App routes](https://github.com/farming-labs/leaf/tree/3a84551bdd1be5eb359d61fe054635179984e0b3/app/src/app).
 
 <span id="step-1-the-descriptor" className="blog-heading-anchor" />
 
@@ -252,7 +253,7 @@ A page uses it like any hook. leaf's pages are `.leaf` files, which [step 7](#st
 </section>
 ```
 
-`createRendererTheme()` and `createRendererI18n()` wrap the same way. The action and query stores get their own hooks in [step 6](#step-6-server-functions). For links, `resolveLinkAttributes()` returns the attributes Farm's router looks for. A `Link` component only has to render an `<a>` with them, and Farm handles the click. leaf's bindings, all five hooks and `Link`, are 77 lines.
+`createRendererTheme()` and `createRendererI18n()` wrap the same way. The action and query stores get their own hooks in [step 6](#step-6-server-functions). For links, `resolveLinkAttributes()` returns the attributes Farm's router looks for. A `Link` component only has to render an `<a>` with them, and Farm handles the click.
 
 One rule for apps without React: **import from core's subpaths**, such as `@farm.js/core/api`, `@farm.js/core/server-fn`, and `@farm.js/core/renderer-client`. The root `@farm.js/core` entry imports React. Type-only imports from it are fine, and so is `defineConfig` in `farm.config.ts`. `notFound()` and `redirect()` from `@farm.js/core/navigation` work with any renderer. That module's React hooks don't, so use your own bindings for those.
 
@@ -413,7 +414,7 @@ async transform(code, id) {
 },
 ```
 
-leaf's compiler is 429 lines. It parses the markup, writes the JSX, and turns a mistake, such as JSX's `onClick={...}`, into a build error with the file, the line, and the `.leaf` spelling. A template language, Markdown, or something nobody has invented yet works the same way, as long as it compiles to that shape. `.leaf` files then work as pages, layouts, dynamic segments, and error and not-found pages, next to `.tsx` routes in the same app.
+Leaf's compiler parses the markup, writes the JSX, and turns a mistake, such as JSX's `onClick={...}`, into a build error with the file, the line, and the `.leaf` spelling. A template language, Markdown, or something nobody has invented yet works the same way, as long as it compiles to that shape. `.leaf` files then work as pages, layouts, dynamic segments, and error and not-found pages, next to `.tsx` routes in the same app.
 
 Farm reads hydration settings from the source before your compiler runs. If you use `export const hydrate`, give it a literal `true` or `false`. An expression like `!0` stops the build with an error that names the file.
 
@@ -428,7 +429,7 @@ Without streaming, Farm renders the whole page with `renderToString()` and sends
 - **`renderToReadableStream(element, options)`** returns a Web `ReadableStream` of HTML. Turn on `web`.
 - **`renderToPipeableStream(element, callbacks)`** returns an object with `pipe(destination)`, for Node streams. Turn on `node`.
 
-Leaf exports a Web stream. In the reference checkout, it sends the paragraph before the Suspense boundary, waits for the crop list, then sends the list. You can read the whole route in [streaming/page.leaf](https://github.com/farming-labs/leaf/blob/fcdbcc3d489654287408a2e080a07e3289f7a315/app/src/app/streaming/page.leaf).
+Leaf exports a Web stream. In the reference checkout, it sends the paragraph before the Suspense boundary, waits for the crop list, then sends the list. You can read the whole route in [streaming/page.leaf](https://github.com/farming-labs/leaf/blob/3a84551bdd1be5eb359d61fe054635179984e0b3/app/src/app/streaming/page.leaf).
 
 ```html
 <!-- app/src/app/streaming/page.leaf -->
@@ -472,7 +473,7 @@ Async components run on the server. A page that uses one stays server-rendered. 
 
 A page that hydrates hydrates as one tree: all of its components ship to the browser, including the ones that never change. With islands, a server page stays HTML, and only its client components hydrate, each on its own and when it's needed. Since 0.1.84, that works with any renderer that opts in.
 
-The runnable example pins Farm 0.1.84 and enables islands with `experimental.isolatedClientHydration: "enabled"`. If you're building the adapter on Farm 0.1.87, select islands mode as shown below. [Reference app config](https://github.com/farming-labs/leaf/blob/fcdbcc3d489654287408a2e080a07e3289f7a315/app/farm.config.ts).
+The runnable example pins Farm 0.1.86 and enables islands with `experimental.isolatedClientHydration: "enabled"`. If you're building the adapter on Farm 0.1.87, select islands mode as shown below. [Reference app config](https://github.com/farming-labs/leaf/blob/3a84551bdd1be5eb359d61fe054635179984e0b3/app/farm.config.ts).
 
 ```ts
 // app/farm.config.ts
@@ -707,7 +708,7 @@ Routes, layouts, SSR, hydration, navigation, server functions, and production ou
 
 - **React Server Components are React-only.** Islands were too, until 0.1.84: now a renderer that opts in gets them, as [step 9](#step-9-optional-islands) shows. Of the built-in renderers, only React uses them so far. The [feature table](/docs/renderers#feature-support) lists what else each renderer gets.
 - **One renderer per app.** You can't render one page with leaf and the next with React.
-- **The UI library owns identity and streaming.** The reference checkout matches siblings by position, supports callback and object refs on host elements, and streams in document order. Adding keyed reordering or independent Suspense reveals is work inside the UI library. Farm already delegates those decisions to it.
+- **The UI library owns identity and streaming.** The reference checkout matches siblings by position, supports callback and object refs on host elements, and streams in document order. The [Leaf runtime change](https://github.com/farming-labs/leaf/pull/6) implements keyed reordering and independent Suspense reveals inside the library.
 
 <span id="what-building-leaf-fixed-in-farm" className="blog-heading-anchor" />
 
