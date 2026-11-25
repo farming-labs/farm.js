@@ -343,12 +343,21 @@ renderers get them from their library's plugin: `@vitejs/plugin-vue`, `vite-plug
 and swaps it in place, so the page and its layouts keep their state.
 
 Without that, Vite reloads the page when you save a component, and all component state resets,
-including the layout's. The leaf example works this way. Production builds aren't affected.
+including the layout's. The leaf example works this way, apart from its islands. Production
+builds aren't affected.
 
 To add hot updates, have the plugin's `transform()` append an `import.meta.hot.accept()` handler to
 component modules in the browser graph (`ssr` false in the transform options) that swaps the new
 component into the instances your runtime has mounted. Vite's
 [HMR API](https://vite.dev/guide/api-hmr) describes the handler.
+
+Islands are the exception, because Farm mounts their roots. On a renderer that declares
+`reconcilesRerenders`, when your plugin's output for an island's module has no `import.meta.hot`
+code, Farm renders each of that module's islands again with the new module. The rest of the page
+keeps its state, and the islands start with fresh state. The page reloads instead when other
+browser code imports the module too, or when one of its islands hasn't started yet, since the
+server rendered that island's HTML with the old code. Island hot updates ship in the release after
+0.1.86.
 
 ## Streaming
 
@@ -1113,7 +1122,7 @@ too: the example's Playwright tests run the same checks against both.
   islands through isolated client hydration.
 - **Islands take data.** An element passed as `children` or another prop, or a promise, can't
   reach the browser, so that island keeps its server HTML without hydrating. Integration
-  providers don't wrap islands, and an edit to an island's module reloads the page in development.
+  providers don't wrap islands.
 - **Some UI integrations are React-oriented.** Most integration UI providers render React
   components today. `withDocs()` builds docs pages with your renderer, and
   `@farming-labs/farmjs/testing` checks that it writes and hydrates them; see

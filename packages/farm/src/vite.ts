@@ -1957,6 +1957,37 @@ export function shouldEmitFarmClientRootHmr(renderer?: FarmRenderer | false): bo
   return getFarmRendererCapabilities(resolveFarmRenderer(renderer)).reconcilesRerenders;
 }
 
+interface FarmHotModuleNode {
+  file: string | null;
+  importers: Set<FarmHotModuleNode>;
+}
+
+/**
+ * Whether an edit to `file` reaches a renderer island module that other browser code imports too.
+ * An island module takes its own hot update, which renders its islands again and stops there, so
+ * an importer such as a hydrating layout would keep running the old code.
+ */
+export function reachesSharedFarmRendererIsland(
+  graph: { getModulesByFile(file: string): Set<FarmHotModuleNode> | undefined } | undefined,
+  file: string,
+  islandModules: ReadonlySet<string>,
+): boolean {
+  const queue = Array.from(graph?.getModulesByFile(file) ?? []);
+  const seen = new Set(queue);
+  for (const node of queue) {
+    if (node.file && islandModules.has(path.resolve(node.file))) {
+      if (node.importers.size > 0) return true;
+      continue;
+    }
+    for (const importer of node.importers) {
+      if (seen.has(importer)) continue;
+      seen.add(importer);
+      queue.push(importer);
+    }
+  }
+  return false;
+}
+
 /**
  * Prefix of the id a development server module imports a Farm runtime module by when the module
  * lives outside the app root. Farm's plugin resolves it from Farm's own install.
@@ -5917,13 +5948,31 @@ export { manifest };
         // place across the page and isolated island roots alike. A second
         // accept here would re-render the module's default export as the
         // whole root and do nothing for a module with only named exports.
+        //
         // An island of a renderer that declares `islands` is its own root, which the route's root
-        // doesn't render: its update reloads the page instead.
-        const hmrCode =
-          transformOptions?.ssr ||
-          reactRefreshActive ||
-          rendererIslandModule ||
-          !shouldEmitFarmClientRootHmr(currentConfig.renderer)
+        // doesn't render. Unless the renderer's plugin handles the module's hot updates itself,
+        // the island runtime renders each of its islands again with the new module, and the page
+        // reloads when it can't (see updateModule).
+        const rendererIslandHmr =
+          rendererIslandModule &&
+          !transformOptions?.ssr &&
+          !/\bimport\.meta\.hot\b/.test(transformedCode) &&
+          shouldEmitFarmClientRootHmr(currentConfig.renderer);
+        const hmrCode = rendererIslandHmr
+          ? `
+if (import.meta.hot) {
+  import.meta.hot.accept((newModule) => {
+    const runtime = window.__FARM_ISOLATED_HYDRATION_RUNTIME__;
+    if (!newModule || !runtime?.updateModule?.(${JSON.stringify(toViteModuleId(cleanId, root))}, newModule)) {
+      import.meta.hot.invalidate();
+    }
+  });
+}
+`
+          : transformOptions?.ssr ||
+              reactRefreshActive ||
+              rendererIslandModule ||
+              !shouldEmitFarmClientRootHmr(currentConfig.renderer)
             ? ""
             : `
 if (import.meta.hot) {
@@ -6360,6 +6409,21 @@ if (import.meta.hot) {
 
           return [];
         }
+      }
+
+      if (
+        currentFarmConfig &&
+        planRouteManager &&
+        usesFarmRendererIslands(currentFarmConfig) &&
+        shouldEmitFarmClientRootHmr(currentFarmConfig.renderer) &&
+        reachesSharedFarmRendererIsland(
+          server.environments.client?.moduleGraph,
+          normalizedFile,
+          planRouteManager.getIsolatedClientBoundaryModules(currentFarmConfig.root),
+        )
+      ) {
+        reloadAfterEdit();
+        return [];
       }
 
       // A server component a page or layout renders, such as one imported only by server
