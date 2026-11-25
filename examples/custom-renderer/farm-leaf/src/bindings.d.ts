@@ -6,6 +6,7 @@ import type {
   FarmActionOptions,
   FarmActionSnapshot,
   FarmClientStore,
+  FarmImageOptions,
   FarmLinkOptions,
   FarmRendererRouter,
   FarmRendererRouterOptions,
@@ -56,3 +57,5 @@ export declare function Link<
   TRoute extends string = DefaultRouteHref,
   THref extends string = string,
 >(props: LinkProps<TRoute, THref>): LeafElement;
+
+export declare function Image(props: FarmImageOptions): LeafElement;
