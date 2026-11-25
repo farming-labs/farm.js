@@ -9,7 +9,7 @@ KinfeMichael Tariku · Nov 2026
 
 Farm ships five renderers: React, Preact, Solid, Vue, and Svelte. This post is about the sixth, the one you write.
 
-To find out what that takes, I wrote leaf, a small UI library Farm had never heard of, and plugged it in. It now runs a whole Farm app: server rendering, hydration, islands, client navigation, server functions, its own file format, and components from a component library. Every snippet below comes from that app, and you can run it:
+To find out what that takes, I wrote leaf, a small UI library Farm had never heard of, and plugged it in. It now runs a whole Farm app: server rendering, hydration, islands, client navigation, server functions, its own file format, and components from a component library. You can run the app locally. The page examples below use its `.leaf` syntax.
 
 ```bash
 git clone https://github.com/farming-labs/leaf
@@ -233,8 +233,8 @@ export function useRouter() {
 
 A page uses it like any hook. leaf's pages are `.leaf` files, which [step 7](#step-7-optional-your-own-file-format) covers:
 
-```vue
-<!-- app/src/app/page.leaf (abridged) -->
+```html
+<!-- app/src/app/page.leaf -->
 <script module>
 export const hydrate = true;
 </script>
@@ -324,11 +324,18 @@ export function useServerQuery<TInput, TData>(query: ServerQuery<TInput, TData>,
 }
 ```
 
-Then a page uses both:
+The page hydrates so the button can submit the action and the query can refresh its count.
 
-```vue
-<!-- app/src/app/page.leaf (abridged) -->
+```html
+<!-- app/src/app/page.leaf -->
+<script module>
+export const hydrate = true;
+</script>
+
 <script>
+import { useAction, useServerQuery } from "farm-leaf/bindings";
+import { plantCrop, plantedCount } from "../server/plant";
+
 const plant = useAction(plantCrop);
 const total = useServerQuery(plantedCount, undefined);
 // A failed call lands in plant.error, which the page renders.
@@ -353,7 +360,7 @@ The browser gets references, not handlers. Each call posts its input to the curr
 
 Svelte and Vue routes aren't `.tsx` files, and yours don't have to be either. leaf has `.leaf` files:
 
-```vue
+```html
 <!-- app/src/app/notes/page.leaf -->
 <script module>
 // Module scope: Farm reads these exports.
@@ -427,36 +434,41 @@ leaf exports a Web stream. A `<Suspense>` with a fallback starts rendering its c
 
 An error before the shell goes out can still set the response status. If a pending boundary fails after the shell, leaf reports it to `options.onError` and keeps the fallback. Other pending boundaries can still finish.
 
-Now a page can stream past slow data:
+The streaming page puts the slow list inside a Suspense boundary.
 
-```tsx
-// app/src/app/streaming/page.tsx (abridged)
-import { Suspense } from "leaf";
-import { loadCropsSlowly } from "../../server/slow-crops";
-import { headers } from "@farm.js/core/headers";
+```html
+<!-- app/src/app/streaming/page.leaf -->
+<script>
+  import { headers } from "@farm.js/core/headers";
+  import { Suspense } from "leaf";
+  import SlowCropList from "../../components/slow-crop-list.leaf";
 
-async function SlowCropList() {
-  const crops = await loadCropsSlowly(); // takes 400 ms
-  return (
-    <ul>
-      {crops.map((crop) => (
-        <li>{crop}</li>
-      ))}
-    </ul>
-  );
-}
-
-export default function StreamingPage() {
   const fallback = headers().get("sec-fetch-dest") === "document" ? "Loading crops…" : undefined;
-  return (
-    <section>
-      <p>This arrives first. The list below waits 400 ms for its data.</p>
-      <Suspense fallback={fallback}>
-        <SlowCropList />
-      </Suspense>
-    </section>
-  );
-}
+</script>
+
+<section>
+  <p>This arrives first. The list below waits 400 ms for its data.</p>
+  <Suspense fallback="{{ fallback }}">
+    <SlowCropList />
+  </Suspense>
+</section>
+```
+
+The list awaits its data in its render script. Leaf compiles that component as an async function.
+
+```html
+<!-- app/src/components/slow-crop-list.leaf -->
+<script>
+  import { loadCropsSlowly } from "../server/slow-crops";
+
+  const crops = await loadCropsSlowly();
+</script>
+
+<ul id="slow-crops">
+  <leaf:for each="crop" in="crops">
+    <li>{{ crop }}</li>
+  </leaf:for>
+</ul>
 ```
 
 On a document load, the paragraph and fallback arrive first. Each pending sibling replaces its own fallback as its data arrives. The example varies the response on `Sec-Fetch-Dest`. For a client navigation, Farm parses HTML without executing its inline scripts, so the example omits the fallback and streams the resolved list in order.
@@ -511,13 +523,20 @@ There's no browser half to write. Farm's island runtime hydrates each island wit
 
 `ClientGraph` is a leaf context. Under a `"use client"` layout, the route hydrates as one root, and a client component inside it is part of that root, not an island. Farm marks that tree with `wrapClientGraph()`, and a server page under it with `isolateServerPageGraph()`, where client components are islands again. leaf's two exports set the context.
 
-A page uses client components as usual, and says when each one starts:
+Here’s the islands page written as a `.leaf` file. It imports the same client component and passes the date and map as values.
 
-```tsx
-// app/src/app/islands/page.tsx (abridged)
+```html
+<!-- app/src/app/islands/page.leaf -->
+<script>
+  import { Counter } from "../../components/counter";
+
+  const since = new Date("2026-03-01T00:00:00.000Z");
+  const crops = new Map([["wheat", 3], ["barley", 5]]);
+</script>
+
 <p id="islands-static">This text ships no JavaScript.</p>
-<Counter name="load" label="Starts at once" since={since} crops={crops} client:load />
-<Counter name="idle" label="Starts when the browser is idle" since={since} crops={crops} />
+<Counter name="load" label="Starts at once" since="{{ since }}" crops="{{ crops }}" client:load />
+<Counter name="idle" label="Starts when the browser is idle" since="{{ since }}" crops="{{ crops }}" />
 ```
 
 `Counter`'s module exports `island = "idle"`, and `client:load` overrides it where it's used. The other strategies are `visible` and `interaction`. `since` is a `Date` and `crops` a `Map`, and the browser gets a `Date` and a `Map`: props go through the same codec as Farm's React islands, and a value several islands share is sent once.
@@ -588,7 +607,7 @@ Sooner or later, your library wants a component library. Most ship one adapter p
 
 ### Way 1: build on the primitive
 
-Write a small component per primitive. leaf's `Toggle` creates the primitive once, re-renders when it changes, and spreads its attributes and handlers onto a button:
+The example implements the `Toggle` adapter in TypeScript with JSX. It creates the primitive once, subscribes to its state, and spreads its attributes onto the button. A `.leaf` page can import this component directly.
 
 ```tsx
 // app/src/ui/toggle.tsx
@@ -624,12 +643,19 @@ export function Toggle(props: ToggleProps) {
 }
 ```
 
-The primitive has `get()` and `subscribe()`, so it's a store like Farm's, and the hook from [step 5](#step-5-hooks-over-farms-stores) works unchanged. The `id` is fixed, so the server and the browser agree on it:
+The primitive exposes `get()` and `subscribe()`, so the store hook from [step 5](#step-5-hooks-over-farms-stores) works here too. A hydrating Leaf page gives the toggle the same ID on the server and in the browser.
 
-```tsx
-<Toggle id="bold" defaultPressed>
-  Bold
-</Toggle>
+```html
+<!-- app/src/app/ui/page.leaf -->
+<script module>
+  export const hydrate = true;
+</script>
+
+<script>
+  import { Toggle } from "../../ui/toggle";
+</script>
+
+<Toggle id="bold" defaultPressed>Bold</Toggle>
 ```
 
 The primitive runs during server rendering too, so the ARIA is in the first HTML:
@@ -646,24 +672,19 @@ Leaf calls the ref with the mounted button and passes `null` when it detaches. T
 
 Or write no adapter at all. **A custom element is just a tag, so any renderer that can write HTML can use it.**
 
-```tsx
-// app/src/app/ui/web/page.tsx
-"use client";
+```html
+<!-- app/src/app/ui/web/page.leaf -->
+<script module>
+  import "@ui-sdk/web/toggle";
+  export const hydrate = true;
+</script>
 
-import "@ui-sdk/web/toggle";
-
-export default function WebComponentPage() {
-  return (
-    <ui-toggle default-pressed>
-      <button type="button" aria-pressed="true">
-        Bold
-      </button>
-    </ui-toggle>
-  );
-}
+<ui-toggle default-pressed>
+  <button type="button" aria-pressed="true">Bold</button>
+</ui-toggle>
 ```
 
-leaf writes `<ui-toggle>` into the server HTML like any other tag. `"use client"` sends the page to the browser, where the import registers the element and the browser upgrades the one already on the page. The import also runs on the server, which is safe because ui-sdk skips registration when `customElements` doesn't exist.
+Leaf writes `<ui-toggle>` into the server HTML. When the page hydrates, its module import registers the custom element and the browser upgrades the tag. The import also runs on the server, where ui-sdk skips registration when `customElements` is unavailable.
 
 The catch here is ARIA. The web component sets `aria-pressed` in the browser, after the upgrade. The HTML the server sends, which is what an agent fetching the page reads, only has what you wrote. That's why the page writes `aria-pressed="true"` to match `default-pressed`.
 
