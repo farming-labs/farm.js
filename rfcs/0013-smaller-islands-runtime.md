@@ -1,6 +1,8 @@
 # A smaller islands runtime for pages that hydrate at load
 
-Status: Draft (islands mode). No code yet.
+Status: Implemented (islands mode) in #3143, #3148, #3153, #3155, #3162 and #3166, released in
+0.1.83 and 0.1.85 except #3166. islx's half of item 1 was not done. On the probe, islands now
+hydrates before `rsc` at 1.6 Mbit/s and without a bandwidth limit (see Results).
 
 ## Problem
 
@@ -202,12 +204,18 @@ from these changes alone; see Open questions.
 
 ## Open questions
 
-- **The other half.** Measured: neither the server tree split nor islx's call-path split is worth
-  an islx release. See "What is left" under Results.
-- **The untraced task time.** islands spends 36 ms more in `RunTask` self time on localhost. It
-  may be the cost of instantiating eight modules instead of three; that is not verified.
-- **The probe is one page.** The verification plan below adds it to the benchmark, so the
-  numbers above can be reproduced and every change measured on it.
+- **The other half.** Closed by items 6 and 7 rather than by bytes: islands still sends more
+  script than `rsc` on the probe (68.5 KB against 66.9) and hydrates it first. Neither the server
+  tree split nor islx's call-path split was worth an islx release; see "What is left" under
+  Results.
+- **The untraced task time.** Mostly closed by item 7. Traced at 150 ms latency without a
+  bandwidth limit (4x CPU, medians of 9, after #3166), the main thread is busy for 221 ms before
+  every island has hydrated, against 217 ms for `rsc` and 236 ms for the build before #3166 (A/A
+  244). Islands spends less of it than `rsc` parsing and compiling, and more running script: 13 ms
+  more in microtasks (19 against 6) and 8 ms more in function calls, not broken down further. The
+  localhost `RunTask` self time was not measured again.
+- **The probe is one page.** It is now the benchmark's `dash` section, measured by
+  `hydration.mjs` (#3143), and every change was measured on it.
 
 ## Verification plan
 
@@ -443,12 +451,19 @@ With the hint, the trace's main thread spends 19.2 ms parsing functions instead 
   ms, -32 to 3), and no section's cold visit painted later than both.
 - **Remaining gap:** none on this page. Islands hydrates it first on both networks.
 - **Cost:** Chrome also compiles the React functions hydration never runs, on a background thread,
-  and keeps their bytecode. Chrome's CPU throttling slows the main thread, so the probe doesn't show
-  what that compile costs a slow phone's other cores.
+  and keeps their bytecode. Measured after #3166 merged, without a bandwidth limit:
+  - **Memory:** after a forced garbage collection, the page's JS heap is 2,899 KB with the hint
+    against 2,756 KB for `main` and its A/A copy (medians of 21; every visit with the hint held
+    at least 116 KB more than every visit without): 143 KB of bytecode. `rsc` holds 2,309 KB.
+  - **Background work:** parsing and compiling on the page renderer's other threads went from
+    7.1 ms per visit (A/A 6.0) to 12.5 ms (Chrome tracing, medians of 9). Chrome throttles only the
+    main thread, so this ran at the M1's full speed; a slow phone's other cores take longer, which
+    was not measured on a phone.
 
-**What is left.** On the probe the whole difference is script: 81.4 KB on the wire for islands
-against 69.7 KB, with documents within 0.4 KB. Measured with esbuild and brotli 11: the server
-tree helpers on islx 0.0.25's published build, the call path on a split of islx `main` (v0.0.27):
+**What is left,** as measured before item 1. On the probe the whole difference was script: 81.4 KB
+on the wire for islands against 69.7 KB, with documents within 0.4 KB. Measured with esbuild and
+brotli 11: the server tree helpers on islx 0.0.25's published build, the call path on a split of
+islx `main` (v0.0.27):
 
 - **Server tree helpers:** `createServerTreeElement` and what only it reaches cost 235 bytes on
   0.0.25's one-chunk build. With 0.0.28's split, the server trees reach islx's reviving code, and
