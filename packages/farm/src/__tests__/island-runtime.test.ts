@@ -174,6 +174,45 @@ describe("scheduleFarmIslandHydration", () => {
     expect(handled).toEqual(["add", "add", "undo"]);
   });
 
+  // Server HTML is on screen before its island hydrates, so a click on it then would do nothing.
+  for (const strategy of ["load", "idle", "visible"] as const) {
+    it(`replays every click made while a ${strategy} boundary hydrates, and starts it on one`, async () => {
+      vi.useFakeTimers();
+      // Never in view: only the click starts a visible boundary.
+      vi.stubGlobal(
+        "IntersectionObserver",
+        class {
+          observe() {}
+          unobserve() {}
+          disconnect() {}
+        },
+      );
+      const container = document.getElementById("island")!;
+      const button = container.querySelector("button")!;
+      let handledClicks = 0;
+      let finishHydrate!: () => void;
+      const hydrate = vi.fn(
+        () =>
+          new Promise<void>((resolve) => {
+            finishHydrate = () => {
+              button.addEventListener("click", () => handledClicks++);
+              resolve();
+            };
+          }),
+      );
+      const scheduled = scheduleFarmIslandHydration({ container, strategy, hydrate });
+
+      button.click();
+      button.click();
+      await vi.advanceTimersByTimeAsync(0);
+      expect(hydrate).toHaveBeenCalledOnce();
+      finishHydrate();
+      await scheduled;
+      await vi.runAllTimersAsync();
+      expect(handledClicks).toBe(2);
+    });
+  }
+
   it("submits a form once when its submit button is clicked twice before hydration", async () => {
     vi.useFakeTimers();
     document.body.innerHTML =

@@ -300,16 +300,6 @@ export function scheduleFarmIslandHydration<T>({
   const resolvedStrategy = strategy ?? "load";
   if (signal?.aborted) return Promise.resolve(undefined);
 
-  if (resolvedStrategy === "load") {
-    return Promise.resolve()
-      .then(() => (signal?.aborted ? undefined : hydrate()))
-      .then((value) => {
-        if (signal?.aborted) return undefined;
-        finishIslandHydration(container);
-        return value;
-      });
-  }
-
   return new Promise<T | undefined>((resolve, reject) => {
     let started = false;
     let cancelled = false;
@@ -319,11 +309,11 @@ export function scheduleFarmIslandHydration<T>({
     // One-shot triggers, dropped the moment hydration starts: an
     // IntersectionObserver or an idle callback has no reason to fire twice.
     const triggerCleanups = new Set<() => void>();
-    // Interaction capture, kept until hydration finishes. A pointerdown or a
-    // focusin starts hydration, and in a real browser the click the user is
-    // actually making arrives a moment later, still before the chunk has
-    // loaded. Tearing these down at start() would drop that click on the floor
-    // with nothing left to hold or replay it.
+    // Interaction capture, from scheduling until hydration finishes, whatever the strategy: the
+    // server HTML is on screen and clickable all that time. A pointerdown or a focusin starts
+    // hydration, and in a real browser the click the user is actually making arrives a moment
+    // later, still before the chunk has loaded. Tearing these down at start() would drop that
+    // click on the floor with nothing left to hold or replay it.
     const captureCleanups = new Set<() => void>();
     let removeAbortListener: (() => void) | null = null;
 
@@ -347,7 +337,8 @@ export function scheduleFarmIslandHydration<T>({
       started = true;
       cleanupTriggers();
       Promise.resolve()
-        .then(hydrate)
+        // Removed in the same task it was scheduled in, as a navigation does: never hydrated.
+        .then(() => (cancelled || signal?.aborted ? undefined : hydrate()))
         .then(
           (value) => {
             cleanup();
@@ -371,31 +362,6 @@ export function scheduleFarmIslandHydration<T>({
       };
       signal.addEventListener("abort", abort, { once: true });
       removeAbortListener = () => signal.removeEventListener("abort", abort);
-    }
-
-    if (resolvedStrategy === "idle") {
-      triggerCleanups.add(runWhenIdle(start));
-      return;
-    }
-
-    if (resolvedStrategy === "visible") {
-      if (typeof IntersectionObserver !== "function") {
-        start();
-        return;
-      }
-
-      // Isolated boundary markers render with display:contents, so the
-      // container itself has no box and can never intersect. Observe its
-      // element children instead; with nothing observable, start now.
-      const targets =
-        container.getClientRects().length > 0 ? [container] : Array.from(container.children);
-      if (targets.length === 0) {
-        start();
-        return;
-      }
-
-      triggerCleanups.add(observeIslandVisibility(container.ownerDocument, targets, start));
-      return;
     }
 
     const hold = (event: Event, target: Element, kind: FarmIslandReplayKind) => {
@@ -484,6 +450,36 @@ export function scheduleFarmIslandHydration<T>({
     }
     listen("farm:island-interaction", activateFromInteraction, false);
 
-    if (hasQueuedTarget(container)) start();
+    // Then what starts it: at once, or its idle callback or visibility, as its strategy says, or a
+    // held interaction. An interaction island waits for its activation above.
+    if (resolvedStrategy === "load" || hasQueuedTarget(container)) {
+      start();
+      return;
+    }
+
+    if (resolvedStrategy === "idle") {
+      triggerCleanups.add(runWhenIdle(start));
+      return;
+    }
+
+    if (resolvedStrategy === "visible") {
+      if (typeof IntersectionObserver !== "function") {
+        start();
+        return;
+      }
+
+      // Isolated boundary markers render with display:contents, so the
+      // container itself has no box and can never intersect. Observe its
+      // element children instead; with nothing observable, start now.
+      const targets =
+        container.getClientRects().length > 0 ? [container] : Array.from(container.children);
+      if (targets.length === 0) {
+        start();
+        return;
+      }
+
+      triggerCleanups.add(observeIslandVisibility(container.ownerDocument, targets, start));
+      return;
+    }
   });
 }
