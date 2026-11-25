@@ -7,9 +7,9 @@ description: "Releases, engineering notes, and ideas from the people building Fa
 
 Releases, engineering notes, and ideas.
 
-## [Bring your own renderer](/blog/bring-your-own-renderer)
+## [Build your own renderer, build your own full-stack framework](/blog/bring-your-own-renderer)
 
-A step-by-step guide to plugging any UI library into Farm: a descriptor, three small modules, hooks over Farm's stores, and two ways to use ui-sdk components. Every snippet comes from a working app you can clone, farming-labs/leaf.
+A step-by-step guide to plugging any UI library into Farm: a descriptor, three small modules, hooks over Farm's stores, islands, and two ways to use ui-sdk components. Every snippet comes from a working app you can clone, farming-labs/leaf.
 
 ## [I asked 105 developer sites for Markdown. A third answered with HTML.](/blog/agent-markdown-scan)
 
