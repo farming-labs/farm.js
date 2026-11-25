@@ -1,5 +1,5 @@
 import type { ReactNode } from "react";
-import { loadFarmDevModule } from "../dev-module";
+import { createFarmDevModuleCheck, loadFarmDevModule } from "../dev-module";
 import * as fs from "fs";
 import * as https from "https";
 import { isIP } from "net";
@@ -794,6 +794,7 @@ export class ServerRenderer {
   private i18nRuntime?: FarmI18nRuntime;
   private viteServer?: ViteDevServer;
   private rendererRuntime!: FarmServerRendererRuntime;
+  private rendererServerModuleCurrent: () => boolean = () => true;
   private reactRenderer?: typeof import("../renderer/react/server");
   private appliedAppSetupModule: unknown;
   private security: ResolvedFarmSecurityConfig;
@@ -816,7 +817,7 @@ export class ServerRenderer {
   }
 
   async initialize(): Promise<void> {
-    if (this.rendererRuntime) return;
+    if (this.rendererRuntime && this.rendererServerModuleCurrent()) return;
 
     // Islands mode: boundaries this server renders address their large prop values. Without it
     // props stay plain JSON, so a dev server restarted with islands mode off stops encoding them.
@@ -846,6 +847,14 @@ export class ServerRenderer {
                 ),
               ).href
             );
+    // A renderer the module runner evaluated: after a full reload of the server graph, pages
+    // import a new copy of its UI library, so render with the new copy of the renderer too.
+    this.rendererServerModuleCurrent =
+      this.viteServer &&
+      !isReactRenderer(this.config.renderer) &&
+      !isFarmRendererDisabled(this.config.renderer)
+        ? createFarmDevModuleCheck(this.viteServer, loaded)
+        : () => true;
     const runtime = loaded as Partial<FarmServerRendererRuntime>;
     assertFarmRendererServerModule(runtime, this.config.renderer);
 

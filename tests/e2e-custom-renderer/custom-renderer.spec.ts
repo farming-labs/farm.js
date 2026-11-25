@@ -1,3 +1,5 @@
+import { readFile, writeFile } from "node:fs/promises";
+import path from "node:path";
 import { expect, test, type Page } from "@playwright/test";
 
 // examples/custom-renderer runs on leaf, a UI library Farm has no code for, through the farm-leaf
@@ -447,4 +449,29 @@ test("the guides layout's Links navigate between flat pages on the client", asyn
   await expect(page.locator("#guides")).toHaveText("Guides");
   await expect(layoutCounter).toHaveText("Layout clicks: 1");
   expect(await readDocumentMark(page)).toBe("first");
+});
+
+test.describe("development edits", () => {
+  test.skip(process.env.FARM_CUSTOM_RENDERER_SERVER !== "dev", "Development edits");
+
+  test("pages keep rendering after an edit reloads the server's modules", async ({ request }) => {
+    // badge.leaf is imported by server modules that don't accept hot updates, so Vite reloads the
+    // server graph, evaluating leaf again. The renderer has to render with the new leaf too.
+    const file = path.resolve("examples/custom-renderer/src/components/badge.leaf");
+    const original = await readFile(file, "utf8");
+    expect((await request.get("/notes")).status()).toBe(200);
+    await writeFile(file, original.replace('class="badge"', 'class="badge" data-edited="true"'));
+    try {
+      await expect
+        .poll(async () => (await request.get("/notes")).text())
+        .toContain('data-edited="true"');
+      expect((await request.get("/about")).status()).toBe(200);
+    } finally {
+      await writeFile(file, original);
+    }
+    await expect
+      .poll(async () => (await request.get("/notes")).text())
+      .not.toContain('data-edited="true"');
+    expect((await request.get("/notes")).status()).toBe(200);
+  });
 });
