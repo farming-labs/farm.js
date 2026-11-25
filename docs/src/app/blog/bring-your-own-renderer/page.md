@@ -704,11 +704,8 @@ ui-sdk is a beta (`0.1.0-beta.13`). The first way stops depending on internals t
 
 ## What a custom renderer doesn't get
 
-Routes, layouts, SSR, hydration, navigation, server functions, and production output work with any renderer. Some things don't:
-
-- **React Server Components are React-only.** Islands were too, until 0.1.84: now a renderer that opts in gets them, as [step 9](#step-9-optional-islands) shows. Of the built-in renderers, only React uses them so far. The [feature table](/docs/renderers#feature-support) lists what else each renderer gets.
-- **One renderer per app.** You can't render one page with leaf and the next with React.
-- **The UI library owns identity and streaming.** The reference checkout matches siblings by position, supports callback and object refs on host elements, and streams in document order. The [Leaf runtime change](https://github.com/farming-labs/leaf/pull/6) implements keyed reordering and independent Suspense reveals inside the library.
+- **One renderer per app.** The `renderer` setting in `farm.config.ts` applies to every page and layout.
+- **React Server Components require React.** Farm’s `rsc` mode uses React’s Flight protocol. A custom renderer can opt into [islands](#step-9-optional-islands) to hydrate individual components on a server-rendered page.
 
 <span id="what-building-leaf-fixed-in-farm" className="blog-heading-anchor" />
 
