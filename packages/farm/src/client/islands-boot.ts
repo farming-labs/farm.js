@@ -2,8 +2,9 @@
  * @internal Islands mode's entry for a document in which nothing hydrates at load (RFC 0003,
  * section 10). It loads the client runtime (React, islx, the router) when the page first needs it:
  * an island's own trigger, or intent to follow a link. Until then it holds the clicks and submits
- * that would be lost (in an island that has not hydrated, or on a link), and the runtime replays
- * them: islands through the pre-hydration queue its scheduler reads, links on the same element.
+ * that would be lost (in an island that has not hydrated, on a link, or a server component's form
+ * that islx posts without a page load), and the runtime replays them: islands through the
+ * pre-hydration queue its scheduler reads, links and forms on the same element.
  * Once the page has loaded and the browser is idle, it fetches what a link runs, without running it,
  * and it requests a link's page on the press or click that follows it.
  *
@@ -50,6 +51,16 @@ export const FARM_ISLANDS_BOOT_PREFETCHING_LINK =
 
 const ISLAND = "f-island";
 const HYDRATED_ISLAND = '[data-farm-island-hydrated="true"]';
+
+/** Kept equal to islx's FORM_REF_PREFIX, which names a server form's action field; a test compares them. */
+export const FARM_ISLANDS_BOOT_FORM_REF_PREFIX = "$F_REF_";
+
+/** Whether submitting `form` posts a server action: as postsServerAction (island-runtime.ts). */
+function postsServerAction(form: HTMLFormElement, submitter: HTMLElement | null): boolean {
+  const named = (element: Element | null) =>
+    !!element?.getAttribute("name")?.startsWith(FARM_ISLANDS_BOOT_FORM_REF_PREFIX);
+  return named(submitter) || Array.from(form.elements).some(named);
+}
 
 /** Whether replaying `target` submits a form: a held submit, or a click on a submit button. */
 function submitsForm(target: Element, kind: FarmIslandReplayKind): boolean {
@@ -222,7 +233,8 @@ export function startFarmIslandsBoot(load: () => Promise<unknown> = loadFarmClie
     (event) => {
       const form = event.target;
       if (event.defaultPrevented || !(form instanceof Element) || form.nodeName !== "FORM") return;
-      // A form outside islands posts natively, as it does before any JavaScript runs.
+      // A form outside islands is the bubble-phase listener's below: a server component's form
+      // waits for the runtime, and any other posts natively, as before any JavaScript runs.
       if (pendingIsland(form, root)) hold(event, form, "submit");
     },
     true,
@@ -330,6 +342,33 @@ export function startFarmIslandsBoot(load: () => Promise<unknown> = loadFarmClie
         () => location.assign(anchor.href),
       );
       forTarget(anchor);
+    },
+    false,
+  );
+
+  // A server component's form submitted before the runtime runs: held, then submitted again once it
+  // runs, which holds it until islx posts it without a page load. Bubble phase, as islx listens, so
+  // a handler that prevents the default first still wins. A repeat while it loads is held, not
+  // submitted again; after a failed load the form posts natively.
+  const heldForms = new Set<HTMLFormElement>();
+  listen(
+    "submit",
+    (event) => {
+      const form = event.target;
+      if (event.defaultPrevented || !(form instanceof HTMLFormElement)) return;
+      const submitter = (event as SubmitEvent).submitter ?? null;
+      if (!postsServerAction(form, submitter)) return;
+      event.preventDefault();
+      if (heldForms.has(form)) return;
+      heldForms.add(form);
+      const submit = () => {
+        heldForms.delete(form);
+        if (!form.isConnected) return;
+        const button = submitter as HTMLButtonElement | null;
+        form.requestSubmit(button?.isConnected && button.form === form ? button : undefined);
+      };
+      start().then(submit, submit);
+      forTarget(form);
     },
     false,
   );

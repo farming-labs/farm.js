@@ -1,8 +1,10 @@
+import { FORM_REF_PREFIX } from "@farm.js/islx";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { FARM_DEPLOYMENT_ID_HEADER } from "../deployment";
 import { FARM_ISLAND_REPLAYABLE_SELECTOR } from "../island";
 import {
   FARM_ISLANDS_BOOT_DEPLOYMENT_HEADER,
+  FARM_ISLANDS_BOOT_FORM_REF_PREFIX,
   FARM_ISLANDS_BOOT_PREFETCHING_LINK,
   FARM_ISLANDS_BOOT_REPLAYABLE_SELECTOR,
   FARM_ISLANDS_BOOT_VISIBLE_MARGIN,
@@ -171,6 +173,71 @@ describe("startFarmIslandsBoot", () => {
     expect(load).not.toHaveBeenCalled();
     document.querySelector("input")!.dispatchEvent(new FocusEvent("focusin", { bubbles: true }));
     expect(load).toHaveBeenCalledTimes(1);
+  });
+
+  describe("for a server component's form", () => {
+    // What islx renders for <form action={serverAction}> in a server component.
+    const serverForm = `<form><input type="hidden" name="${FORM_REF_PREFIX}0"><input name="title"><button name="intent" value="add">Add</button></form>`;
+    let submits: Array<{ prevented: boolean; submitter: Element | null }>;
+    // jsdom cannot submit a form: the window, which the event reaches last, records it and stops it.
+    const record = (event: Event) => {
+      submits.push({
+        prevented: event.defaultPrevented,
+        submitter: (event as SubmitEvent).submitter,
+      });
+      event.preventDefault();
+    };
+    beforeEach(() => {
+      submits = [];
+      window.addEventListener("submit", record);
+    });
+    afterEach(() => {
+      window.removeEventListener("submit", record);
+      vi.restoreAllMocks();
+    });
+
+    it("reads the field islx names a form's action with", () => {
+      expect(FARM_ISLANDS_BOOT_FORM_REF_PREFIX).toBe(FORM_REF_PREFIX);
+    });
+
+    it("holds its submit until the runtime runs, then submits it again with its button, once", async () => {
+      const load = boot(`<f-island strategy="interaction"></f-island>${serverForm}`);
+      const form = document.querySelector("form")!;
+      const button = form.querySelector("button")!;
+      form.requestSubmit(button);
+      form.requestSubmit(button);
+      expect(load).toHaveBeenCalledTimes(1);
+      expect(submits).toEqual([
+        { prevented: true, submitter: button },
+        { prevented: true, submitter: button },
+      ]);
+      finishLoad!();
+      await settle();
+      expect(submits).toHaveLength(3);
+      expect(submits[2]).toEqual({ prevented: false, submitter: button });
+    });
+
+    it("submits it natively after the runtime fails to load", async () => {
+      document.body.innerHTML = serverForm;
+      const error = vi.spyOn(console, "error").mockImplementation(() => {});
+      // Finished as a failure here, or by the shared cleanup, which releases the boot either way.
+      const load = vi.fn(
+        () =>
+          new Promise<void>((_, reject) => {
+            finishLoad = () => reject(new Error("chunk failed"));
+          }),
+      );
+      started = load;
+      startFarmIslandsBoot(load);
+      document.querySelector("form")!.requestSubmit();
+      finishLoad!();
+      await settle();
+      expect(submits.map((submit) => submit.prevented)).toEqual([true, false]);
+      expect(error).toHaveBeenCalledWith(
+        "[Farm.js] The client runtime failed to load.",
+        expect.any(Error),
+      );
+    });
   });
 
   it("holds a link click until the runtime runs, then clicks the link again", async () => {
