@@ -24,7 +24,7 @@
   padding: 8px 12px;
   background: #fff;
   color: #000;
-  font-family: var(--font-geist-mono);
+  font-family: var(--font-graft-mono);
   font-size: 11px;
   text-transform: uppercase;
 }
@@ -78,7 +78,7 @@
 .design-prose h3 {
   margin: 36px 0 12px;
   color: #ededed;
-  font-family: var(--font-geist-mono);
+  font-family: var(--font-graft-mono);
   font-size: 11px;
   font-weight: 400;
   letter-spacing: 0.06em;
@@ -124,7 +124,7 @@
   border-radius: 3px;
   background: #070707;
   color: #d4d4d4;
-  font-family: var(--font-geist-mono);
+  font-family: var(--font-graft-mono);
   font-size: 0.84em;
   font-weight: 350;
 }
@@ -138,7 +138,7 @@
   border: 0;
   background: transparent;
   color: #a1a1a1;
-  font-family: var(--font-geist-mono), monospace;
+  font-family: var(--font-graft-mono), monospace;
   font-size: 13px;
   line-height: 1.8;
 }
@@ -155,7 +155,7 @@
   padding: 10px 14px;
   background: rgb(255 255 255 / 0.035);
   color: var(--design-muted);
-  font-family: var(--font-geist-mono);
+  font-family: var(--font-graft-mono);
   font-size: 11px;
   font-weight: 400;
   letter-spacing: 0.06em;

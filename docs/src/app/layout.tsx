@@ -24,21 +24,21 @@ export const metadata = {
   },
 } satisfies Metadata;
 
-const geistSans = localFont({
-  src: "../../node_modules/geist/dist/fonts/geist-sans/Geist-Variable.woff2",
-  family: "Geist Sans",
+const graftSans = localFont({
+  src: "@farming-labs/graft/fonts/Graft-Variable.woff2",
+  family: "Graft",
   weight: "100 900",
   display: "block",
-  variable: "--font-geist-sans",
+  variable: "--font-graft-sans",
   fallback: ["ui-sans-serif", "system-ui", "sans-serif"],
 });
 
-const geistMono = localFont({
-  src: "../../node_modules/geist/dist/fonts/geist-mono/GeistMono-Variable.woff2",
-  family: "Geist Mono",
+const graftMono = localFont({
+  src: "@farming-labs/graft/fonts/GraftMono-Variable.woff2",
+  family: "Graft Mono",
   weight: "100 900",
   display: "block",
-  variable: "--font-geist-mono",
+  variable: "--font-graft-mono",
   fallback: ["ui-monospace", "monospace"],
 });
 
@@ -48,21 +48,21 @@ const geistPixel = localFont({
   weight: 500,
   variable: "--font-geist-pixel",
   fallback: ["monospace"],
-  // Only feature headings below the fold use it; preloading it pushed Geist Sans
+  // Only feature headings below the fold use it; preloading it pushed Graft
   // out of the two-font preload budget.
   preload: false,
 });
 
 export const fonts = defineLayoutFonts({
-  body: geistSans,
-  code: geistMono,
+  body: graftSans,
+  code: graftMono,
 });
 
 export default function RootLayout({ children }: LayoutProps) {
   return (
     <>
       <div
-        className={`${geistSans.variable} ${geistMono.variable} ${geistPixel.variable} ${geistSans.className} min-h-screen bg-black text-white`}
+        className={`${graftSans.variable} ${graftMono.variable} ${geistPixel.variable} ${graftSans.className} min-h-screen bg-black text-white`}
       >
         {children}
       </div>

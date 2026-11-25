@@ -73,7 +73,7 @@
 /* Names printed on the objects: small, light, and quiet until pointed at. */
 .iso-scene .iso-print {
   fill: rgb(255 255 255 / 0.5);
-  font-family: var(--font-geist-mono), ui-monospace, monospace;
+  font-family: var(--font-graft-mono), ui-monospace, monospace;
   font-size: calc(var(--iso-text) * 1px);
   font-weight: 400;
   letter-spacing: 0.02em;
@@ -193,7 +193,7 @@
 }
 .iso-scene .iso-callout text {
   fill: rgb(255 255 255 / 0.9);
-  font-family: var(--font-geist-mono), ui-monospace, monospace;
+  font-family: var(--font-graft-mono), ui-monospace, monospace;
   font-size: calc(var(--iso-text) * 1px);
 }
 .iso-scene .iso-callout .iso-callout-detail {

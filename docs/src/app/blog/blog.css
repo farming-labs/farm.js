@@ -40,7 +40,7 @@
 .blog-art-caption,
 .blog-breadcrumb,
 .blog-resource-action {
-  font-family: var(--font-geist-mono), ui-monospace, monospace;
+  font-family: var(--font-graft-mono), ui-monospace, monospace;
 }
 .blog-eyebrow {
   font-size: 10px;
@@ -140,7 +140,7 @@
 .blog-post-meta time {
   padding-left: 14px;
   border-left: 1px solid #353535;
-  font-family: var(--font-geist-sans), ui-sans-serif, sans-serif;
+  font-family: var(--font-graft-sans), ui-sans-serif, sans-serif;
   font-size: 12px;
 }
 .blog-featured h3 {
@@ -258,7 +258,7 @@
   place-content: center;
   margin: 0;
   color: #545454;
-  font-family: var(--font-geist-mono), monospace;
+  font-family: var(--font-graft-mono), monospace;
   font-size: clamp(8px, 1.6cqw, 12px);
   line-height: 1.2;
   letter-spacing: 0;
@@ -487,7 +487,7 @@
   gap: 7px;
   margin-top: 18px;
   color: #a6a6a6;
-  font-family: var(--font-geist-mono), ui-monospace, monospace;
+  font-family: var(--font-graft-mono), ui-monospace, monospace;
   font-size: 11px;
   letter-spacing: 0.06em;
   text-transform: uppercase;
@@ -635,7 +635,7 @@
   gap: 9px;
   margin-bottom: 24px;
   color: #8f8f8f;
-  font-family: var(--font-geist-mono), ui-monospace, monospace;
+  font-family: var(--font-graft-mono), ui-monospace, monospace;
   font-size: 11px;
   font-weight: 400;
   letter-spacing: 0.08em;
@@ -645,7 +645,7 @@
 .blog-contents-index {
   min-width: 20px;
   color: #858585;
-  font-family: var(--font-geist-mono), ui-monospace, monospace;
+  font-family: var(--font-graft-mono), ui-monospace, monospace;
   font-size: 9px;
   font-variant-numeric: tabular-nums;
 }
@@ -752,7 +752,7 @@
 .blog-prose .farm-markdown th {
   padding-bottom: 10px;
   color: #6e6e6e;
-  font-family: var(--font-geist-mono), ui-monospace, monospace;
+  font-family: var(--font-graft-mono), ui-monospace, monospace;
   font-size: 10px;
   font-weight: 400;
   letter-spacing: 0.1em;
@@ -869,7 +869,7 @@
   border: 0.5px solid rgb(255 255 255 / 0.1);
   background: #070707;
   color: rgb(255 255 255 / 0.78);
-  font-family: var(--font-geist-mono), monospace;
+  font-family: var(--font-graft-mono), monospace;
   font-size: 0.8em;
   overflow-wrap: anywhere;
   -webkit-font-smoothing: antialiased;
@@ -884,7 +884,7 @@
   border: 0;
   background: transparent;
   color: #a1a1a1;
-  font-family: var(--font-geist-mono), monospace;
+  font-family: var(--font-graft-mono), monospace;
   font-size: 12px;
   font-weight: 400;
   line-height: 1.8;
@@ -911,7 +911,7 @@
   transform: translateY(-50%);
   pointer-events: none;
   color: #8f8f8f;
-  font-family: var(--font-geist-mono), monospace;
+  font-family: var(--font-graft-mono), monospace;
   font-size: 11px;
   letter-spacing: 0.04em;
   text-transform: uppercase;
@@ -1197,13 +1197,13 @@
     padding-block: 14px;
     cursor: pointer;
     color: #8f8f8f;
-    font-family: var(--font-geist-mono), ui-monospace, monospace;
+    font-family: var(--font-graft-mono), ui-monospace, monospace;
     font-size: 11px;
     letter-spacing: 0.08em;
     text-transform: uppercase;
   }
   .blog-mobile-contents summary > span {
-    font-family: var(--font-geist-mono), ui-monospace, monospace;
+    font-family: var(--font-graft-mono), ui-monospace, monospace;
     color: #777;
     margin-left: 12px;
     font-size: 9px;

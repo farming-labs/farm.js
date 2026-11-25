@@ -43,7 +43,7 @@
   min-width: 0;
   align-items: center;
   gap: 6px;
-  font-family: var(--font-geist-mono), ui-monospace, monospace;
+  font-family: var(--font-graft-mono), ui-monospace, monospace;
   font-size: 10px;
   text-transform: uppercase;
 }
@@ -129,7 +129,7 @@
   padding: 12px 28px 0;
   border-top: 1px solid rgb(255 255 255 / 0.08);
   color: #a3a3a3;
-  font-family: var(--font-geist-mono), ui-monospace, monospace;
+  font-family: var(--font-graft-mono), ui-monospace, monospace;
   font-size: 11px;
   line-height: 1.4;
   /* One height whatever it says, so the page never jumps as it changes: room
@@ -232,7 +232,7 @@
   background: none;
   color: #a3a3a3;
   cursor: pointer;
-  font-family: var(--font-geist-mono), ui-monospace, monospace;
+  font-family: var(--font-graft-mono), ui-monospace, monospace;
   font-size: 10px;
   letter-spacing: 0.08em;
   text-transform: uppercase;

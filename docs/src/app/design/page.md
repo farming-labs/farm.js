@@ -14,7 +14,7 @@ Values come from the site source in [`docs/`](https://github.com/farming-labs/fa
 - **Structure first.** 1px hairlines, rails, grids, and separators carry the layout. Cards are for repeated items or framed tools, never nested.
 - **Proof over decoration.** Show the install command, the code, the terminal, real benchmark numbers, or a figure that explains a mechanism. No orbs, bokeh, or one-note gradients.
 - **Black, white, and greys.** The site is dark-only, with no brand accent colour. Contrast comes from opacity, and colour appears only for status.
-- **Mono as utility.** Geist Mono carries commands, routes, labels, indexes, and tags. Geist Sans carries reading text.
+- **Mono as utility.** Graft Mono carries commands, routes, labels, indexes, and tags. Graft carries reading text.
 - **Motion with a job.** Feedback, state, continuity, or explanation. Every loop pauses off screen and has a still pose for reduced motion.
 - **Agent-ready.** Copyable commands, a markdown mirror of every page, `llms.txt`, and real states (loading, empty, error) are part of the design, not extras.
 
@@ -74,12 +74,12 @@ Selection is white on black on the homepage and `#ededed` on `#000` on the agent
 
 ## Typography
 
-Three faces, all from the `geist` package, loaded with `localFont` in `docs/src/app/layout.tsx`:
+Three faces, loaded with `localFont` in `docs/src/app/layout.tsx`. Graft and Graft Mono come from `@farming-labs/graft`, Geist Pixel Square from `geist`:
 
 | Face               | Variable             | Weights    | Use                                                       |
 | ------------------ | -------------------- | ---------- | --------------------------------------------------------- |
-| Geist Sans         | `--font-geist-sans`  | 100 to 900 | Reading text, headings                                    |
-| Geist Mono         | `--font-geist-mono`  | 100 to 900 | Code, commands, labels, nav, buttons                      |
+| Graft              | `--font-graft-sans`  | 100 to 900 | Reading text, headings                                    |
+| Graft Mono         | `--font-graft-mono`  | 100 to 900 | Code, commands, labels, nav, buttons                      |
 | Geist Pixel Square | `--font-geist-pixel` | 500        | Feature headings, figure titles, the final call to action |
 
 Headings run light and tight: weights 380 to 450 with negative tracking. Body text runs at weight 300 with generous leading.
@@ -96,7 +96,7 @@ Headings run light and tight: weights 380 to 450 with negative tracking. Body te
 
 ### Labels
 
-Labels are uppercase Geist Mono with modest tracking:
+Labels are uppercase Graft Mono with modest tracking:
 
 - Eyebrows: 10px, an index number at 26% white, a `/` at 18%, then the label (`01 / Guide`).
 - Docs labels (table headers, sidebar sections, breadcrumbs): 11px, `0.06em` to `0.08em`.
@@ -153,7 +153,7 @@ Figures are plain SVG drawn from a small kit in `docs/src/components/iso/` (`sce
 - **Strokes.** One weight per figure: `stroke-width: 1` with `vector-effect: non-scaling-stroke` and round joins, at 20% white. Detail lines 30%, ticks 14%, dashes `2 3`.
 - **Faces.** Top `#121212`, left `#0e0e0e`, right `#0a0a0a`. Hairline figures fill faces with `#000` and use 30% strokes and 14% creases.
 - **One bright edge.** The part that matters right now (`[data-on]`, `[data-hot]`) rises to 55% to 60% white. Everything else stays at hairline contrast.
-- **Words beside the drawing.** Names printed in Geist Mono only where they sit on the object. Callouts are a dot, a wire with rounded elbows, and a label that fades in once the wire lands.
+- **Words beside the drawing.** Names printed in Graft Mono only where they sit on the object. Callouts are a dot, a wire with rounded elbows, and a label that fades in once the wire lands.
 - **Interaction.** Each figure loops on its own clock. Pointing at a part takes over the loop and releasing resumes it in place; arrow keys step through parts; Enter opens a close-up dialog. A live readout sits under the drawing.
 - **Hydration.** Coordinates are snapped to two decimals so the server and the browser draw identical paths.
 

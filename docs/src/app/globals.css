@@ -14,12 +14,12 @@
 @source "../**/*.{js,ts,jsx,tsx}";
 
 @theme {
-  --font-sans: var(--font-geist-sans), ui-sans-serif, system-ui, -apple-system, sans-serif;
+  --font-sans: var(--font-graft-sans), ui-sans-serif, system-ui, -apple-system, sans-serif;
 }
 
 /* Reads the Geist Pixel variable the font package sets, so it can't be a theme variable. */
 @utility font-geist-pixel {
-  font-family: var(--font-geist-pixel), var(--font-geist-mono), monospace;
+  font-family: var(--font-geist-pixel), var(--font-graft-mono), monospace;
 }
 
 /* On Tailwind v3 the theme's layered base rules came after its unlayered ones, so code text kept
@@ -47,7 +47,7 @@ samp {
   --farm-line-soft: rgb(255 255 255 / 0.055);
   --farm-rule: rgb(255 255 255 / 0.09);
   /* Keep theme utilities on the compiled layout font instead of ui-monospace. */
-  --font-geist-mono: "Geist Mono", ui-monospace, monospace !important;
+  --font-graft-mono: "Graft Mono", ui-monospace, monospace !important;
 }
 
 html {
@@ -56,7 +56,7 @@ html {
 
 body {
   font-family:
-    "Geist Mono", ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono",
+    "Graft Mono", ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono",
     "Courier New", monospace;
   margin: 0;
   background: var(--farm-bg);
@@ -69,7 +69,7 @@ body {
 }
 
 .farm-home .font-mono {
-  font-family: var(--font-geist-mono), ui-monospace, SFMono-Regular, Menlo, monospace !important;
+  font-family: var(--font-graft-mono), ui-monospace, SFMono-Regular, Menlo, monospace !important;
   letter-spacing: 0;
 }
 
@@ -258,7 +258,7 @@ svg.lucide:not([stroke]) {
   border: 1px solid rgb(255 255 255 / 0.34);
   color: rgb(255 255 255 / 0.5);
   font:
-    400 10px/1 var(--font-geist-mono),
+    400 10px/1 var(--font-graft-mono),
     ui-monospace,
     monospace;
   letter-spacing: 0.04em;
@@ -1035,7 +1035,7 @@ svg.lucide:not([stroke]) {
 
 .farm-route-text {
   fill: rgb(255 255 255 / 0.46);
-  font-family: var(--font-geist-mono), ui-monospace, monospace;
+  font-family: var(--font-graft-mono), ui-monospace, monospace;
   font-size: 7px;
   white-space: pre;
 }
@@ -1181,7 +1181,7 @@ svg.lucide:not([stroke]) {
 
 .benchmark-hairline .iso-callout text {
   fill: rgb(255 255 255 / 0.5);
-  font-family: var(--font-geist-mono), ui-monospace, monospace;
+  font-family: var(--font-graft-mono), ui-monospace, monospace;
   font-size: calc(var(--iso-text) * 1.55px);
   white-space: pre;
 }
@@ -1498,7 +1498,7 @@ html[data-farm-docs-runtime="true"] .fd-page-action-menu-item,
 #nd-docs-layout[data-fd-framework] .fd-page-footer a,
 #nd-docs-layout[data-fd-framework] .fd-last-updated-footer,
 #nd-docs-layout[data-fd-framework] .fd-page-nav-card {
-  font-family: var(--font-geist-mono), ui-monospace, SFMono-Regular, Menlo, monospace !important;
+  font-family: var(--font-graft-mono), ui-monospace, SFMono-Regular, Menlo, monospace !important;
 }
 
 #nd-docs-layout[data-fd-framework] .fd-page-action-btn,

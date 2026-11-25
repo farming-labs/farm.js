@@ -128,6 +128,9 @@ importers:
       '@farm.js/devtools':
         specifier: workspace:*
         version: link:../packages/farm-devtools
+      '@farming-labs/graft':
+        specifier: 0.3.0
+        version: 0.3.0(@farm.js/core@packages+farm)(next@16.4.3)
       '@tailwindcss/vite':
         specifier: ^4.3.3
         version: 4.3.3(vite@8.3.4)
@@ -7258,6 +7261,21 @@ packages:
       - supports-color
       - waku
     dev: false
+
+  /@farming-labs/graft@0.3.0(@farm.js/core@packages+farm)(next@16.4.3):
+    resolution: {integrity: sha512-xp19E6cR5SX9OlfJEBqohfzgiS7i1GntRmSj6574ceWB3VKmmWUN6sZfdNx2/uF7MeyuhySiEvFVI9KCekGodA==}
+    peerDependencies:
+      '@farm.js/core': '>=0.1.85'
+      next: '>=13.2.0'
+    peerDependenciesMeta:
+      '@farm.js/core':
+        optional: true
+      next:
+        optional: true
+    dependencies:
+      '@farm.js/core': link:packages/farm
+      next: 16.4.3(@opentelemetry/api@1.9.1)(@playwright/test@1.58.2)(@types/node@22.20.5)(react-dom@19.2.8)(react@19.2.8)
+    dev: true
 
   /@farming-labs/orm-d1@0.0.66:
     resolution: {integrity: sha512-bjjk9fK4BepblqoUM1ONCLf8xnlqD0/JCK13A0+M7F3e2O+/19/37qq3XtN5N0YfgeGZVi+4dSQ4RpnSJzSvRQ==}

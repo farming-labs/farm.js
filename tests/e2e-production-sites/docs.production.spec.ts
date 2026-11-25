@@ -124,7 +124,7 @@ test("blog connects the index, article, contents, and Markdown mirror", async ({
   );
   await expect(page.locator(".blog-featured .blog-post-meta time")).toHaveCSS(
     "font-family",
-    /Geist Sans/,
+    /Graft/,
   );
   const listed = page.locator('.blog-post-list a[href="/blog/0.1.0"]');
   await expect(listed).toHaveCount(1);
