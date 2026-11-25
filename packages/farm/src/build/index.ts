@@ -20,7 +20,7 @@ import { getFarmDocsRouteTypeEntries } from "../docs";
 import { generateFarmTypeArtifacts } from "../type-artifacts";
 import { PluginManager } from "../plugin";
 import { farmEnvironmentFunctionsPlugin } from "../environment-vite";
-import { farmFontImportsPlugin } from "../font-vite";
+import { farmFontImportsPlugin, isFarmLayoutModule } from "../font-vite";
 import { createFarmSourceAlias, mergeFarmViteConfig } from "../server/vite-config";
 import { getFarmRendererComponentExtensions, loadFarmRendererVitePlugins } from "../renderer";
 import { loadFarmProductionVite, type FarmProductionViteRuntime } from "./production-vite";
@@ -336,6 +336,7 @@ async function createProjectModuleServer(
           root,
           basePath: config.basePath,
           publicDir: config.publicDir,
+          isLayoutModule: (id) => isFarmLayoutModule(id, getFarmAppDirectories(config)),
         }),
         farmEnvironmentFunctionsPlugin({ renderer: config.renderer }),
         // Route modules load here at build time (rendering config, prerendering): `server-only`
