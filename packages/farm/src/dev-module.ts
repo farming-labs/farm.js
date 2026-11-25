@@ -31,6 +31,27 @@ async function startPluginContainer(server: FarmDevModuleServer): Promise<void> 
   startedContainers.add(container);
 }
 
+/**
+ * @internal A check that the module whose `exports` the environment's runner returned is still
+ * the copy the runner keeps. A full reload of the server graph clears the runner, which evaluates
+ * every module again on its next import, so a caller holding the old copy (and the modules it
+ * imported, such as a UI library) would no longer match the modules a page imports.
+ */
+export function createFarmDevModuleCheck(
+  server: FarmDevModuleServer,
+  exports: unknown,
+  environmentName: "ssr" | "rsc" = "ssr",
+): () => boolean {
+  const modules = (server.environments[environmentName] as RunnableDevEnvironment | undefined)
+    ?.runner?.evaluatedModules;
+  // The runner keys a module by its resolved id and URL, not by the specifier it was imported by.
+  const node = modules
+    ? Array.from(modules.idToModuleMap.values()).find((module) => module.exports === exports)
+    : undefined;
+  if (!modules || !node) return () => true;
+  return () => node.evaluated && modules.getModuleById(node.id) === node;
+}
+
 /** @internal Distinguishes an unsupported runtime from a module evaluation error. */
 export class FarmDevEnvironmentError extends Error {}
 

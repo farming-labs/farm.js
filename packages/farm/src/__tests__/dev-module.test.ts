@@ -5,6 +5,7 @@ import path from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { createServer, type ViteDevServer, type RunnableDevEnvironment } from "vite";
 import {
+  createFarmDevModuleCheck,
   loadFarmDevModule,
   invalidateFailedFarmDevModules,
   invalidateFarmDevDependents,
@@ -192,5 +193,62 @@ describe("development environment module loading", () => {
     await writeFile(path.join(root, "page.css"), "body { margin: 0 }");
     await writeFile(path.join(root, "page.js"), 'import "./page.css"; export const ok = true;');
     expect((await loadFarmDevModule(server, "/page.js")).ok).toBe(true);
+  });
+});
+
+describe("createFarmDevModuleCheck", () => {
+  // No watcher: a late event for a file written here would invalidate modules mid-test.
+  async function unwatchedProject(files: Record<string, string>) {
+    const root = await mkdtemp(path.join(os.tmpdir(), "farm-dev-module-check-"));
+    for (const [file, code] of Object.entries(files)) await writeFile(path.join(root, file), code);
+    const server = await createServer({
+      root,
+      configFile: false,
+      envFile: false,
+      appType: "custom",
+      logLevel: "silent",
+      server: { middlewareMode: true, ws: false, watch: null },
+    });
+    projects.push({ root, server });
+    const modules = (server.environments.ssr as RunnableDevEnvironment).runner.evaluatedModules;
+    return { server, modules };
+  }
+
+  it("turns false once a full reload of the server graph clears the module", async () => {
+    // A renderer and a page that share a UI library, which the runner evaluates itself.
+    const { server, modules } = await unwatchedProject({
+      "ui.js": "export const instance = {};",
+      "renderer.js": 'export { instance } from "/ui.js";',
+      "page.js": 'export { instance } from "/ui.js";',
+    });
+    const renderer = await loadFarmDevModule(server, "/renderer.js");
+    const current = createFarmDevModuleCheck(server, renderer);
+    expect(current()).toBe(true);
+    expect((await loadFarmDevModule(server, "/page.js")).instance).toBe(renderer.instance);
+
+    // What Vite's runner does on a full-reload payload.
+    modules.clear();
+    expect(current()).toBe(false);
+    // Pages now get a new copy of the library, which only the new renderer shares.
+    const page = await loadFarmDevModule(server, "/page.js");
+    expect(page.instance).not.toBe(renderer.instance);
+    expect((await loadFarmDevModule(server, "/renderer.js")).instance).toBe(page.instance);
+  });
+
+  it("turns false once the runner invalidates the module", async () => {
+    const { server, modules } = await unwatchedProject({
+      "renderer.js": "export const instance = {};",
+    });
+    const current = createFarmDevModuleCheck(
+      server,
+      await loadFarmDevModule(server, "/renderer.js"),
+    );
+    modules.invalidateModule(modules.getModuleByUrl("/renderer.js")!);
+    expect(current()).toBe(false);
+  });
+
+  it("stays true for exports the runner didn't evaluate", async () => {
+    const { server } = await unwatchedProject({});
+    expect(createFarmDevModuleCheck(server, await import("../dev-module"))()).toBe(true);
   });
 });
