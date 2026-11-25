@@ -86,6 +86,11 @@ async function* walk(node) {
   let attributes = "";
   for (const [name, value] of Object.entries(props)) {
     if (name === "children" || name === "dangerouslySetInnerHTML") continue;
+    if (name === "style" && typeof value === "object" && value !== null) {
+      const css = Object.entries(value).map(([property, entry]) => property.replace(/[A-Z]/g, (c) => "-" + c.toLowerCase()) + ":" + entry).join(";");
+      attributes += ' style="' + escape(css) + '"';
+      continue;
+    }
     if (value == null || value === false || typeof value === "function" || typeof value === "object") continue;
     attributes += " " + (name === "className" ? "class" : name) + (value === true ? "" : '="' + escape(value) + '"');
   }
@@ -193,7 +198,25 @@ function rendererFor({ server, streaming }: Primitive) {
   };
 }
 
-async function createApp(variant: Primitive): Promise<string> {
+const fragmentLayout = `import { createElement as h } from "trickle-renderer";
+export default function Layout(props) {
+  return h("main", { id: "trickle-layout" }, props.children);
+}
+`;
+
+// A root layout that renders the whole document, as most apps' layouts do.
+const documentLayout = `import { createElement as h } from "trickle-renderer";
+export default function Layout(props) {
+  return h(
+    "html",
+    { lang: "en" },
+    h("head", null, h("title", null, "trickle document")),
+    h("body", null, h("main", { id: "trickle-layout" }, props.children)),
+  );
+}
+`;
+
+async function createApp(variant: Primitive, layout = fragmentLayout): Promise<string> {
   const root = await fs.mkdtemp(path.join(packageRoot, ".tmp-renderer-streaming-"));
   cleanups.push(() =>
     fs.rm(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 }),
@@ -208,11 +231,7 @@ async function createApp(variant: Primitive): Promise<string> {
       images: { provider: "none" },
       telemetry: false,
     })};\n`,
-    "src/app/layout.js": `import { createElement as h } from "trickle-renderer";
-export default function Layout(props) {
-  return h("main", { id: "trickle-layout" }, props.children);
-}
-`,
+    "src/app/layout.js": layout,
     "src/app/page.js": `import { Gate, createElement as h } from "trickle-renderer";
 export default function Page() {
   return h("section", null, h("p", null, "before the gate"), h(Gate, null, h("p", null, "after the gate")));
@@ -330,45 +349,83 @@ async function expectRenderErrorsEndTheResponse(origin: string) {
   expect(html).not.toContain("never rendered");
 }
 
+/** The layout's own document, with Farm's head assets in its head, streamed up to the gate. */
+function expectDocumentStreamedThroughGate(beforeGate: string, html: string) {
+  expect(beforeGate).toMatch(/^<!DOCTYPE html>/i);
+  const head = beforeGate.slice(0, beforeGate.indexOf("</head>"));
+  expect(head).toContain(HYDRATION_SCRIPT);
+  expect(head).toContain("<title>trickle document</title>");
+  expect(beforeGate).toContain('<main id="trickle-layout">');
+  expect(beforeGate).toContain("<p>before the gate</p>");
+  expect(beforeGate).not.toContain("after the gate");
+  expect(html).toContain("<p>before the gate</p><p>after the gate</p></section>");
+  expect(html.match(/<html[\s>]/gi)).toHaveLength(1);
+  expect(html.match(/<body[\s>]/gi)).toHaveLength(1);
+  expect(html).toMatch(/<\/html>\s*$/);
+}
+
+async function serveProductionBuild(root: string) {
+  const config = await resolveConfig(
+    { ...(await loadConfig(root, undefined, "production")), root, srcDir: "src" },
+    "production",
+  );
+  await build(config, { root, preset: "node-server" });
+  const gate = await startGate();
+  const server = await startProductionServer(path.join(root, ".farm", ".output", "server"), {
+    env: { TRICKLE_GATE_URL: gate.url },
+  });
+  cleanups.push(() => server.stop());
+  return { origin: server.origin, gate };
+}
+
+async function serveDevelopment(root: string, variant: Primitive) {
+  const gate = await startGate();
+  const previousGateUrl = process.env.TRICKLE_GATE_URL;
+  process.env.TRICKLE_GATE_URL = gate.url;
+  cleanups.push(async () => {
+    if (previousGateUrl === undefined) delete process.env.TRICKLE_GATE_URL;
+    else process.env.TRICKLE_GATE_URL = previousGateUrl;
+  });
+  const server: ViteDevServer = await createServer({
+    root,
+    renderer: rendererFor(variant),
+    images: { provider: "none" },
+  });
+  cleanups.push(() => server.close());
+  const port = await getAvailablePort();
+  await server.listen(port);
+  return { origin: `http://127.0.0.1:${port}`, gate };
+}
+
 describe.each(primitives)("a third-party renderer that streams with $primitive", (variant) => {
   it("streams the page in a production build", async () => {
-    const root = await createApp(variant);
-    const config = await resolveConfig(
-      { ...(await loadConfig(root, undefined, "production")), root, srcDir: "src" },
-      "production",
-    );
-    await build(config, { root, preset: "node-server" });
-    const gate = await startGate();
-    const server = await startProductionServer(path.join(root, ".farm", ".output", "server"), {
-      env: { TRICKLE_GATE_URL: gate.url },
-    });
-    cleanups.push(() => server.stop());
+    const { origin, gate } = await serveProductionBuild(await createApp(variant));
 
-    const { beforeGate, html } = await readThroughGate(`${server.origin}/`, gate);
+    const { beforeGate, html } = await readThroughGate(`${origin}/`, gate);
     expectStreamedThroughGate(beforeGate, html);
-    await expectRenderErrorsEndTheResponse(server.origin);
+    await expectRenderErrorsEndTheResponse(origin);
   }, 240_000);
 
   it("streams the page in development", async () => {
-    const root = await createApp(variant);
-    const gate = await startGate();
-    const previousGateUrl = process.env.TRICKLE_GATE_URL;
-    process.env.TRICKLE_GATE_URL = gate.url;
-    cleanups.push(async () => {
-      if (previousGateUrl === undefined) delete process.env.TRICKLE_GATE_URL;
-      else process.env.TRICKLE_GATE_URL = previousGateUrl;
-    });
-    const server: ViteDevServer = await createServer({
-      root,
-      renderer: rendererFor(variant),
-      images: { provider: "none" },
-    });
-    cleanups.push(() => server.close());
-    const port = await getAvailablePort();
-    await server.listen(port);
+    const { origin, gate } = await serveDevelopment(await createApp(variant), variant);
 
-    const { beforeGate, html } = await readThroughGate(`http://127.0.0.1:${port}/`, gate);
+    const { beforeGate, html } = await readThroughGate(`${origin}/`, gate);
     expectStreamedThroughGate(beforeGate, html);
-    await expectRenderErrorsEndTheResponse(`http://127.0.0.1:${port}`);
+    await expectRenderErrorsEndTheResponse(origin);
+  }, 60_000);
+
+  it("streams a layout's own document in a production build", async () => {
+    const { origin, gate } = await serveProductionBuild(await createApp(variant, documentLayout));
+
+    const { beforeGate, html } = await readThroughGate(`${origin}/`, gate);
+    expectDocumentStreamedThroughGate(beforeGate, html);
+  }, 240_000);
+
+  it("streams a layout's own document in development", async () => {
+    const root = await createApp(variant, documentLayout);
+    const { origin, gate } = await serveDevelopment(root, variant);
+
+    const { beforeGate, html } = await readThroughGate(`${origin}/`, gate);
+    expectDocumentStreamedThroughGate(beforeGate, html);
   }, 60_000);
 });

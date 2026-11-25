@@ -376,6 +376,10 @@ descriptor that declares a primitive the server module doesn't export fails with
 it. A renderer that exports only `renderToReadableStream()` streams in development as well as in
 production builds.
 
+A root layout that renders its own `<html>` streams too. Farm holds the output until its `<body>`
+and puts its head assets (stylesheets, metadata, the hydration script) in the layout's `<head>`, so
+the page starts as soon as the shell is ready.
+
 The descriptor's top-level `node` and `web` apply to every runtime. When a package's exports change
 between runtimes, as React DOM's do between Node and edge builds, override them per runtime:
 
