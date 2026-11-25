@@ -65,8 +65,8 @@ pnpm test:e2e:custom-renderer
 
 This copy runs against Farm's source in CI. To start your own renderer, clone
 [farming-labs/leaf](https://github.com/farming-labs/leaf) instead. It's the same adapter and app
-on published packages, plus ui-sdk components. [Bring your own
-renderer](https://farmjs.dev/blog/bring-your-own-renderer) walks through it step by step.
+on published packages, plus ui-sdk components. [Build your own renderer, build your own full-stack
+framework](https://farmjs.dev/blog/bring-your-own-renderer) walks through it step by step.
 
 ## What it does not do
 

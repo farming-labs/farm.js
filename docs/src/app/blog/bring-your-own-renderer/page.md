@@ -1,15 +1,15 @@
 ---
-title: "Bring your own renderer"
-description: "How to plug any UI library into Farm, one piece at a time: a descriptor, three small modules, a few hooks, and two ways to use a component library. The working example is farming-labs/leaf."
+title: "Build your own renderer, build your own full-stack framework"
+description: "How to plug any UI library into Farm, one piece at a time: a descriptor, three small modules, a few hooks, islands, and two ways to use a component library. The working example is farming-labs/leaf."
 ---
 
-# Bring your own renderer
+# Build your own renderer, build your own full-stack framework
 
 KinfeMichael Tariku · Nov 2026
 
 Farm ships five renderers: React, Preact, Solid, Vue, and Svelte. This post is about the sixth, the one you write.
 
-To find out what that takes, I wrote leaf, a small UI library Farm had never heard of, and plugged it in. It now runs a whole Farm app: server rendering, hydration, client navigation, server functions, its own file format, and components from a component library. Every snippet below comes from that app, and you can run it:
+To find out what that takes, I wrote leaf, a small UI library Farm had never heard of, and plugged it in. It now runs a whole Farm app: server rendering, hydration, islands, client navigation, server functions, its own file format, and components from a component library. Every snippet below comes from that app, and you can run it:
 
 ```bash
 git clone https://github.com/farming-labs/leaf
@@ -492,9 +492,68 @@ The layout and the paragraph reach the browser at once, and the list follows whe
 - Its browser renderer can't run an async component, so a page that has one stays server HTML.
 - Its `renderToString()` rejects an async component with an error that says to stream it. Farm's conformance suite expects that from a renderer that can't wait.
 
-<span id="step-9-test-it" className="blog-heading-anchor" />
+<span id="step-9-optional-islands" className="blog-heading-anchor" />
 
-## Step 9: test it
+## Step 9 (optional): islands
+
+A page that hydrates hydrates as one tree: all of its components ship to the browser, including the ones that never change. With islands, a server page stays HTML, and only its client components hydrate, each on its own and when it's needed. Since 0.1.84, that works with any renderer that opts in.
+
+The app turns islands on:
+
+```ts
+// app/farm.config.ts
+export default defineConfig({
+  renderer: leaf(),
+  experimental: {
+    isolatedClientHydration: "enabled",
+  },
+});
+```
+
+The descriptor adds `islands: true` to `capabilities`, and the server module exports one more function. Farm wraps each export of a `"use client"` module with `withIsland()` in the server graph. `resolveFarmIsland()` from `@farm.js/core/renderer` works out what to write for the props the component got: the scripts that carry them, Farm's island element, and the script that starts it. The renderer writes those around the component:
+
+```ts
+// packages/farm-leaf/src/server.ts (abridged)
+export function withIsland(component: unknown, reference: FarmIslandReference): unknown {
+  if (typeof component !== "function") return component;
+  const Inner = component as Component<Props>;
+  function Island(props: Props) {
+    const island = useContext(ClientGraph) ? undefined : resolveFarmIsland(props, reference);
+    if (!island) return createElement(Inner, withoutClientAttributes(props));
+    return createElement(
+      Fragment,
+      null,
+      ...island.values.map(script),
+      createElement(
+        island.element.tag,
+        island.element.attributes,
+        createElement(Inner, island.props),
+      ),
+      script(island.script),
+    );
+  }
+  return Island;
+}
+```
+
+There's no browser half to write. Farm's island runtime hydrates each island with the client module's `createElement()` and `hydrateRoot()` from step 3, and unmounts it when a navigation removes it.
+
+`ClientGraph` is a leaf context. Under a `"use client"` layout, the route hydrates as one root, and a client component inside it is part of that root, not an island. Farm marks that tree with `wrapClientGraph()`, and a server page under it with `isolateServerPageGraph()`, where client components are islands again. leaf's two exports set the context.
+
+A page uses client components as usual, and says when each one starts:
+
+```tsx
+// app/src/app/islands/page.tsx (abridged)
+<p id="islands-static">This text ships no JavaScript.</p>
+<Counter name="load" label="Starts at once" since={since} crops={crops} client:load />
+<Counter name="idle" label="Starts when the browser is idle" since={since} crops={crops} />
+```
+
+`Counter`'s module exports `island = "idle"`, and `client:load` overrides it where it's used. The other strategies are `visible` and `interaction`. `since` is a `Date` and `crops` a `Map`, and the browser gets a `Date` and a `Map`: props go through the same codec as Farm's React islands, and a value several islands share is sent once.
+
+<span id="step-10-test-it" className="blog-heading-anchor" />
+
+## Step 10: test it
 
 The official renderers share a conformance suite, and it's on npm:
 
@@ -540,7 +599,7 @@ defineRendererClientConformance({ name: "leaf", client, server, reconcilesRerend
 
 The suite checks the exports, renders and hydrates real trees, and checks that a re-render keeps the DOM when you say it does.
 
-Unit tests don't prove the build works, so the repo also runs one Playwright spec against `farm dev` and against a production build. It covers hydration keeping the server's DOM, client navigation, a server function call, `<leaf:if>` and `<leaf:for>`, and 404 and 500 pages:
+Unit tests don't prove the build works, so the repo also runs one Playwright spec against `farm dev` and against a production build. It covers hydration keeping the server's DOM, islands, client navigation, a server function call, `<leaf:if>` and `<leaf:for>`, and 404 and 500 pages:
 
 ```bash
 pnpm test          # conformance and unit tests
@@ -649,7 +708,7 @@ ui-sdk is a beta (`0.1.0-beta.13`). The first way stops depending on internals t
 
 Routes, layouts, SSR, hydration, navigation, server functions, and production output work with any renderer. Some things don't:
 
-- **React Server Components and islands are React-only.** The [feature table](/docs/renderers#feature-support) lists what each renderer gets. A custom renderer gets the same as Solid, Vue, and Svelte.
+- **React Server Components are React-only.** Islands were too, until 0.1.84: now a renderer that opts in gets them, as [step 9](#step-9-optional-islands) shows. Of the built-in renderers, only React uses them so far. The [feature table](/docs/renderers#feature-support) lists what else each renderer gets.
 - **One renderer per app.** You can't render one page with leaf and the next with React.
 - **leaf's own gaps are leaf's.** It streams only in order, and it has no keys and no refs. Those are missing from the library, not from Farm's contract.
 
