@@ -79,6 +79,39 @@ test("server output passed as children stays server output inside a client compo
   expect(errors).toEqual([]);
 });
 
+test("a click on a client component that hydrates at load counts when it lands before its code", async ({
+  page,
+}) => {
+  const errors = collectErrors(page);
+  // Islands mode swaps a navigation's page in before its islands' code arrives: the Collapsible's
+  // is held here, as on a slow connection. rsc mode shows the page once its code has loaded.
+  let releaseModule = () => {};
+  const requested: string[] = [];
+  if (mode === "islands") {
+    const moduleHeld = new Promise<void>((resolve) => (releaseModule = resolve));
+    // A production chunk, or the module development serves as source.
+    await page.route(
+      /\/chunks\/collapsible-h[0-9a-f]+\.js$|\/components\/collapsible\.tsx(\?|$)/,
+      async (route) => {
+        requested.push(route.request().url());
+        await moduleHeld;
+        await route.continue();
+      },
+    );
+  }
+  await page.goto("/");
+  await hydrated(page);
+  await page.getByRole("link", { name: "Children" }).click();
+  const toggle = page.getByRole("button", { name: "Toggle list" });
+  await expect(toggle).toHaveAttribute("aria-expanded", "true");
+  // Its hydration has started: the click lands while its code loads.
+  if (mode === "islands") await expect.poll(() => requested.length).toBeGreaterThan(0);
+  await toggle.click();
+  releaseModule();
+  await expect(toggle).toHaveAttribute("aria-expanded", "false");
+  expect(errors).toEqual([]);
+});
+
 test("a client component reads context from a client provider in a server layout", async ({
   page,
 }) => {
