@@ -212,7 +212,7 @@ import {
   FARM_CLIENT_MODULE_PRELOADS_PLACEHOLDER,
   readFarmClientModulePreloads,
 } from "./client-module-preloads";
-import { configuresFarmClientChunks, createFarmIslandsReactOutput } from "./islands-react-chunk";
+import { createFarmIslandsReactChunkPlugin } from "./islands-react-chunk";
 import { createFarmRouter } from "../router";
 import {
   createFarmClientRouteTable,
@@ -2579,11 +2579,6 @@ async function buildClient(
               entryFileNames: "[name]-h[hash].js",
               chunkFileNames: "chunks/[name]-h[hash].js",
               hashCharacters: "hex",
-              ...(islandsMode &&
-              isReactRenderer(config.renderer) &&
-              !configuresFarmClientChunks(config.vite)
-                ? createFarmIslandsReactOutput()
-                : {}),
               // Use predictable name for CSS so we can reference it in SSR HTML
               assetFileNames: (assetInfo) => {
                 if (assetInfo.name?.endsWith(".css")) {
@@ -2662,6 +2657,10 @@ async function buildClient(
           ...(tailwindVitePlugin ? [tailwindVitePlugin] : []),
           ...(rendererVitePlugins as any[]),
           ...(config.vite.plugins || []),
+          // React in one chunk, unless the app's config or one of its plugins splits chunks.
+          ...(islandsMode && isReactRenderer(config.renderer)
+            ? [createFarmIslandsReactChunkPlugin()]
+            : []),
           farmServerOnlyEntriesPlugin({ platform, distDir: config.distDir || ".farm" }),
           farmNavigationPlugin(config.renderer),
           farmDocsClientConfigPlugin(
@@ -5009,8 +5008,9 @@ let farmRendererLoaded = false;${
         isolatedHydrationEnabled
           ? `
 // The boot stops holding interactions once this entry runs. Until islx loads, islands that have not
-// hydrated hold them here, for their schedulers to replay.
-const releaseFarmIslandInteractions = holdFarmIslandInteractions("f-island");`
+// hydrated hold them here, for their schedulers to replay, and a server component's form waits for
+// islx to post it without a page load.
+const releaseFarmIslandInteractions = holdFarmIslandInteractions("f-island", loadFarmRenderer);`
           : ""
       }
 function loadFarmRenderer() {

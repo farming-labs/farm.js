@@ -364,6 +364,10 @@ Farm keeps the output options the server reads or that would publish private dat
 `output` to one object; an array of outputs fails the build. The server build keeps Farm's own
 output options.
 
+In islands mode, a React app's client build puts React, its JSX runtime, and React DOM in one
+chunk. Setting `codeSplitting`, `advancedChunks`, `manualChunks`, or `inlineDynamicImports`, in
+`vite.build` or from a Vite plugin's `config` hook, replaces that chunk with the app's own split.
+
 A production document lists the chunks its page needs before it hydrates as
 `<link rel="modulepreload">`: the static imports of the client entry (Farm's runtime and the
 hydrating layouts), of the page's hydrating module, and of the islands that hydrate at load.
@@ -957,9 +961,9 @@ The mode applies to synchronous pages and layouts, which have a route-wide alter
 page or layout has none, so its eligible client components always hydrate as islands, in every
 mode. See [Async pages and client components](/docs/server-rendering#async-pages-and-client-components).
 
-With another renderer, `"enabled"` hydrates islands only when the renderer declares
-`capabilities.islands`. Each island then hydrates through that renderer; see
-[Islands](/docs/renderers/custom#islands) for what it implements.
+With another renderer, turn islands on with `serverComponents: { mode: "islands" }`. It needs a
+renderer that declares `capabilities.islands`, and each island then hydrates through that renderer;
+see [Islands](/docs/renderers/custom#islands) for what it implements. `"enabled"` still works there.
 
 An eligible boundary is a local, statically analyzable `"use client"` module with a default or
 named capitalized component export and serializable props. Farm preserves its server-rendered HTML,

@@ -79,6 +79,39 @@ test("server output passed as children stays server output inside a client compo
   expect(errors).toEqual([]);
 });
 
+test("a click on a client component that hydrates at load counts when it lands before its code", async ({
+  page,
+}) => {
+  const errors = collectErrors(page);
+  // Islands mode swaps a navigation's page in before its islands' code arrives: the Collapsible's
+  // is held here, as on a slow connection. rsc mode shows the page once its code has loaded.
+  let releaseModule = () => {};
+  const requested: string[] = [];
+  if (mode === "islands") {
+    const moduleHeld = new Promise<void>((resolve) => (releaseModule = resolve));
+    // A production chunk, or the module development serves as source.
+    await page.route(
+      /\/chunks\/collapsible-h[0-9a-f]+\.js$|\/components\/collapsible\.tsx(\?|$)/,
+      async (route) => {
+        requested.push(route.request().url());
+        await moduleHeld;
+        await route.continue();
+      },
+    );
+  }
+  await page.goto("/");
+  await hydrated(page);
+  await page.getByRole("link", { name: "Children" }).click();
+  const toggle = page.getByRole("button", { name: "Toggle list" });
+  await expect(toggle).toHaveAttribute("aria-expanded", "true");
+  // Its hydration has started: the click lands while its code loads.
+  if (mode === "islands") await expect.poll(() => requested.length).toBeGreaterThan(0);
+  await toggle.click();
+  releaseModule();
+  await expect(toggle).toHaveAttribute("aria-expanded", "false");
+  expect(errors).toEqual([]);
+});
+
 test("a client component reads context from a client provider in a server layout", async ({
   page,
 }) => {
@@ -363,13 +396,58 @@ test("static pages are prerendered at build time", async ({ request }) => {
   expect(await (await request.get("/static/b")).text()).toContain("Static b");
 });
 
-test("a server action runs from a form, with JavaScript", async ({ page }) => {
+/** The documents the page loads from now on: a form that posts natively loads one. */
+function documentRequests(page: Page): string[] {
+  const documents: string[] = [];
+  page.on("request", (request) => {
+    if (request.isNavigationRequest()) documents.push(`${request.method()} ${request.url()}`);
+  });
+  return documents;
+}
+
+test("a server action runs from a form, with JavaScript, without reloading the page", async ({
+  page,
+}) => {
   const errors = collectErrors(page);
   await page.goto("/action");
   await hydrated(page);
+  await page.evaluate(() => Object.assign(window, { __farmSameDocument: true }));
+  const documents = documentRequests(page);
   await page.getByLabel("Title").fill("From the browser");
+  // In islands mode the field's focus runs the client entry; the press on Add then loads islx.
+  await hydrated(page);
   await page.getByRole("button", { name: "Add" }).click();
   await expect(page.getByTestId("todos")).toContainText("From the browser");
+  expect(documents).toEqual([]);
+  expect(await page.evaluate(() => "__farmSameDocument" in window)).toBe(true);
+  expect(errors).toEqual([]);
+});
+
+test("a server action form pressed while the client entry loads posts without reloading the page", async ({
+  page,
+}) => {
+  const errors = collectErrors(page);
+  // Islands mode runs its client entry on the first intent, here the field's focus: held until
+  // after the press on Add, as on a slow connection. rsc mode has run its entry with the page.
+  let releaseEntry = () => {};
+  if (mode === "islands") {
+    const entryHeld = new Promise<void>((resolve) => (releaseEntry = resolve));
+    await page.route(/\/farm-client-h[0-9a-f]+\.js$/, async (route) => {
+      await entryHeld;
+      await route.continue();
+    });
+  }
+  await page.goto("/action");
+  // The boot fetches the held entry once the browser is idle, so the network never goes idle.
+  if (mode === "rsc") await hydrated(page);
+  await page.evaluate(() => Object.assign(window, { __farmSameDocument: true }));
+  const documents = documentRequests(page);
+  await page.getByLabel("Title").fill("While the entry loads");
+  await page.getByRole("button", { name: "Add" }).click();
+  releaseEntry();
+  await expect(page.getByTestId("todos")).toContainText("While the entry loads");
+  expect(documents).toEqual([]);
+  expect(await page.evaluate(() => "__farmSameDocument" in window)).toBe(true);
   expect(errors).toEqual([]);
 });
 

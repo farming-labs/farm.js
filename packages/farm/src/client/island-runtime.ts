@@ -134,13 +134,33 @@ export function replayFarmQueuedInteraction(target: Element, kind: unknown): voi
   replayInteraction({ target, kind: toReplayKind(kind) });
 }
 
+/** Kept equal to islx's FORM_REF_PREFIX, which names a server form's action field; a test compares them. */
+export const FARM_ISLANDS_FORM_REF_PREFIX = "$F_REF_";
+
+/**
+ * Whether submitting `form` posts a server action, as islx reads it (`readPostedAction`): a field
+ * named with its reference prefix, on the form or on the button that submits it.
+ */
+function postsServerAction(form: HTMLFormElement, submitter: HTMLElement | null): boolean {
+  const named = (element: Element | null) =>
+    !!element?.getAttribute("name")?.startsWith(FARM_ISLANDS_FORM_REF_PREFIX);
+  return named(submitter) || Array.from(form.elements).some(named);
+}
+
 /**
  * Holds clicks and submits on islands that have not hydrated in the pre-hydration queue, as the
  * boot script does, until the returned function runs. Islands mode's entry holds them while islx
  * loads (RFC 0010): the boot stops holding once the entry runs, and each island's scheduler starts
  * it and replays them when it reaches it. `island` is the islands' element name.
+ *
+ * With `load`, it also holds the submit of a server component's form, which islx posts without a
+ * page load (`enhanceForms`): `load` loads islx, and releases this hold, then the form is submitted
+ * again. After a failed load it posts natively.
  */
-export function holdFarmIslandInteractions(island: string): () => void {
+export function holdFarmIslandInteractions(
+  island: string,
+  load?: () => Promise<unknown>,
+): () => void {
   const scope = window as typeof window & { __FARM_PREHYDRATION_CLICK_QUEUE__?: FarmQueuedClick[] };
   const queue = (scope.__FARM_PREHYDRATION_CLICK_QUEUE__ ??= []);
   const pending = (node: Element) =>
@@ -169,11 +189,39 @@ export function holdFarmIslandInteractions(island: string): () => void {
     if (event.defaultPrevented || !(form instanceof Element) || form.nodeName !== "FORM") return;
     if (pending(form)) hold(event, form, "submit");
   };
+  // No island owns a server component's form, so no trigger loads islx for it. Bubble phase, as
+  // islx listens, so a handler that prevents the default first still wins. A form is submitted
+  // once: a repeat while islx loads is held, not submitted again.
+  const heldForms = new Set<HTMLFormElement>();
+  const onServerFormSubmit = (event: Event) => {
+    const form = event.target;
+    if (!load || event.defaultPrevented || !(form instanceof HTMLFormElement)) return;
+    const submitter = (event as SubmitEvent).submitter ?? null;
+    if (!postsServerAction(form, submitter)) return;
+    event.preventDefault();
+    if (heldForms.has(form)) return;
+    heldForms.add(form);
+    const submit = () => {
+      heldForms.delete(form);
+      if (!form.isConnected) return;
+      const button = submitter as HTMLButtonElement | null;
+      form.requestSubmit(button?.isConnected && button.form === form ? button : undefined);
+    };
+    load().then(submit, (error: unknown) => {
+      console.error(
+        "[Farm.js] The client runtime failed to load, so the form posts without it.",
+        error,
+      );
+      submit();
+    });
+  };
   document.addEventListener("click", onClick, true);
   document.addEventListener("submit", onSubmit, true);
+  document.addEventListener("submit", onServerFormSubmit, false);
   return () => {
     document.removeEventListener("click", onClick, true);
     document.removeEventListener("submit", onSubmit, true);
+    document.removeEventListener("submit", onServerFormSubmit, false);
   };
 }
 
@@ -300,16 +348,6 @@ export function scheduleFarmIslandHydration<T>({
   const resolvedStrategy = strategy ?? "load";
   if (signal?.aborted) return Promise.resolve(undefined);
 
-  if (resolvedStrategy === "load") {
-    return Promise.resolve()
-      .then(() => (signal?.aborted ? undefined : hydrate()))
-      .then((value) => {
-        if (signal?.aborted) return undefined;
-        finishIslandHydration(container);
-        return value;
-      });
-  }
-
   return new Promise<T | undefined>((resolve, reject) => {
     let started = false;
     let cancelled = false;
@@ -319,11 +357,11 @@ export function scheduleFarmIslandHydration<T>({
     // One-shot triggers, dropped the moment hydration starts: an
     // IntersectionObserver or an idle callback has no reason to fire twice.
     const triggerCleanups = new Set<() => void>();
-    // Interaction capture, kept until hydration finishes. A pointerdown or a
-    // focusin starts hydration, and in a real browser the click the user is
-    // actually making arrives a moment later, still before the chunk has
-    // loaded. Tearing these down at start() would drop that click on the floor
-    // with nothing left to hold or replay it.
+    // Interaction capture, from scheduling until hydration finishes, whatever the strategy: the
+    // server HTML is on screen and clickable all that time. A pointerdown or a focusin starts
+    // hydration, and in a real browser the click the user is actually making arrives a moment
+    // later, still before the chunk has loaded. Tearing these down at start() would drop that
+    // click on the floor with nothing left to hold or replay it.
     const captureCleanups = new Set<() => void>();
     let removeAbortListener: (() => void) | null = null;
 
@@ -347,7 +385,8 @@ export function scheduleFarmIslandHydration<T>({
       started = true;
       cleanupTriggers();
       Promise.resolve()
-        .then(hydrate)
+        // Removed in the same task it was scheduled in, as a navigation does: never hydrated.
+        .then(() => (cancelled || signal?.aborted ? undefined : hydrate()))
         .then(
           (value) => {
             cleanup();
@@ -371,31 +410,6 @@ export function scheduleFarmIslandHydration<T>({
       };
       signal.addEventListener("abort", abort, { once: true });
       removeAbortListener = () => signal.removeEventListener("abort", abort);
-    }
-
-    if (resolvedStrategy === "idle") {
-      triggerCleanups.add(runWhenIdle(start));
-      return;
-    }
-
-    if (resolvedStrategy === "visible") {
-      if (typeof IntersectionObserver !== "function") {
-        start();
-        return;
-      }
-
-      // Isolated boundary markers render with display:contents, so the
-      // container itself has no box and can never intersect. Observe its
-      // element children instead; with nothing observable, start now.
-      const targets =
-        container.getClientRects().length > 0 ? [container] : Array.from(container.children);
-      if (targets.length === 0) {
-        start();
-        return;
-      }
-
-      triggerCleanups.add(observeIslandVisibility(container.ownerDocument, targets, start));
-      return;
     }
 
     const hold = (event: Event, target: Element, kind: FarmIslandReplayKind) => {
@@ -484,6 +498,36 @@ export function scheduleFarmIslandHydration<T>({
     }
     listen("farm:island-interaction", activateFromInteraction, false);
 
-    if (hasQueuedTarget(container)) start();
+    // Then what starts it: at once, or its idle callback or visibility, as its strategy says, or a
+    // held interaction. An interaction island waits for its activation above.
+    if (resolvedStrategy === "load" || hasQueuedTarget(container)) {
+      start();
+      return;
+    }
+
+    if (resolvedStrategy === "idle") {
+      triggerCleanups.add(runWhenIdle(start));
+      return;
+    }
+
+    if (resolvedStrategy === "visible") {
+      if (typeof IntersectionObserver !== "function") {
+        start();
+        return;
+      }
+
+      // Isolated boundary markers render with display:contents, so the
+      // container itself has no box and can never intersect. Observe its
+      // element children instead; with nothing observable, start now.
+      const targets =
+        container.getClientRects().length > 0 ? [container] : Array.from(container.children);
+      if (targets.length === 0) {
+        start();
+        return;
+      }
+
+      triggerCleanups.add(observeIslandVisibility(container.ownerDocument, targets, start));
+      return;
+    }
   });
 }

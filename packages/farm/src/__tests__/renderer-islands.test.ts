@@ -1,12 +1,13 @@
 // @vitest-environment node
 
+import path from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { assertFarmRendererServerModule } from "../renderer";
 import { resolveFarmIsland, type FarmIslandReference } from "../renderer-entry";
 import { usesFarmRendererIslands } from "../renderer-islands";
 import * as reactServer from "../renderer/react/server";
 import { _setCurrentRequestResolver } from "../server/request-bridge";
-import { transformIsolatedClientBoundaryModule } from "../vite";
+import { reachesSharedFarmRendererIsland, transformIsolatedClientBoundaryModule } from "../vite";
 
 /**
  * RFC 0012: a renderer that declares `capabilities.islands` exports `withIsland`, which Farm wraps
@@ -210,5 +211,64 @@ describe("capabilities.islands", () => {
     expect(code).toContain('export: "default", strategy: "idle" })');
     expect(code).not.toContain("islx-react");
     expect(code).not.toContain("isolated-boundary");
+  });
+});
+
+describe("hot updates of island modules", () => {
+  interface Node {
+    file: string;
+    importers: Set<Node>;
+  }
+  function graph(edges: Record<string, string[]>) {
+    const nodes = new Map<string, Node>();
+    const node = (file: string) => {
+      let found = nodes.get(file);
+      if (!found) nodes.set(file, (found = { file, importers: new Set() }));
+      return found;
+    };
+    for (const [file, importers] of Object.entries(edges)) {
+      node(file);
+      for (const importer of importers) node(file).importers.add(node(importer));
+    }
+    return {
+      getModulesByFile: (file: string) => new Set(nodes.has(file) ? [nodes.get(file)!] : []),
+    };
+  }
+  const islands = new Set([path.resolve("/app/src/components/planter.leaf")]);
+
+  it("takes the update in place when nothing else in the browser imports the island module", () => {
+    // planter.leaf reaches the browser through the island runtime's dynamic import alone.
+    const modules = graph({
+      "/app/src/components/planter.leaf": [],
+      "/app/src/lib/seed.ts": ["/app/src/components/planter.leaf"],
+    });
+    expect(
+      reachesSharedFarmRendererIsland(modules, "/app/src/components/planter.leaf", islands),
+    ).toBe(false);
+    expect(reachesSharedFarmRendererIsland(modules, "/app/src/lib/seed.ts", islands)).toBe(false);
+  });
+
+  it("reloads when other browser code imports the island module too", () => {
+    const modules = graph({
+      "/app/src/components/planter.leaf": ["/app/src/app/layout.leaf"],
+      "/app/src/lib/seed.ts": ["/app/src/components/planter.leaf"],
+      "/app/src/app/layout.leaf": [],
+    });
+    expect(
+      reachesSharedFarmRendererIsland(modules, "/app/src/components/planter.leaf", islands),
+    ).toBe(true);
+    // An edit to a module the island imports stops at the island module too.
+    expect(reachesSharedFarmRendererIsland(modules, "/app/src/lib/seed.ts", islands)).toBe(true);
+  });
+
+  it("leaves a module no island module imports to Vite", () => {
+    const modules = graph({
+      "/app/src/lib/clock.ts": ["/app/src/app/layout.leaf", "/app/src/lib/clock.ts"],
+      "/app/src/app/layout.leaf": [],
+    });
+    expect(reachesSharedFarmRendererIsland(modules, "/app/src/lib/clock.ts", islands)).toBe(false);
+    expect(reachesSharedFarmRendererIsland(undefined, "/app/src/lib/clock.ts", islands)).toBe(
+      false,
+    );
   });
 });

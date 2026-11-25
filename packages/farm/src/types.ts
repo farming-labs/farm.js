@@ -260,9 +260,16 @@ export interface FarmConfig {
   suppressLintOnLink?: boolean;
   experimental?: {
     /**
-     * React Server Components. `true` is `{ mode: "rsc" }`: `farm dev` and `farm build` run
-     * React's Flight pipeline from `@farm.js/plugin/rsc`. `{ mode: "islands" }` is reserved for
-     * Farm's own engine (RFC 0003). Pages and layouts are server components either way.
+     * Server components: pages and layouts render on the server only, and `"use client"` marks
+     * what runs in the browser.
+     *
+     * - `{ mode: "islands" }`, or `true`: each client component hydrates on its own, as an island.
+     *   React runs pages on Farm's own engine (RFC 0003). Another renderer needs
+     *   `capabilities.islands`, and its islands hydrate through its `withIsland`.
+     * - `{ mode: "rsc" }`: React's Flight pipeline from `@farm.js/plugin/rsc`. React only.
+     *
+     * @experimental
+     * @default false
      */
     serverComponents?: FarmServerComponentsConfig;
     serverActions?: boolean;
@@ -287,7 +294,8 @@ export interface FarmConfig {
      *   back to route-wide hydration for unsupported module graphs.
      *
      * This does not enable React Server Components. `"use client"` remains a
-     * valid client-boundary declaration in normal SSR applications.
+     * valid client-boundary declaration in normal SSR applications. On a renderer
+     * besides React, turn islands on with `serverComponents: { mode: "islands" }`.
      *
      * @experimental
      * @default "off"
