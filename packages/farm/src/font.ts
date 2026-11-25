@@ -78,6 +78,11 @@ export interface FarmLayoutFonts {
 
 export interface FarmLayoutFontModule {
   fonts?: FarmLayoutFonts;
+  /**
+   * @internal The roles the font compiler infers from the font classes a layout applies, when the
+   * layout has no `fonts` export.
+   */
+  __farmLayoutFonts?: FarmLayoutFonts;
 }
 
 /**
@@ -98,11 +103,47 @@ export function resolveFarmLayoutFonts(
   let resolved: FarmLayoutFonts | undefined;
 
   for (const layout of layouts) {
-    if (!layout.fonts) continue;
-    resolved = { ...resolved, ...layout.fonts };
+    const fonts = layout.fonts ?? layout.__farmLayoutFonts;
+    if (!fonts) continue;
+    resolved = { ...resolved, ...fonts };
   }
 
   return resolved;
+}
+
+/**
+ * @internal Infers a layout's font roles from the fonts it applies, in source order. `body` is the
+ * first font whose `className` the layout applies, or else its first font that is not monospace.
+ * `code` is the first other font whose stack ends in `monospace`. The font compiler calls this for
+ * a layout without a `fonts` export.
+ */
+export function inferFarmLayoutFonts(
+  uses: readonly (readonly [value: unknown, property: string])[],
+): FarmLayoutFonts | undefined {
+  const fonts = uses.filter((use): use is readonly [FarmFont, string] => isFarmFont(use[0]));
+  const body =
+    fonts.find(([, property]) => property === "className")?.[0] ??
+    fonts.find(([font]) => !isMonospaceFont(font))?.[0];
+  const code =
+    fonts.find(([font]) => font !== body && isMonospaceFont(font))?.[0] ??
+    (body && isMonospaceFont(body) ? body : undefined);
+  if (!body && !code) return undefined;
+  return { ...(body ? { body } : {}), ...(code ? { code } : {}) };
+}
+
+function isFarmFont(value: unknown): value is FarmFont {
+  if (!value || typeof value !== "object") return false;
+  const font = value as Partial<FarmFont>;
+  return (
+    typeof font.className === "string" &&
+    typeof font.variable === "string" &&
+    typeof font.style?.fontFamily === "string" &&
+    Array.isArray(font.preloads)
+  );
+}
+
+function isMonospaceFont(font: FarmFont): boolean {
+  return /(?:^|,)\s*monospace\s*$/i.test(font.style.fontFamily);
 }
 
 function fontCompilerError(loader: string): never {

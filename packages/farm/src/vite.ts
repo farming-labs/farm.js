@@ -239,7 +239,7 @@ import {
 } from "./deployment";
 import { getPublicFarmImageConfig, resolveFarmImageConfig } from "./image-config";
 import { farmImageImportsPlugin } from "./image-vite";
-import { farmFontImportsPlugin } from "./font-vite";
+import { farmFontImportsPlugin, isFarmLayoutModule } from "./font-vite";
 import type { FarmServerBundledPackage } from "./islands-react-server-exports";
 import {
   createFarmDeferredMiddleware,
@@ -2055,6 +2055,9 @@ export function farmPlugin(
     root: options.root,
     basePath: options.basePath,
     publicDir: options.publicDir,
+    // A production build never starts the app, so it reads the directories from these options.
+    isLayoutModule: (id) =>
+      isFarmLayoutModule(id, getFarmAppDirectories(farmApp?.getConfig() ?? options)),
   });
   let farmApp: FarmApp;
   // Files Farm writes under its output directory (client references, caches), as a POSIX path.

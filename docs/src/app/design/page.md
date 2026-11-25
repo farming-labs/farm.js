@@ -74,7 +74,7 @@ Selection is white on black on the homepage and `#ededed` on `#000` on the agent
 
 ## Typography
 
-Three faces, loaded with `localFont` in `docs/src/app/layout.tsx`. Graft and Graft Mono come from `@farming-labs/graft`, Geist Pixel Square from `geist`:
+Three faces, set in `docs/src/app/layout.tsx`. Graft and Graft Mono are imported from `@farming-labs/graft/farm/sans` and `@farming-labs/graft/farm/mono`. Geist Pixel Square is loaded with `localFont` from `geist`:
 
 | Face               | Variable             | Weights    | Use                                                       |
 | ------------------ | -------------------- | ---------- | --------------------------------------------------------- |

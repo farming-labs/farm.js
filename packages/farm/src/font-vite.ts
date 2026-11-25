@@ -120,6 +120,8 @@ export function farmFontImportsPlugin(
     publicDir?: string | false;
     /** See TransformFarmFontCallsOptions.importCss. */
     importCss?: boolean;
+    /** Whether a module is an app layout, which gets font roles inferred from the fonts it applies. */
+    isLayoutModule?: (id: string) => boolean;
   } = {},
 ): Plugin {
   let root = normalizeRoot(options.root || process.cwd());
@@ -207,7 +209,7 @@ export function farmFontImportsPlugin(
       );
     },
 
-    async transform(code, id) {
+    async transform(code, id, transformOptions) {
       const result = await transformFarmFontCalls({
         code,
         id,
@@ -219,6 +221,17 @@ export function farmFontImportsPlugin(
       });
 
       if (!result) registry.clearModule(id.split("?", 1)[0]);
+
+      // Only the server reads a layout's font roles, so the browser bundle never carries them.
+      const server = this.environment
+        ? this.environment.config.consumer === "server"
+        : transformOptions?.ssr === true;
+      const cleanId = id.split("?", 1)[0]!;
+      if (server && MODULE_EXTENSION_RE.test(cleanId) && options.isLayoutModule?.(cleanId)) {
+        const source = result?.code ?? code;
+        const inferred = addInferredLayoutFonts(source, this.parse(source) as unknown as AstNode);
+        if (inferred) return { code: inferred, map: null };
+      }
 
       return result ? { code: result.code, map: null } : null;
     },
@@ -641,6 +654,100 @@ class FarmFontRegistry {
     this.resources.set(key, resource);
     return resource;
   }
+}
+
+/** Whether a module id is a layout file in one of the app directories. */
+export function isFarmLayoutModule(id: string, appDirs: readonly string[]): boolean {
+  if (!/\/layout\.[cm]?[jt]sx?$/.test(id)) return false;
+  return appDirs.some((appDir) => id.startsWith(`${appDir.replace(/\\/g, "/")}/`));
+}
+
+const LAYOUT_FONTS_EXPORT = "__farmLayoutFonts";
+const LAYOUT_FONT_PROPERTIES = new Set(["className", "variable"]);
+
+/**
+ * Gives a layout without a `fonts` export the font roles it applies, so framework-owned pages such
+ * as Farm Docs use the fonts its rendered pages use. It records each module-scope binding the
+ * layout reads `.className` or `.variable` from, and `inferFarmLayoutFonts` keeps the compiled
+ * fonts among them. Returns null when the layout declares fonts itself or applies none.
+ */
+export function addInferredLayoutFonts(code: string, ast: AstNode): string | null {
+  const body = (Array.isArray(ast.body) ? ast.body : []).filter(isAstNode);
+  if (body.some((statement) => statement.type === "ExportAllDeclaration")) return null;
+  if (moduleExports(body, "fonts") || moduleExports(body, LAYOUT_FONTS_EXPORT)) return null;
+
+  const bindings = moduleScopeBindings(body);
+  const uses: string[] = [];
+  const seen = new Set<string>();
+  walkAst(ast, (node) => {
+    if (node.type !== "MemberExpression" || node.computed === true) return;
+    if (!isAstNode(node.object) || node.object.type !== "Identifier") return;
+    const name = node.object.name;
+    const property = readPropertyName(node.property);
+    if (typeof name !== "string" || !bindings.has(name)) return;
+    if (!property || !LAYOUT_FONT_PROPERTIES.has(property)) return;
+    const key = `${name}.${property}`;
+    if (seen.has(key)) return;
+    seen.add(key);
+    uses.push(`[${name}, ${JSON.stringify(property)}]`);
+  });
+  if (uses.length === 0) return null;
+
+  return `${code}
+import { inferFarmLayoutFonts as __farmInferLayoutFonts } from "@farm.js/core/font";
+export const ${LAYOUT_FONTS_EXPORT} = /* @__PURE__ */ __farmInferLayoutFonts([${uses.join(", ")}]);
+`;
+}
+
+function moduleExports(body: AstNode[], name: string): boolean {
+  return body.some((statement) => {
+    if (statement.type !== "ExportNamedDeclaration") return false;
+    const specifiers = Array.isArray(statement.specifiers) ? statement.specifiers : [];
+    if (specifiers.some((specifier) => readPropertyName(specifier.exported) === name)) return true;
+    return isAstNode(statement.declaration) && declaredNames(statement.declaration).includes(name);
+  });
+}
+
+function moduleScopeBindings(body: AstNode[]): Set<string> {
+  const names = new Set<string>();
+  for (const statement of body) {
+    if (statement.type === "ImportDeclaration") {
+      if (statement.importKind === "type") continue;
+      const specifiers = Array.isArray(statement.specifiers) ? statement.specifiers : [];
+      for (const specifier of specifiers) {
+        if (specifier.importKind === "type" || !isAstNode(specifier.local)) continue;
+        if (typeof specifier.local.name === "string") names.add(specifier.local.name);
+      }
+      continue;
+    }
+    const declaration =
+      statement.type === "ExportNamedDeclaration" || statement.type === "ExportDefaultDeclaration"
+        ? statement.declaration
+        : statement;
+    if (isAstNode(declaration)) for (const name of declaredNames(declaration)) names.add(name);
+  }
+  return names;
+}
+
+function declaredNames(declaration: AstNode): string[] {
+  if (declaration.type === "VariableDeclaration") {
+    const declarations = Array.isArray(declaration.declarations) ? declaration.declarations : [];
+    return declarations.flatMap((declarator) =>
+      isAstNode(declarator.id) &&
+      declarator.id.type === "Identifier" &&
+      typeof declarator.id.name === "string"
+        ? [declarator.id.name]
+        : [],
+    );
+  }
+  if (
+    (declaration.type === "FunctionDeclaration" || declaration.type === "ClassDeclaration") &&
+    isAstNode(declaration.id) &&
+    typeof declaration.id.name === "string"
+  ) {
+    return [declaration.id.name];
+  }
+  return [];
 }
 
 function findFontBindings(ast: AstNode) {
