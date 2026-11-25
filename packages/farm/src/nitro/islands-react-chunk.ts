@@ -77,17 +77,32 @@ function reactLoadsWithAnEntry(moduleId: string, context: ChunkingContext): bool
   return false;
 }
 
-/** Whether an app's own Vite config decides how the client build splits chunks. */
-export function configuresFarmClientChunks(vite: unknown): boolean {
-  const build = (vite as { build?: Record<string, { output?: unknown } | undefined> } | undefined)
-    ?.build;
-  const outputs = [build?.rollupOptions?.output, build?.rolldownOptions?.output].flat();
-  return outputs.some(
-    (output) =>
-      !!output &&
-      typeof output === "object" &&
-      ["manualChunks", "advancedChunks", "codeSplitting", "inlineDynamicImports"].some(
-        (key) => (output as Record<string, unknown>)[key] !== undefined,
-      ),
-  );
+/** The output options with which an app decides how the client build splits chunks. */
+const CHUNKING_OPTIONS = [
+  "manualChunks",
+  "advancedChunks",
+  "codeSplitting",
+  "inlineDynamicImports",
+] as const;
+
+/**
+ * Applies {@link createFarmIslandsReactOutput} to the client build unless the app splits chunks
+ * itself.
+ *
+ * It reads the output options the bundler runs with, after every plugin's `config` hook has merged
+ * into them, so chunking a Vite plugin sets counts as the app's own: the bundler ignores
+ * `manualChunks` beside `codeSplitting`.
+ */
+export function createFarmIslandsReactChunkPlugin() {
+  return {
+    name: "farm-islands-react-chunk",
+    enforce: "post" as const,
+    outputOptions: {
+      order: "post" as const,
+      handler(options: OutputOptions): OutputOptions | null {
+        if (CHUNKING_OPTIONS.some((key) => options[key] !== undefined)) return null;
+        return { ...options, ...createFarmIslandsReactOutput() };
+      },
+    },
+  };
 }
