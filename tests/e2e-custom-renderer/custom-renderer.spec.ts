@@ -1,3 +1,5 @@
+import { readFile, writeFile } from "node:fs/promises";
+import path from "node:path";
 import { expect, test, type Page } from "@playwright/test";
 
 // examples/custom-renderer runs on leaf, a UI library Farm has no code for, through the farm-leaf
@@ -447,4 +449,104 @@ test("the guides layout's Links navigate between flat pages on the client", asyn
   await expect(page.locator("#guides")).toHaveText("Guides");
   await expect(layoutCounter).toHaveText("Layout clicks: 1");
   expect(await readDocumentMark(page)).toBe("first");
+});
+
+test.describe("development edits", () => {
+  test.skip(process.env.FARM_CUSTOM_RENDERER_SERVER !== "dev", "Development edits");
+
+  test("pages keep rendering after an edit reloads the server's modules", async ({ request }) => {
+    // badge.leaf is imported by server modules that don't accept hot updates, so Vite reloads the
+    // server graph, evaluating leaf again. The renderer has to render with the new leaf too.
+    const file = path.resolve("examples/custom-renderer/src/components/badge.leaf");
+    const original = await readFile(file, "utf8");
+    expect((await request.get("/notes")).status()).toBe(200);
+    await writeFile(file, original.replace('class="badge"', 'class="badge" data-edited="true"'));
+    try {
+      await expect
+        .poll(async () => (await request.get("/notes")).text())
+        .toContain('data-edited="true"');
+      expect((await request.get("/about")).status()).toBe(200);
+    } finally {
+      await writeFile(file, original);
+    }
+    await expect
+      .poll(async () => (await request.get("/notes")).text())
+      .not.toContain('data-edited="true"');
+    expect((await request.get("/notes")).status()).toBe(200);
+  });
+});
+
+// Editing an island's module in development. A full reload drops the document mark.
+test.describe("island hot updates", () => {
+  test.skip(process.env.FARM_CUSTOM_RENDERER_SERVER !== "dev", "Development hot updates");
+
+  const components = path.resolve("examples/custom-renderer/src/components");
+
+  async function editSource(file: string, from: string, to: string) {
+    const original = await readFile(file, "utf8");
+    if (!original.includes(from)) throw new Error(`${file} does not contain ${from}`);
+    await writeFile(file, original.replace(from, to));
+    return async () => {
+      if ((await readFile(file, "utf8")) !== original) await writeFile(file, original);
+    };
+  }
+
+  test("an edit to an island's module renders its islands again in place", async ({ page }) => {
+    const errors: string[] = [];
+    page.on("pageerror", (error) => errors.push(error.message));
+    await gotoHydrated(page, "/islands/leaf");
+    const wheat = page.locator('[data-crop="wheat"]');
+    const rye = page.locator('[data-crop="rye"]');
+    await expect(wheat).toHaveAttribute("data-hydrated", "true");
+    await expect(rye).toHaveAttribute("data-hydrated", "true");
+    await markDocument(page);
+    await page.locator("#layout-counter").click();
+    await expect(page.locator("#layout-counter")).toHaveText("Layout clicks: 1");
+
+    await wheat.getByRole("button").click();
+    await expect(wheat.getByRole("button")).toHaveText("wheat planted: 1");
+
+    const restore = await editSource(
+      path.join(components, "planter.leaf"),
+      "{{ props.crop }} planted:",
+      "{{ props.crop }} sown:",
+    );
+    try {
+      // Each island renders the new component, which starts with fresh state.
+      await expect(wheat.getByRole("button")).toHaveText("wheat sown: 0");
+      await expect(rye.getByRole("button")).toHaveText("rye sown: 0");
+      await wheat.getByRole("button").click();
+      await expect(wheat.getByRole("button")).toHaveText("wheat sown: 1");
+      // The layout's root and the document stayed.
+      await expect(page.locator("#layout-counter")).toHaveText("Layout clicks: 1");
+      expect(await readDocumentMark(page)).toBe("first");
+    } finally {
+      await restore();
+    }
+    await expect(wheat.getByRole("button")).toHaveText("wheat planted: 0");
+    expect(await readDocumentMark(page)).toBe("first");
+    expect(errors).toEqual([]);
+  });
+
+  test("the page reloads when an island of the edited module hasn't started", async ({ page }) => {
+    await gotoHydrated(page, "/islands");
+    const load = page.locator("#island-load");
+    await expect(load).toHaveAttribute("data-hydrated", "true");
+    // Below the fold, the visible island still holds the old code's server HTML.
+    await expect(page.locator("#island-visible")).not.toHaveAttribute("data-hydrated", "true");
+    await markDocument(page);
+
+    const restore = await editSource(
+      path.join(components, "counter.tsx"),
+      "{props.label}: {count}",
+      "{props.label} = {count}",
+    );
+    try {
+      await expect(load.getByRole("button")).toHaveText("Starts at once = 0");
+      expect(await readDocumentMark(page)).toBeUndefined();
+    } finally {
+      await restore();
+    }
+    await expect(load.getByRole("button")).toHaveText("Starts at once: 0");
+  });
 });

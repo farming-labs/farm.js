@@ -343,12 +343,21 @@ renderers get them from their library's plugin: `@vitejs/plugin-vue`, `vite-plug
 and swaps it in place, so the page and its layouts keep their state.
 
 Without that, Vite reloads the page when you save a component, and all component state resets,
-including the layout's. The leaf example works this way. Production builds aren't affected.
+including the layout's. The leaf example works this way, apart from its islands. Production
+builds aren't affected.
 
 To add hot updates, have the plugin's `transform()` append an `import.meta.hot.accept()` handler to
 component modules in the browser graph (`ssr` false in the transform options) that swaps the new
 component into the instances your runtime has mounted. Vite's
 [HMR API](https://vite.dev/guide/api-hmr) describes the handler.
+
+Islands are the exception, because Farm mounts their roots. On a renderer that declares
+`reconcilesRerenders`, when your plugin's output for an island's module has no `import.meta.hot`
+code, Farm renders each of that module's islands again with the new module. The rest of the page
+keeps its state, and the islands start with fresh state. The page reloads instead when other
+browser code imports the module too, or when one of its islands hasn't started yet, since the
+server rendered that island's HTML with the old code. Island hot updates ship in the release after
+0.1.86.
 
 ## Streaming
 
@@ -870,9 +879,10 @@ slot and params through signals. See [Re-render behavior](/docs/renderers#re-ren
 
 ## Islands
 
-With `experimental.isolatedClientHydration: "enabled"`, a client component rendered from a server
-page hydrates on its own, as an island, instead of hydrating the whole route. A renderer opts in
-with `capabilities.islands: true` and one server export, `withIsland()`. It writes no browser code:
+With `experimental.serverComponents: { mode: "islands" }`, pages render on the server only, and a
+client component rendered from one hydrates on its own, as an island, instead of hydrating the
+whole route. A renderer opts in with `capabilities.islands: true` and one server export,
+`withIsland()`. On a renderer that doesn't, that config fails `farm dev` and `farm build`. It writes no browser code:
 Farm's island runtime hydrates each island with the client module's `createElement()` and
 `hydrateRoot()`, and calls `unmount()` on its root when a navigation removes it.
 
@@ -1108,12 +1118,12 @@ too: the example's Playwright tests run the same checks against both.
 - **One renderer per app.** `renderer` is app-wide, so every page and layout uses the same one.
 - **Route rules cover pages, layouts, and their boundaries.** API routes, middleware, metadata
   files, and named slots stay in `src/app` folders.
-- **React Server Components are React-only.** So is islands mode
-  (`experimental.serverComponents: { mode: "islands" }`); a renderer that declares `islands` gets
-  islands through isolated client hydration.
+- **React Server Components are React-only.** `{ mode: "rsc" }` runs React's Flight pipeline. On
+  another renderer, `{ mode: "islands" }` gives server-only pages and islands, without React's
+  async server components or server trees.
 - **Islands take data.** An element passed as `children` or another prop, or a promise, can't
   reach the browser, so that island keeps its server HTML without hydrating. Integration
-  providers don't wrap islands, and an edit to an island's module reloads the page in development.
+  providers don't wrap islands.
 - **Some UI integrations are React-oriented.** Most integration UI providers render React
   components today. `withDocs()` builds docs pages with your renderer, and
   `@farming-labs/farmjs/testing` checks that it writes and hydrates them; see

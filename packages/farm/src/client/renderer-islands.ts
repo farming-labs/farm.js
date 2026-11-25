@@ -33,31 +33,46 @@ export interface FarmRendererIslandRuntime {
   /** Islands mode carries islands over a refresh; these islands start again instead. */
   carryOver(): void;
   rootCount(): number;
+  /**
+   * After a development hot update of the module `reference` (an `<f-island src>`), renders its
+   * started islands again with `module`'s exports, and starts its later islands with `module`.
+   * Returns false, changing nothing, when an island can't take the update in place: one still
+   * waiting to start, whose server HTML the old code rendered, or an export the module no longer
+   * has. The caller reloads the page then.
+   */
+  updateModule(reference: string, module: Record<string, unknown>): boolean;
 }
 
 export function createFarmRendererIslandRuntime(
   options: FarmRendererIslandRuntimeOptions,
 ): FarmRendererIslandRuntime {
-  const containers = new Set<Element>();
+  const roots = new Map<Element, StartedIsland>();
+  // The modules hot updates replaced. The browser keeps the first copy of a module under its
+  // plain URL, which load() imports, so an island that starts after an update needs this one.
+  const replaced = new Map<string, Record<string, unknown>>();
+  const report = (message: string, error?: unknown) => console.error(`[Farm.js] ${message}`, error);
   const islands = createIslandRuntime({
     renderer: defineIslandRenderer({
-      hydrate(container, component, props) {
+      hydrate(container, component, props, island) {
         const root = options.renderer.hydrateRoot(
           container,
           options.renderer.createElement(component, props),
         );
-        containers.add(container);
+        roots.set(container, { root, src: island.src, export: island.export, props });
         return {
           unmount() {
-            containers.delete(container);
+            roots.delete(container);
             root.unmount();
           },
         };
       },
     }),
-    load: options.load,
+    load: (reference) => {
+      const module = replaced.get(reference);
+      return module ? Promise.resolve(module) : options.load(reference);
+    },
     schedule: options.schedule,
-    report: (message, error) => console.error(`[Farm.js] ${message}`, error),
+    report,
   });
 
   return {
@@ -70,11 +85,47 @@ export function createFarmRendererIslandRuntime(
       islands.dispose(scope);
     },
     prune() {
-      for (const container of Array.from(containers)) {
+      for (const container of Array.from(roots.keys())) {
         if (!container.isConnected) islands.dispose(container);
       }
     },
     carryOver() {},
-    rootCount: () => containers.size,
+    rootCount: () => roots.size,
+    updateModule(reference, module) {
+      for (const container of document.querySelectorAll(ISLAND_SELECTOR)) {
+        // An island inside another is rendered by that island's root.
+        if (container.getAttribute("src") !== reference || roots.has(container)) continue;
+        if (!container.parentElement?.closest(ISLAND_SELECTOR)) return false;
+      }
+      const started = Array.from(roots)
+        .filter(([container, island]) => island.src === reference && container.isConnected)
+        .map(([, island]) => island);
+      if (started.some((island) => !isComponent(module[island.export]))) return false;
+
+      replaced.set(reference, module);
+      try {
+        for (const island of started) {
+          island.root.render(options.renderer.createElement(module[island.export], island.props));
+        }
+      } catch (error) {
+        report(`Could not update the islands of ${reference} in place.`, error);
+        return false;
+      }
+      return true;
+    },
   };
+}
+
+interface StartedIsland {
+  root: FarmRendererClientRoot;
+  src: string;
+  export: string;
+  props: Record<string, unknown>;
+}
+
+const ISLAND_SELECTOR = "f-island";
+
+// What islx's runtime accepts as an island's component.
+function isComponent(value: unknown): boolean {
+  return typeof value === "function" || (typeof value === "object" && value !== null);
 }

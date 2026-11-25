@@ -1,3 +1,4 @@
+import { resolveFarmRendererServerComponentsIslands } from "./renderer-islands";
 import { resolveFarmServerComponentsMode } from "./server-components-mode";
 import type { FarmSchemaConfig } from "./schema";
 import { assertPluginDependencies } from "./plugin-dependencies";
@@ -1271,6 +1272,8 @@ export async function resolveConfig(
     mode,
   });
   userConfig = layerResolution.config;
+  // Throws for a renderer without islands; see `resolveFarmRendererServerComponentsIslands`.
+  const rendererServerComponentsIslands = resolveFarmRendererServerComponentsIslands(userConfig);
 
   if ((userConfig as Record<string, unknown>).typescript !== undefined) {
     logger.warn(
@@ -1445,6 +1448,8 @@ export async function resolveConfig(
           : "off",
       ppr: false,
       ...userConfig.experimental,
+      // Another renderer's islands run without Farm's server components engine, which renders React.
+      ...(rendererServerComponentsIslands ? { serverComponents: false } : {}),
     },
     agent: resolveFarmAgentConfig(userConfig.agent, {
       docs: docs.enabled,
