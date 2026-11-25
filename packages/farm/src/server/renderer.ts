@@ -4084,17 +4084,17 @@ window.__FARM_I18N__ = ${getFarmI18nClientSnapshot() ? serializeInlineValue(getF
         : undefined);
     const fullDocumentRouteKey =
       options.observabilityRoute || (req as any).__FARM_ROUTE__ || req.url || "/";
-    // A route known to render a full-document layout streams that document: React's output is
-    // held until its <body>, so Farm's head assets go into the layout's head, as production
-    // does. A static-shell capture and other renderers take the buffered path, which composes
-    // the whole document. So does the anonymous check behind a page's Markdown source, where a
-    // late redirect() must still set the status.
+    // A route known to render a full-document layout streams that document, on any renderer
+    // that streams: the renderer's output is held until its <body>, so Farm's head assets go
+    // into the layout's head, as production does. A static-shell capture takes the buffered
+    // path, which composes the whole document. So does the anonymous check behind a page's
+    // Markdown source, where a late redirect() must still set the status.
     const streamDocument =
       fullDocumentRoutes.has(fullDocumentRouteKey) || (await this.rootLayoutRendersDocument(req));
     if (
       !renderToPipeableStream ||
       _isFarmMarkdownPageCheck(req.headers?.[FARM_MARKDOWN_PAGE_CHECK_HEADER]) ||
-      (streamDocument && (options.captureStaticShell || !isReactRenderer(this.config.renderer)))
+      (streamDocument && options.captureStaticShell)
     ) {
       return this.renderBufferedSSR(element, req, res, clearMiddlewareData, options);
     }
