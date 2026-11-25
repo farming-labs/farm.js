@@ -505,7 +505,7 @@ The app turns islands on:
 export default defineConfig({
   renderer: leaf(),
   experimental: {
-    isolatedClientHydration: "enabled",
+    serverComponents: { mode: "islands" },
   },
 });
 ```

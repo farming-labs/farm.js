@@ -870,9 +870,10 @@ slot and params through signals. See [Re-render behavior](/docs/renderers#re-ren
 
 ## Islands
 
-With `experimental.isolatedClientHydration: "enabled"`, a client component rendered from a server
-page hydrates on its own, as an island, instead of hydrating the whole route. A renderer opts in
-with `capabilities.islands: true` and one server export, `withIsland()`. It writes no browser code:
+With `experimental.serverComponents: { mode: "islands" }`, pages render on the server only, and a
+client component rendered from one hydrates on its own, as an island, instead of hydrating the
+whole route. A renderer opts in with `capabilities.islands: true` and one server export,
+`withIsland()`. On a renderer that doesn't, that config fails `farm dev` and `farm build`. It writes no browser code:
 Farm's island runtime hydrates each island with the client module's `createElement()` and
 `hydrateRoot()`, and calls `unmount()` on its root when a navigation removes it.
 
@@ -1108,9 +1109,9 @@ too: the example's Playwright tests run the same checks against both.
 - **One renderer per app.** `renderer` is app-wide, so every page and layout uses the same one.
 - **Route rules cover pages, layouts, and their boundaries.** API routes, middleware, metadata
   files, and named slots stay in `src/app` folders.
-- **React Server Components are React-only.** So is islands mode
-  (`experimental.serverComponents: { mode: "islands" }`); a renderer that declares `islands` gets
-  islands through isolated client hydration.
+- **React Server Components are React-only.** `{ mode: "rsc" }` runs React's Flight pipeline. On
+  another renderer, `{ mode: "islands" }` gives server-only pages and islands, without React's
+  async server components or server trees.
 - **Islands take data.** An element passed as `children` or another prop, or a promise, can't
   reach the browser, so that island keeps its server HTML without hydrating. Integration
   providers don't wrap islands, and an edit to an island's module reloads the page in development.

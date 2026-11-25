@@ -8,6 +8,7 @@ import { resolveIslandMarkup } from "@farm.js/islx/islands/server";
 import { isFarmIslandStrategy, type FarmIslandStrategy } from "./island";
 import {
   getFarmRendererCapabilities,
+  isFarmRendererDisabled,
   isReactRenderer,
   resolveFarmRenderer,
   type FarmRenderer,
@@ -171,10 +172,45 @@ export function resolveFarmIsland(
 }
 
 /**
+ * Whether `experimental.serverComponents` asks for a renderer's own islands. Farm's server
+ * components engine renders React, so on another renderer `{ mode: "islands" }` (and `true`) means
+ * that renderer's islands: pages render on the server only, and each client component hydrates on
+ * its own through `withIsland`. Config resolution then carries them as
+ * `isolatedClientHydration: "enabled"` without server components, the shape
+ * `usesFarmRendererIslands` reads.
+ *
+ * Throws for a renderer that doesn't declare `capabilities.islands`, which would otherwise hydrate
+ * every route whole without a word. `{ mode: "rsc" }` is left to the RSC pipeline, which refuses a
+ * renderer other than React itself.
+ */
+export function resolveFarmRendererServerComponentsIslands(config: {
+  readonly renderer?: FarmRenderer | false | undefined;
+  readonly experimental?: { readonly serverComponents?: unknown };
+}): boolean {
+  if (resolveFarmServerComponentsMode(config.experimental?.serverComponents) !== "islands") {
+    return false;
+  }
+  // No renderer means React; `renderer: false` has no pages to hydrate.
+  if (config.renderer === undefined || isFarmRendererDisabled(config.renderer)) return false;
+  const renderer = resolveFarmRenderer(config.renderer);
+  if (isReactRenderer(renderer)) return false;
+  if (!getFarmRendererCapabilities(renderer).islands) {
+    throw new Error(
+      `[Farm.js] \`experimental.serverComponents: { mode: "islands" }\` needs a renderer that ` +
+        `supports islands, and \`${renderer.name}\` doesn't declare \`capabilities.islands\`. ` +
+        "Remove `experimental.serverComponents` to hydrate each route whole, or add islands to " +
+        "the renderer: https://farmjs.dev/docs/renderers/custom#islands",
+    );
+  }
+  return true;
+}
+
+/**
  * Whether the app's islands start through its renderer's `withIsland`: a renderer other than
  * React that declares `capabilities.islands`, in an app that sets
- * `experimental.isolatedClientHydration: "enabled"` without server components. Every other app
- * takes the path it took before.
+ * `experimental.serverComponents: { mode: "islands" }` (which config resolution carries as
+ * `isolatedClientHydration: "enabled"`, see `resolveFarmRendererServerComponentsIslands`) or the
+ * older `isolatedClientHydration: "enabled"`. Every other app takes the path it took before.
  */
 export function usesFarmRendererIslands(config: {
   readonly renderer?: FarmRenderer | false | undefined;
