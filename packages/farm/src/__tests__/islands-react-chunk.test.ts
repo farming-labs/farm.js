@@ -8,7 +8,7 @@ import { rolldown, type OutputChunk } from "rolldown";
 import { afterEach, describe, expect, it } from "vitest";
 import {
   FARM_EAGER_COMPILE_HINT,
-  configuresFarmClientChunks,
+  createFarmIslandsReactChunkPlugin,
   createFarmIslandsReactOutput,
 } from "../nitro/islands-react-chunk";
 
@@ -113,19 +113,19 @@ export const load = () => Promise.all([import("./runtime.mjs"), import("./island
     expect(chunks.some((chunk) => chunk.code.includes(FARM_EAGER_COMPILE_HINT))).toBe(false);
   });
 
-  it("leaves chunks to an app whose Vite config splits them", () => {
-    expect(configuresFarmClientChunks(undefined)).toBe(false);
-    expect(configuresFarmClientChunks({ build: { rollupOptions: { output: {} } } })).toBe(false);
+  it("leaves chunks to an app whose output options split them", () => {
+    const { handler } = createFarmIslandsReactChunkPlugin().outputOptions;
+    expect(handler({ format: "esm" })).toMatchObject({
+      format: "esm",
+      codeSplitting: { groups: [{ debugName: "react" }] },
+    });
     for (const output of [
       { manualChunks: () => undefined },
       { advancedChunks: { groups: [] } },
       { codeSplitting: false },
       { inlineDynamicImports: true },
     ]) {
-      expect(configuresFarmClientChunks({ build: { rollupOptions: { output } } })).toBe(true);
-      expect(configuresFarmClientChunks({ build: { rolldownOptions: { output: [output] } } })).toBe(
-        true,
-      );
+      expect(handler({ format: "esm", ...output })).toBeNull();
     }
   });
 });

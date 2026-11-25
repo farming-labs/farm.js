@@ -364,6 +364,10 @@ Farm keeps the output options the server reads or that would publish private dat
 `output` to one object; an array of outputs fails the build. The server build keeps Farm's own
 output options.
 
+In islands mode, a React app's client build puts React, its JSX runtime, and React DOM in one
+chunk. Setting `codeSplitting`, `advancedChunks`, `manualChunks`, or `inlineDynamicImports`, in
+`vite.build` or from a Vite plugin's `config` hook, replaces that chunk with the app's own split.
+
 A production document lists the chunks its page needs before it hydrates as
 `<link rel="modulepreload">`: the static imports of the client entry (Farm's runtime and the
 hydrating layouts), of the page's hydrating module, and of the islands that hydrate at load.
