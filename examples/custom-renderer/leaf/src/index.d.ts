@@ -24,7 +24,7 @@ export declare function createElement(
 export declare function isValidElement(value: unknown): value is LeafElement;
 /**
  * On the server, where leaf/server's stream sends what it has before waiting on the async
- * components inside. leaf streams in order, so `fallback` never shows.
+ * components inside. An explicit fallback lets pending siblings reveal independently.
  */
 export declare function Suspense(props: { children?: Children; fallback?: Children }): Children;
 export declare function toChildArray(children: Children): Array<LeafElement | string>;

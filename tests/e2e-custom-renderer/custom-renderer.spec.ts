@@ -212,8 +212,11 @@ test("notFound() and a throwing page answer with their route files and statuses"
 test("a page streams what's before a Suspense boundary before the async component in it", async ({
   baseURL,
 }) => {
-  const response = await fetch(`${baseURL}/streaming`);
+  const response = await fetch(`${baseURL}/streaming`, {
+    headers: { "Sec-Fetch-Dest": "document" },
+  });
   expect(response.status).toBe(200);
+  expect(response.headers.get("vary")?.toLowerCase().split(/,\s*/)).toContain("sec-fetch-dest");
   const reader = response.body!.getReader();
   const decoder = new TextDecoder();
   let html = "";
@@ -224,6 +227,7 @@ test("a page streams what's before a Suspense boundary before the async componen
   }
   // The list waits on its data, so the chunks that carried the text before it can't hold it.
   expect(html).toContain("This arrives first.");
+  expect(html).toContain("Loading crops…");
   expect(html).not.toContain('id="slow-crops"');
   for (;;) {
     const { done, value } = await reader.read();
@@ -232,6 +236,12 @@ test("a page streams what's before a Suspense boundary before the async componen
   }
   expect(html).toContain('<ul id="slow-crops"><li>wheat</li><li>barley</li><li>rye</li></ul>');
   expect(html).toMatch(/<\/html>\s*$/);
+});
+
+test("a document reveals the slow list in place", async ({ page }) => {
+  await page.goto("/streaming");
+  await expect(page.locator("#slow-crops li")).toHaveText(["wheat", "barley", "rye"]);
+  await expect(page.getByText("Loading crops…", { exact: true })).toHaveCount(0);
 });
 
 test("a client navigation renders a page with an async component", async ({ page }) => {

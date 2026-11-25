@@ -6,5 +6,5 @@ export declare function renderToString(element: Children): string;
 /** Everything before a Suspense boundary goes out before the async components inside it resolve. */
 export declare function renderToReadableStream(
   element: Children,
-  options?: { onError?(error: unknown): void },
+  options?: { progressive?: boolean; nonce?: string; onError?(error: unknown): void },
 ): ReadableStream<Uint8Array>;

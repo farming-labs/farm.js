@@ -18,7 +18,7 @@ export function isValidElement(value) {
 
 /**
  * Renders its children. On the server it's also where leaf/server's stream sends what it has
- * before waiting on the async components inside. The stream is in order, so `fallback` never shows.
+ * before waiting on the async components inside. Supplying a fallback lets pending siblings reveal independently.
  */
 export function Suspense(props) {
   return props.children ?? null;
@@ -29,11 +29,28 @@ export function Suspense(props) {
  * dropped, so `cond && <X />` renders nothing; numbers become text, `0` included.
  */
 export function toChildArray(children, out = []) {
+  const start = out.length;
+  flattenChildren(children, out);
+  let keys;
+  for (let index = start; index < out.length; index++) {
+    const child = out[index];
+    if (typeof child === "string" || child.key === null) continue;
+    keys ??= new Set();
+    if (keys.has(child.key))
+      throw new Error(
+        `leaf: duplicate sibling key "${String(child.key)}". Give each sibling a unique key.`,
+      );
+    keys.add(child.key);
+  }
+  return out;
+}
+
+function flattenChildren(children, out = []) {
   if (children == null || typeof children === "boolean") return out;
   if (Array.isArray(children)) {
-    for (const child of children) toChildArray(child, out);
-  } else if (isValidElement(children) && children.type === Fragment) {
-    toChildArray(children.props.children, out);
+    for (const child of children) flattenChildren(child, out);
+  } else if (isValidElement(children) && children.type === Fragment && children.key === null) {
+    flattenChildren(children.props.children, out);
   } else if (isValidElement(children)) {
     out.push(children);
   } else if (typeof children === "string" || typeof children === "number") {

@@ -35,7 +35,7 @@ For each request, Farm builds the route as one element tree. It calls your libra
 
 That's the whole job. The leaf repo has three parts:
 
-- **`packages/leaf`** is the UI library: elements, hooks, a DOM patcher, and an HTML renderer that can stream. It's about 1,000 lines of TypeScript, and your library replaces it.
+- **`packages/leaf`** is the UI library: elements, hooks, a DOM patcher, and an HTML renderer that can stream. Your library replaces it.
 - **`packages/farm-leaf`** is the adapter between leaf and Farm. This post builds it, one step at a time.
 - **`app`** is a Farm app that uses it.
 
@@ -423,40 +423,9 @@ Without streaming, Farm renders the whole page with `renderToString()` and sends
 - **`renderToReadableStream(element, options)`** returns a Web `ReadableStream` of HTML. Turn on `web`.
 - **`renderToPipeableStream(element, callbacks)`** returns an object with `pipe(destination)`, for Node streams. Turn on `node`.
 
-leaf uses the first. Its HTML renderer is a generator: it yields strings, a marker where a `<Suspense>` starts, and the promise an async component returns. `renderChunks()` joins the strings into one chunk per marker and waits on each promise in order. The stream sends each chunk as it's ready:
+leaf exports a Web stream. A `<Suspense>` with a fallback starts rendering its children as the shell is built. If a child suspends, leaf sends the fallback and keeps rendering siblings. A completed boundary sends a template with the final HTML and a script that replaces its fallback. The script takes the nonce Farm passes in `options.nonce`.
 
-```ts
-// packages/leaf/src/server.ts (the stream)
-export function renderToReadableStream(
-  element: Children,
-  options?: RenderToReadableStreamOptions,
-): ReadableStream<Uint8Array> {
-  const chunks = renderChunks(renderChildren(element));
-  let started = false;
-  return new ReadableStream<Uint8Array>({
-    async pull(controller) {
-      let result: IteratorResult<string, void>;
-      try {
-        result = await chunks.next();
-      } catch (error) {
-        // Before any output, the error decides the status. After it, the status is already
-        // sent, so report the error and end the document.
-        if (!started) return controller.error(error);
-        options?.onError?.(error);
-        return controller.close();
-      }
-      if (result.done) return controller.close();
-      started = true;
-      controller.enqueue(encoder.encode(result.value));
-    },
-    async cancel() {
-      await chunks.return();
-    },
-  });
-}
-```
-
-The `catch` is the rule that matters. If rendering fails before any output, error the stream, so Farm can answer with the error's status: leaf's `/broken` page still gets its `error.tsx` and a 500. After output has started, call `options.onError(error)` and close the stream. Erroring a stream that has already sent bytes resets the connection.
+An error before the shell goes out can still set the response status. If a pending boundary fails after the shell, leaf reports it to `options.onError` and keeps the fallback. Other pending boundaries can still finish.
 
 Now a page can stream past slow data:
 
@@ -464,6 +433,7 @@ Now a page can stream past slow data:
 // app/src/app/streaming/page.tsx (abridged)
 import { Suspense } from "leaf";
 import { loadCropsSlowly } from "../../server/slow-crops";
+import { headers } from "@farm.js/core/headers";
 
 async function SlowCropList() {
   const crops = await loadCropsSlowly(); // takes 400 ms
@@ -477,10 +447,11 @@ async function SlowCropList() {
 }
 
 export default function StreamingPage() {
+  const fallback = headers().get("sec-fetch-dest") === "document" ? "Loading crops…" : undefined;
   return (
     <section>
       <p>This arrives first. The list below waits 400 ms for its data.</p>
-      <Suspense>
+      <Suspense fallback={fallback}>
         <SlowCropList />
       </Suspense>
     </section>
@@ -488,11 +459,9 @@ export default function StreamingPage() {
 }
 ```
 
-The layout and the paragraph reach the browser at once, and the list follows when its data does. Three limits are leaf's, not Farm's:
+On a document load, the paragraph and fallback arrive first. Each pending sibling replaces its own fallback as its data arrives. The example varies the response on `Sec-Fetch-Dest`. For a client navigation, Farm parses HTML without executing its inline scripts, so the example omits the fallback and streams the resolved list in order.
 
-- It streams in order. React streams out of order, showing `fallback` and swapping the content in with a script. leaf never shows `fallback`.
-- Its browser renderer can't run an async component, so a page that has one stays server HTML.
-- Its `renderToString()` rejects an async component with an error that says to stream it. Farm's conformance suite expects that from a renderer that can't wait.
+Async components run on the server. A page that uses one stays server-rendered. Leaf's synchronous `renderToString()` rejects an async component and points the caller to the stream.
 
 <span id="step-9-optional-islands" className="blog-heading-anchor" />
 
@@ -623,7 +592,7 @@ Write a small component per primitive. leaf's `Toggle` creates the primitive onc
 
 ```tsx
 // app/src/ui/toggle.tsx
-import { attrs, handlers } from "@ui-sdk/core/renderer";
+import { attrs, handlers, ref } from "@ui-sdk/core/renderer";
 import { toggle } from "@ui-sdk/core/toggle";
 import { useFarmStore } from "farm-leaf/bindings";
 import { type Children, useMemo } from "leaf";
@@ -644,7 +613,11 @@ export function Toggle(props: ToggleProps) {
   const root = primitive.part("root");
   const on = handlers(root);
   return (
-    <button {...attrs(root)} onClick={on.click} onKeyDown={on.keydown} onKeyUp={on.keyup}>
+    <button
+      {...attrs(root)}
+      ref={ref(root, { by: "framework", attaches: ["click", "keydown", "keyup"] })}
+      onClick={on.click} onKeyDown={on.keydown} onKeyUp={on.keyup}
+    >
       {props.children}
     </button>
   );
@@ -667,7 +640,7 @@ The primitive runs during server rendering too, so the ARIA is in the first HTML
 
 Click, Space, and Enter each toggle it, in `farm dev` and in a production build.
 
-The catch is where `attrs` and `handlers` come from. `@ui-sdk/core/renderer` is the entry ui-sdk's own adapters use, and it isn't documented or public API yet. It can change in any release. leaf also has no refs, so this `Toggle` skips what ui-sdk does with the DOM element, like its `focus()` method. A standalone button doesn't need it.
+Leaf calls the ref with the mounted button and passes `null` when it detaches. That lets ui-sdk bind and release the element. The `attrs`, `handlers`, and `ref` helpers come from ui-sdk's undocumented adapter entry, so the example pins its version.
 
 ### Way 2: use the web components
 
@@ -712,7 +685,7 @@ Routes, layouts, SSR, hydration, navigation, server functions, and production ou
 
 - **React Server Components are React-only.** Islands were too, until 0.1.84: now a renderer that opts in gets them, as [step 9](#step-9-optional-islands) shows. Of the built-in renderers, only React uses them so far. The [feature table](/docs/renderers#feature-support) lists what else each renderer gets.
 - **One renderer per app.** You can't render one page with leaf and the next with React.
-- **leaf's own gaps are leaf's.** It streams only in order, and it has no keys and no refs. Those are missing from the library, not from Farm's contract.
+- **The UI library owns identity and streaming.** In leaf, a stable sibling key keeps a component’s state and DOM nodes through a reorder. A host ref receives the actual DOM node. Suspense can reveal independent siblings in completion order.
 
 <span id="what-building-leaf-fixed-in-farm" className="blog-heading-anchor" />
 
