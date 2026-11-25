@@ -690,7 +690,7 @@ function Hero() {
           tag="/agents"
           word="product-integrated"
         />
-        <p className="mt-5 max-w-[38rem] text-balance text-[12px] font-light leading-[1.65] text-white/56 sm:text-[13px]">
+        <p className="mt-5 max-w-[38rem] text-balance text-[14px] font-light leading-[1.65] text-white/56 sm:text-[15px]">
           Bring the stack you already use. Farm.js turns it into one product for people and agents
           <span className="hidden sm:inline">
             , with typed APIs, integrations, docs, and deploys built in
