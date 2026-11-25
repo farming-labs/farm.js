@@ -95,6 +95,9 @@ lets the browser give `useId` the ids in the HTML. The full contract is islx's
 - **Actions.** `"use server"` functions compile to islx action references. A form posts its action
   without a page load, or without JavaScript, and the page refreshes with its islands' state kept,
   including islands in Suspense content that streams in after the page.
+  The browser sends action calls one at a time, in the order it receives them. A server query
+  that calls a server function uses the same queue and refreshes the page when the call succeeds.
+  A redirect returned by an action navigates to its destination instead.
   An action called from a client component can return elements, promises and streams, as under
   RSC: elements render on the server, and promises and streams settle in the browser after the
   call returns. Its arguments and result can refer to themselves, through a promise or stream in
@@ -106,6 +109,8 @@ lets the browser give `useId` the ids in the HTML. The full contract is islx's
 - **Navigation.** A navigation fetches the page's HTML, streamed, with only the layouts the
   browser does not keep, and hydrates the islands it brings. A kept layout still runs on the
   server, so a guard in it (`redirect()`, `notFound()`, an auth check) decides the navigation.
+  When a page request returns an HTTP redirect, the browser follows it with a full document
+  navigation. This also handles redirect chains that end on another origin.
   The build skips that run for a layout that cannot decide a request: one whose modules, followed
   through every import, never throw, await, read `headers()`, `cookies()` or another
   per-request value, and import no package besides React and `Link`.
