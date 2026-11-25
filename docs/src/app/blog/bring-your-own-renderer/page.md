@@ -7,18 +7,18 @@ description: "How to plug any UI library into Farm, one piece at a time: a descr
 
 KinfeMichael Tariku · Nov 2026
 
-Farm ships five renderers: React, Preact, Solid, Vue, and Svelte. This post is about the sixth, the one you write.
+I built Leaf to find out what a UI library has to supply before Farm can serve one of its pages. In the example, a `.leaf` page renders its counter as HTML, hydrates that same button, then calls a server function when you plant a crop. [Get the working example on GitHub](https://github.com/farming-labs/leaf).
 
-To find out what that takes, I wrote leaf, a small UI library Farm had never heard of, and plugged it in. It now runs a whole Farm app: server rendering, hydration, islands, client navigation, server functions, its own file format, and components from a component library. You can run the app locally. The page examples below use its `.leaf` syntax.
+Use Node.js 22.13 or later and pnpm 8.12.1 to run the example.
 
 ```bash
 git clone https://github.com/farming-labs/leaf
 cd leaf
-pnpm install
+pnpm install --frozen-lockfile
 pnpm dev
 ```
 
-**A renderer is one descriptor and three small modules. Farm does the rest.**
+Open the local URL printed by `pnpm dev`. On the home page, click **Plant barley** and watch the planted count update. Visit `/streaming` to see the page arrive before the crop list, then `/islands` to try counters that hydrate independently.
 
 <BlogFigure kind="renderer-seams" caption="A renderer is three modules. Farm compiles routes with the Vite module, renders them to HTML with the server module, and hydrates that HTML with the client module." />
 
@@ -33,13 +33,11 @@ For each request, Farm builds the route as one element tree. It calls your libra
 - On the server, turn that tree into HTML.
 - In the browser, adopt that HTML, and render the next tree when the user navigates.
 
-That's the whole job. The leaf repo has three parts:
+The example has three places to look.
 
-- **`packages/leaf`** is the UI library: elements, hooks, a DOM patcher, and an HTML renderer that can stream. Your library replaces it.
-- **`packages/farm-leaf`** is the adapter between leaf and Farm. This post builds it, one step at a time.
-- **`app`** is a Farm app that uses it.
-
-You probably have the library already. The adapter is what you write.
+- **The UI library** defines elements, hooks, HTML streaming, and DOM hydration. [Leaf source](https://github.com/farming-labs/leaf/tree/main/packages/leaf/src).
+- **The Farm adapter** describes the library to Farm and exports the server, client, and Vite modules. Start here when you bring your own library. [Adapter source](https://github.com/farming-labs/leaf/tree/main/packages/farm-leaf/src).
+- **The app** exercises the adapter through real routes. The page examples in this tutorial use `.leaf` markup, including equivalents of routes the repository writes in JSX. [App routes](https://github.com/farming-labs/leaf/tree/main/app/src/app).
 
 <span id="step-1-the-descriptor" className="blog-heading-anchor" />
 
@@ -236,15 +234,15 @@ A page uses it like any hook. leaf's pages are `.leaf` files, which [step 7](#st
 ```html
 <!-- app/src/app/page.leaf -->
 <script module>
-export const hydrate = true;
+  export const hydrate = true;
 </script>
 
 <script>
-import { useRouter } from "farm-leaf/bindings";
-import { useState } from "leaf";
+  import { useRouter } from "farm-leaf/bindings";
+  import { useState } from "leaf";
 
-const [count, setCount] = useState(0);
-const router = useRouter();
+  const [count, setCount] = useState(0);
+  const router = useRouter();
 </script>
 
 <section>
@@ -329,17 +327,17 @@ The page hydrates so the button can submit the action and the query can refresh 
 ```html
 <!-- app/src/app/page.leaf -->
 <script module>
-export const hydrate = true;
+  export const hydrate = true;
 </script>
 
 <script>
-import { useAction, useServerQuery } from "farm-leaf/bindings";
-import { plantCrop, plantedCount } from "../server/plant";
+  import { useAction, useServerQuery } from "farm-leaf/bindings";
+  import { plantCrop, plantedCount } from "../server/plant";
 
-const plant = useAction(plantCrop);
-const total = useServerQuery(plantedCount, undefined);
-// A failed call lands in plant.error, which the page renders.
-const plantBarley = () => plant.submit({ name: "barley" }).catch(() => {});
+  const plant = useAction(plantCrop);
+  const total = useServerQuery(plantedCount, undefined);
+  // A failed call lands in plant.error, which the page renders.
+  const plantBarley = () => plant.submit({ name: "barley" }).catch(() => {});
 </script>
 
 <section>
@@ -363,18 +361,18 @@ Svelte and Vue routes aren't `.tsx` files, and yours don't have to be either. le
 ```html
 <!-- app/src/app/notes/page.leaf -->
 <script module>
-// Module scope: Farm reads these exports.
-export const hydrate = true;
-export const metadata = { title: "Notes in a .leaf file" };
+  // Module scope: Farm reads these exports.
+  export const hydrate = true;
+  export const metadata = { title: "Notes in a .leaf file" };
 </script>
 
 <script>
-// Runs on every render.
-import { useState } from "leaf";
-import Badge from "../../components/badge.leaf";
+  // Runs on every render.
+  import { useState } from "leaf";
+  import Badge from "../../components/badge.leaf";
 
-const [notes, setNotes] = useState(0);
-const crops = ["wheat", "barley", "rye"];
+  const [notes, setNotes] = useState(0);
+  const crops = ["wheat", "barley", "rye"];
 </script>
 
 <section>
@@ -430,25 +428,18 @@ Without streaming, Farm renders the whole page with `renderToString()` and sends
 - **`renderToReadableStream(element, options)`** returns a Web `ReadableStream` of HTML. Turn on `web`.
 - **`renderToPipeableStream(element, callbacks)`** returns an object with `pipe(destination)`, for Node streams. Turn on `node`.
 
-leaf exports a Web stream. A `<Suspense>` with a fallback starts rendering its children as the shell is built. If a child suspends, leaf sends the fallback and keeps rendering siblings. A completed boundary sends a template with the final HTML and a script that replaces its fallback. The script takes the nonce Farm passes in `options.nonce`.
-
-An error before the shell goes out can still set the response status. If a pending boundary fails after the shell, leaf reports it to `options.onError` and keeps the fallback. Other pending boundaries can still finish.
-
-The streaming page puts the slow list inside a Suspense boundary.
+Leaf exports a Web stream. In the reference checkout, it sends the paragraph before the Suspense boundary, waits for the crop list, then sends the list. You can read the whole route in [streaming/page.leaf](https://github.com/farming-labs/leaf/blob/fcdbcc3d489654287408a2e080a07e3289f7a315/app/src/app/streaming/page.leaf).
 
 ```html
 <!-- app/src/app/streaming/page.leaf -->
 <script>
-  import { headers } from "@farm.js/core/headers";
   import { Suspense } from "leaf";
   import SlowCropList from "../../components/slow-crop-list.leaf";
-
-  const fallback = headers().get("sec-fetch-dest") === "document" ? "Loading crops…" : undefined;
 </script>
 
 <section>
   <p>This arrives first. The list below waits 400 ms for its data.</p>
-  <Suspense fallback="{{ fallback }}">
+  <Suspense>
     <SlowCropList />
   </Suspense>
 </section>
@@ -471,7 +462,7 @@ The list awaits its data in its render script. Leaf compiles that component as a
 </ul>
 ```
 
-On a document load, the paragraph and fallback arrive first. Each pending sibling replaces its own fallback as its data arrives. The example varies the response on `Sec-Fetch-Dest`. For a client navigation, Farm parses HTML without executing its inline scripts, so the example omits the fallback and streams the resolved list in order.
+The first paragraph stays visible while the list loads. Client navigation gets the resolved list as HTML. A library can also reveal pending siblings out of order by sending a fallback and a script that replaces it. That requires the renderer to handle the response nonce and provide resolved HTML for consumers that do not execute scripts.
 
 Async components run on the server. A page that uses one stays server-rendered. Leaf's synchronous `renderToString()` rejects an async component and points the caller to the stream.
 
@@ -481,7 +472,7 @@ Async components run on the server. A page that uses one stays server-rendered. 
 
 A page that hydrates hydrates as one tree: all of its components ship to the browser, including the ones that never change. With islands, a server page stays HTML, and only its client components hydrate, each on its own and when it's needed. Since 0.1.84, that works with any renderer that opts in.
 
-The app turns islands on:
+The runnable example pins Farm 0.1.84 and enables islands with `experimental.isolatedClientHydration: "enabled"`. If you're building the adapter on Farm 0.1.87, select islands mode as shown below. [Reference app config](https://github.com/farming-labs/leaf/blob/fcdbcc3d489654287408a2e080a07e3289f7a315/app/farm.config.ts).
 
 ```ts
 // app/farm.config.ts
@@ -531,12 +522,20 @@ Here’s the islands page written as a `.leaf` file. It imports the same client 
   import { Counter } from "../../components/counter";
 
   const since = new Date("2026-03-01T00:00:00.000Z");
-  const crops = new Map([["wheat", 3], ["barley", 5]]);
+  const crops = new Map([
+    ["wheat", 3],
+    ["barley", 5],
+  ]);
 </script>
 
 <p id="islands-static">This text ships no JavaScript.</p>
 <Counter name="load" label="Starts at once" since="{{ since }}" crops="{{ crops }}" client:load />
-<Counter name="idle" label="Starts when the browser is idle" since="{{ since }}" crops="{{ crops }}" />
+<Counter
+  name="idle"
+  label="Starts when the browser is idle"
+  since="{{ since }}"
+  crops="{{ crops }}"
+/>
 ```
 
 `Counter`'s module exports `island = "idle"`, and `client:load` overrides it where it's used. The other strategies are `visible` and `interaction`. `since` is a `Date` and `crops` a `Map`, and the browser gets a `Date` and a `Map`: props go through the same codec as Farm's React islands, and a value several islands share is sent once.
@@ -607,7 +606,7 @@ Sooner or later, your library wants a component library. Most ship one adapter p
 
 ### Way 1: build on the primitive
 
-The example implements the `Toggle` adapter in TypeScript with JSX. It creates the primitive once, subscribes to its state, and spreads its attributes onto the button. A `.leaf` page can import this component directly.
+The app implements its `Toggle` adapter in TypeScript with JSX. This version also connects the DOM node to ui-sdk with a ref. It creates the primitive once, subscribes to its state, and spreads its attributes onto the button. A `.leaf` page can import this component directly.
 
 ```tsx
 // app/src/ui/toggle.tsx
@@ -635,7 +634,9 @@ export function Toggle(props: ToggleProps) {
     <button
       {...attrs(root)}
       ref={ref(root, { by: "framework", attaches: ["click", "keydown", "keyup"] })}
-      onClick={on.click} onKeyDown={on.keydown} onKeyUp={on.keyup}
+      onClick={on.click}
+      onKeyDown={on.keydown}
+      onKeyUp={on.keyup}
     >
       {props.children}
     </button>
@@ -706,7 +707,7 @@ Routes, layouts, SSR, hydration, navigation, server functions, and production ou
 
 - **React Server Components are React-only.** Islands were too, until 0.1.84: now a renderer that opts in gets them, as [step 9](#step-9-optional-islands) shows. Of the built-in renderers, only React uses them so far. The [feature table](/docs/renderers#feature-support) lists what else each renderer gets.
 - **One renderer per app.** You can't render one page with leaf and the next with React.
-- **The UI library owns identity and streaming.** In leaf, a stable sibling key keeps a component’s state and DOM nodes through a reorder. A host ref receives the actual DOM node. Suspense can reveal independent siblings in completion order.
+- **The UI library owns identity and streaming.** The reference checkout matches siblings by position, supports callback and object refs on host elements, and streams in document order. Adding keyed reordering or independent Suspense reveals is work inside the UI library. Farm already delegates those decisions to it.
 
 <span id="what-building-leaf-fixed-in-farm" className="blog-heading-anchor" />
 
