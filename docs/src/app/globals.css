@@ -774,7 +774,7 @@ svg.lucide:not([stroke]) {
 }
 
 .farm-footer-link {
-  @apply flex min-h-7 items-center justify-between gap-2 text-[9px] font-normal uppercase !tracking-[0.04em] text-white/48 transition-colors duration-150 hover:text-white focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-white;
+  @apply flex min-h-8 items-center justify-between gap-2 text-[10px] font-normal uppercase !tracking-[0.04em] text-white/48 transition-colors duration-150 hover:text-white focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-white;
 }
 
 .farm-nav-link {
@@ -782,7 +782,7 @@ svg.lucide:not([stroke]) {
 }
 
 .farm-footer-row {
-  @apply flex h-12 items-center justify-between border-b border-white/12 px-4 text-[9px] font-normal uppercase !tracking-[0.04em] text-white/58 transition-[background-color,color] duration-150 hover:bg-white/[0.035] hover:text-white focus-visible:outline focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-white;
+  @apply flex h-12 items-center justify-between border-b border-white/12 px-4 text-[10px] font-normal uppercase !tracking-[0.04em] text-white/58 transition-[background-color,color] duration-150 hover:bg-white/[0.035] hover:text-white focus-visible:outline focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-white;
 }
 
 .farm-menu-link {
