@@ -363,13 +363,58 @@ test("static pages are prerendered at build time", async ({ request }) => {
   expect(await (await request.get("/static/b")).text()).toContain("Static b");
 });
 
-test("a server action runs from a form, with JavaScript", async ({ page }) => {
+/** The documents the page loads from now on: a form that posts natively loads one. */
+function documentRequests(page: Page): string[] {
+  const documents: string[] = [];
+  page.on("request", (request) => {
+    if (request.isNavigationRequest()) documents.push(`${request.method()} ${request.url()}`);
+  });
+  return documents;
+}
+
+test("a server action runs from a form, with JavaScript, without reloading the page", async ({
+  page,
+}) => {
   const errors = collectErrors(page);
   await page.goto("/action");
   await hydrated(page);
+  await page.evaluate(() => Object.assign(window, { __farmSameDocument: true }));
+  const documents = documentRequests(page);
   await page.getByLabel("Title").fill("From the browser");
+  // In islands mode the field's focus runs the client entry; the press on Add then loads islx.
+  await hydrated(page);
   await page.getByRole("button", { name: "Add" }).click();
   await expect(page.getByTestId("todos")).toContainText("From the browser");
+  expect(documents).toEqual([]);
+  expect(await page.evaluate(() => "__farmSameDocument" in window)).toBe(true);
+  expect(errors).toEqual([]);
+});
+
+test("a server action form pressed while the client entry loads posts without reloading the page", async ({
+  page,
+}) => {
+  const errors = collectErrors(page);
+  // Islands mode runs its client entry on the first intent, here the field's focus: held until
+  // after the press on Add, as on a slow connection. rsc mode has run its entry with the page.
+  let releaseEntry = () => {};
+  if (mode === "islands") {
+    const entryHeld = new Promise<void>((resolve) => (releaseEntry = resolve));
+    await page.route(/\/farm-client-h[0-9a-f]+\.js$/, async (route) => {
+      await entryHeld;
+      await route.continue();
+    });
+  }
+  await page.goto("/action");
+  // The boot fetches the held entry once the browser is idle, so the network never goes idle.
+  if (mode === "rsc") await hydrated(page);
+  await page.evaluate(() => Object.assign(window, { __farmSameDocument: true }));
+  const documents = documentRequests(page);
+  await page.getByLabel("Title").fill("While the entry loads");
+  await page.getByRole("button", { name: "Add" }).click();
+  releaseEntry();
+  await expect(page.getByTestId("todos")).toContainText("While the entry loads");
+  expect(documents).toEqual([]);
+  expect(await page.evaluate(() => "__farmSameDocument" in window)).toBe(true);
   expect(errors).toEqual([]);
 });
 

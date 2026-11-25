@@ -1,5 +1,7 @@
+import { FORM_REF_PREFIX } from "@farm.js/islx";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
+  FARM_ISLANDS_FORM_REF_PREFIX,
   holdFarmIslandInteractions,
   scheduleFarmIslandHydration,
   watchFarmIslandTriggers,
@@ -567,6 +569,84 @@ describe("holdFarmIslandInteractions", () => {
     const queue = (window as typeof window & { __FARM_PREHYDRATION_CLICK_QUEUE__?: unknown[] })
       .__FARM_PREHYDRATION_CLICK_QUEUE__;
     expect(queue).toEqual([{ target: form, kind: "submit" }]);
+  });
+
+  describe("of a server component's form", () => {
+    // What islx renders for <form action={serverAction}> in a server component.
+    const serverForm = `<form><input type="hidden" name="${FORM_REF_PREFIX}0"><input name="title"><button name="intent" value="add">Add</button></form>`;
+    let submits: Array<{ prevented: boolean; submitter: Element | null }>;
+    // jsdom cannot submit a form: the window, which the event reaches last, records it and stops it.
+    const record = (event: Event) => {
+      submits.push({
+        prevented: event.defaultPrevented,
+        submitter: (event as SubmitEvent).submitter,
+      });
+      event.preventDefault();
+    };
+    beforeEach(() => {
+      submits = [];
+      window.addEventListener("submit", record);
+    });
+    afterEach(() => {
+      window.removeEventListener("submit", record);
+      vi.restoreAllMocks();
+    });
+
+    it("reads the field islx names a form's action with", () => {
+      expect(FARM_ISLANDS_FORM_REF_PREFIX).toBe(FORM_REF_PREFIX);
+    });
+
+    it("holds its submit until islx loads, then submits it again with its button, once", async () => {
+      document.body.innerHTML = serverForm;
+      const form = document.querySelector("form")!;
+      const button = form.querySelector("button")!;
+      let finish!: () => void;
+      const load = vi.fn(() => new Promise<void>((resolve) => (finish = resolve)));
+      const release = holdFarmIslandInteractions("f-island", load);
+      form.requestSubmit(button);
+      form.requestSubmit(button);
+      expect(load).toHaveBeenCalledTimes(1);
+      expect(submits).toEqual([
+        { prevented: true, submitter: button },
+        { prevented: true, submitter: button },
+      ]);
+      // The entry's loader releases the hold as islx loads, before the form is submitted again.
+      release();
+      finish();
+      await vi.waitFor(() => expect(submits).toHaveLength(3));
+      expect(submits[2]).toEqual({ prevented: false, submitter: button });
+    });
+
+    it("submits it natively after islx fails to load", async () => {
+      document.body.innerHTML = serverForm;
+      const form = document.querySelector("form")!;
+      const failure = new Error("chunk failed");
+      const error = vi.spyOn(console, "error").mockImplementation(() => {});
+      let fail!: (error: Error) => void;
+      const release = holdFarmIslandInteractions(
+        "f-island",
+        () => new Promise<void>((_, reject) => (fail = reject)),
+      );
+      form.requestSubmit();
+      release();
+      fail(failure);
+      await vi.waitFor(() => expect(submits).toHaveLength(2));
+      expect(submits.map((submit) => submit.prevented)).toEqual([true, false]);
+      expect(error).toHaveBeenCalledWith(expect.stringContaining("posts without it"), failure);
+    });
+
+    it("leaves a form without an action, or any form when it has nothing to load, alone", () => {
+      document.body.innerHTML = `<form id="plain"><input name="q"><button>Search</button></form>${serverForm}`;
+      const load = vi.fn(() => new Promise<void>(() => {}));
+      let release = holdFarmIslandInteractions("f-island", load);
+      document.querySelector<HTMLFormElement>("#plain")!.requestSubmit();
+      release();
+      release = holdFarmIslandInteractions("f-island");
+      document.querySelector<HTMLFormElement>("form:not(#plain)")!.requestSubmit();
+      release();
+      expect(load).not.toHaveBeenCalled();
+      expect(submits.map((submit) => submit.prevented)).toEqual([false, false]);
+    });
   });
 });
 

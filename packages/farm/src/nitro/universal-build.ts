@@ -5009,8 +5009,9 @@ let farmRendererLoaded = false;${
         isolatedHydrationEnabled
           ? `
 // The boot stops holding interactions once this entry runs. Until islx loads, islands that have not
-// hydrated hold them here, for their schedulers to replay.
-const releaseFarmIslandInteractions = holdFarmIslandInteractions("f-island");`
+// hydrated hold them here, for their schedulers to replay, and a server component's form waits for
+// islx to post it without a page load.
+const releaseFarmIslandInteractions = holdFarmIslandInteractions("f-island", loadFarmRenderer);`
           : ""
       }
 function loadFarmRenderer() {
