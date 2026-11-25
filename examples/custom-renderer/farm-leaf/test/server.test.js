@@ -2,10 +2,12 @@
 
 import {
   defineRendererDescriptorConformance,
+  defineRendererIslandsConformance,
   defineRendererServerConformance,
+  defineRendererSourceConformance,
 } from "@farm.js/renderer-tests";
 import { createElement } from "leaf";
-import { describe, expect, it, vi } from "vitest";
+import { describe, expect, it } from "vitest";
 import { compileLeaf, componentName } from "../src/compile.js";
 import { leaf } from "../src/index.js";
 import * as server from "../src/server.js";
@@ -107,63 +109,51 @@ describe("leaf files", () => {
   });
 });
 
-describe("leaf islands", () => {
-  function Counter(props) {
-    return createElement("button", null, `${props.label}: 0`);
-  }
-  const reference = { src: "/src/components/counter.tsx", export: "Counter", strategy: "idle" };
-  const Island = server.withIsland(Counter, reference);
+// withIsland, wrapClientGraph and isolateServerPageGraph, the exports capabilities.islands needs.
+defineRendererIslandsConformance({ name: "leaf", server });
 
-  it("writes a client component from server output as an island, with its strategy", async () => {
-    const html = await server.renderToString(
-      createElement(Island, { label: "Plant", "client:visible": true }),
-    );
-    expect(html).toMatch(
-      /^<f-island src="\/src\/components\/counter\.tsx" export="Counter" props="(fi-?\d+)" strategy="visible" style="display:contents"><button>Plant: 0<\/button><\/f-island><script type="[^"]+" for="\1">/,
-    );
-    // client:* sets the strategy and never reaches the component.
-    expect(html).toContain('{"label":"Plant"}');
-  });
-
-  it("uses the module's strategy without a client:* attribute", async () => {
-    const html = await server.renderToString(createElement(Island, { label: "Plant" }));
-    expect(html).toContain('strategy="idle"');
-  });
-
-  it("renders the component plain inside a tree that hydrates as one root", async () => {
-    const html = await server.renderToString(
-      server.wrapClientGraph(createElement(Island, { label: "Plant", "client:load": true })),
-    );
-    expect(html).toBe("<button>Plant: 0</button>");
-  });
-
-  it("starts islands again in a server page that root keeps as HTML", async () => {
-    const html = await server.renderToString(
-      server.wrapClientGraph(
-        createElement(
-          "main",
-          null,
-          server.isolateServerPageGraph(createElement(Island, { label: "Plant" })),
-        ),
-      ),
-    );
-    expect(html).toMatch(/^<main><f-island [^>]*><button>Plant: 0<\/button><\/f-island><script /);
-  });
-
-  it("keeps the server HTML without an island when a prop can't reach the browser", async () => {
-    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
-    try {
-      const html = await server.renderToString(
-        createElement(Island, { label: "Plant", onPlant: function onPlant() {} }),
-      );
-      expect(html).toBe("<button>Plant: 0</button>");
-      expect(warn).toHaveBeenCalledWith(expect.stringContaining("onPlant"));
-    } finally {
-      warn.mockRestore();
-    }
-  });
-
-  it("leaves an export that isn't a component as it is", () => {
-    expect(server.withIsland("idle", reference)).toBe("idle");
-  });
+// The descriptor's routes(), hydration.resolve() and compile(), on .leaf files like the example
+// app's.
+defineRendererSourceConformance({
+  name: "leaf",
+  createDescriptor: leaf,
+  files: [
+    { path: "src/app/page.leaf", route: { kind: "page", pattern: "/" } },
+    { path: "src/app/about/page.tsx", route: { kind: "page", pattern: "/about" } },
+    { path: "src/app/crops/[name]/page.leaf", route: { kind: "page", pattern: "/crops/[name]" } },
+    { path: "src/app/not-found.leaf", route: { kind: "not-found", pattern: "/" } },
+    { path: "src/app/guides/index.leaf", route: { kind: "page", pattern: "/guides" } },
+    { path: "src/app/guides/[crop].leaf", route: { kind: "page", pattern: "/guides/[crop]" } },
+    { path: "src/app/guides/_layout.leaf", route: { kind: "layout", pattern: "/guides" } },
+    { path: "src/app/guides/_tip.leaf", route: null },
+    { path: "src/app/guides/notes.tsx", route: null },
+    {
+      path: "src/app/guides/watering.client.leaf",
+      route: { kind: "page", pattern: "/guides/watering", hydrate: true },
+    },
+    {
+      path: "src/app/guides/harvest.leaf",
+      source: "<script module>\n  // @hydrate interaction\n</script>\n\n<p>Harvest</p>\n",
+      route: { kind: "page", pattern: "/guides/harvest" },
+      hydration: { hydrate: true, strategy: "interaction" },
+      client: false,
+    },
+    {
+      path: "src/app/guides/fences.leaf",
+      source: "<script module>\n  // @hydrate false\n</script>\n\n<p>Fences</p>\n",
+      hydration: { hydrate: false },
+    },
+    {
+      path: "src/app/notes/page.leaf",
+      source: "<script module>\n  export const hydrate = true;\n</script>\n\n<p>Notes</p>\n",
+      hydration: null,
+      client: false,
+    },
+    {
+      path: "src/components/planter.leaf",
+      source:
+        '<script module>\n  "use client";\n\n  // A client component.\n  export const island = "load";\n</script>\n\n<button>{{ props.crop }}</button>\n',
+      client: true,
+    },
+  ],
 });

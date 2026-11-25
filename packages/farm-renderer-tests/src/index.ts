@@ -655,3 +655,355 @@ export function defineRendererNativeTreeConformance(
     });
   });
 }
+
+export type RendererIslandStrategy = "load" | "idle" | "visible" | "interaction";
+
+/** What Farm passes `withIsland()` for each export of a `"use client"` module. */
+export interface RendererIslandReference {
+  src: string;
+  export: string;
+  strategy: RendererIslandStrategy;
+}
+
+export interface RendererIslandsServerFixture {
+  createElement(type: unknown, props?: unknown, ...children: unknown[]): unknown;
+  markFunctionComponent?<T>(component: T): T;
+  renderToString(element: unknown): string | Promise<string>;
+  withIsland(component: unknown, reference: RendererIslandReference): unknown;
+  wrapClientGraph?(element: unknown): unknown;
+  isolateServerPageGraph?(element: unknown): unknown;
+}
+
+/** The attributes of the first `<f-island>` in `html`, and the markup inside it. */
+function readIsland(html: string): { attributes: string; inner: string } | undefined {
+  const match = /<f-island\b([^>]*)>([\s\S]*?)<\/f-island>/.exec(html);
+  return match ? { attributes: match[1]!, inner: match[2]! } : undefined;
+}
+
+/**
+ * Islands (`capabilities.islands`): the server module's `withIsland()` writes the island Farm's
+ * runtime starts, and `wrapClientGraph()` and `isolateServerPageGraph()`, when exported, turn
+ * islands off and on again around a tree that hydrates as one root.
+ */
+export function defineRendererIslandsConformance(options: {
+  name: string;
+  server: RendererIslandsServerFixture;
+}): void {
+  const { server } = options;
+  const reference: RendererIslandReference = {
+    src: "/src/components/counter.tsx",
+    export: "Counter",
+    strategy: "idle",
+  };
+  const Counter = (props: Record<string, unknown>) =>
+    server.createElement("button", null, `${String(props.label)}: 0`);
+  const component = server.markFunctionComponent?.(Counter) ?? Counter;
+  const plain = () => server.renderToString(server.createElement(component, { label: "Plant" }));
+
+  describe(`${options.name} islands conformance`, () => {
+    it("writes a client component as an island with its src, export, and strategy", async () => {
+      const Island = server.withIsland(component, reference);
+      const html = await server.renderToString(
+        server.createElement(Island, { label: "Plant", "client:visible": true }),
+      );
+      const island = readIsland(html);
+
+      expect(island, `no <f-island> in ${html}`).toBeDefined();
+      expect(island!.attributes).toContain(`src="${reference.src}"`);
+      expect(island!.attributes).toContain(`export="${reference.export}"`);
+      expect(island!.attributes).toContain('strategy="visible"');
+      // The style is a CSS string: a renderer that takes style objects still writes it.
+      expect(island!.attributes).toContain('style="display:contents"');
+      expect(island!.inner).toBe(await plain());
+      // The props go to the browser in the script right after the island, which names it by its
+      // props attribute. The script's text is written raw, and client:* never reaches it.
+      const id = /\bprops="([^"]+)"/.exec(island!.attributes)?.[1];
+      expect(id, `no props attribute on the island in ${html}`).toBeDefined();
+      const after = html.slice(html.indexOf("</f-island>") + "</f-island>".length);
+      expect(after).toMatch(new RegExp(`^<script\\b[^>]*\\bfor="${id}"[^>]*>`));
+      expect(after).toContain('"label":"Plant"');
+      expect(html).not.toContain("client:visible");
+    });
+
+    it("uses the module's strategy when no client:* attribute sets one", async () => {
+      const Island = server.withIsland(component, reference);
+      const html = await server.renderToString(server.createElement(Island, { label: "Plant" }));
+
+      expect(readIsland(html)?.attributes).toContain('strategy="idle"');
+    });
+
+    it("keeps the server HTML without an island when a prop can't reach the browser", async () => {
+      const Island = server.withIsland(component, reference);
+      // Farm logs the prop once; keep that out of the test output.
+      const warn = console.warn;
+      console.warn = () => {};
+      try {
+        const html = await server.renderToString(
+          server.createElement(Island, { label: "Plant", onHarvest: () => {} }),
+        );
+        expect(html).toBe(await plain());
+      } finally {
+        console.warn = warn;
+      }
+    });
+
+    it("returns an export that isn't a component as it is", () => {
+      expect(server.withIsland("idle", reference)).toBe("idle");
+    });
+
+    it.skipIf(typeof server.wrapClientGraph !== "function")(
+      "renders a client component plain inside a tree that hydrates as one root",
+      async () => {
+        const Island = server.withIsland(component, reference);
+        const html = await server.renderToString(
+          server.wrapClientGraph!(
+            server.createElement(Island, { label: "Plant", "client:load": true }),
+          ),
+        );
+        expect(html).toBe(await plain());
+      },
+    );
+
+    it.skipIf(
+      typeof server.wrapClientGraph !== "function" ||
+        typeof server.isolateServerPageGraph !== "function",
+    )("starts islands again in a server page that root keeps as HTML", async () => {
+      const Island = server.withIsland(component, reference);
+      const html = await server.renderToString(
+        server.wrapClientGraph!(
+          server.createElement(
+            "main",
+            null,
+            server.isolateServerPageGraph!(server.createElement(Island, { label: "Plant" })),
+          ),
+        ),
+      );
+      expect(readIsland(html)?.inner).toBe(await plain());
+    });
+  });
+}
+
+export type RendererRouteKind = "page" | "layout" | "loading" | "error" | "not-found";
+
+/** A route `routes().resolve()` returns. */
+export interface RendererRouteFixture {
+  kind: RendererRouteKind;
+  pattern: string;
+  hydrate?: boolean;
+  strategy?: RendererIslandStrategy;
+}
+
+/** A page or layout's settings, as `hydration.resolve()` returns them. */
+export interface RendererHydrationFixture {
+  hydrate?: boolean;
+  strategy?: RendererIslandStrategy;
+}
+
+/** What Farm passes `routes().resolve()`. */
+export interface RendererRouteFileFixture {
+  path: string;
+  segments: readonly string[];
+  name: string;
+  extension: string;
+}
+
+export interface RendererRoutesFixture {
+  dir?: string;
+  resolve(file: RendererRouteFileFixture): unknown;
+}
+
+export interface RendererSourceDescriptorFixture {
+  routes?(context: {
+    root: string;
+    defaults: RendererRoutesFixture;
+  }): RendererRoutesFixture | Promise<RendererRoutesFixture>;
+  hydration?: { resolve?(source: string, file: string): unknown };
+  compile?(source: string, file: string): unknown;
+}
+
+/** A file in your renderer's format, and what each hook should say about it. */
+export interface RendererSourceFile {
+  /**
+   * Relative to the project root, with `/` separators: `"src/app/blog/[slug].leaf"`. A file with a
+   * `route` is inside the directory `routes()` scans.
+   */
+  path: string;
+  /** The file's source. Needed for `hydration` and `client`. */
+  source?: string;
+  /** What `routes().resolve()` returns: a route, or `null` for a file that isn't one. */
+  route?: RendererRouteFixture | null;
+  /** What `hydration.resolve()` returns, or `null` to leave the file to Farm's exports. */
+  hydration?: RendererHydrationFixture | null;
+  /** Whether the module `compile()` returns has `"use client"` in its directive prologue. */
+  client?: boolean;
+}
+
+const ROUTE_KINDS: ReadonlySet<string> = new Set([
+  "page",
+  "layout",
+  "loading",
+  "error",
+  "not-found",
+]);
+const ISLAND_STRATEGIES: ReadonlySet<string> = new Set(["load", "idle", "visible", "interaction"]);
+
+/**
+ * Farm's folder rules, as `routes()` gets them in `defaults`: a file named `page`, `layout`,
+ * `loading` or `error` is that route for its directory, and a `not-found` file directly in it is
+ * the not-found page.
+ */
+const folderRoutes: RendererRoutesFixture = {
+  dir: "src/app",
+  resolve(file) {
+    if (!ROUTE_KINDS.has(file.name)) return null;
+    if (file.name === "not-found" && file.segments.length > 0) return null;
+    return { kind: file.name, pattern: `/${file.segments.join("/")}` };
+  },
+};
+
+function routeFile(path: string): RendererRouteFileFixture {
+  const parts = path.split("/");
+  const fileName = parts.pop()!;
+  const dot = fileName.lastIndexOf(".");
+  const extension = dot > 0 ? fileName.slice(dot).toLowerCase() : "";
+  return Object.freeze({
+    path,
+    segments: Object.freeze(parts),
+    name: dot > 0 ? fileName.slice(0, dot) : fileName,
+    extension,
+  });
+}
+
+/**
+ * Whether `code` starts with a `"use client"` directive: one of the string-literal statements
+ * before any other code, with comments and other directives such as `"use strict"` allowed
+ * around it. Farm reads a module this way when it plans what hydrates.
+ */
+function hasUseClientDirective(code: string): boolean {
+  const prologue = /^(?:\s+|\/\/[^\n]*|\/\*[\s\S]*?\*\/|(["'])((?:(?!\1)[^\\\n]|\\.)*)\1\s*;?)/;
+  let rest = code;
+  for (let match = prologue.exec(rest); match && match[0]; match = prologue.exec(rest)) {
+    if (match[1] && match[2] === "use client") return true;
+    rest = rest.slice(match[0].length);
+  }
+  return false;
+}
+
+function expectRendererHydration(value: unknown, where: string): void {
+  if (value === null || value === undefined) return;
+  expect(typeof value, `${where} returned ${JSON.stringify(value)}`).toBe("object");
+  const { hydrate, strategy } = value as Record<string, unknown>;
+  if (hydrate !== undefined) expect(typeof hydrate, `${where}: hydrate`).toBe("boolean");
+  if (strategy !== undefined) {
+    expect(ISLAND_STRATEGIES.has(String(strategy)), `${where}: strategy ${String(strategy)}`).toBe(
+      true,
+    );
+  }
+}
+
+/**
+ * The build-time hooks that read your own file format, run against files you list: `routes()`
+ * maps each to a route Farm can serve, `hydration.resolve()` reads its settings, and `compile()`
+ * returns a module whose `"use client"` Farm can find. A hook your descriptor doesn't have, or a
+ * field a file leaves out, is skipped. Each hook must give the same answer for the same file.
+ */
+export function defineRendererSourceConformance(options: {
+  name: string;
+  createDescriptor(): RendererSourceDescriptorFixture;
+  /** The project root: `routes()` gets it, and the other hooks get each file's path under it. */
+  root?: string;
+  files: readonly RendererSourceFile[];
+}): void {
+  const root = (options.root ?? "/project").replace(/\/+$/, "");
+
+  describe(`${options.name} source conformance`, () => {
+    const descriptor = options.createDescriptor();
+    const routed = options.files.filter((file) => file.route !== undefined);
+    const hydrated = options.files.filter((file) => file.hydration !== undefined);
+    const compiled = options.files.filter((file) => file.client !== undefined);
+
+    const loadRoutes = async () => {
+      const routes = await descriptor.routes!({ root, defaults: folderRoutes });
+      expect(routes, "routes() returned no rules").toBeTruthy();
+      expect(typeof routes.resolve, "routes() returned no resolve(file)").toBe("function");
+      if (routes.dir !== undefined) {
+        expect(typeof routes.dir, "routes(): dir").toBe("string");
+        expect(/^(?:\/|\.\.(?:\/|$))/.test(routes.dir), `routes(): dir ${routes.dir}`).toBe(false);
+      }
+      return routes;
+    };
+
+    describe.skipIf(typeof descriptor.routes !== "function" || routed.length === 0)(
+      "routes()",
+      () => {
+        it.each(routed)("maps $path", async (file) => {
+          const routes = await loadRoutes();
+          const dir = `${(routes.dir ?? "src/app").replace(/^\.\/|\/+$/g, "")}/`;
+          expect(
+            file.path.startsWith(dir),
+            `${file.path} isn't in ${dir}, which routes() scans`,
+          ).toBe(true);
+          const relative = file.path.slice(dir.length);
+          const first = routes.resolve.call(routes, routeFile(relative)) ?? null;
+          const second = routes.resolve.call(routes, routeFile(relative)) ?? null;
+
+          expect(second, "a second call returned something else").toEqual(first);
+          expect(first).toEqual(file.route);
+          if (first === null) return;
+          const route = first as Record<string, unknown>;
+          expect(ROUTE_KINDS.has(String(route.kind)), `kind ${String(route.kind)}`).toBe(true);
+          expect(String(route.pattern)).toMatch(/^\//);
+          // Each segment is a folder name Farm can route: no empty, dot, or @slot segments.
+          const pattern = String(route.pattern);
+          for (const segment of pattern === "/" ? [] : pattern.slice(1).split("/")) {
+            expect(
+              segment !== "" && segment !== "." && segment !== ".." && !/^@|[\\?#]/.test(segment),
+              `segment ${JSON.stringify(segment)} of ${pattern}`,
+            ).toBe(true);
+          }
+          if (route.kind === "not-found") expect(route.pattern).toBe("/");
+          expectRendererHydration(route, `routes() for ${file.path}`);
+        });
+      },
+    );
+
+    describe.skipIf(typeof descriptor.hydration?.resolve !== "function" || hydrated.length === 0)(
+      "hydration.resolve()",
+      () => {
+        it.each(hydrated)("reads $path", async (file) => {
+          const path = `${root}/${file.path}`;
+          const source = file.source ?? "";
+          const first = descriptor.hydration!.resolve!(source, path) ?? null;
+          const second = descriptor.hydration!.resolve!(source, path) ?? null;
+
+          expect(second, "a second call returned something else").toEqual(first);
+          expect(first).toEqual(file.hydration);
+          expectRendererHydration(first, `hydration.resolve() for ${file.path}`);
+        });
+      },
+    );
+
+    describe.skipIf(typeof descriptor.compile !== "function" || compiled.length === 0)(
+      "compile()",
+      () => {
+        it.each(compiled)("compiles $path", async (file) => {
+          const path = `${root}/${file.path}`;
+          const source = file.source ?? "";
+          const first = descriptor.compile!(source, path);
+          const second = descriptor.compile!(source, path);
+
+          expect(typeof first, "compile() must return the module's source as a string").toBe(
+            "string",
+          );
+          expect(second, "a second call returned something else").toBe(first);
+          expect(
+            hasUseClientDirective(first as string),
+            file.client
+              ? `"use client" isn't in the directive prologue of:\n${first as string}`
+              : `"use client" is in the directive prologue of:\n${first as string}`,
+          ).toBe(file.client);
+        });
+      },
+    );
+  });
+}
