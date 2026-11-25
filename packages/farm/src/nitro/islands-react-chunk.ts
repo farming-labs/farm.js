@@ -101,7 +101,8 @@ export function createFarmIslandsReactChunkPlugin() {
       order: "post" as const,
       handler(options: OutputOptions): OutputOptions | null {
         if (CHUNKING_OPTIONS.some((key) => options[key] !== undefined)) return null;
-        return { ...options, ...createFarmIslandsReactOutput() };
+        const { codeSplitting, postBanner } = createFarmIslandsReactOutput();
+        return { ...options, codeSplitting, postBanner: options.postBanner ?? postBanner };
       },
     },
   };

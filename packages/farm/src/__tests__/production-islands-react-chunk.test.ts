@@ -13,7 +13,7 @@ const packageRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "
 const VENDOR_CHUNKS = `{ manualChunks: (id) => (id.includes("node_modules") ? "vendor" : undefined) }`;
 
 /** Where an islands app's farm.config.ts splits the client's chunks, if anywhere. */
-type Chunking = "none" | "config" | "plugin";
+type Chunking = "none" | "config" | "plugin" | "banner";
 
 /** An islands app around one client component, with its chunking set where `chunking` says. */
 async function createFixture(chunking: Chunking): Promise<string> {
@@ -29,6 +29,7 @@ async function createFixture(chunking: Chunking): Promise<string> {
   );
   const vite = {
     none: "{}",
+    banner: '{ build: { rollupOptions: { output: { postBanner: "/* app banner */" } } } }',
     config: `{ build: { rollupOptions: { output: ${VENDOR_CHUNKS} } } }`,
     plugin: `{
     plugins: [
@@ -94,6 +95,12 @@ describe("islands mode's React chunk in a production build", () => {
     const chunks = await buildChunks("none");
     expect(chunks.get("react")?.startsWith(`${FARM_EAGER_COMPILE_HINT}\n`)).toBe(true);
     expect(chunks.has("vendor")).toBe(false);
+  }, 180_000);
+
+  it("keeps the app's postBanner when Farm groups React", async () => {
+    const chunks = await buildChunks("banner");
+    expect(chunks.get("react")).toContain("/* app banner */");
+    for (const code of chunks.values()) expect(code).toContain("/* app banner */");
   }, 180_000);
 
   it.each(["config", "plugin"] as const)(
