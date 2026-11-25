@@ -1021,6 +1021,42 @@ defineRendererClientConformance({
 });
 ```
 
+A renderer that declares `islands`, or reads its own file format, runs two more. List files in
+your format with what each hook should say about them; a hook you don't have, or a field a file
+leaves out, is skipped:
+
+```ts
+// test/server.test.js
+import {
+  defineRendererIslandsConformance,
+  defineRendererSourceConformance,
+} from "@farm.js/renderer-tests";
+
+defineRendererIslandsConformance({ name: "leaf", server });
+
+defineRendererSourceConformance({
+  name: "leaf",
+  createDescriptor: leaf,
+  files: [
+    { path: "src/app/guides/index.leaf", route: { kind: "page", pattern: "/guides" } },
+    { path: "src/app/guides/_tip.leaf", route: null },
+    {
+      path: "src/app/guides/harvest.leaf",
+      source: "<script module>\n  // @hydrate interaction\n</script>\n",
+      route: { kind: "page", pattern: "/guides/harvest" },
+      hydration: { hydrate: true, strategy: "interaction" },
+    },
+    {
+      path: "src/components/planter.leaf",
+      source: '<script module>\n  "use client";\n</script>\n<button>Plant</button>\n',
+      client: true,
+    },
+  ],
+});
+```
+
+Both ship in the `@farm.js/renderer-tests` release after `0.1.0-beta.3`.
+
 - **`defineRendererDescriptorConformance`**: the descriptor names all three modules and returns
   fresh arrays on each call.
 - **`defineRendererServerConformance`**: element primitives, escaping, React-style props, function
@@ -1031,6 +1067,12 @@ defineRendererClientConformance({
   between visitors.
 - **`defineRendererNativeTreeConformance`**: the mobile native tier reads your server markup like any
   other renderer's.
+- **`defineRendererIslandsConformance`**: `withIsland()` writes an island with its source, export,
+  strategy, and props script, keeps the server HTML when a prop can't reach the browser, and
+  `wrapClientGraph()` and `isolateServerPageGraph()` turn islands off and on again.
+- **`defineRendererSourceConformance`**: `routes()` maps each file to the route you expect, with a
+  pattern Farm can serve; `hydration.resolve()` reads each file's settings; and `compile()` returns
+  a module with `"use client"` where Farm looks for it. Each answers the same way every time.
 
 The suite doesn't start an app. Run one on your renderer in `farm dev` and in a production build
 too: the example's Playwright tests run the same checks against both.

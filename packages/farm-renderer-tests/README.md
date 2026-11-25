@@ -59,6 +59,35 @@ defineRendererClientConformance({
 | `defineRendererClientConformance`      | The client exports Farm imports, mounting and updating a root, a new root replacing existing markup, events, and hydrating in place. |
 | `defineRendererServerQueryConformance` | Server renders never share the browser query cache between visitors.                                                                 |
 | `defineRendererNativeTreeConformance`  | The mobile native tier reads your server markup the same way as any other renderer's.                                                |
+| `defineRendererIslandsConformance`     | `withIsland()` writes islands Farm's runtime starts, and `wrapClientGraph()` and `isolateServerPageGraph()` turn them off and on.    |
+| `defineRendererSourceConformance`      | `routes()`, `hydration.resolve()` and `compile()` give the answer you list for each file in your format, every time.                 |
+
+A renderer that declares `capabilities.islands`, or reads its own file format, runs two more.
+List files in your format, relative to the project root, with what each hook should say about them:
+
+```ts
+// test/server.test.ts
+import {
+  defineRendererIslandsConformance,
+  defineRendererSourceConformance,
+} from "@farm.js/renderer-tests";
+
+defineRendererIslandsConformance({ name: "my-renderer", server });
+
+defineRendererSourceConformance({
+  name: "my-renderer",
+  createDescriptor: myRenderer,
+  files: [
+    { path: "src/app/blog/[slug].mine", route: { kind: "page", pattern: "/blog/[slug]" } },
+    { path: "src/app/blog/_card.mine", route: null },
+    {
+      path: "src/components/counter.mine",
+      source: '<script>"use client";</script><button>0</button>',
+      client: true,
+    },
+  ],
+});
+```
 
 ## What it doesn't do
 
