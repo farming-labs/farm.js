@@ -1,5 +1,7 @@
 import type { LayoutProps, Metadata } from "@farm.js/core";
-import { defineLayoutFonts, localFont } from "@farm.js/core/font";
+import { localFont } from "@farm.js/core/font";
+import { GraftMono } from "@farming-labs/graft/farm/mono";
+import { GraftSans } from "@farming-labs/graft/farm/sans";
 import { Databuddy } from "@databuddy/sdk/react";
 import { SITE_URL } from "../lib/site";
 import "./globals.css";
@@ -24,24 +26,6 @@ export const metadata = {
   },
 } satisfies Metadata;
 
-const graftSans = localFont({
-  src: "@farming-labs/graft/fonts/Graft-Variable.woff2",
-  family: "Graft",
-  weight: "100 900",
-  display: "block",
-  variable: "--font-graft-sans",
-  fallback: ["ui-sans-serif", "system-ui", "sans-serif"],
-});
-
-const graftMono = localFont({
-  src: "@farming-labs/graft/fonts/GraftMono-Variable.woff2",
-  family: "Graft Mono",
-  weight: "100 900",
-  display: "block",
-  variable: "--font-graft-mono",
-  fallback: ["ui-monospace", "monospace"],
-});
-
 const geistPixel = localFont({
   src: "../../node_modules/geist/dist/fonts/geist-pixel/GeistPixel-Square.woff2",
   family: "Geist Pixel Square",
@@ -53,16 +37,11 @@ const geistPixel = localFont({
   preload: false,
 });
 
-export const fonts = defineLayoutFonts({
-  body: graftSans,
-  code: graftMono,
-});
-
 export default function RootLayout({ children }: LayoutProps) {
   return (
     <>
       <div
-        className={`${graftSans.variable} ${graftMono.variable} ${geistPixel.variable} ${graftSans.className} min-h-screen bg-black text-white`}
+        className={`${GraftSans.variable} ${GraftMono.variable} ${geistPixel.variable} ${GraftSans.className} min-h-screen bg-black text-white`}
       >
         {children}
       </div>
