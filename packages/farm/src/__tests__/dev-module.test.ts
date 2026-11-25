@@ -19,8 +19,14 @@ afterEach(async () => {
   }
 });
 
-async function project() {
+async function project(files: Record<string, string> = {}) {
   const root = await mkdtemp(path.join(os.tmpdir(), "farm-dev-runners-"));
+  // Write the initial graph before the watcher starts so setup cannot trigger a reload.
+  for (const [file, contents] of Object.entries(files)) {
+    const target = path.join(root, file);
+    await mkdir(path.dirname(target), { recursive: true });
+    await writeFile(target, contents);
+  }
   const server = await createServer({
     root,
     configFile: false,
@@ -44,23 +50,16 @@ async function project() {
 
 describe("development environment module loading", () => {
   it("uses independent SSR and RSC conditions and caches", async () => {
-    const { root, server } = await project();
-    const pkg = path.join(root, "node_modules/conditional");
-    await mkdir(pkg, { recursive: true });
-    await writeFile(
-      path.join(pkg, "package.json"),
-      JSON.stringify({
+    const { server } = await project({
+      "node_modules/conditional/package.json": JSON.stringify({
         name: "conditional",
         type: "module",
         exports: { "react-server": "./rsc.js", default: "./ssr.js" },
       }),
-    );
-    await writeFile(path.join(pkg, "rsc.js"), 'export default "rsc";');
-    await writeFile(path.join(pkg, "ssr.js"), 'export default "ssr";');
-    await writeFile(
-      path.join(root, "entry.js"),
-      'export { default } from "conditional"; export const state = {};',
-    );
+      "node_modules/conditional/ssr.js": 'export default "ssr";',
+      "node_modules/conditional/rsc.js": 'export default "rsc";',
+      "entry.js": 'export { default } from "conditional"; export const state = {};',
+    });
     const ssr = await loadFarmDevModule(server, "/entry.js");
     const rsc = await loadFarmDevModule(server, "/entry.js", "rsc");
     expect(ssr.default).toBe("ssr");
@@ -115,10 +114,11 @@ describe("development environment module loading", () => {
   });
 
   it("recovers nested failed imports without replacing healthy module state", async () => {
-    const { root, server } = await project();
-    await writeFile(path.join(root, "healthy.js"), "export const state = {};");
-    await writeFile(path.join(root, "entry.js"), 'export { default } from "./nested.js";');
-    await writeFile(path.join(root, "nested.js"), 'export { default } from "./missing.js";');
+    const { root, server } = await project({
+      "healthy.js": "export const state = {};",
+      "entry.js": 'export { default } from "./nested.js";',
+      "nested.js": 'export { default } from "./missing.js";',
+    });
     const healthy = await loadFarmDevModule(server, "/healthy.js");
     await expect(loadFarmDevModule(server, "/entry.js")).rejects.toThrow(/missing/);
     await writeFile(path.join(root, "missing.js"), 'export default "recovered";');
