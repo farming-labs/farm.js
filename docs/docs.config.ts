@@ -5,6 +5,7 @@ import { FARM_VERSION } from "@farm.js/core/version";
 import { existsSync, readFileSync } from "node:fs";
 import path from "node:path";
 import { agentSupportInvitation } from "./src/lib/agent-support";
+import { agentFeedbackPayloadSchema } from "./src/lib/agent-feedback-schema";
 import {
   siCloudflare,
   siConvex,
@@ -38,8 +39,11 @@ const brandSvg = (content: string, viewBox = "0 0 24 24") =>
 // The build reads this config from the docs app and embeds the fonts in the JSON copy that
 // renders social images. The production server also imports this module (for the adapter's
 // icons and components), where node_modules isn't on disk, so it goes without the fonts there
-// rather than failing every request.
+// rather than failing every request. The browser imports it as well, to restore the callbacks
+// the server's JSON copy of the config can't carry (agent feedback's `onFeedback`). It has no
+// filesystem and never renders social images, so it skips the lookup.
 const resolveGeistFontsDirectory = () => {
+  if (typeof process === "undefined") return undefined;
   const candidates = [
     path.join(process.cwd(), "node_modules", "geist", "dist", "fonts"),
     path.join(process.cwd(), "docs", "node_modules", "geist", "dist", "fonts"),
@@ -142,6 +146,8 @@ const icons = {
     '<rect x="3" y="3" width="18" height="18" rx="2"></rect><circle cx="9" cy="9" r="2"></circle><path d="m21 15-5-5L5 21"></path>',
   gauge: '<path d="M12 14 16 9"></path><path d="M4 20a9 9 0 1 1 16 0"></path>',
   key: '<circle cx="7.5" cy="14.5" r="3.5"></circle><path d="M10 12 21 3"></path><path d="m16 8 2 2"></path><path d="m19 5 2 2"></path>',
+  layers:
+    '<path d="M12.83 2.18a2 2 0 0 0-1.66 0L2.6 6.08a1 1 0 0 0 0 1.83l8.58 3.91a2 2 0 0 0 1.66 0l8.58-3.9a1 1 0 0 0 0-1.83Z"></path><path d="M2 12a1 1 0 0 0 .58.91l8.6 3.91a2 2 0 0 0 1.65 0l8.58-3.9A1 1 0 0 0 22 12"></path><path d="M2 17a1 1 0 0 0 .58.91l8.6 3.91a2 2 0 0 0 1.65 0l8.58-3.9A1 1 0 0 0 22 17"></path>',
   layout:
     '<rect x="3" y="3" width="18" height="18" rx="2"></rect><path d="M3 9h18"></path><path d="M9 21V9"></path>',
   languages:
@@ -199,6 +205,7 @@ const sidebar = [
           { label: "Solid", slug: "renderers/solid", icon: "brand-solid" },
           { label: "Vue", slug: "renderers/vue", icon: "brand-vue" },
           { label: "Svelte", slug: "renderers/svelte", icon: "brand-svelte" },
+          { label: "Custom", slug: "renderers/custom", icon: "code" },
         ],
       },
       { label: "Internationalization", slug: "internationalization", icon: "languages" },
@@ -452,6 +459,19 @@ const config = {
   favicon: "/favicon.ico",
   // The docs MCP describes Farm.js, so it reports the Farm.js version, not this site's.
   mcp: { version: FARM_VERSION },
+  // Agent feedback (`/api/docs?feedback=agent` and the MCP `submit_feedback` tool) is stored in
+  // the `feedback` mount. The page feedback prompt stays off. The store loads on first use, so
+  // storage code never reaches a module graph that only needs this config.
+  feedback: {
+    enabled: false,
+    agent: {
+      schema: agentFeedbackPayloadSchema,
+      onFeedback: async (data) => {
+        const { saveAgentFeedback } = await import("./src/lib/agent-feedback");
+        await saveAgentFeedback(data);
+      },
+    },
+  },
   // List the hand-written /openapi.json (public APIs only) in /.well-known/api-catalog.
   agent: { apiCatalog: { openapi: "/openapi.json" } },
   socialImage: {

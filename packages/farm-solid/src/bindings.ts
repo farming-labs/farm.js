@@ -1,16 +1,30 @@
 "use client";
 
-import { createSignal, onCleanup, type Accessor } from "solid-js";
+import {
+  createComponent,
+  createSignal,
+  mergeProps,
+  onCleanup,
+  splitProps,
+  type Accessor,
+  type JSX,
+} from "solid-js";
+import { Dynamic } from "solid-js/web";
 import {
   createRendererAction,
   createRendererI18n,
   createRendererQuery,
   createRendererRouter,
   createRendererTheme,
+  FARM_LINK_OPTION_KEYS,
+  resolveLinkAttributes,
+  submitRendererActionForm,
+  type DefaultRouteHref,
   type FarmActionOptions,
   type FarmActionSnapshot,
   type FarmActionSubmit,
   type FarmClientStore,
+  type FarmLinkOptions,
   type FarmRendererI18n,
   type FarmRendererQueryOptions,
   type FarmRendererQuerySnapshot,
@@ -78,7 +92,33 @@ export type FarmSolidAction<TInput, TResult, TError extends Error = Error> = Far
   readonly data: TResult | null;
   readonly error: TError | null;
   reset(): void;
+  /**
+   * A `<form>` that submits its fields through this action, as React's `useAction().Form`
+   * does. Attributes and an `onSubmit` handler pass through; calling `preventDefault()` in that
+   * handler keeps the form from submitting.
+   */
+  Form(props: JSX.FormHTMLAttributes<HTMLFormElement>): JSX.Element;
 };
+
+function createActionForm(action: Parameters<typeof submitRendererActionForm>[0]) {
+  return function Form(props: JSX.FormHTMLAttributes<HTMLFormElement>): JSX.Element {
+    const [local, form] = splitProps(props, ["onSubmit"]);
+    const onSubmit = (event: SubmitEvent & { currentTarget: HTMLFormElement }) => {
+      const handler = local.onSubmit as
+        | ((event: SubmitEvent) => void)
+        | [(data: unknown, event: SubmitEvent) => void, unknown]
+        | undefined;
+      if (typeof handler === "function") handler(event);
+      else if (Array.isArray(handler)) handler[0](handler[1], event);
+      void submitRendererActionForm(action, event);
+    };
+    // POST keeps field values out of the URL if the form submits before the page hydrates.
+    return createComponent(
+      Dynamic,
+      mergeProps({ method: "post" }, form, { component: "form", onSubmit }),
+    );
+  };
+}
 
 export function useAction<TInput, TResult, TError extends Error = Error>(
   target:
@@ -96,6 +136,7 @@ export function useAction<TInput, TResult, TError extends Error = Error>(
     data: { get: () => snapshot().data },
     error: { get: () => snapshot().error },
     reset: { value: () => action.reset() },
+    Form: { value: createActionForm(action) },
   }) as FarmSolidAction<TInput, TResult, TError>;
 }
 
@@ -194,4 +235,35 @@ function createReactiveTranslator(
     return i18n.t.has(key);
   };
   return translate;
+}
+
+/**
+ * Binds any `FarmClientStore`, such as a store from `createStore` in
+ * `@farm.js/core/renderer-client`, to an accessor that updates when the store changes. The
+ * subscription ends with the owning scope.
+ */
+export function useStore<T>(store: FarmClientStore<T>): Accessor<T> {
+  return bindFarmStore(store);
+}
+
+export type FarmSolidLinkProps<
+  TRoute extends string = DefaultRouteHref,
+  THref extends string = string,
+> = Omit<JSX.AnchorHTMLAttributes<HTMLAnchorElement>, "href"> & FarmLinkOptions<TRoute, THref>;
+
+/**
+ * An anchor that navigates and prefetches through the FARMJS router, with the same props as the
+ * React `Link`: a typed `href` or route pattern with `params`, `query`, `hash`, `prefetch`,
+ * `replace`, `scroll`, `viewTransition`, and `locale`. Other props go on the `<a>`.
+ */
+export function Link<TRoute extends string = DefaultRouteHref, THref extends string = string>(
+  props: FarmSolidLinkProps<TRoute, THref>,
+): JSX.Element {
+  const [options, anchor] = splitProps(props as FarmSolidLinkProps<string>, FARM_LINK_OPTION_KEYS);
+  return createComponent(
+    Dynamic,
+    mergeProps(anchor, () => resolveLinkAttributes(options as FarmLinkOptions<string>), {
+      component: "a",
+    }),
+  );
 }

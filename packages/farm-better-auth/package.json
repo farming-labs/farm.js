@@ -1,6 +1,6 @@
 {
   "name": "@farm.js/better-auth",
-  "version": "0.1.78",
+  "version": "0.1.87",
   "description": "Better Auth integration for Farm.js",
   "license": "MIT",
   "repository": {
@@ -31,7 +31,12 @@
     "test": "echo 'No tests in this package'"
   },
   "dependencies": {
-    "@farm.js/core": "workspace:*",
     "@farm.js/integration-utils": "workspace:*"
+  },
+  "devDependencies": {
+    "@farm.js/core": "workspace:*"
+  },
+  "peerDependencies": {
+    "@farm.js/core": ">=0.1.78 <0.3.0"
   }
 }

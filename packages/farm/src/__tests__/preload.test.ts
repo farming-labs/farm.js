@@ -3,6 +3,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   clearReportedFarmPreloadWarnings,
+  hasFarmHtmlPreloadToken,
   manageFarmDocumentPreloads,
   manageFarmHtmlPreloads,
   manageFarmLinkHeaderPreloads,
@@ -333,6 +334,20 @@ describe("smart preload manager", () => {
       });
     },
   );
+
+  it.each([
+    ['<link rel="preload" as="font">', true],
+    ["<link rel='preload' as=font>", true],
+    ["<link rel=preload as=font>", true],
+    ["<link rel=preload>", true],
+    ['<link rel = "alternate\u00a0PRELOAD" as="image">', true],
+    ['<link rel="stylesheet\npreload" as="font">', true],
+    ['<script data-farm-preload="chunks/a.js" data-farm-preload-router="b.js"></script>', false],
+    ['<link rel="modulepreload" href="/app.js">', false],
+    ['<img src="/preload/hero.webp" alt="preloaded">', false],
+  ])("finds a preload relation token in %j: %s", (html, expected) => {
+    expect(hasFarmHtmlPreloadToken(html)).toBe(expected);
+  });
 
   it("does not mistake preload-looking content for budgeted links", () => {
     const config = resolveFarmPerformanceConfig({

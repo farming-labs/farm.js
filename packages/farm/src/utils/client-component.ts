@@ -30,6 +30,12 @@ import {
   getPackageClientBoundaryCache,
   PackageInspectionTrace,
 } from "./package-client-boundary-cache";
+import { formatFarmHydrateExportError, readFarmHydrateExport } from "./hydrate-export";
+import {
+  compileFarmRendererSource,
+  mayCompileFarmRendererSource,
+  resolveFarmRendererModuleHydration,
+} from "./renderer-hydration";
 import { getFarmProjectSourceDir } from "./source-dir";
 import {
   farmSourceSnapshotPathKey,
@@ -39,7 +45,21 @@ import {
 
 export { traceFarmSourceReads, withFarmSourceSnapshot } from "./source-snapshot";
 
+/**
+ * A module's code as the plan reads it: a file in the renderer's own format is read as the module
+ * its `compile()` returns.
+ */
 function readIfExists(filePath: string): string | null {
+  const source = readSourceIfExists(filePath);
+  if (source === null || !mayCompileFarmRendererSource(filePath)) return source;
+  // By path and source, so an edited file compiles again.
+  return memoizeInFarmSourceSnapshot("compiled-source", `${filePath}\0${source}`, () =>
+    compileFarmRendererSource(source, filePath),
+  );
+}
+
+/** A file's source as written. */
+function readSourceIfExists(filePath: string): string | null {
   // Client references are written while a plan runs, so they are read from disk every time.
   if (filePath.replace(/\\/g, "/").includes(FARM_CLIENT_REFERENCE_DIRECTORY)) {
     return readSourceFile(filePath);
@@ -345,25 +365,9 @@ export function hasUseClientDirective(content: string | null): boolean {
   return false;
 }
 
+/** Whether the module exports `hydrate` as the literal `true`. */
 export function hasHydrateExport(content: string | null): boolean {
-  if (!content) {
-    return false;
-  }
-  if (/\bexport\s+const\s+hydrate\s*=\s*true\b/.test(content)) {
-    return true;
-  }
-  // Export lists may carry several specifiers and as-renames; the module
-  // opts in when any specifier's *exported* name is hydrate.
-  for (const match of content.matchAll(/\bexport\s*\{([^}]*)\}/g)) {
-    for (const specifier of match[1].split(",")) {
-      const parts = specifier.trim().split(/\s+as\s+/);
-      const exportedName = (parts[1] ?? parts[0])?.trim();
-      if (exportedName === "hydrate") {
-        return true;
-      }
-    }
-  }
-  return false;
+  return readFarmHydrateExport(content)?.value === true;
 }
 
 interface ModuleSourceToken {
@@ -698,9 +702,11 @@ function isAsyncLocalDeclaration(tokens: readonly ModuleSourceToken[], name: str
   return false;
 }
 
+/** `inspectIslandExport` is true for the route's own page or layout, at `sourcePath`. */
 function parseClientModuleMetadata(
   content: string | null,
   inspectIslandExport: boolean,
+  sourcePath?: string,
 ): ParsedClientModuleMetadata {
   if (!content) {
     return {
@@ -711,7 +717,35 @@ function parseClientModuleMetadata(
   }
 
   const isClientComponent = hasUseClientDirective(content);
-  const hasHydrate = hasHydrateExport(content);
+  const hydrate = readFarmHydrateExport(content);
+  // A route module's `hydrate` decides whether the route ships JavaScript. Any other module may
+  // export something else by that name.
+  if (inspectIslandExport && hydrate && hydrate.value === null) {
+    throw new Error(formatFarmHydrateExportError(hydrate, sourcePath));
+  }
+  // A renderer's defaults, its route rule for the file, and its own syntax (`hydration` and
+  // `routes()` on the descriptor) apply to the route's own page or layout.
+  const rendererHydration =
+    inspectIslandExport && sourcePath
+      ? // The renderer's own syntax is read from the file as written, before its `compile()`.
+        resolveFarmRendererModuleHydration(
+          (mayCompileFarmRendererSource(sourcePath) && readSourceIfExists(sourcePath)) || content,
+          sourcePath,
+          () => ({
+            hydrate: typeof hydrate?.value === "boolean" ? hydrate.value : undefined,
+            strategy: getIslandStrategyExport(content),
+            clientDirective: isClientComponent,
+          }),
+        )
+      : null;
+  if (rendererHydration) {
+    return {
+      isClientComponent,
+      hasHydrateExport: rendererHydration.hydrate,
+      islandStrategy: rendererHydration.strategy,
+    };
+  }
+  const hasHydrate = hydrate?.value === true;
   return {
     isClientComponent,
     hasHydrateExport: hasHydrate,
@@ -867,7 +901,11 @@ export function getClientModuleHydrationPlan(
     return plan;
   }
   const resolvedPath = resolveOwnerSourcePath(resolveModuleSourcePath(modulePath, root), root);
-  const owner = parseClientModuleMetadata(readIfExists(resolvedPath ?? ""), true);
+  const owner = parseClientModuleMetadata(
+    readIfExists(resolvedPath ?? ""),
+    true,
+    resolvedPath ?? undefined,
+  );
   // An owner that is a client component, or opts into hydrating whole, keeps its root.
   if (!resolvedPath || owner.isClientComponent || owner.hasHydrateExport) return plan;
   const layout = collectIsolatedClientBoundaries(resolvedPath, root, {
@@ -944,7 +982,7 @@ function planClientModuleHydration(
   // analysis is needed, including async-owner islands with the experiment off.
   const resolvedPath = resolveOwnerSourcePath(resolveModuleSourcePath(modulePath, root), root);
   const content = readIfExists(resolvedPath ?? "");
-  const parsed = parseClientModuleMetadata(content, true);
+  const parsed = parseClientModuleMetadata(content, true, resolvedPath ?? undefined);
   if (!resolvedPath) return emptyPlan("the owner source could not be resolved");
   if (parsed.isClientComponent) {
     return emptyPlan("the owner is already a client component");
@@ -1969,7 +2007,7 @@ function inspectClientModuleMetadata(
     const target = resolveDefaultReexport(resolvedPath, content, root);
     if (target) return inspectClientModuleMetadata(target, root, visited, true);
   }
-  const parsed = parseClientModuleMetadata(content, inspectIslandExport);
+  const parsed = parseClientModuleMetadata(content, inspectIslandExport, resolvedPath);
   if (parsed.isClientComponent) {
     return {
       isClientComponent: true,
@@ -2903,7 +2941,8 @@ export function getFarmClientReachableModules(directory: string, root: string): 
  * `collectFarmClientPackageImports`, except packages whose `react-server` build re-exports a
  * `"use client"` module. The RSC plugin loads that module straight from the package, so those
  * packages stay out of the pre-bundle (their own dependencies stay in, through `pkg > dep`) and
- * the browser gets one copy of each.
+ * the browser gets one copy of each. A package that defines fonts stays out too, so Farm's font
+ * compiler transforms it.
  */
 export function resolveFarmClientOptimizeDeps(
   directory: string,
@@ -2914,6 +2953,11 @@ export function resolveFarmClientOptimizeDeps(
   const exclude = new Set<string>();
   const imports = scanFarmPackageImports(directory, root);
   for (const specifier of imports.client) {
+    const fonts = findFarmServerBundledPackage(importer, specifier);
+    if (fonts?.fonts) {
+      exclude.add(fonts.name);
+      continue;
+    }
     const manifest = findFarmPackageManifest(importer, specifier);
     if (
       manifest &&

@@ -1,0 +1,13 @@
+<script>
+  // `.client` in the file name hydrates the page: farm-leaf's route rule says so.
+  import { useState } from "leaf";
+
+  const [checks, setChecks] = useState(0);
+</script>
+
+<section>
+  <h1 id="watering">Watering</h1>
+  <button type="button" id="watering-counter" @click="setChecks((n) => n + 1)">
+    Checked {{ checks }} times
+  </button>
+</section>

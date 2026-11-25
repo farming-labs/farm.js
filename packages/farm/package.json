@@ -1,6 +1,6 @@
 {
   "name": "@farm.js/core",
-  "version": "0.1.78",
+  "version": "0.1.87",
   "description": "The core of Farm.js, the framework for the web and agents",
   "keywords": [
     "@farm.js/core",
@@ -719,6 +719,16 @@
       "import": "./dist/internal/client-runtime.mjs",
       "require": "./dist/internal/client-runtime.cjs"
     },
+    "./internal/spa-router": {
+      "types": "./dist/internal/spa-router.d.ts",
+      "import": "./dist/internal/spa-router.mjs",
+      "require": "./dist/internal/spa-router.cjs"
+    },
+    "./internal/navigation-neutral": {
+      "types": "./dist/internal/navigation-neutral.d.ts",
+      "import": "./dist/internal/navigation-neutral.mjs",
+      "require": "./dist/internal/navigation-neutral.cjs"
+    },
     "./internal/client-error-overlay": {
       "types": "./dist/internal/client-error-overlay.d.ts",
       "import": "./dist/internal/client-error-overlay.mjs",
@@ -749,6 +759,16 @@
       "import": "./dist/internal/islands-runtime.mjs",
       "require": "./dist/internal/islands-runtime.cjs"
     },
+    "./internal/islands-action-client": {
+      "types": "./dist/internal/islands-action-client.d.ts",
+      "import": "./dist/internal/islands-action-client.mjs",
+      "require": "./dist/internal/islands-action-client.cjs"
+    },
+    "./internal/islands-server-tree": {
+      "types": "./dist/internal/islands-server-tree.d.ts",
+      "import": "./dist/internal/islands-server-tree.mjs",
+      "require": "./dist/internal/islands-server-tree.cjs"
+    },
     "./internal/islands-boot": {
       "types": "./dist/internal/islands-boot.d.ts",
       "import": "./dist/internal/islands-boot.mjs",
@@ -758,6 +778,11 @@
       "types": "./dist/internal/islands-server.d.ts",
       "import": "./dist/internal/islands-server.mjs",
       "require": "./dist/internal/islands-server.cjs"
+    },
+    "./internal/renderer-islands": {
+      "types": "./dist/internal/renderer-islands.d.ts",
+      "import": "./dist/internal/renderer-islands.mjs",
+      "require": "./dist/internal/renderer-islands.cjs"
     },
     "./internal/islx-client": {
       "types": "./dist/internal/islx-client.d.ts",
@@ -778,6 +803,16 @@
       "types": "./dist/internal/islx-server.d.ts",
       "import": "./dist/internal/islx-server.mjs",
       "require": "./dist/internal/islx-server.cjs"
+    },
+    "./internal/islx-actions-client": {
+      "types": "./dist/internal/islx-actions-client.d.ts",
+      "import": "./dist/internal/islx-actions-client.mjs",
+      "require": "./dist/internal/islx-actions-client.cjs"
+    },
+    "./internal/islx-actions-server": {
+      "types": "./dist/internal/islx-actions-server.d.ts",
+      "import": "./dist/internal/islx-actions-server.mjs",
+      "require": "./dist/internal/islx-actions-server.cjs"
     },
     "./internal/islx-react": {
       "types": "./dist/internal/islx-react.d.ts",
@@ -846,7 +881,7 @@
     "clean": "rm -rf dist"
   },
   "dependencies": {
-    "@farm.js/islx": "0.0.25",
+    "@farm.js/islx": "0.0.30",
     "@farming-labs/orm": "0.0.66",
     "@farming-labs/orm-runtime": "0.0.66",
     "@farming-labs/orm-sql": "0.0.66",

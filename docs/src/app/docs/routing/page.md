@@ -306,6 +306,63 @@ fragments keep the current page mounted without loading route data. Native
 anchor scrolling and `hashchange` listeners still work. A different pathname,
 query string, or intercepted-route context still performs route navigation.
 
+#### Link in Solid, Vue, and Svelte
+
+Preact apps use the `Link` above through `preact/compat`. Solid, Vue, and Svelte each have their
+own `Link` with the same props: `href` or a route pattern with `params`, `query`, `hash`,
+`prefetch`, `prefetchDelay`, `replace`, `scroll`, `viewTransition`, `locale`, and
+`trailingSlash`. Other attributes and event handlers go on the `<a>`.
+
+```tsx
+// Solid
+import { Link } from "@farm.js/solid/bindings";
+
+<Link href="/products/[id]" params={{ id: product.id }} prefetch="intent">
+  {product.name}
+</Link>;
+```
+
+```vue
+<!-- Vue -->
+<script setup lang="ts">
+import { Link } from "@farm.js/vue/bindings";
+</script>
+
+<template>
+  <Link href="/products/[id]" :params="{ id: product.id }" prefetch="intent">
+    {{ product.name }}
+  </Link>
+</template>
+```
+
+```svelte
+<!-- Svelte -->
+<script lang="ts">
+  import Link from "@farm.js/svelte/link";
+</script>
+
+<Link href="/products/[id]" params={{ id: product.id }} prefetch="intent">{product.name}</Link>
+```
+
+All three render the same anchor as the React `Link`, and the router does the rest: a click
+navigates in place, and the anchor prefetches as `prefetch` says, in development and production.
+The Solid `Link` checks `params` against the route pattern, as the React one does. Vue and Svelte
+components are not generic over their props, so there `href` is typed and `params` is not checked
+against it. A `javascript:` href renders without an `href`, so a click on it does nothing.
+
+`@farm.js/svelte/link` is a `.svelte` file that your app's Svelte plugin compiles, so the package
+carries a `svelte` export condition. A custom renderer gets the same anchor from
+`resolveLinkAttributes`:
+
+```ts
+import { resolveLinkAttributes } from "@farm.js/core/renderer-client";
+
+resolveLinkAttributes({ href: "/products/[id]", params: { id: 42 }, replace: true });
+// { href: "/products/42", "data-farm-link": "", "data-replace": "", ... }
+```
+
+Spread the result onto an `<a>`. Values that are `undefined` mean the attribute is absent.
+
 ## Lightweight router helpers
 
 Use the lightweight router when client components, layouts, breadcrumbs, tabs, or tests need to match app routes without adding a separate routing library.
@@ -1447,9 +1504,6 @@ serves a file added while it runs.
 
 ### Generated metadata images
 
-Generated JSX metadata images currently use the React image renderer. Every renderer can use static
-`opengraph-image.png`, `twitter-image.png`, and explicit metadata image URLs.
-
 Place `opengraph-image.tsx` or `twitter-image.tsx` next to a route segment when the image needs data or route params. Return ordinary stateless JSX: Farm owns the image endpoint and PNG renderer, so the component does not import `ImageResponse` or declare an API URL. The renderer is `@vercel/og`, which the app installs with `pnpm add @vercel/og`; `farm build` fails with that command when a generated image exists and the package is missing. Farm also adds the nearest matching image to the page head when `openGraph.images` or `twitter.images` is not already set.
 
 **src/app/products/[id]/opengraph-image.tsx**
@@ -1499,7 +1553,42 @@ Satori-compatible TTF, OTF, and WOFF files are supported; WOFF2 is not. Set `fon
 
 Generated images revalidate on every request by default. Export `revalidate = 300` to let a CDN cache the route for five minutes, or `revalidate = false` only when the output is permanently immutable. Farm emits an `ETag`, supports conditional requests and `HEAD`, and performs JSX-to-image rendering internally.
 
-For advanced renderers, the default export may still return a `Response`, string, or bytes. To preserve the earlier React-to-SVG behavior, export `contentType = "image/svg+xml"` and return an SVG React element. A returned `Response` keeps its own status, headers, and body.
+For advanced renderers, the default export may still return a `Response`, string, or bytes. To preserve the earlier React-to-SVG behavior, export `contentType = "image/svg+xml"` and return an SVG element. A returned `Response` keeps its own status, headers, and body.
+
+#### With Preact, Solid, Vue, and Svelte
+
+Write the image with the app's renderer. Preact and Solid use JSX in `opengraph-image.tsx`, as
+above. Vue and Svelte can also use a component in their own file type:
+
+**src/app/products/[id]/opengraph-image.vue**
+
+```vue
+<script lang="ts">
+export const size = { width: 1200, height: 630 };
+export const alt = "Product preview";
+</script>
+
+<script setup lang="ts">
+const props = defineProps<{ params: { id: string } }>();
+</script>
+
+<template>
+  <div class="flex h-full w-full flex-col justify-between bg-[#09090b] p-20 text-white">
+    <span class="text-3xl font-medium text-emerald-400">Acme</span>
+    <span class="text-8xl font-bold tracking-tight">Product {{ props.params.id }}</span>
+  </div>
+</template>
+```
+
+An `opengraph-image.svelte` works the same way, with `params`, `searchParams`, and `path` from
+`$props()`. A component file gets those three as props. A default-exported function is called
+with them and can be async, so load data there and return the renderer's elements: Vue's `h()`, for
+example, in `opengraph-image.ts`.
+
+Farm renders the image with the app's renderer, as it renders a page, and draws that markup. Inline
+`style` attributes become the image's styles, and `class` takes the same utilities as `className`.
+The supported CSS is the same as above, and the image renders once on the server, so there are no
+hooks, effects, or client state.
 
 Keep only one implementation for each image kind in a segment. For example, defining both `opengraph-image.png` and `opengraph-image.tsx` produces a build error. For broad social-platform compatibility, use 1200 by 630; generated JSX routes emit PNG automatically.
 

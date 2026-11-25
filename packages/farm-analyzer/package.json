@@ -1,6 +1,6 @@
 {
   "name": "@farm.js/analyzer",
-  "version": "0.1.0-beta.53",
+  "version": "0.1.0-beta.54",
   "description": "Page-aware client and server build analysis for Farm.js",
   "keywords": [
     "bundle-analyzer",
@@ -37,15 +37,18 @@
     "test": "vitest run"
   },
   "dependencies": {
-    "@farm.js/core": "workspace:*",
     "es-module-lexer": "2.0.0",
     "parse5": "7.3.0"
   },
   "devDependencies": {
+    "@farm.js/core": "workspace:*",
     "@types/node": "^22.20.5",
     "typescript": "^5.3.3",
     "vite": "8.3.4",
     "vitest": "5.0.5"
+  },
+  "peerDependencies": {
+    "@farm.js/core": ">=0.1.78 <0.3.0"
   },
   "engines": {
     "node": ">=22.13.0"

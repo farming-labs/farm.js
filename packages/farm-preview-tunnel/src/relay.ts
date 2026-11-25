@@ -11,7 +11,12 @@ import {
   type TunnelRequestMessage,
   type TunnelResponseMessage,
 } from "./protocol.js";
-import { getHopByHopHeaderNames, getRecordHeader, PREVIEW_REQUEST_HEADER } from "./headers.js";
+import {
+  getHopByHopHeaderNames,
+  getRecordHeader,
+  isGatewayPlatformHeader,
+  PREVIEW_REQUEST_HEADER,
+} from "./headers.js";
 import { closeWebSocket } from "./websocket.js";
 
 const MAX_TIMER_DELAY_MS = 2_147_483_647;
@@ -402,8 +407,12 @@ export function createPersistentPreviewRelay(options: PersistentPreviewRelayOpti
         return sendText(response, 412, "The selected preview connection has changed.");
       }
 
+      // A denied session's socket is already closed and its name released, so its address
+      // answers like any preview that isn't running.
       if (activeLocalSession && !(await checkAccess(activeLocalSession))) {
-        return sendText(response, 403, "This preview is no longer authorized.");
+        return handleFallback(request, response, options.fallbackHandler, () =>
+          sendText(response, 404, `No active persistent preview is running for "${route.name}".`),
+        );
       }
 
       if (options.observer?.request) {
@@ -1153,6 +1162,7 @@ function normalizeIncomingHeaders(
       hopByHopHeaders.has(lowerName) ||
       lowerName === "forwarded" ||
       lowerName.startsWith("x-forwarded-") ||
+      isGatewayPlatformHeader(lowerName) ||
       lowerName === "x-farm-preview-connection" ||
       lowerName === PREVIEW_REQUEST_HEADER
     ) {

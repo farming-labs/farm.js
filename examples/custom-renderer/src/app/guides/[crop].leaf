@@ -1,0 +1,17 @@
+<script module>
+  export function generateMetadata({ params }) {
+    return { title: `Growing ${params.crop}` };
+  }
+</script>
+
+<script>
+  // guides/[crop].leaf is /guides/[crop], a dynamic route like a [crop] folder.
+  import { notFound } from "@farm.js/core/navigation";
+  import { CROPS } from "../../server/crops";
+
+  if (!CROPS.includes(props.params.crop)) notFound();
+</script>
+
+<section>
+  <h1 id="guide-crop">Growing {{ props.params.crop }}</h1>
+</section>

@@ -2,7 +2,7 @@
    the homepage HTML does not carry it. */
 .benchmark-chart text {
   fill: currentColor;
-  font-family: var(--font-geist-mono, monospace);
+  font-family: var(--font-graft-mono, monospace);
 }
 
 /* Each series' points set --benchmark-ring-opacity; Farm's are a step heavier. */

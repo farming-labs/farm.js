@@ -357,7 +357,7 @@ function FooterLinksGroup({ title, links }: { title: string; links: readonly Foo
                 </span>
                 <DirectionIcon
                   aria-hidden
-                  className="size-3 shrink-0 text-white/0 transition-[color,transform] duration-150 group-hover:translate-x-0.5 group-hover:text-white/56"
+                  className="size-3.5 shrink-0 text-white/0 transition-[color,transform] duration-150 group-hover:translate-x-0.5 group-hover:text-white/56"
                   strokeWidth={1.5}
                 />
               </a>
@@ -378,7 +378,7 @@ export function SiteFooter() {
             <BrandLockup />
           </div>
           <div className="px-4 py-4 md:min-h-[154px]">
-            <p className="max-w-[15rem] font-mono text-[9px] font-normal uppercase leading-5 !tracking-[0.04em] text-white/42">
+            <p className="max-w-[15rem] font-mono text-[10px] font-normal uppercase leading-5 !tracking-[0.04em] text-white/42">
               The framework for the web and agents
             </p>
           </div>

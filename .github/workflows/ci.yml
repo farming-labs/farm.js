@@ -370,6 +370,8 @@ jobs:
           pnpm --filter @farm.js/cli build
         env:
           NODE_OPTIONS: --max-old-space-size=12288
+      - name: Check dev server readiness detection
+        run: node --test benchmarks/app-scale/dev-port.test.mjs
       - name: Time dev startup and builds
         run: node benchmarks/app-scale/run.mjs --rounds 5 > "${{ runner.temp }}/app-scale.json"
       - name: Retain raw samples for review

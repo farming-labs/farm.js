@@ -28,7 +28,8 @@ export type FigureKind =
   | "agent-authorize"
   | "ast-native"
   | "mobile-arch"
-  | "agent-scan";
+  | "agent-scan"
+  | "renderer-seams";
 export type IconKey =
   | "stripe"
   | "cloudflare"
@@ -2611,6 +2612,102 @@ const mobileArch: FigureSpec = {
   },
 };
 
+// What a renderer gives Farm: three modules, each read for its named exports. Core sends one route
+// tree through each in turn: the Vite module compiles it, the server module renders it to HTML, and
+// the client module hydrates that HTML in the browser.
+const RS = { fork: 0.6, build: 1.3, server: 2, html: 2.7, client: 3.4, dom: 4.1 };
+
+const rendererSeams: FigureSpec = {
+  duration: 5.2,
+  label:
+    "A renderer is three modules: Farm compiles routes with the renderer's Vite module, renders them to HTML with its server module, and hydrates that HTML in the browser with its client module",
+  panels: [
+    { id: "farm", x: 16, y: 140, w: 200, h: 120, title: "@farm.js/core" },
+    { id: "vite", x: 262, y: 16, w: 228, h: 112, title: "leaf/vite" },
+    { id: "server", x: 262, y: 144, w: 228, h: 112, title: "leaf/server" },
+    { id: "client", x: 262, y: 272, w: 228, h: 112, title: "leaf/client" },
+    { id: "bundle", x: 536, y: 16, w: 208, h: 112, title: "Build" },
+    { id: "html", x: 536, y: 144, w: 208, h: 112, title: "Response" },
+    { id: "dom", x: 536, y: 272, w: 208, h: 112, title: "Browser" },
+  ],
+  wires: {
+    fv: [
+      [216, 200],
+      [239, 200],
+      [239, 72],
+      [262, 72],
+    ],
+    fs: [
+      [216, 200],
+      [262, 200],
+    ],
+    fc: [
+      [216, 200],
+      [239, 200],
+      [239, 328],
+      [262, 328],
+    ],
+    vb: [
+      [490, 72],
+      [536, 72],
+    ],
+    sh: [
+      [490, 200],
+      [536, 200],
+    ],
+    cd: [
+      [490, 328],
+      [536, 328],
+    ],
+  },
+  frame: (t) => {
+    const hot = (a: number, b: number): PanelState | undefined =>
+      t >= a && t < b ? "hot" : undefined;
+    return {
+      slots: {
+        farm:
+          maSub("file routes &rarr; one tree", t, 0) +
+          maSub("build · SSR · routing", t, 0.15, "#7a7a7a"),
+        vite:
+          maSub("createFarmRendererPlugin", t, RS.fork) +
+          maSub("JSX &rarr; leaf runtime", t, RS.fork + 0.15, "#7a7a7a"),
+        server:
+          maSub("createElement · Fragment", t, RS.server) +
+          maSub("renderToString", t, RS.server + 0.15, "#7a7a7a"),
+        client:
+          maSub("createRoot · hydrateRoot", t, RS.client) +
+          maSub("no default export", t, RS.client + 0.15, "#7a7a7a"),
+        bundle:
+          maSub("client + SSR graphs", t, RS.build) +
+          maSub("compiled against leaf", t, RS.build + 0.15, "#8fb8a0"),
+        html:
+          maSub("one HTML response", t, RS.html) +
+          maSub("rendered by leaf", t, RS.html + 0.15, "#8fb8a0"),
+        dom:
+          maSub("hydrated in place", t, RS.dom) +
+          maSub("no React installed", t, RS.dom + 0.15, "#8fb8a0"),
+      },
+      wires: {
+        fv: wire(t, RS.fork - 0.3, [[RS.fork]]),
+        fs: wire(t, RS.fork - 0.3, [[RS.server - PULSE]]),
+        fc: wire(t, RS.fork - 0.3, [[RS.client - PULSE]]),
+        vb: wire(t, RS.build - 0.3, [[RS.build]]),
+        sh: wire(t, RS.html - 0.3, [[RS.html]]),
+        cd: wire(t, RS.dom - 0.3, [[RS.dom]]),
+      },
+      states: {
+        farm: hot(0, RS.fork + PULSE),
+        vite: hot(RS.fork + PULSE, RS.build + PULSE),
+        bundle: hot(RS.build + PULSE, RS.build + PULSE + 0.45),
+        server: hot(RS.server, RS.html + PULSE),
+        html: hot(RS.html + PULSE, RS.html + PULSE + 0.45),
+        client: hot(RS.client, RS.dom + PULSE),
+        dom: hot(RS.dom + PULSE, RS.dom + PULSE + 0.45),
+      },
+    };
+  },
+};
+
 export const FIGURES: Record<FigureKind, FigureSpec> = {
   integration,
   agents,
@@ -2636,6 +2733,7 @@ export const FIGURES: Record<FigureKind, FigureSpec> = {
   "ast-native": astNative,
   "mobile-arch": mobileArch,
   "agent-scan": agentScan,
+  "renderer-seams": rendererSeams,
 };
 
 // The two callers stack, so a phone reads the refused run above the one that completes.

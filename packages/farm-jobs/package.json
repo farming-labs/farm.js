@@ -1,6 +1,6 @@
 {
   "name": "@farm.js/jobs",
-  "version": "0.1.78",
+  "version": "0.1.87",
   "description": "Jobs integration primitives for Farm.js",
   "license": "MIT",
   "repository": {
@@ -35,7 +35,12 @@
     "test": "echo 'No tests in this package'"
   },
   "dependencies": {
-    "@farm.js/core": "workspace:*",
     "@farm.js/integration-utils": "workspace:*"
+  },
+  "devDependencies": {
+    "@farm.js/core": "workspace:*"
+  },
+  "peerDependencies": {
+    "@farm.js/core": ">=0.1.78 <0.3.0"
   }
 }

@@ -1,0 +1,12 @@
+<script module>
+  import Planter from "../../../components/planter.leaf";
+
+  export const metadata = { title: "Islands in .leaf files" };
+</script>
+
+<!-- A server page: it ships HTML, and each Planter in it hydrates as its own island. -->
+<section>
+  <h1 id="leaf-islands">Islands in .leaf files</h1>
+  <Planter crop="wheat" />
+  <Planter crop="rye" client:idle />
+</section>

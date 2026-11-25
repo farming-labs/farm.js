@@ -1,6 +1,6 @@
 {
   "name": "@farm.js/wasm",
-  "version": "0.1.0-beta.52",
+  "version": "0.1.0-beta.53",
   "description": "WebAssembly imports and browser workers for Farm.js applications",
   "keywords": [
     "farm.js",
@@ -38,16 +38,19 @@
     "test": "vitest run"
   },
   "dependencies": {
-    "@farm.js/core": "workspace:*",
     "esbuild": "^0.28.0",
     "vite-plugin-wasm": "^3.6.0"
   },
   "devDependencies": {
+    "@farm.js/core": "workspace:*",
     "@types/node": "^22.20.5",
     "typescript": "^5.3.3",
     "vite": "8.3.4",
     "vitest": "5.0.5",
     "wabt": "^1.0.39"
+  },
+  "peerDependencies": {
+    "@farm.js/core": ">=0.1.78 <0.3.0"
   },
   "engines": {
     "node": ">=22.13.0"

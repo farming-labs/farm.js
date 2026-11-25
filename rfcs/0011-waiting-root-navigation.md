@@ -1,7 +1,8 @@
 # A first navigation out of a root that has not hydrated
 
-Status: Draft (islands mode, web). Implementation: #3071, open; values before islx runs: #3073,
-open.
+Status: Implemented (islands mode, web).
+Navigation out of a waiting root shipped in 0.1.80 ([#3071](https://github.com/farming-labs/farm.js/pull/3071)).
+Reuse of values already in the page shipped in 0.1.81 ([#3073](https://github.com/farming-labs/farm.js/pull/3073)).
 
 ## Problem
 
@@ -96,9 +97,9 @@ No configuration or public API changes.
 ## Costs
 
 - **Data per navigation.** Until the root hydrates, a navigation carries the page's HTML as well as
-  its tree. Before islx runs, the browser holds no value store, so the router names no values
-  (`F-Values`) and the server sends them again. On the bench's shop section that is 6.0 KB br per
-  navigation instead of 2.0 KB. #3073 names the value scripts the page holds until islx runs and
+  its tree. In 0.1.80, the router named no values (`F-Values`) before islx ran, so the server
+  sent them again. On the benchmark’s shop section this took 6.0 KB br per navigation, up from
+  2.0 KB. #3073 names the value scripts the page holds until islx runs and
   keeps them through the swap, which brings it to 4.4 KB, three quarters of it the page's HTML. The JavaScript a navigation loads falls by more, from 9.7 to 2.7 KB
   br on average over ten navigations, since React DOM, islx and the root's modules no longer load
   on the first hover.
@@ -121,11 +122,11 @@ with this change, medians in ms (HTTP/2, 4x CPU; Apple M1, macOS 26.2, Node 24.2
 | shop    | 223 / 788 / 350                 | 111 / 203 / 126    | 247 / 241 / 213   | 87 / 60 / 47        |
 | guide   | 306 / 837 / 397                 | 158 / 221 / 170    | 273 / 251 / 235   | 134 / 97 / 77       |
 
-- At 1.6 Mbit/s a first tap on shop and guide now costs what docs and blog do: 438 and 440 ms
-  less, and 127 and 91 ms behind `rsc`, whose first load already brought its 71 KB.
+- At 1.6 Mbit/s, a first tap took 438 ms less on shop and 440 ms less on guide. Those taps
+  were still 127 ms and 91 ms behind `rsc`, whose first load already brought its 71 KB.
 - An instant tap on a fast network is 77 and 51 ms faster on shop and guide, 15 and 12 ms behind
   `rsc`.
-- With 150 ms of latency an 80 ms tap is faster than `rsc` in every section.
+- With 150 ms of latency and no bandwidth cap, the 80 ms tap was faster than `rsc` in every section.
 - docs and blog are unchanged within noise: their path was already this one.
 
 This RFC's draft estimated 320 to 400 ms at 1.6 Mbit/s, which held, and an instant tap near docs'
@@ -148,10 +149,8 @@ This RFC's draft estimated 320 to 400 ms at 1.6 Mbit/s, which held, and an insta
   layout the page is most of the document (on shop, 154 bytes of the root are layout), so leaving
   layouts out saves little.
 
-## Open questions
+## Follow-up in #3073
 
-- Values before islx runs, answered by #3073. Until islx loads, the page's `f/value` scripts are
-  the only copy of its values, so a navigation named none and the server sent them again. The
-  router and the boot now name the scripts the document holds, and the swap keeps the ones the
-  next page leaves out. That applies to every islands navigation before islx runs, not only under
-  a waiting root.
+Until islx loads, the page's `f/value` scripts are the only copy of its values. The router and
+the boot name the scripts the document holds, and the swap keeps the ones the next page leaves
+out. This applies to every islands navigation before islx runs.

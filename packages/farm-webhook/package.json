@@ -1,7 +1,7 @@
 {
   "name": "@farm.js/webhook",
-  "version": "0.1.0",
-  "description": "Receive signed Farm Infra webhook deliveries and send events to a receiver",
+  "version": "0.1.2",
+  "description": "Receive signed Farm Infra webhook deliveries and send events to a Farm Infra webhook",
   "keywords": [
     "farm.js",
     "webhooks"
@@ -40,14 +40,17 @@
     "type-check": "tsc --noEmit"
   },
   "dependencies": {
-    "@farm.js/core": "workspace:*",
     "@farm.js/webhooks": "workspace:*"
   },
   "devDependencies": {
+    "@farm.js/core": "workspace:*",
     "@types/node": "^22.20.5",
     "typescript": "^5.3.3",
     "vite": "8.3.4",
     "vitest": "5.0.5"
+  },
+  "peerDependencies": {
+    "@farm.js/core": ">=0.1.78 <0.3.0"
   },
   "engines": {
     "node": ">=22.13.0"

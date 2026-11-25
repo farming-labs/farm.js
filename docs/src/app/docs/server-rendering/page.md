@@ -222,6 +222,10 @@ trigger.
 | `visible`     | When the route boundary approaches the viewport.               |
 | `idle`        | During browser idle time, with a timeout fallback.             |
 
+Until a page hydrates, Farm holds clicks on its buttons and its form submissions, and replays them
+once it has, in development and in production builds. An early submit runs the page's own handler
+instead of going to the server as a native form post.
+
 With [isolated client hydration](/docs/configuration#isolated-client-hydration), each eligible
 client module keeps its own strategy, including after SPA navigation. Sibling boundaries can mix
 all four strategies: one boundary's trigger never hydrates another, and an interaction click is
@@ -446,18 +450,21 @@ qualify; anything else hydrates at load, and an explicit `island` export always 
 provider around the pages) waits the same way when every client component inside it, on the page
 too, passes; it hydrates when the pointer reaches one of its links, so the click's navigation
 updates it. A page whose client components all wait, or
-that has none, starts with a 2.2 KB script, and loads the runtime when one is clicked, pressed or
-focused, when one that waits for `"visible"` or `"idle"` is due, when the pointer reaches a link,
-or when a form gets focus. A click made before then is held and replayed once the component has
+that has none, starts with a 2.4 KB script, fetches the runtime once the page is idle without
+running it, and runs it when one is clicked, pressed or focused, when one that waits for
+`"visible"` or `"idle"` is due, when the pointer reaches a link, or when a form gets focus. A click
+made before then is held and replayed once the component has
 hydrated, and a `<form>` written in a server component posts natively until the runtime runs. An
 app with client plugins, a `src/client.ts`, or `docs` loads the runtime on every page. On
 `benchmarks/server-components-payload`, with no change to the app, docs, blog, guide and shop
-pages load 2.2 KB of JavaScript (`"rsc"`: 71.0 KB). See
+pages run 2.4 KB of JavaScript and fetch 27.6 KB in all (`"rsc"`: 71.0 KB). See
 [how the two modes compare](/docs/server-rendering/islands#how-it-compares-with-react-server-components).
 
 The app's `vite` options and plugins apply as in other Farm apps, and so does built-in Tailwind.
 The build goes to the deploy target's
-output directory, so `farm start` and platform deploys work unchanged.
+output directory, so `farm start` and platform deploys work unchanged. On the `node` target the
+build writes gzip copies of its static files, as other Farm apps' builds do, and the server sends
+them to browsers that accept gzip.
 
 The RSC pipeline (`serverComponents: { mode: "rsc" }`) does not run every Farm feature
 yet:

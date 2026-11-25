@@ -1,6 +1,6 @@
 {
   "name": "@farm.js/integrations",
-  "version": "0.1.78",
+  "version": "0.1.87",
   "description": "Compatibility package that re-exports official Farm.js integrations",
   "license": "MIT",
   "repository": {
@@ -137,7 +137,6 @@
     "@farm.js/autumn": "workspace:*",
     "@farm.js/better-auth": "workspace:*",
     "@farm.js/clerk": "workspace:*",
-    "@farm.js/core": "workspace:*",
     "@farm.js/email": "workspace:*",
     "@farm.js/integration-utils": "workspace:*",
     "@farm.js/jobs": "workspace:*",
@@ -148,5 +147,11 @@
     "@farm.js/supabase": "workspace:*",
     "@farm.js/unkey": "workspace:*",
     "@farm.js/workos": "workspace:*"
+  },
+  "devDependencies": {
+    "@farm.js/core": "workspace:*"
+  },
+  "peerDependencies": {
+    "@farm.js/core": ">=0.1.78 <0.3.0"
   }
 }

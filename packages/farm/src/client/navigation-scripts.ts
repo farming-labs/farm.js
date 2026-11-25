@@ -1,7 +1,8 @@
 /**
  * Scripts a client navigation adds to the page (React's reveal scripts in a streamed navigation, a
- * swapped document's scripts), as source. The production client entry (nitro/universal-build.ts)
- * and the `farm dev` client entry (vite.ts) both include it.
+ * swapped document's scripts) and the nodes it moves in from a parsed response, as source. The
+ * production client entry (nitro/universal-build.ts) and the `farm dev` client entry (vite.ts)
+ * both include it.
  *
  * With a nonce Content Security Policy (`security.csp.nonce`), the page trusts only the nonce of the
  * response that loaded the document, and each navigation response carries a nonce of its own. The
@@ -28,6 +29,15 @@ function createFarmNavigationScript(script) {
   }
   freshScript.textContent = script.textContent || "";
   return freshScript;
+}
+// Readies nodes parsed outside the page (DOMParser, a <template>) for the page they move into.
+// Those parse as a page without scripting, so a <noscript>'s content comes out as elements, whose
+// images and frames would load once in the page. They become the text the page's own parser makes
+// of that markup.
+function adoptFarmParsedNodes(root) {
+  for (const noscript of Array.from(root.querySelectorAll("noscript"))) {
+    noscript.textContent = noscript.innerHTML;
+  }
 }
 // React streams Suspense content after its fallback, in a hidden segment that a reveal script
 // ($RC for a boundary, $RS for a segment placeholder) moves into place. This makes the same moves

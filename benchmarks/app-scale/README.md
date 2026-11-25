@@ -25,8 +25,8 @@ render its client component. Every build must exit 0 and produce a Node server.
 
 Each round measures, in this order:
 
-- **Cold dev:** `.farm` and `node_modules/.vite` removed. Process spawn until the port accepts a
-  connection (`coldDevPortOpenMs`), and until the first Markdown page is fully read
+- **Cold dev:** `.farm` and `node_modules/.vite` removed. Process spawn until Farm prints its local URL and the port
+  accepts a connection (`coldDevPortOpenMs`), and until the first Markdown page is fully read
   (`coldDevFirstPageMs`).
 - **Warm dev:** the next `farm dev`, with the caches the cold start left. The same two times, plus
   the time to read a TSX page after the first page (`warmDevSecondPageMs`).

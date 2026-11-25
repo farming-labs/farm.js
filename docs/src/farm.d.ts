@@ -21,6 +21,7 @@ export type RoutePath =
   | "/blog/0.1.0"
   | "/blog/agent-markdown-scan"
   | "/blog/agent-native"
+  | "/blog/bring-your-own-renderer"
   | "/blog/native-internals"
   | "/blog/web-to-native"
   | "/contact"
@@ -123,6 +124,7 @@ export type RoutePath =
   | "/docs/query"
   | "/docs/reference"
   | "/docs/renderers"
+  | "/docs/renderers/custom"
   | "/docs/renderers/preact"
   | "/docs/renderers/react"
   | "/docs/renderers/solid"
@@ -153,6 +155,7 @@ export type RoutePattern =
   | "/blog/0.1.0"
   | "/blog/agent-markdown-scan"
   | "/blog/agent-native"
+  | "/blog/bring-your-own-renderer"
   | "/blog/native-internals"
   | "/blog/web-to-native"
   | "/contact"
@@ -255,6 +258,7 @@ export type RoutePattern =
   | "/docs/query"
   | "/docs/reference"
   | "/docs/renderers"
+  | "/docs/renderers/custom"
   | "/docs/renderers/preact"
   | "/docs/renderers/react"
   | "/docs/renderers/solid"
@@ -285,6 +289,7 @@ export type RouteModulePattern =
   | "/blog/0.1.0"
   | "/blog/agent-markdown-scan"
   | "/blog/agent-native"
+  | "/blog/bring-your-own-renderer"
   | "/blog/native-internals"
   | "/blog/web-to-native"
   | "/contact"
@@ -387,6 +392,7 @@ export type RouteModulePattern =
   | "/docs/query"
   | "/docs/reference"
   | "/docs/renderers"
+  | "/docs/renderers/custom"
   | "/docs/renderers/preact"
   | "/docs/renderers/react"
   | "/docs/renderers/solid"
@@ -463,6 +469,16 @@ declare module "@farm.js/core" {
   interface FarmEnvTypes {
     server: FarmResolvedEnv["server"];
     public: FarmResolvedEnv["public"];
+  }
+}
+
+type FarmMountsOf<C> = C extends { storage: { mounts: infer M } } ? M : {};
+type FarmStorageMounts0 = FarmMountsOf<typeof import("../farm.config.js").default>;
+declare global {
+  namespace FarmJS {
+    interface StorageRegistry {
+      mounts: FarmStorageMounts0;
+    }
   }
 }
 

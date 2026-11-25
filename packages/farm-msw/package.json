@@ -1,6 +1,6 @@
 {
   "name": "@farm.js/msw",
-  "version": "0.1.0-beta.54",
+  "version": "0.1.0-beta.55",
   "description": "Shared browser and server API mocking for Farm.js development",
   "keywords": [
     "api-mocking",
@@ -46,14 +46,17 @@
     "test": "vitest run"
   },
   "dependencies": {
-    "@farm.js/core": "workspace:*",
     "msw": "^2.15.0"
   },
   "devDependencies": {
+    "@farm.js/core": "workspace:*",
     "@types/node": "^22.20.5",
     "typescript": "^5.3.3",
     "vite": "8.3.4",
     "vitest": "5.0.5"
+  },
+  "peerDependencies": {
+    "@farm.js/core": ">=0.1.78 <0.3.0"
   },
   "engines": {
     "node": ">=22.13.0"

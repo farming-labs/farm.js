@@ -81,22 +81,26 @@ Export `hydrate = true` from the module script, then use Svelte runes and events
 <button type="button" onclick={() => (count += 1)}>Count: {count}</button>
 ```
 
+FARMJS reads `hydrate` from the file before Svelte compiles it, so write the literal `true` or `false`. Any declaration works,
+including a type annotation or an export list. A value FARMJS can't read without running the code,
+such as an expression, an import, or a re-export, fails the build with an error that names the file.
+
 FARMJS server-renders the component with Svelte's server runtime and claims the existing markup with
 Svelte hydration in the browser.
 
 ## Call FARMJS server code
 
 API routes, endpoint schemas, server functions, middleware, cache, storage, and observability are
-renderer-neutral. Use the generated typed API client from a Svelte component:
+renderer-neutral. Call them from a Svelte component with `apiClient`, created once in `src/lib/api.ts` as shown in [API Client](/docs/api-client#create-both-callers-once):
 
 ```svelte
 <script lang="ts">
-  import { api } from "../lib/api.generated";
+  import { apiClient } from "../lib/api";
 
   let message = $state("Ready");
 
   async function callServer() {
-    const result = await api.greeting.post({ body: { name: "Svelte" } });
+    const result = await apiClient.greeting.post({ body: { name: "Svelte" } });
     if (result.data) message = result.data.message;
   }
 </script>
@@ -105,27 +109,39 @@ renderer-neutral. Use the generated typed API client from a Svelte component:
 ```
 
 The endpoint can call a validated `createServerFn`; its handler, database access, and secrets remain
-in the server bundle.
+in the server bundle. With `experimental.serverActions`, browser code can also import the server function and call it
+directly; see [callable actions](/docs/renderers#native-client-bindings).
 
 ## Current boundaries
 
-Use the Svelte-native bindings for router, action, server-query, theme, and i18n stores:
+Use the Svelte-native bindings for router, theme, and i18n stores:
 
 ```svelte
 <script lang="ts">
-  import { createAction, createRouter, createTheme } from "@farm.js/svelte/bindings";
+  import { createRouter, createTheme } from "@farm.js/svelte/bindings";
 
   const router = createRouter();
-  const save = createAction(saveProduct);
   const theme = createTheme();
 </script>
 
-<button on:click={() => save({ name: "FARMJS" })} disabled={$save.pending}>Save</button>
+<button on:click={() => router.push("/products")}>{$router.pathname}</button>
+<button on:click={theme.toggleTheme}>Theme</button>
 ```
 
-The returned values implement Svelte's readable-store contract. Renderer-specific `Link` and form
-components, fetchers, integration providers, programmatic UI routes, Markdown/MDX visual pages,
-the docs adapter, and generated JSX metadata images remain React-oriented today.
+`createAction` and `createServerQuery` take a server function or server query imported from its server
+module, which needs `experimental.serverActions`; see
+[callable actions](/docs/renderers#native-client-bindings).
+
+The returned values implement Svelte's readable-store contract. `createReadable(store)` wraps
+your own state, a store from `createStore` in `@farm.js/core/renderer-client`, the same way; see
+[Shared client state](/docs/renderers#shared-client-state). `Link` from `@farm.js/svelte/link`
+navigates and prefetches like the React one; see [Link in Solid, Vue, and Svelte](/docs/routing#link-in-solid-vue-and-svelte).
+`<form use:action.enhance>` submits a form through an action; see
+[action forms](/docs/renderers#action-forms). Fetchers and integration providers remain
+React-oriented today. `withDocs()` from `@farming-labs/farmjs` builds docs pages with Svelte;
+see [Docs adapters on any renderer](/docs/docs-engine#docs-adapters-on-any-renderer). Markdown and MDX pages and [programmatic UI routes](/docs/routing#programmatic-routes) render with
+Svelte, and an `opengraph-image.svelte` component draws a
+[generated metadata image](/docs/routing#generated-metadata-images).
 
 The Better Auth starter includes native Svelte routes, runes, and forms:
 

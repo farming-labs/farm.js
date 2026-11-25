@@ -1,6 +1,11 @@
 export { restorePagePosition } from "../renderer/react/page-position";
 export { installChunkErrorRecovery } from "./chunk-recovery";
-export { replayFarmQueuedInteraction, scheduleFarmIslandHydration } from "./island-runtime";
+export {
+  holdFarmIslandInteractions,
+  replayFarmQueuedInteraction,
+  scheduleFarmIslandHydration,
+  watchFarmIslandTriggers,
+} from "./island-runtime";
 export { createClientPluginManager } from "./plugin";
 export { createPluginlessClientRuntime } from "./pluginless-runtime";
 export { createFarmSearchParams, searchParamsToObject } from "../search-params";
@@ -12,7 +17,7 @@ export { readFarmLinkNavigateOptions } from "./link-navigation";
 export { rememberFarmLinkLocale } from "../i18n/client-state";
 export { createFarmMetadataHeadReconciler, reconcileFarmDocumentHead } from "./document-head";
 export { isFarmBlockedNavigationURL, isFarmExternalNavigationURL } from "./navigation-url";
-export { getFarmIslandValueHeaders } from "./island-value-protocol";
+export { getFarmIslandValueHeaders, keepFarmIslandValues } from "./island-value-protocol";
 export { createClientCancellation } from "../client-cancellation";
 export { applyFarmCacheInvalidations } from "../cache-invalidation";
 export { runFarmNavigationDelegates } from "./navigation-delegate";

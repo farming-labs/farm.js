@@ -7,6 +7,18 @@ the Bumpp list keep their independently managed versions. Release preparation sy
 dependencies to the actual version of each workspace package instead of forcing those packages into
 the shared version.
 
+## How packages depend on core
+
+Every public package except `@farm.js/core` and `@farm.js/cli` declares core as a peer range,
+such as `">=0.1.78 <0.3.0"`, with `"workspace:*"` in `devDependencies` for local development.
+Never put core in `dependencies`: pnpm publishes `workspace:*` as the exact core version of that
+release, so an app on a newer core installs a second copy of core for each such package.
+
+The range's upper bound must accept the next core minor. Independently versioned packages are not
+republished on every release, so a package that refuses the next minor stops installing with npm
+the day it ships. `pnpm test` enforces both rules. When a release moves core to a new minor, raise
+the upper bounds past the following minor in the same change.
+
 ## Bump independently versioned packages
 
 Public packages under `packages/` that are not listed in `bump.config.ts`, such as

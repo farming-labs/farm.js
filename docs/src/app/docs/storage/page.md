@@ -17,7 +17,7 @@ Every store is a named mount with its own driver. A driver can point at a servic
 | Cache entries, flags, settings, counters, or JSON    | `getStorage(name)` on a KV mount                               | [Key/value storage](#keyvalue-storage)                                                              |
 | Files or values addressed by one key                 | `getStorage(name)` on `s3Storage(...)` or a blob driver        | [Supported KV drivers](#supported-kv-drivers)                                                       |
 | Models, relations, joins, and filters in your own DB | `@farming-labs/orm` with a PostgreSQL, MySQL, or SQLite driver | [SQL databases and models](#sql-databases-and-models)                                               |
-| The same models without running a database           | `farmStorage({ schema })` and `getDatabase(name)`              | [Hosted by Farm.js Infra](#hosted-by-farmjs-infra)                                                  |
+| The same models without running a database           | `farmStorage({ type: "sql", schema })` and `getDatabase(name)` | [Hosted by Farm.js Infra](#hosted-by-farmjs-infra)                                                  |
 | Rate limiting shared across production instances     | An atomic adapter such as `redisRateLimitStorage(...)`         | [Atomic rate-limit storage](#atomic-rate-limit-storage)                                             |
 | Models owned by a schema-backed Farm integration     | Farm's integration ORM through `ctx.args.db`                   | [Database and ORM Clients](/docs/integrations/orm-storage)                                          |
 | Better Auth users, accounts, and sessions            | Better Auth's own database adapter                             | [Database and ORM Clients](/docs/integrations/orm-storage#better-auth-and-other-adapter-owned-data) |
@@ -38,7 +38,7 @@ export default defineConfig({
     mounts: {
       settings: sqliteStorage({ path: "./.farm/storage/settings.sqlite" }),
       cache: redisStorage({ url: process.env.REDIS_URL! }),
-      app: farmStorage({ schema }),
+      app: farmStorage({ type: "sql", schema }),
     },
   },
 });
@@ -46,7 +46,7 @@ export default defineConfig({
 
 - `settings` is KV in a local SQLite file. Good for a single long-running server.
 - `cache` is KV in a Redis you run.
-- `app` is a database hosted by Farm.js Infra. It serves KV and typed SQL models from the same database.
+- `app` is a SQL database hosted by Farm.js Infra, with typed models from `schema`.
 
 Server code reads each mount by name:
 
@@ -204,14 +204,14 @@ Use descriptive keys such as `settings:global`, `tenant:acme:flags`, or `webhook
 
 Mount names describe the responsibility; drivers decide where the values live:
 
-| Use case                                    | Suggested mount              | Typical driver                                        |
-| ------------------------------------------- | ---------------------------- | ----------------------------------------------------- |
-| Application settings and durable JSON state | `app` or `settings`          | SQLite, Postgres, MySQL, libSQL, or `farmStorage()`   |
-| Shared cache entries                        | `cache`                      | Redis, Upstash Redis, or memory for local development |
-| Rate-limit counters                         | Dedicated rate-limit adapter | `redisRateLimitStorage(...)` or another atomic store  |
-| Idempotency and webhook deduplication       | `webhooks` or `idempotency`  | Redis or a durable SQL store                          |
-| Bucket-backed objects or metadata           | `uploads`                    | S3 or Vercel Blob                                     |
-| Tests and disposable local state            | Any descriptive name         | Memory or local filesystem                            |
+| Use case                                    | Suggested mount              | Typical driver                                                    |
+| ------------------------------------------- | ---------------------------- | ----------------------------------------------------------------- |
+| Application settings and durable JSON state | `app` or `settings`          | SQLite, Postgres, MySQL, libSQL, or `farmStorage({ type: "kv" })` |
+| Shared cache entries                        | `cache`                      | Redis, Upstash Redis, or memory for local development             |
+| Rate-limit counters                         | Dedicated rate-limit adapter | `redisRateLimitStorage(...)` or another atomic store              |
+| Idempotency and webhook deduplication       | `webhooks` or `idempotency`  | Redis or a durable SQL store                                      |
+| Bucket-backed objects or metadata           | `uploads`                    | S3 or Vercel Blob                                                 |
+| Tests and disposable local state            | Any descriptive name         | Memory or local filesystem                                        |
 
 The mount names are conventions chosen by the application. Two mounts may use the same driver type while remaining isolated, or use different drivers based on durability and latency requirements. A mount named `ratelimit` is still generic KV storage and is not accepted as proof of atomic increment support.
 
@@ -375,12 +375,12 @@ Use `"postgres"`, `"mysql"`, or `"sqlite"`. Run the output with your migration t
 
 Don't want to run a database? [Farm.js Infra](https://app.farmjs.dev) provisions one for each mount you declare, per project and environment. You get:
 
-- **One database per mount.** It serves KV through `getStorage(name)` and SQL through `getDatabase(name)`.
+- **One database per mount, holding one kind of data.** A key-value mount serves `getStorage(name)`; a SQL mount serves `getDatabase(name)`.
 - **Typed models.** Pass your Farming Labs ORM schema to the mount and `getDatabase(name)` returns `db.<model>` with the same API as above.
 - **No credentials in your app config.** Infra issues short-lived database credentials and Farm refreshes them.
 - **A Storage view in the dashboard.** Browse keys, tables, rows, and foreign keys.
 
-Hosted databases run on libSQL and speak SQLite. Setting `managed: true` on `postgresStorage` or `redisStorage` provisions the same hosted SQLite database; it does not start a PostgreSQL server or Redis. Use your own connection when you need PostgreSQL-specific SQL, Redis commands, or provider options such as Redis TTL.
+Hosted databases run on libSQL and speak SQLite. Setting `managed: true` on `postgresStorage` or `redisStorage` provisions a hosted SQLite database; it does not start a PostgreSQL server or Redis. Use your own connection when you need PostgreSQL-specific SQL, Redis commands, or provider options such as Redis TTL.
 
 ### Declare hosted mounts
 
@@ -393,7 +393,8 @@ import { farmStorage, postgresStorage, redisStorage, sqliteStorage } from "@farm
 export default defineConfig({
   storage: {
     mounts: {
-      drafts: farmStorage(),
+      drafts: farmStorage({ type: "sql" }),
+      settings: farmStorage({ type: "kv" }),
       orders: postgresStorage({ managed: true }),
       cache: redisStorage({ managed: true }),
       scratch: sqliteStorage({ path: "./.farm/scratch.sqlite" }),
@@ -402,14 +403,35 @@ export default defineConfig({
 });
 ```
 
-`farmStorage({ managed: true })` is the explicit form of `farmStorage()`.
-Set `managed: true` on a named storage helper or a built-in driver declaration such as
-`{ driver: "cloudflare-kv-binding", managed: true }` to provision Farm-hosted SQLite.
-Every managed mount supports both `getStorage(name)` and `getDatabase(name)`.
-In this example `scratch` has no `managed` flag, so it stays a local SQLite file.
+Every hosted mount holds one kind of data:
+
+| Mount                                                                                                                                                                    | Kind      | Read it with        |
+| ------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | --------- | ------------------- |
+| `farmStorage({ type: "kv" })`                                                                                                                                            | Key-value | `getStorage(name)`  |
+| `farmStorage({ type: "sql" })`, optionally with `schema`                                                                                                                 | SQL       | `getDatabase(name)` |
+| A database driver with `managed: true`: `sqliteStorage`, `postgresStorage`, `mysqlStorage`, `libsqlStorage`, `pgliteStorage`, `planetscaleStorage`                       | SQL       | `getDatabase(name)` |
+| Any other driver with `managed: true`: `redisStorage`, `upstashStorage`, `vercelKVStorage`, `s3Storage`, `{ driver: "cloudflare-kv-binding", managed: true }`, and so on | Key-value | `getStorage(name)`  |
+
+A driver helper takes its kind from the driver, so `orders` above is SQL and `cache` is key-value.
+Calling the other API throws and names the right one: `getDatabase("cache")` says to use
+`getStorage("cache")`. A schema needs a SQL mount, so `redisStorage({ managed: true, schema })`
+throws. In this example `scratch` has no `managed` flag, so it stays a local SQLite file.
+
+`farmStorage()` without `type` is deprecated. It still works and accepts both APIs, and
+`farm storage plan` warns about it. Pick the kind by how you read the mount:
+
+| Before                                                                 | After                                  |
+| ---------------------------------------------------------------------- | -------------------------------------- |
+| `farmStorage()` read with `getStorage()`                               | `farmStorage({ type: "kv" })`          |
+| `farmStorage()` or `farmStorage({ schema })` read with `getDatabase()` | `farmStorage({ type: "sql", schema })` |
+
+A mount that used both APIs needs two mounts: give the key-value one its own `namespace` and copy
+its existing keys into it.
 
 The mount name is the default resource name. Set `namespace` to reuse a resource,
-for example `redisStorage({ managed: true, namespace: "sessions" })`.
+for example `redisStorage({ managed: true, namespace: "sessions" })`. Mounts that share a
+resource must hold the same kind: `farm storage plan` refuses a key-value mount and a SQL
+mount on one database.
 Omit `managed` or set it to `false` on a provider helper to keep using its own driver.
 When switching an existing external store to Farm hosting, migrate its data separately.
 Pass native connection options only when using the native driver.
@@ -465,7 +487,7 @@ const schema = defineSchema({
 });
 
 export default defineConfig({
-  storage: { mounts: { drafts: farmStorage({ schema }) } },
+  storage: { mounts: { drafts: farmStorage({ type: "sql", schema }) } },
 });
 ```
 
@@ -487,8 +509,8 @@ Existing calls to `getDatabase(name, { schema })` can still select a schema for 
 
 Farm opens the connection on first use and refreshes credentials. Farm owns
 the returned client's lifetime and closes it at shutdown. Use `db.transaction(async (tx) => …)`
-for ORM writes that must commit together. Nested ORM transactions are unsupported. KV uses the reserved
-table `_farm_kv` in this database. `getDatabase(name)` throws for a misspelled name and for a mount that Farm.js Infra does not host; for your own database, use the ORM client from [Connect your own PostgreSQL](#connect-your-own-postgresql).
+for ORM writes that must commit together. Nested ORM transactions are unsupported. A key-value mount keeps
+its keys in the reserved table `_farm_kv`. `getDatabase(name)` throws for a misspelled name, a key-value mount, and a mount that Farm.js Infra does not host; for your own database, use the ORM client from [Connect your own PostgreSQL](#connect-your-own-postgresql).
 
 ### Migrate a hosted database
 
@@ -510,7 +532,7 @@ export async function migrateApp() {
 ### Rename or remove a hosted mount
 
 To rename the mount and keep its data, declare
-`editor: farmStorage({ namespace: "drafts" })` and call
+`editor: farmStorage({ type: "sql", namespace: "drafts" })` and call
 `getDatabase("editor")`. A resource name accepts 1–63 lowercase letters,
 digits, and hyphens, starting with a letter. Removing a mount from config
 keeps the database. Disconnecting its Farm project schedules deletion.
@@ -532,15 +554,16 @@ resource to browse its data.
 - **Tables** shows rows, column definitions, and foreign keys. Select a related table to inspect its rows.
 - **Details** lists the mount names and configured drivers and shows how to connect from your app.
 
-A Redis mount opens on **KV**. A PostgreSQL or SQLite mount opens on **Tables**.
-`farmStorage()` and namespaces shared by SQL and KV mounts offer both views.
+A key-value mount shows **KV**. A SQL mount, from `farmStorage({ type: "sql" })` or a
+database driver, shows **Tables**. Only a mount from a deprecated untyped `farmStorage()`
+shows both.
 **Back to storage** returns to the selected project and environment.
 
 ### Existing SQLite mounts
 
 Existing `sqliteStorage({ managed: true })` mounts use the same hosted resources.
-Switch to `farmStorage()` with the same mount name to keep the data. For a mount
-with `managed: { name: "drafts" }`, use `farmStorage({ namespace: "drafts" })`.
+Switch to `farmStorage({ type: "sql" })` with the same mount name to keep the data. For a
+mount with `managed: { name: "drafts" }`, use `farmStorage({ type: "sql", namespace: "drafts" })`.
 
 ## Atomic rate-limit storage
 
@@ -620,7 +643,7 @@ Import these helpers from `@farm.js/core/storage`:
 
 | Helper                                        | Driver                   | Common use                                                                        |
 | --------------------------------------------- | ------------------------ | --------------------------------------------------------------------------------- |
-| `farmStorage()`                               | Hosted by Farm.js Infra  | KV and SQL models in one database, with no database to run.                       |
+| `farmStorage({ type })`                       | Hosted by Farm.js Infra  | A key-value (`"kv"`) or SQL (`"sql"`) mount, with no database to run.             |
 | `memoryStorage()`                             | `memory`                 | Tests, local development, and disposable process-local state.                     |
 | `localStorage({ base })`                      | Farm alias for `fs-lite` | Local persistent files, development caches, and self-hosted single-instance apps. |
 | `sqliteStorage({ path, tableName })`          | `sqlite` / `node-sqlite` | Durable local application state with no external service.                         |
@@ -641,7 +664,7 @@ Import these helpers from `@farm.js/core/storage`:
 | `driverStorage(driver)`                       | Custom                   | Wrap an existing `unstorage` driver or driver factory.                            |
 | `defineStorageClient(factory)`                | Custom                   | Lazily create a custom synchronous or asynchronous driver.                        |
 
-Passing `managed: true` to a provider helper switches it to the hosted database described in [Hosted by Farm.js Infra](#hosted-by-farmjs-infra).
+Passing `managed: true` to a provider helper switches it to the hosted database described in [Hosted by Farm.js Infra](#hosted-by-farmjs-infra). Database drivers become SQL mounts; every other driver becomes a key-value mount.
 
 ### Configure drivers directly
 

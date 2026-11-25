@@ -877,6 +877,7 @@ const IMPORT_SPECIFIER = /(?:\bfrom\s*|\bimport\s*\(?\s*)["']([^"'./][^"']*)["']
 const STYLESHEET_IMPORT =
   /(?:\bfrom\s*|\bimport\s*\(?\s*|\brequire\s*\(\s*)["'][^"']+\.(?:css|scss|sass|less|styl)["']/;
 const MAX_SCANNED_FILES = 2000;
+const FARM_FONT_MODULE = "@farm.js/core/font";
 
 interface PackageScan {
   /** The bare specifiers its script files import. */
@@ -1055,6 +1056,8 @@ function scanPackage(directory: string): PackageScan {
  * null. That is a package whose own script files import stylesheets (react-tweet's CSS modules),
  * or one that ships an ES module build only through `module` beside a CommonJS `main`
  * (react-wrap-balancer), whose default export Node would read as the whole CommonJS exports object.
+ * A package that defines fonts with `@farm.js/core/font` is bundled too, because its `localFont`
+ * calls only work once Farm's font compiler has transformed them.
  */
 export function findFarmServerBundledPackage(
   importer: string,
@@ -1082,7 +1085,10 @@ export function findFarmServerBundledPackage(
   } catch {
     return null;
   }
-  return scanPackage(directory).stylesheets ? { name: parsed.name, prebundle: false } : null;
+  const scan = scanPackage(directory);
+  if (scan.imports.has(FARM_FONT_MODULE))
+    return { name: parsed.name, prebundle: false, fonts: true };
+  return scan.stylesheets ? { name: parsed.name, prebundle: false } : null;
 }
 
 /**
@@ -1116,6 +1122,11 @@ export interface FarmServerBundledPackage {
    * package bundled for its stylesheet imports is never pre-bundled.
    */
   prebundle: boolean;
+  /**
+   * It defines fonts with `@farm.js/core/font`. No dependency optimizer may bundle it, for the
+   * browser either, because only Farm's font compiler can turn its `localFont` calls into fonts.
+   */
+  fonts?: true;
 }
 
 /**

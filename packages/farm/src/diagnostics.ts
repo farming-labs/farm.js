@@ -39,7 +39,7 @@ export const FARM_DIAGNOSTIC_RULES = {
   },
   CLIENT_SERVER_FUNCTION: {
     severity: "error",
-    fix: "Add @farm.js/plugin/rsc and set experimental.serverActions: true so client imports become server references, or call it from server code, or expose an API route and call it with createAPIClient.",
+    fix: "Set experimental.serverActions: true so client imports become server references (a React app outside islands mode also needs @farm.js/plugin/rsc), or call it from server code, or expose an API route and call it with createAPIClient.",
     docs: BOUNDARY_DOCS,
   },
   CLIENT_SERVER_ONLY_IMPORT: {

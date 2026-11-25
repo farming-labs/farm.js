@@ -150,8 +150,37 @@ export const agentScanSections = [
   ["how-i-measured", "How I measured"],
 ] as const satisfies BlogSections;
 
+export const rendererPost: BlogPost = {
+  href: "/blog/bring-your-own-renderer",
+  title: "Build your own renderer, build your own full-stack framework",
+  description:
+    "How to plug any UI library into Farm, one piece at a time: a descriptor, three small modules, a few hooks, islands, and two ways to use a component library. The working example is farming-labs/leaf.",
+  ...AUTHOR,
+  date: "Nov 2026",
+  dateTime: "2026-11-21",
+  category: "Engineering",
+};
+
+export const rendererSections = [
+  ["what-farm-does-and-what-you-do", "What Farm does"],
+  ["step-1-the-descriptor", "The descriptor"],
+  ["step-2-the-server-module", "The server module"],
+  ["step-3-the-client-module", "The client module"],
+  ["step-4-the-vite-module", "The Vite module"],
+  ["step-5-hooks-over-farms-stores", "Hooks", "Step 5: hooks over Farm's stores"],
+  ["step-6-server-functions", "Server functions"],
+  ["step-7-optional-your-own-file-format", "Your own file format"],
+  ["step-8-optional-streaming", "Streaming"],
+  ["step-9-optional-islands", "Islands"],
+  ["step-10-test-it", "Test it"],
+  ["components-the-ui-sdk-way", "Components with ui-sdk"],
+  ["what-a-custom-renderer-doesnt-get", "Limits", "What a custom renderer doesn't get"],
+  ["what-building-leaf-fixed-in-farm", "What leaf fixed"],
+] as const satisfies BlogSections;
+
 /** Every post. The index features the first and lists the rest. */
 export const posts: readonly { post: BlogPost; sections: BlogSections }[] = [
+  { post: rendererPost, sections: rendererSections },
   { post: agentScanPost, sections: agentScanSections },
   { post: nativeInternalsPost, sections: nativeInternalsSections },
   { post: agentNativePost, sections: agentNativeSections },

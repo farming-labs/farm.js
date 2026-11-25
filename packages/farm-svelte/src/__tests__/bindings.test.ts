@@ -3,7 +3,8 @@
 import { describe, expect, it, vi } from "vitest";
 import type { ServerFn } from "@farm.js/core/server-fn";
 import type { ServerQuery } from "@farm.js/core/server-query";
-import { createAction, createServerQuery } from "../bindings";
+import { createStore } from "@farm.js/core/renderer-client";
+import { createAction, createReadable, createServerQuery } from "../bindings";
 
 describe("Svelte FARMJS bindings", () => {
   it("exposes action state through a readable store", async () => {
@@ -39,4 +40,48 @@ describe("Svelte FARMJS bindings", () => {
     expect(latest?.status).toBe("success");
     unsubscribe();
   });
+
+  it("wraps a Farm store in a readable store", () => {
+    const cart = createStore({ items: [] as string[] });
+    const readable = createReadable(cart);
+    const seen: string[][] = [];
+    const unsubscribe = readable.subscribe((state) => seen.push(state.items));
+
+    cart.items.set(["tea"]);
+    unsubscribe();
+    cart.items.set(["tea", "milk"]);
+
+    expect(seen).toEqual([[], ["tea"]]);
+  });
+
+  it("submits an enhanced form's fields through the action until destroyed", async () => {
+    const save = vi.fn(async (_data: FormData) => "saved") as unknown as ServerFn<FormData, string>;
+    const action = createAction(save);
+    const form = document.createElement("form");
+    form.innerHTML =
+      '<input name="name" /><button type="submit" name="intent" value="publish">Publish</button>';
+    document.body.append(form);
+    const enhanced = action.enhance(form);
+    form.querySelector("input")!.value = "wheat";
+
+    const event = submit(form);
+    expect(event.defaultPrevented).toBe(true);
+    await vi.waitFor(() => expect(save).toHaveBeenCalledOnce());
+    const data = vi.mocked(save).mock.calls[0]![0];
+    expect(data.get("name")).toBe("wheat");
+    expect(data.get("intent")).toBe("publish");
+    await vi.waitFor(() => expect(form.querySelector("input")!.value).toBe(""));
+
+    enhanced?.destroy?.();
+    expect(submit(form).defaultPrevented).toBe(false);
+    expect(save).toHaveBeenCalledOnce();
+    form.remove();
+  });
 });
+
+function submit(form: HTMLFormElement): SubmitEvent {
+  const submitter = form.querySelector<HTMLButtonElement>("button[type=submit]");
+  const event = new SubmitEvent("submit", { bubbles: true, cancelable: true, submitter });
+  form.dispatchEvent(event);
+  return event;
+}

@@ -241,6 +241,15 @@ describe('the "use server" transform', () => {
     expect(code).toContain("@farm.js/core/internal/islx-client");
   });
 
+  it("compiles against islx's React-free runtime for renderers other than React", () => {
+    const options = { code: source, id: "/app/src/actions.ts", root: "/app", parse };
+    const server = transformFarmFormActionModule({ ...options, ssr: true, runtime: "renderer" })!;
+    expect(server).toContain('from "@farm.js/core/internal/islx-actions-server"');
+    const client = transformFarmFormActionModule({ ...options, ssr: false, runtime: "renderer" })!;
+    expect(client).toContain('from "@farm.js/core/internal/islx-actions-client"');
+    expect(client).toContain("export const addTodo = $$islx_ref(");
+  });
+
   it("hoists an inline action out of a server component", () => {
     const code = transformFarmFormActionModule({
       code: 'export default async function Page() {\n  const list = "inbox";\n  async function add(form) {\n    "use server";\n    return list;\n  }\n  return <form action={add} />;\n}\n',

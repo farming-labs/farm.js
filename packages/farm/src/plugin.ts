@@ -972,16 +972,10 @@ export class PluginManager {
     return endpoints;
   }
 
-  private async runRuntimeEndpoint(
-    request: Request,
-    options: FarmPluginRuntimeRequestOptions,
-    waitUntil: (promise: Promise<unknown>) => void,
-    onMatch: (options: FarmPluginRuntimeRequestOptions) => void,
-  ): Promise<Response | undefined> {
+  private matchRuntimeEndpoint(requestPathname: string) {
     const endpoints = this.getRuntimeEndpoints();
     if (endpoints.length === 0) return undefined;
 
-    const requestPathname = new URL(request.url).pathname;
     const basePath = normalizeFarmBasePath(this.context.config.basePath);
     if (basePath && requestPathname !== basePath && !requestPathname.startsWith(`${basePath}/`)) {
       return undefined;
@@ -989,7 +983,22 @@ export class PluginManager {
     const pathname = normalizeRuntimeEndpointRequestPath(
       stripFarmBasePath(requestPathname, basePath),
     );
-    const match = endpoints.find((entry) => entry.path === pathname);
+    return endpoints.find((entry) => entry.path === pathname);
+  }
+
+  /** @internal Whether a plugin runtime endpoint answers this request path (with the base path). */
+  _hasRuntimeEndpoint(requestPathname: string): boolean {
+    return this.matchRuntimeEndpoint(requestPathname) !== undefined;
+  }
+
+  private async runRuntimeEndpoint(
+    request: Request,
+    options: FarmPluginRuntimeRequestOptions,
+    waitUntil: (promise: Promise<unknown>) => void,
+    onMatch: (options: FarmPluginRuntimeRequestOptions) => void,
+  ): Promise<Response | undefined> {
+    const requestPathname = new URL(request.url).pathname;
+    const match = this.matchRuntimeEndpoint(requestPathname);
     if (!match) return undefined;
 
     const endpointOptions: FarmPluginRuntimeRequestOptions = {

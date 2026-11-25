@@ -1,0 +1,20 @@
+<script module>
+  export function generateMetadata({ params }) {
+    return { title: `Crop: ${params.name}` };
+  }
+</script>
+
+<script>
+  import { notFound } from "@farm.js/core/navigation";
+  import { useRouter } from "farm-leaf/bindings";
+  import { CROPS } from "../../../server/crops";
+
+  if (!CROPS.includes(props.params.name)) notFound();
+  // The page doesn't hydrate, so this is the router as the server reads it.
+  const router = useRouter();
+</script>
+
+<section>
+  <h1 id="crop">Crop: {{ props.params.name }}</h1>
+  <p id="crop-path">path: {{ router.pathname }}</p>
+</section>

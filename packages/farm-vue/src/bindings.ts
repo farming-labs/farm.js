@@ -2,10 +2,14 @@
 
 import {
   computed,
+  defineComponent,
+  h,
+  mergeProps,
   onScopeDispose,
   readonly,
   shallowRef,
   type ComputedRef,
+  type PropType,
   type ShallowRef,
 } from "vue";
 import {
@@ -14,10 +18,13 @@ import {
   createRendererQuery,
   createRendererRouter,
   createRendererTheme,
+  resolveLinkAttributes,
+  submitRendererActionForm,
   type FarmActionOptions,
   type FarmActionSnapshot,
   type FarmActionSubmit,
   type FarmClientStore,
+  type FarmLinkOptions,
   type FarmRendererQueryOptions,
   type FarmRendererQuerySnapshot,
   type FarmRendererRouter,
@@ -92,7 +99,26 @@ export type FarmVueAction<TInput, TResult, TError extends Error = Error> = FarmA
   data: ComputedRef<TResult | null>;
   error: ComputedRef<TError | null>;
   reset(): void;
+  /**
+   * A `<form>` that submits its fields through this action, as React's `useAction().Form`
+   * does. Attributes and an `@submit` listener pass through; calling `preventDefault()` in that
+   * listener keeps the form from submitting.
+   */
+  Form: ReturnType<typeof createActionForm>;
 };
+
+function createActionForm(action: Parameters<typeof submitRendererActionForm>[0]) {
+  return defineComponent({
+    name: "FarmActionForm",
+    inheritAttrs: false,
+    setup(_props, { attrs, slots }) {
+      const onSubmit = (event: Event) => void submitRendererActionForm(action, event);
+      // POST keeps field values out of the URL if the form submits before the page hydrates.
+      return () =>
+        h("form", mergeProps({ method: "post" }, attrs, { onSubmit }), slots.default?.());
+    },
+  });
+}
 
 export function useAction<TInput, TResult, TError extends Error = Error>(
   target:
@@ -111,6 +137,7 @@ export function useAction<TInput, TResult, TError extends Error = Error>(
     data: computed(() => state.value.data),
     error: computed(() => state.value.error),
     reset: () => action.reset(),
+    Form: createActionForm(action),
   });
 }
 
@@ -206,3 +233,52 @@ function createReactiveTranslator(
   };
   return translate;
 }
+
+/**
+ * Binds any `FarmClientStore`, such as a store from `createStore` in
+ * `@farm.js/core/renderer-client`, to a read-only ref that updates when the store changes. The
+ * subscription ends with the current effect scope.
+ */
+export function useStore<T>(store: FarmClientStore<T>): Readonly<ShallowRef<T>> {
+  return bindFarmStore(store);
+}
+
+type VueLinkOptions = FarmLinkOptions;
+
+/**
+ * An anchor that navigates and prefetches through the FARMJS router, with the same props as the
+ * React `Link`: a typed `href` or route pattern with `params`, `query`, `hash`, `prefetch`,
+ * `replace`, `scroll`, `viewTransition`, and `locale`. Other attributes and listeners go on the
+ * `<a>`, and the default slot is its content.
+ */
+export const Link = defineComponent({
+  name: "FarmLink",
+  inheritAttrs: false,
+  props: {
+    href: { type: String as PropType<VueLinkOptions["href"]>, required: true },
+    params: { type: Object as PropType<VueLinkOptions["params"]>, default: undefined },
+    query: {
+      type: [Object, URLSearchParams] as PropType<VueLinkOptions["query"]>,
+      default: undefined,
+    },
+    hash: { type: String, default: undefined },
+    trailingSlash: { type: Boolean, default: undefined },
+    // Boolean first, so a bare `prefetch` attribute is `true`, as in the React `Link`.
+    prefetch: {
+      type: [Boolean, String] as PropType<VueLinkOptions["prefetch"]>,
+      default: undefined,
+    },
+    prefetchDelay: { type: Number, default: undefined },
+    replace: { type: Boolean, default: undefined },
+    scroll: { type: Boolean, default: undefined },
+    viewTransition: {
+      type: [Boolean, String] as PropType<VueLinkOptions["viewTransition"]>,
+      default: undefined,
+    },
+    locale: { type: String as PropType<VueLinkOptions["locale"]>, default: undefined },
+  },
+  setup(props, { attrs, slots }) {
+    return () =>
+      h("a", { ...attrs, ...resolveLinkAttributes(props as VueLinkOptions) }, slots.default?.());
+  },
+});

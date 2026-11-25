@@ -1,6 +1,6 @@
 {
   "name": "@farm.js/email",
-  "version": "0.1.78",
+  "version": "0.1.87",
   "description": "Email and Resend integration for Farm.js",
   "license": "MIT",
   "repository": {
@@ -39,15 +39,16 @@
     "test": "pnpm run build && node --test test/*.test.mjs"
   },
   "dependencies": {
-    "@farm.js/core": "workspace:*",
     "@farm.js/integration-utils": "workspace:*",
     "@react-email/render": "2.0.6",
     "resend": "6.10.0"
   },
   "devDependencies": {
+    "@farm.js/core": "workspace:*",
     "@types/react": "19.2.13"
   },
   "peerDependencies": {
+    "@farm.js/core": ">=0.1.78 <0.3.0",
     "react": "^18.2.0 || ^19.0.0"
   }
 }

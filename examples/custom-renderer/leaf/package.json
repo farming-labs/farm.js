@@ -1,0 +1,30 @@
+{
+  "name": "leaf",
+  "version": "0.0.0",
+  "private": true,
+  "description": "A small UI library that knows nothing about Farm: elements, hooks, a DOM patcher, and an HTML renderer.",
+  "type": "module",
+  "sideEffects": false,
+  "exports": {
+    ".": {
+      "types": "./src/index.d.ts",
+      "default": "./src/index.js"
+    },
+    "./dom": {
+      "types": "./src/dom.d.ts",
+      "default": "./src/dom.js"
+    },
+    "./server": {
+      "types": "./src/server.d.ts",
+      "default": "./src/server.js"
+    },
+    "./jsx-runtime": {
+      "types": "./src/jsx-runtime.d.ts",
+      "default": "./src/jsx-runtime.js"
+    },
+    "./jsx-dev-runtime": {
+      "types": "./src/jsx-runtime.d.ts",
+      "default": "./src/jsx-runtime.js"
+    }
+  }
+}

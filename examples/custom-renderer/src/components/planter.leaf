@@ -1,0 +1,20 @@
+<script module>
+  "use client";
+
+  // A client component in a .leaf file. Rendered from a server page, it's an island: the
+  // descriptor's compile() lets Farm read the "use client" above before Vite compiles the file.
+  export const island = "load";
+</script>
+
+<script>
+  import { useEffect, useState } from "leaf";
+
+  const [planted, setPlanted] = useState(0);
+  // Effects run once the island has hydrated; the e2e tests wait for this attribute.
+  const [hydrated, setHydrated] = useState(false);
+  useEffect(() => setHydrated(true), []);
+</script>
+
+<div class="island" data-crop="{{ props.crop }}" data-hydrated="{{ hydrated ? 'true' : undefined }}">
+  <button type="button" @click="setPlanted((n) => n + 1)">{{ props.crop }} planted: {{ planted }}</button>
+</div>

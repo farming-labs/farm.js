@@ -1,0 +1,21 @@
+<script module>
+  export const metadata = { title: "Streaming" };
+</script>
+
+<script>
+  import { headers } from "@farm.js/core/headers";
+  import { Suspense } from "leaf";
+  import SlowCropList from "../../components/slow-crop-list.leaf";
+
+  // A client navigation reads HTML into a detached document, where reveal scripts do not run.
+  const fallback = headers().get("sec-fetch-dest") === "document" ? "Loading crops…" : undefined;
+</script>
+
+<!-- The list is an async component, which renders on the server only, so this page doesn't hydrate. -->
+<section>
+  <h1>Streaming</h1>
+  <p id="sent-first">This arrives first. The list below waits 400 ms for its data.</p>
+  <Suspense fallback="{{ fallback }}">
+    <SlowCropList />
+  </Suspense>
+</section>

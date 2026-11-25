@@ -1,6 +1,7 @@
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
 import Image, { getImageProps, type StaticImageData } from "../image";
+import { resolveImageAttributes } from "../renderer-client";
 
 const staticImage: StaticImageData = {
   src: "/assets/product-a1b2.png",
@@ -97,5 +98,43 @@ describe("Image", () => {
         placeholder: "blur",
       }),
     ).toThrow("requires a static import or blurDataURL");
+  });
+});
+
+// What a renderer's own <Image> spreads onto its <img>, from the entry that loads no React.
+describe("resolveImageAttributes", () => {
+  it("returns the attributes getImageProps() gives React's Image", () => {
+    const cases = [
+      { src: staticImage, alt: "Red Farm jacket", placeholder: "blur" as const },
+      { src: "/hero.jpg", alt: "Farm field", fill: true, sizes: "50vw" },
+      { src: "/photo.jpg", alt: "Photo", width: 400, height: 300, preload: true },
+      { src: "/logo.svg", alt: "Farm", width: 120, height: 40 },
+    ];
+    for (const options of cases) {
+      expect(resolveImageAttributes(options)).toEqual(getImageProps(options).props);
+    }
+  });
+
+  it("passes other attributes through and throws the same errors", () => {
+    const attributes = resolveImageAttributes({
+      src: staticImage,
+      alt: "Red Farm jacket",
+      class: "hero",
+      "data-crop": "wheat",
+      style: { borderRadius: 4 },
+    });
+    expect(attributes).toMatchObject({
+      class: "hero",
+      "data-crop": "wheat",
+      width: 800,
+      height: 600,
+      loading: "lazy",
+      decoding: "async",
+      style: { borderRadius: 4 },
+    });
+    expect(attributes.srcSet).toContain("/_farm/image?url=%2Fassets%2Fproduct-a1b2.png");
+    expect(() => resolveImageAttributes({ src: "/photo.jpg", alt: "Photo" })).toThrow(
+      "requires width and height",
+    );
   });
 });

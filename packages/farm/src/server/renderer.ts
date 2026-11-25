@@ -1,5 +1,5 @@
 import type { ReactNode } from "react";
-import { loadFarmDevModule } from "../dev-module";
+import { createFarmDevModuleCheck, loadFarmDevModule } from "../dev-module";
 import * as fs from "fs";
 import * as https from "https";
 import { isIP } from "net";
@@ -141,7 +141,7 @@ import {
 import { sendWebResponse } from "./response";
 import { createFarmNodeRequestAbortSignal, matchesFarmIfNoneMatch } from "../server-http";
 import { renderFarmFontDevHead } from "../font-vite";
-import { createFarmMetadataImageResponse } from "../metadata-image";
+import { createFarmMetadataImageResponse, resolveFarmMetadataImageValue } from "../metadata-image";
 import { createFarmMetadataRouteResponse } from "../metadata-route";
 import {
   collectFarmLlmsTxtPages,
@@ -200,10 +200,11 @@ import {
   type FarmRendererRenderOptions,
   type FarmServerRendererRuntime,
   resolveFarmComponentExtensions,
+  assertFarmRendererServerModule,
 } from "../renderer";
 import { isRendererCompiledComponent } from "../integration-provider-build";
 import { pathToFileURL } from "node:url";
-import { FARM_ISLAND_REPLAYABLE_SELECTOR } from "../island";
+import { createPreHydrationClickQueueScript } from "./prehydration-hold-script";
 import type { FarmIslandStrategy } from "../island";
 import { createDefaultErrorDiagnostics } from "./error-diagnostics";
 import {
@@ -211,6 +212,7 @@ import {
   handleFarmFormActionRequest,
   renderFarmFormStateScript,
 } from "../form-actions";
+import { resolveFarmIslxActionsMode } from "../server-actions-mode";
 import { installFarmIslandValues, uninstallFarmIslandValues } from "../client/island-values";
 import { resolveServerActionsConfig } from "../server-action-security";
 import { resolveFarmRouteRootStrategy } from "../island-inference";
@@ -227,6 +229,66 @@ import {
   resolveFarmSecurityConfig,
   type ResolvedFarmSecurityConfig,
 } from "../security";
+
+/**
+ * `renderToReadableStream()` in the shape of `renderToPipeableStream()`, for a renderer that
+ * streams only Web streams. Development streams pages through the Node shape, and production
+ * streams the Web stream itself, so without this such a renderer streamed only in production.
+ */
+function pipeFarmRendererWebStream(
+  runtime: FarmServerRendererRuntime,
+): NonNullable<FarmServerRendererRuntime["renderToPipeableStream"]> {
+  return (element, callbacks) => {
+    let source: Readable | undefined;
+    let destination: NodeJS.WritableStream | undefined;
+    let aborted = false;
+    let shellSettled = false;
+    const settleShell = (error?: unknown) => {
+      if (shellSettled) return false;
+      shellSettled = true;
+      if (error === undefined) callbacks.onShellReady();
+      else callbacks.onShellError(error);
+      return true;
+    };
+    Promise.resolve()
+      .then(() =>
+        runtime.renderToReadableStream!(element, {
+          ...(callbacks.nonce ? { nonce: callbacks.nonce } : {}),
+          onError: callbacks.onError,
+        }),
+      )
+      .then(
+        (stream) => {
+          source = Readable.fromWeb(stream as import("node:stream/web").ReadableStream);
+          if (aborted) {
+            source.destroy();
+            return;
+          }
+          // The shell is ready once the stream has output, or has ended without any.
+          source.once("readable", () => settleShell());
+          source.once("error", (error) => {
+            if (settleShell(error)) return;
+            // A stream should report a late error through `onError` and close instead. One that
+            // errors anyway still ends the response rather than leaving the request open.
+            callbacks.onError(error);
+            destination?.end();
+          });
+        },
+        (error) => settleShell(error),
+      );
+    return {
+      pipe(target) {
+        destination = target;
+        source?.pipe(target);
+      },
+      abort() {
+        aborted = true;
+        source?.destroy();
+        destination?.end();
+      },
+    };
+  };
+}
 
 // Islands mode renders on islx, which loads React: only an islands app loads it (`initialize`).
 let islands: typeof import("../client/islands-runtime") | undefined;
@@ -515,23 +577,7 @@ export function createPPRRefreshScript(): string {
   return `<script>(function(){if(window.__FARM_PPR_REFRESHING__)return;window.__FARM_PPR_REFRESHING__=true;var owner=document.currentScript;function applyState(doc){doc.querySelectorAll("script[data-farm-refresh-state]").forEach(function(source){var script=document.createElement("script");if(owner&&owner.nonce)script.nonce=owner.nonce;script.textContent=source.textContent||"";document.head.appendChild(script);script.remove();});}function key(node){return node.nodeType===1?node.getAttribute("id"):null}function compatible(current,next){if(current.nodeType!==next.nodeType)return false;if(current.nodeType===1&&current.tagName!==next.tagName)return false;var currentKey=key(current);var nextKey=key(next);return currentKey||nextKey?currentKey===nextKey:true}function syncAttributes(current,next){Array.from(current.attributes).forEach(function(attribute){if(!next.hasAttribute(attribute.name))current.removeAttribute(attribute.name)});Array.from(next.attributes).forEach(function(attribute){if(current.getAttribute(attribute.name)!==attribute.value)current.setAttribute(attribute.name,attribute.value)})}function syncChildren(current,next){var cursor=current.firstChild;Array.from(next.childNodes).forEach(function(nextChild){if(cursor&&compatible(cursor,nextChild)){var matched=cursor;cursor=cursor.nextSibling;syncNode(matched,nextChild);return}var candidate=cursor;while(candidate&&!compatible(candidate,nextChild))candidate=candidate.nextSibling;if(candidate){current.insertBefore(candidate,cursor);syncNode(candidate,nextChild);return}current.insertBefore(nextChild.cloneNode(true),cursor)});while(cursor){var stale=cursor;cursor=cursor.nextSibling;stale.remove()}}function syncNode(current,next){if(current.nodeType===3||current.nodeType===8){if(current.nodeValue!==next.nodeValue)current.nodeValue=next.nodeValue;return}if(current.nodeType!==1)return;var tag=current.tagName;var value=tag==="INPUT"&&current.type==="file"?null:"value" in current?current.value:null;var checked="checked" in current?current.checked:null;var selected=tag==="SELECT"?Array.from(current.options).map(function(option){return option.selected}):null;var focused=document.activeElement===current;var selection=focused&&typeof current.selectionStart==="number"?[current.selectionStart,current.selectionEnd,current.selectionDirection]:null;syncAttributes(current,next);syncChildren(current,next);if(value!==null)current.value=value;if(checked!==null)current.checked=checked;if(selected)Array.from(current.options).forEach(function(option,index){option.selected=selected[index]===true});if(selection)try{current.setSelectionRange(selection[0],selection[1],selection[2])}catch{}}function replaceRoot(html){var doc=new DOMParser().parseFromString(html,"text/html");var next=doc.getElementById("root");var current=document.getElementById("root");if(!next||!current)return false;applyState(doc);syncNode(current,next);return true}var attempts=0,settle;window.__FARM_PPR_REFRESH_PROMISE__=new Promise(function(resolve){settle=resolve;});function release(){window.__FARM_PPR_REFRESHING__=false;}function retry(){settle();if(window.__FARM_PPR_HYDRATING__||attempts>=${PPR_REFRESH_MAX_ATTEMPTS})return release();if(navigator.onLine===false){window.addEventListener("online",run,{once:true});return;}setTimeout(run,1000*Math.pow(2,attempts-1));}function run(){if(window.__FARM_PPR_HYDRATING__)return release();attempts++;fetch(window.location.href,{cache:"no-store",credentials:"same-origin",headers:{"x-farm-ppr-refresh":"1"}}).then(function(response){if(!response.ok)throw new Error("status "+response.status);return response.text();}).then(function(html){if(window.__FARM_PPR_HYDRATING__)return release();if(!replaceRoot(html))throw new Error("no root");settle();}).catch(retry);}run();})();</script>`;
 }
 
-export function createPreHydrationClickQueueScript(): string {
-  // Inlined into every document, so this stays hand-minified rather than
-  // importing from the island runtime, which has not loaded yet at this point.
-  //
-  // Two kinds of interaction are handled. A click or a submit is HELD: the
-  // event is prevented and queued so the island can hydrate and the action can
-  // be reproduced against the same target. A pointerdown or a focusin is only
-  // OBSERVED: it starts hydration early and native behavior proceeds, so
-  // typing into a field or toggling a checkbox is never swallowed. The event
-  // set here must match FARM_ISLAND_ACTIVATION_EVENTS. Every click is queued,
-  // so two clicks on a counter count two once it hydrates. A repeated submit
-  // of a form, or click on its submit button, is still prevented but queued
-  // once, so a second submit never goes native ahead of the replay and the
-  // form is not submitted twice.
-  const selector = JSON.stringify(FARM_ISLAND_REPLAYABLE_SELECTOR);
-  return `<script>(function(){if(window.__FARM_PREHYDRATION_CLICK_QUEUE__)return;var queue=[];window.__FARM_PREHYDRATION_CLICK_QUEUE__=queue;window.__FARM_HYDRATED__=false;document.documentElement.dataset.farmHydrated="false";function isModified(event){return !!(event.metaKey||event.altKey||event.ctrlKey||event.shiftKey)}function inHydrated(node){return !!(node&&node.closest&&node.closest('[data-farm-island-hydrated="true"]'))}function closestQueuedTarget(target){while(target&&target!==document.documentElement){if(target.matches&&target.matches(${selector}))return target;target=target.parentElement}return null}function announce(target,kind){document.dispatchEvent(new CustomEvent("farm:island-interaction",{detail:{target:target,kind:kind||null}}))}function submits(target,kind){return kind==="submit"||!!(target.form&&target.type==="submit")}function hold(event,target,kind){if(!(submits(target,kind)&&queue.some(function(item){return item.target===target}))){queue.push({target:target,kind:kind,createdAt:Date.now()});announce(target,kind)}event.preventDefault();event.stopImmediatePropagation()}document.addEventListener("click",function(event){if(window.__FARM_HYDRATED__)return;if(event.defaultPrevented||event.button!==0||isModified(event))return;var target=closestQueuedTarget(event.target);if(!target||target.closest&&target.closest("a[href]")||inHydrated(target))return;hold(event,target,"click")},true);document.addEventListener("submit",function(event){if(window.__FARM_HYDRATED__)return;if(event.defaultPrevented)return;var form=event.target;if(!form||form.nodeName!=="FORM"||inHydrated(form))return;hold(event,form,"submit")},true);function observe(event){if(window.__FARM_HYDRATED__)return;var target=event.target;if(!(target&&target.closest)||inHydrated(target))return;announce(target,null)}document.addEventListener("pointerdown",observe,true);document.addEventListener("focusin",observe,true);})();</script>`;
-}
+export { createPreHydrationClickQueueScript } from "./prehydration-hold-script";
 
 /** Options for renderer calls made while rendering a response (its CSP nonce). */
 function rendererRenderOptions(): FarmRendererRenderOptions | undefined {
@@ -748,6 +794,7 @@ export class ServerRenderer {
   private i18nRuntime?: FarmI18nRuntime;
   private viteServer?: ViteDevServer;
   private rendererRuntime!: FarmServerRendererRuntime;
+  private rendererServerModuleCurrent: () => boolean = () => true;
   private reactRenderer?: typeof import("../renderer/react/server");
   private appliedAppSetupModule: unknown;
   private security: ResolvedFarmSecurityConfig;
@@ -770,7 +817,7 @@ export class ServerRenderer {
   }
 
   async initialize(): Promise<void> {
-    if (this.rendererRuntime) return;
+    if (this.rendererRuntime && this.rendererServerModuleCurrent()) return;
 
     // Islands mode: boundaries this server renders address their large prop values. Without it
     // props stay plain JSON, so a dev server restarted with islands mode off stops encoding them.
@@ -800,15 +847,16 @@ export class ServerRenderer {
                 ),
               ).href
             );
+    // A renderer the module runner evaluated: after a full reload of the server graph, pages
+    // import a new copy of its UI library, so render with the new copy of the renderer too.
+    this.rendererServerModuleCurrent =
+      this.viteServer &&
+      !isReactRenderer(this.config.renderer) &&
+      !isFarmRendererDisabled(this.config.renderer)
+        ? createFarmDevModuleCheck(this.viteServer, loaded)
+        : () => true;
     const runtime = loaded as Partial<FarmServerRendererRuntime>;
-    const required = ["createElement", "isValidElement", "renderToString"] as const;
-    for (const key of required) {
-      if (typeof runtime[key] !== "function") {
-        throw new Error(
-          `Renderer \`${this.config.renderer.name}\` server module must export ${key}().`,
-        );
-      }
-    }
+    assertFarmRendererServerModule(runtime, this.config.renderer);
 
     assertFarmRendererStreamingRuntime(
       this.config.renderer.name,
@@ -850,14 +898,17 @@ export class ServerRenderer {
     configureApp((setupModule as { default?: unknown }).default);
   }
 
-  private createPageBoundary(
+  private async createPageBoundary(
     pageElement: unknown,
     options: {
       pageShouldHydrate: boolean;
       layoutShouldHydrate: boolean;
       islandStrategy?: FarmIslandStrategy | null;
     },
-  ): unknown {
+  ): Promise<unknown> {
+    if (options.pageShouldHydrate && !options.layoutShouldHydrate) {
+      pageElement = await this.wrapIslandIntegrationProviders(pageElement);
+    }
     const boundary = this.rendererRuntime.createElement(
       "div",
       {
@@ -873,6 +924,16 @@ export class ServerRenderer {
     return options.pageShouldHydrate && !options.layoutShouldHydrate && this.reactRenderer
       ? this.reactRenderer.markPagePosition(boundary)
       : boundary;
+  }
+
+  /**
+   * The browser hydrates a page island or a route slot as its own root, inside the integration
+   * providers, so the server renders the providers inside it too, or a provider that renders
+   * markup (a Vue `<slot />` renders fragment markers) puts the root's HTML out of step. React
+   * lines an island up with its tree position instead, and its providers render no markup.
+   */
+  private async wrapIslandIntegrationProviders(element: unknown): Promise<unknown> {
+    return this.reactRenderer ? element : this.wrapWithIntegrationProviders(element);
   }
 
   /// The app's `<srcDir>/app/globals.css`, linked only when it exists, as the
@@ -1129,6 +1190,26 @@ export class ServerRenderer {
   }
 
   /**
+   * The page's element. Only React renders an async component, so for any other renderer Farm
+   * awaits an async page itself and hands the renderer what it returned, as the production
+   * server does. A `page.md` page is one: it compiles its Markdown on first render.
+   */
+  private async createPageElement(PageComponent: unknown, pageProps: unknown): Promise<any> {
+    const runtime = this.rendererRuntime;
+    if (
+      isReactRenderer(this.config.renderer) ||
+      typeof PageComponent !== "function" ||
+      PageComponent.constructor?.name !== "AsyncFunction"
+    ) {
+      return runtime.createElement(PageComponent, pageProps);
+    }
+    const result = await (PageComponent as (props: unknown) => Promise<unknown>)(pageProps);
+    return runtime.isValidElement(result)
+      ? result
+      : runtime.createElement(runtime.Fragment, null, result);
+  }
+
+  /**
    * Render the route tree used by client navigation without producing a second
    * document response. Layout markers let the browser preserve the longest
    * common shell and replace only the first changed boundary.
@@ -1139,7 +1220,7 @@ export class ServerRenderer {
     setFarmBasePath(this.config.basePath);
     this.publishSearchPreserveRoutes();
     setFarmTrailingSlashPreference(this.config.trailingSlash);
-    let element = this.rendererRuntime.createElement(input.PageComponent, input.pageProps);
+    let element = await this.createPageElement(input.PageComponent, input.pageProps);
     if (input.LoadingComponent) {
       element = this.rendererRuntime.createElement(
         this.rendererRuntime.Suspense,
@@ -1163,7 +1244,7 @@ export class ServerRenderer {
       // unless the page renders as a server tree the layout's root rebuilds.
       element = await this.isolateServerPage(element, input.serverTree === true);
     }
-    element = this.createPageBoundary(element, {
+    element = await this.createPageBoundary(element, {
       pageShouldHydrate: input.pageShouldHydrate,
       layoutShouldHydrate: input.layoutShouldHydrate,
       islandStrategy: input.islandStrategy,
@@ -1193,7 +1274,11 @@ export class ServerRenderer {
           continue;
         }
         let slotElement = this.rendererRuntime.createElement(slot.module.default, slot.props);
-        if (slot.shouldHydrate !== false) slotElement = this.wrapClientGraph(slotElement);
+        if (slot.shouldHydrate !== false) {
+          slotElement = this.wrapClientGraph(
+            await this.wrapIslandIntegrationProviders(slotElement),
+          );
+        }
         slotProps[slot.name] = this.rendererRuntime.createElement(
           "div",
           {
@@ -1627,7 +1712,7 @@ window.__FARM_I18N__ = ${i18nSnapshot ? serializeInlineValue(i18nSnapshot) : "nu
             path: page.urlPath,
           };
 
-          let pageElement: any = this.rendererRuntime.createElement(PageComponent, pageProps);
+          let pageElement: any = await this.createPageElement(PageComponent, pageProps);
           const pageMetadata = routeManifest.routes.find(
             (entry) => entry.pattern === route?.pattern,
           ) ?? {
@@ -1642,7 +1727,7 @@ window.__FARM_I18N__ = ${i18nSnapshot ? serializeInlineValue(i18nSnapshot) : "nu
               },
           );
           const layoutShouldHydrate = layoutMetadata.some((metadata) => metadata.shouldHydrate);
-          pageElement = this.createPageBoundary(pageElement, {
+          pageElement = await this.createPageBoundary(pageElement, {
             pageShouldHydrate: pageMetadata.shouldHydrate,
             layoutShouldHydrate,
             islandStrategy: pageMetadata.islandStrategy,
@@ -1661,7 +1746,9 @@ window.__FARM_I18N__ = ${i18nSnapshot ? serializeInlineValue(i18nSnapshot) : "nu
           if (pageMetadata.shouldHydrate && !layoutShouldHydrate && this.reactRenderer) {
             pageElement = this.reactRenderer.markLayoutPosition(pageElement);
           }
-          const html = await this.rendererRuntime.renderToString(
+          // Render as a request does, so a page the stream renders (one that suspends or has an
+          // async component) regenerates, and head markup the renderer emits stays.
+          const { html, head: rendererHead } = await this.renderElementToDocumentParts(
             await this.wrapWithIntegrationProviders(pageElement),
           );
 
@@ -1675,10 +1762,13 @@ window.__FARM_I18N__ = ${i18nSnapshot ? serializeInlineValue(i18nSnapshot) : "nu
             pageProps: pageProps as unknown as PageProps,
             pathname: page.urlPath,
           });
-          const { title, tags, hasFavicon } = renderMetadataHead(mergedMetadata);
+          const { title, tags, hasFavicon, hasExplicitTitle } = renderMetadataHead(mergedMetadata);
+          // As on a request, a renderer-emitted <title> replaces the fallback title.
+          const titleTag =
+            !hasExplicitTitle && /<title[\s>]/i.test(rendererHead) ? "" : `<title>${title}</title>`;
           const metadataHead = `${
             hasFavicon ? "" : '<link rel="icon" href="data:,">\n  '
-          }<title>${title}</title>${tags}`;
+          }${titleTag}${tags}${rendererHead}`;
           // No request drives a background regeneration, so the cached document's
           // hreflang alternates resolve against metadataBase only.
           const fullDocument = this.createFullHTML(
@@ -1975,14 +2065,11 @@ window.__FARM_I18N__ = ${i18nSnapshot ? serializeInlineValue(i18nSnapshot) : "nu
         params,
       });
 
-      // Islands mode: a form or client component posting a server action to this page. Loading
-      // the page and its layouts registers the `"use server"` modules they import, as the
-      // production server does at startup.
+      // Islands mode, or a renderer other than React with server actions on: a form or client
+      // component posting a server action to this page. Loading the page and its layouts registers
+      // the `"use server"` modules they import, as the production server does at startup.
       let actionRequest: Request | undefined;
-      if (
-        req.method === "POST" &&
-        resolveFarmServerComponentsMode(this.config.experimental?.serverComponents) === "islands"
-      ) {
+      if (req.method === "POST" && resolveFarmIslxActionsMode(this.config) !== null) {
         await Promise.all([
           this.routeManager.loadRouteModule(route.modulePath),
           ...layouts.map((layout) => this.routeManager.loadLayoutModule(layout.modulePath)),
@@ -2208,14 +2295,6 @@ window.__FARM_I18N__ = ${i18nSnapshot ? serializeInlineValue(i18nSnapshot) : "nu
         );
         if (loadingModule.default) {
           LoadingFallbackComponent = loadingModule.default;
-        }
-      }
-
-      let ErrorFallbackComponent: any = null;
-      if (errorBoundaryEntry) {
-        const errorModule = await this.routeManager.loadRouteModule(errorBoundaryEntry.modulePath);
-        if (errorModule.default) {
-          ErrorFallbackComponent = errorModule.default;
         }
       }
 
@@ -2460,7 +2539,7 @@ window.__FARM_I18N__ = ${i18nSnapshot ? serializeInlineValue(i18nSnapshot) : "nu
       await _runWithMiddlewareData(middlewareDataForContext, async () => {
         await _runWithMiddlewareContext(middlewareContext, async () => {
           await _runWithCurrentRequest(currentRequest, async () => {
-            let pageElement: any = this.rendererRuntime.createElement(PageComponent, pageProps);
+            let pageElement: any = await this.createPageElement(PageComponent, pageProps);
 
             // An islands navigation is swapped into a page already on screen, where a fallback
             // would paint, so it arrives without loading.tsx, as on the production server.
@@ -2504,7 +2583,7 @@ window.__FARM_I18N__ = ${i18nSnapshot ? serializeInlineValue(i18nSnapshot) : "nu
             // Every route gets a stable HTML boundary. Server-only pages keep
             // native markup with no React root; interactive pages hydrate this
             // exact boundary.
-            pageElement = this.createPageBoundary(pageElement, {
+            pageElement = await this.createPageBoundary(pageElement, {
               pageShouldHydrate: isClientComponent || shouldHydrate,
               layoutShouldHydrate: shouldHydrateLayout,
               islandStrategy: hydrationIslandStrategy,
@@ -2582,7 +2661,11 @@ window.__FARM_I18N__ = ${i18nSnapshot ? serializeInlineValue(i18nSnapshot) : "nu
                   slot.module.default,
                   slot.props,
                 );
-                if (slot.shouldHydrate) slotElement = this.wrapClientGraph(slotElement);
+                if (slot.shouldHydrate) {
+                  slotElement = this.wrapClientGraph(
+                    await this.wrapIslandIntegrationProviders(slotElement),
+                  );
+                }
                 slotElement = this.rendererRuntime.createElement(
                   "div",
                   {
@@ -2619,25 +2702,6 @@ window.__FARM_I18N__ = ${i18nSnapshot ? serializeInlineValue(i18nSnapshot) : "nu
 
             if (shouldHydrateLayout) {
               wrappedElement = this.wrapClientGraph(wrappedElement);
-            }
-
-            if (ErrorFallbackComponent && this.rendererRuntime.ErrorBoundary) {
-              wrappedElement = this.rendererRuntime.createElement(
-                this.rendererRuntime.ErrorBoundary,
-                {
-                  Fallback: ErrorFallbackComponent,
-                  fallbackProps: {
-                    ...createRouteStateProps({
-                      params,
-                      searchParamsObject,
-                      path: pathname,
-                      middlewareMap,
-                      pluginExposedContext,
-                    }),
-                  },
-                },
-                wrappedElement,
-              );
             }
 
             if (
@@ -3545,10 +3609,13 @@ window.__FARM_I18N__ = ${i18nSnapshot ? serializeInlineValue(i18nSnapshot) : "nu
       searchParams: createFarmSearchParams(options.searchParamsObject),
       path: options.pagePath,
     };
-    const handlerResult =
-      typeof imageModule.default === "function"
-        ? await (imageModule.default as any)(imageProps)
-        : imageModule.default;
+    const handlerResult = await resolveFarmMetadataImageValue(imageModule, imageProps, {
+      renderer: this.getMetadataImageRenderer(),
+      component: isRendererCompiledComponent(
+        options.image.modulePath,
+        this.config.renderer?.componentExtensions ?? [],
+      ),
+    });
 
     await this.writeMetadataImageResponse(req, res, handlerResult, imageModule);
   }
@@ -3563,9 +3630,14 @@ window.__FARM_I18N__ = ${i18nSnapshot ? serializeInlineValue(i18nSnapshot) : "nu
     const response = await createFarmMetadataImageResponse(value, imageModule, {
       method: req.method,
       ifNoneMatch: Array.isArray(ifNoneMatch) ? ifNoneMatch[0] : ifNoneMatch,
-      renderer: isReactRenderer(this.config.renderer) ? undefined : this.rendererRuntime,
+      renderer: this.getMetadataImageRenderer(),
     });
     await sendWebResponse(res as any, response);
+  }
+
+  /** The renderer that draws a metadata image: none for React, whose elements Satori reads directly. */
+  private getMetadataImageRenderer() {
+    return isReactRenderer(this.config.renderer) ? undefined : this.rendererRuntime;
   }
 
   private async writeStaticMetadataImageResponse(
@@ -3713,6 +3785,33 @@ window.__FARM_I18N__ = ${i18nSnapshot ? serializeInlineValue(i18nSnapshot) : "nu
     }
   }
 
+  /**
+   * Islands mode: a page whose route hydrates nothing as a root hydrates only islands, which hold
+   * their own clicks, so nothing else on it is held, as in production.
+   */
+  private isIslandsOnlyPage(req: FarmRequest): boolean {
+    return (
+      this.islandValues() &&
+      (req as any).__FARM_PAGE_SHOULD_HYDRATE__ !== true &&
+      (req as any).__FARM_LAYOUT_SHOULD_HYDRATE__ !== true &&
+      (req as any).__FARM_HAS_HYDRATABLE_ROUTE_SLOTS__ !== true
+    );
+  }
+
+  /**
+   * The head script that holds a page's clicks and submits until it hydrates, which the client
+   * replays once it has. Production writes it into the same pages, streamed or buffered.
+   */
+  private renderPreHydrationHold(req: FarmRequest, bootClient: boolean): string {
+    const hydrates =
+      (req as any).__FARM_IS_CLIENT_COMPONENT__ === true ||
+      (req as any).__FARM_SHOULD_HYDRATE__ === true ||
+      (req as any).__FARM_HAS_HYDRATABLE_ROUTE_SLOTS__ === true;
+    return hydrates && !bootClient && !this.isIslandsOnlyPage(req)
+      ? createPreHydrationClickQueueScript()
+      : "";
+  }
+
   private async renderBufferedSSR(
     element: unknown,
     req: FarmRequest,
@@ -3787,6 +3886,8 @@ window.__FARM_I18N__ = ${getFarmI18nClientSnapshot() ? serializeInlineValue(getF
       const farmClientScript = farmScripts(
         `<script type="module" src="/@farm/client.js"></script>`,
       );
+      // This document always starts with the full client entry, never the islands boot.
+      const holdScript = farmScripts(this.renderPreHydrationHold(req, false));
       const { html: content, head: rendererHead } = await this.renderElementToDocumentParts(
         element,
         {
@@ -3865,6 +3966,7 @@ window.__FARM_I18N__ = ${getFarmI18nClientSnapshot() ? serializeInlineValue(getF
             viteClientScript,
             rendererHydrationScript,
             bootstrapScript,
+            holdScript,
           ]
             .filter(Boolean)
             .join("\n  "),
@@ -3888,7 +3990,7 @@ window.__FARM_I18N__ = ${getFarmI18nClientSnapshot() ? serializeInlineValue(getF
     .join("")}
   ${viteClientScript}
   ${rendererHydrationScript}
-  ${bootstrapScript}
+  ${bootstrapScript}${holdScript ? `\n  ${holdScript}` : ""}
 </head>
 <body class="">
   <div id="root">${content}</div>
@@ -3982,20 +4084,26 @@ window.__FARM_I18N__ = ${getFarmI18nClientSnapshot() ? serializeInlineValue(getF
       onSuspenseHoleDetected?: () => void;
     } = {},
   ): Promise<void> {
-    const renderToPipeableStream = this.rendererRuntime.renderToPipeableStream;
+    const runtime = this.rendererRuntime;
+    const renderToPipeableStream =
+      runtime.renderToPipeableStream ??
+      (getFarmRendererStreamingCapabilitiesForRuntime(this.config.renderer, "node").web &&
+      runtime.renderToReadableStream
+        ? pipeFarmRendererWebStream(runtime)
+        : undefined);
     const fullDocumentRouteKey =
       options.observabilityRoute || (req as any).__FARM_ROUTE__ || req.url || "/";
-    // A route known to render a full-document layout streams that document: React's output is
-    // held until its <body>, so Farm's head assets go into the layout's head, as production
-    // does. A static-shell capture and other renderers take the buffered path, which composes
-    // the whole document. So does the anonymous check behind a page's Markdown source, where a
-    // late redirect() must still set the status.
+    // A route known to render a full-document layout streams that document, on any renderer
+    // that streams: the renderer's output is held until its <body>, so Farm's head assets go
+    // into the layout's head, as production does. A static-shell capture takes the buffered
+    // path, which composes the whole document. So does the anonymous check behind a page's
+    // Markdown source, where a late redirect() must still set the status.
     const streamDocument =
       fullDocumentRoutes.has(fullDocumentRouteKey) || (await this.rootLayoutRendersDocument(req));
     if (
       !renderToPipeableStream ||
       _isFarmMarkdownPageCheck(req.headers?.[FARM_MARKDOWN_PAGE_CHECK_HEADER]) ||
-      (streamDocument && (options.captureStaticShell || !isReactRenderer(this.config.renderer)))
+      (streamDocument && options.captureStaticShell)
     ) {
       return this.renderBufferedSSR(element, req, res, clearMiddlewareData, options);
     }
@@ -4097,14 +4205,9 @@ window.__FARM_MANIFEST__ = ${JSON.stringify(clientManifest)};
 window.__FARM_INTEGRATION_API_MANIFEST__ = ${JSON.stringify(getRegisteredIntegrationAPIManifest())};
 window.__FARM_I18N__ = ${getFarmI18nClientSnapshot() ? serializeInlineValue(getFarmI18nClientSnapshot()) : "null"};
 </script>${renderFarmFormStateScript()}`;
-      // Islands mode: a page whose route hydrates nothing as a root hydrates only islands, which
-      // hold their own clicks, so nothing else on it is held, as in production. It starts with the
-      // boot entry, as in production, unless the app runs client code at load (RFC 0003, section 10).
-      const islandsOnlyPage =
-        this.islandValues() &&
-        (req as any).__FARM_PAGE_SHOULD_HYDRATE__ !== true &&
-        (req as any).__FARM_LAYOUT_SHOULD_HYDRATE__ !== true &&
-        (req as any).__FARM_HAS_HYDRATABLE_ROUTE_SLOTS__ !== true;
+      // An islands-only page starts with the boot entry, as in production, unless the app runs
+      // client code at load (RFC 0003, section 10).
+      const islandsOnlyPage = this.isIslandsOnlyPage(req);
       // A page whose route hydrates as one root that waits starts with it too, naming that root.
       const rootStrategy = (req as any).__FARM_ISLAND_STRATEGY__ as string | undefined;
       const waitingRoot =
@@ -4124,14 +4227,10 @@ window.__FARM_I18N__ = ${getFarmI18nClientSnapshot() ? serializeInlineValue(getF
         !staticShellParts &&
         resolveFarmPlatform() !== "mobile" &&
         canBootFarmIslandsClient(this.config);
-      const hydrationClickQueueScript =
-        !islandsOnlyPage &&
-        !bootClient &&
-        (isClientComponent ||
-          (req as any).__FARM_SHOULD_HYDRATE__ === true ||
-          (req as any).__FARM_HAS_HYDRATABLE_ROUTE_SLOTS__ === true)
-          ? createPreHydrationClickQueueScript()
-          : "";
+      const hydrationClickQueueScript = this.renderPreHydrationHold(req, bootClient);
+      // What a renderer needs before it hydrates, such as Solid's hydration globals. The buffered
+      // document and production write it too.
+      const rendererHydrationScript = this.rendererRuntime.generateHydrationScript?.() || "";
 
       const {
         title,
@@ -4215,7 +4314,7 @@ window.__FARM_I18N__ = ${getFarmI18nClientSnapshot() ? serializeInlineValue(getF
   <title>${title}</title>${metaTags}${i18nAlternateTags}
   ${fontHead}
   ${globalStylesheetLink}${devStyleLinks.map((l) => `\n  ${l}`).join("")}
-  <script type="module" src="/@vite/client"></script>
+  <script type="module" src="/@vite/client"></script>${rendererHydrationScript ? `\n  ${rendererHydrationScript}` : ""}
   ${propsScript}
   ${hydrationClickQueueScript}
 </head>
@@ -4288,6 +4387,7 @@ window.__FARM_I18N__ = ${getFarmI18nClientSnapshot() ? serializeInlineValue(getF
                             globalStylesheetLink,
                             ...devStyleLinks,
                             `<script type="module" src="/@vite/client"></script>`,
+                            rendererHydrationScript,
                             propsScript,
                             hydrationClickQueueScript,
                           ]
@@ -4580,11 +4680,20 @@ window.__FARM_I18N__ = ${getFarmI18nClientSnapshot() ? serializeInlineValue(getF
       : url;
   }
 
+  /**
+   * The not-found page the renderer's `routes()` mapped, or undefined when the renderer has no route
+   * rules and the not-found lookup scans `src/app` as before.
+   */
+  private getRendererNotFoundPath(): string | null | undefined {
+    return this.config.renderer?.routes ? this.routeManager.getRendererNotFoundPath() : undefined;
+  }
+
   /** The app's not-found component, or null when it relies on the built-in page. */
   private async loadNotFoundModule(): Promise<Record<string, any> | null> {
     const notFoundPath = resolveFarmNotFoundComponentPath(
       this.config,
       getFarmAppDirectories(this.config),
+      this.getRendererNotFoundPath(),
     );
     if (!notFoundPath) return null;
     return (await this.routeManager.loadRouteModule(notFoundPath)) as Record<string, any>;
@@ -4692,9 +4801,14 @@ window.__FARM_I18N__ = ${getFarmI18nClientSnapshot() ? serializeInlineValue(getF
     const appDir = path.join(this.config.root, this.config.srcDir, "app");
     const notFoundExtensions = getFarmRendererComponentExtensions(this.config.renderer);
     let layoutModule: Record<string, any> | null = null;
+    // A renderer's route rules can put the root layout anywhere; the route table has it.
+    const rendererRootLayout = this.config.renderer?.routes
+      ? this.routeManager.getLayouts().get("/")?.modulePath
+      : undefined;
     try {
-      for (const ext of notFoundExtensions) {
-        const layoutPath = path.join(appDir, `layout${ext}`);
+      for (const layoutPath of rendererRootLayout
+        ? [rendererRootLayout]
+        : notFoundExtensions.map((ext) => path.join(appDir, `layout${ext}`))) {
         if (fs.existsSync(layoutPath)) {
           layoutModule = (await this.routeManager.loadLayoutModule(layoutPath)) as Record<
             string,
@@ -4708,6 +4822,7 @@ window.__FARM_I18N__ = ${getFarmI18nClientSnapshot() ? serializeInlineValue(getF
       const notFoundPath = resolveFarmNotFoundComponentPath(
         this.config,
         getFarmAppDirectories(this.config),
+        this.getRendererNotFoundPath(),
       );
 
       if (notFoundPath) {

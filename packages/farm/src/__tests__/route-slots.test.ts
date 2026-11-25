@@ -26,6 +26,19 @@ describe("route slot conventions", () => {
     ]);
   });
 
+  it("recognizes a third-party renderer's pages inside slots", () => {
+    const slot = parseRouteSlotFile("feed/@modal/page.leaf");
+
+    expect(slot?.name).toBe("modal");
+    expect(routeSegments("feed/@modal/page.leaf")).toEqual(["feed"]);
+    expect(parseRouteSlotFile("feed/@modal/default.leaf")?.fallback).toBe(true);
+  });
+
+  it("leaves Markdown pages out of slots", () => {
+    expect(parseRouteSlotFile("feed/@modal/page.md")).toBeNull();
+    expect(parseRouteSlotFile("feed/@modal/page.mdx")).toBeNull();
+  });
+
   it("removes named slots and same-level interception markers from public paths", () => {
     const slot = parseRouteSlotFile("feed/@modal/(.)photo/[id]/page.tsx");
 

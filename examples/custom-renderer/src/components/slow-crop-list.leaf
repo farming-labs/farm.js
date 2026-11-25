@@ -1,0 +1,12 @@
+<script>
+  import { loadCropsSlowly } from "../server/slow-crops";
+
+  // A render script that awaits makes an async component.
+  const crops = await loadCropsSlowly();
+</script>
+
+<ul id="slow-crops">
+  <leaf:for each="crop" in="crops">
+    <li>{{ crop }}</li>
+  </leaf:for>
+</ul>

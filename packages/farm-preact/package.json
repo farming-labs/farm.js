@@ -1,6 +1,6 @@
 {
   "name": "@farm.js/preact",
-  "version": "0.1.0-beta.39",
+  "version": "0.1.0-beta.41",
   "description": "Preact renderer for FARMJS applications",
   "keywords": [
     "farmjs",
@@ -75,7 +75,7 @@
     "vitest": "5.0.5"
   },
   "peerDependencies": {
-    "@farm.js/core": ">=0.1.0 <0.2.0",
+    "@farm.js/core": ">=0.1.0 <0.3.0",
     "@farm.js/react": ">=0.1.0-beta.39 <0.2.0",
     "preact": "^10.29.8"
   },

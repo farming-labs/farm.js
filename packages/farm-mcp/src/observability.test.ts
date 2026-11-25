@@ -4,6 +4,7 @@ import { z } from "zod";
 import { createEndpoint } from "@farm.js/core/api";
 import { invokeAPIRouteEndpoint, mergePluginAPIRoutes } from "@farm.js/core/api/runtime";
 import {
+  _farmToolCallPayload,
   configureFarmObservability,
   onFarmEvent,
   resetFarmObservability,
@@ -135,6 +136,20 @@ describe("MCP completion events", () => {
       });
       expect((events[index] as any).durationMs).toBeGreaterThanOrEqual(0);
     }
+    // Each call's arguments and result ride along for Farm Infra analytics only, out of the
+    // event's own fields.
+    expect(events.map((event) => _farmToolCallPayload(event)?.arguments)).toEqual([
+      { secret: "private-input" },
+      {},
+      {},
+      { secret: "private-input" },
+      { params: { id: "private-route-value" } },
+    ]);
+    expect(_farmToolCallPayload(events[0])?.result).toMatchObject({
+      structuredContent: { result: { isError: true, secret: "private-result" } },
+    });
+    for (const event of events.slice(1))
+      expect(_farmToolCallPayload(event)?.result).toMatchObject({ isError: true });
     expect(JSON.stringify(events)).not.toContain("private-");
   });
 

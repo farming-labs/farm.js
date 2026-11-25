@@ -605,17 +605,17 @@ function MetricStrip() {
           : getMetricMinimum(key) / farmValue;
 
         return (
-          <div key={key} className="bg-black px-5 py-4">
-            <p className="font-mono text-[8px] font-normal uppercase tracking-normal text-white/42">
+          <div key={key} className="bg-black px-5 py-5">
+            <p className="font-mono text-[10px] font-normal uppercase tracking-normal text-white/42">
               {label}
             </p>
-            <div className="mt-1 flex flex-wrap items-baseline gap-x-2 gap-y-1">
-              <span className="font-mono text-sm font-medium tabular-nums tracking-normal text-white">
+            <div className="mt-1.5 flex flex-wrap items-baseline gap-x-2 gap-y-1">
+              <span className="font-mono text-lg font-medium tabular-nums tracking-normal text-white">
                 {formatMetricValue(key, farmValue)}
               </span>
               <span
                 className={
-                  "font-mono text-[8px] font-normal uppercase tracking-normal " +
+                  "font-mono text-[10px] font-normal uppercase tracking-normal " +
                   (isLead ? "text-white/56" : "text-white/34")
                 }
               >

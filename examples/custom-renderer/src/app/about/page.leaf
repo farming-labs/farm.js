@@ -1,0 +1,18 @@
+<script module>
+  export const metadata = { title: "About leaf" };
+</script>
+
+<script>
+  import { Image } from "farm-leaf/bindings";
+  import field from "./field.png";
+</script>
+
+<!-- No `hydrate` export: this page ships HTML and no JavaScript of its own. -->
+<section>
+  <h1>About leaf</h1>
+  <p id="about">
+    leaf is a small UI library that has never heard of Farm. The farm-leaf adapter tells Farm
+    how to render it.
+  </p>
+  <Image id="field" src="{{ field }}" alt="A field under a pale sky" placeholder="blur" />
+</section>

@@ -1,5 +1,6 @@
 "use client";
 
+import type { ActionReturn } from "svelte/action";
 import { readable, type Readable } from "svelte/store";
 import {
   createRendererAction,
@@ -7,6 +8,7 @@ import {
   createRendererQuery,
   createRendererRouter,
   createRendererTheme,
+  submitRendererActionForm,
   type FarmActionOptions,
   type FarmActionSnapshot,
   type FarmActionSubmit,
@@ -65,6 +67,12 @@ export type FarmSvelteAction<TInput, TResult, TError extends Error = Error> = Fa
 > &
   Readable<FarmActionSnapshot<TResult, TError>> & {
     reset(): void;
+    /**
+     * A Svelte action, `<form method="post" use:action.enhance>`, that submits the form's fields
+     * through this action, as React's `useAction().Form` does. An `onsubmit` handler that calls
+     * `preventDefault()` keeps the form from submitting.
+     */
+    enhance(form: HTMLFormElement): ActionReturn;
   };
 
 export function createAction<TInput, TResult, TError extends Error = Error>(
@@ -78,6 +86,11 @@ export function createAction<TInput, TResult, TError extends Error = Error>(
     action.submit(input as TInput | FormData)) as FarmActionSubmit<TInput, TResult>;
   return Object.assign(call, readableFarmStore(action), {
     reset: () => action.reset(),
+    enhance(form: HTMLFormElement): ActionReturn {
+      const onSubmit = (event: Event) => void submitRendererActionForm(action, event);
+      form.addEventListener("submit", onSubmit);
+      return { destroy: () => form.removeEventListener("submit", onSubmit) };
+    },
   });
 }
 
@@ -120,4 +133,13 @@ export function createI18n(): FarmSvelteI18n {
     t: i18n.t,
     setLocale: i18n.setLocale,
   });
+}
+
+/**
+ * Wraps any `FarmClientStore`, such as a store from `createStore` in
+ * `@farm.js/core/renderer-client`, in a Svelte readable store, so components can read it as
+ * `$store`. It subscribes while the readable has subscribers.
+ */
+export function createReadable<T>(store: FarmClientStore<T>): Readable<T> {
+  return readableFarmStore(store);
 }

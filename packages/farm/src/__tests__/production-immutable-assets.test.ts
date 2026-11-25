@@ -160,7 +160,7 @@ async function cacheControl(origin: string, pathname: string) {
 describe("production caching of content-hashed client assets (node-server)", () => {
   // it.for, not it.each: only it.for hands the test context over, so ctx.skip() works without bun.
   it.for(["node-server", "bun"] as const)(
-    "serves hashed client files immutable and public files revalidatable ($0)",
+    "serves hashed client files immutable, compressed, and public files revalidatable ($0)",
     async (preset, ctx) => {
       if (preset === "bun" && !hasBun) ctx.skip();
       const { root, files, production } = await buildAndStart(
@@ -196,6 +196,20 @@ describe("production caching of content-hashed client assets (node-server)", () 
           const result = await cacheControl(production.origin, `/${file}`);
           expect(result.status, file).toBe(200);
           expect(result.cacheControl ?? "", file).not.toContain("immutable");
+        }
+
+        // The server sends a client file's brotli copy to a browser that accepts brotli,
+        // and its gzip copy to one that accepts only gzip.
+        const source = await fs.readFile(
+          path.join(root, ".farm", ".output", "public", entry),
+          "utf8",
+        );
+        for (const encoding of ["br", "gzip"]) {
+          const compressed = await fetch(`${production.origin}/${entry}`, {
+            headers: { "accept-encoding": encoding === "br" ? "gzip, br" : "gzip" },
+          });
+          expect(compressed.headers.get("content-encoding"), encoding).toBe(encoding);
+          expect(await compressed.text(), encoding).toBe(source);
         }
 
         // A chunk an older deployment referenced is a 404 that no cache keeps.

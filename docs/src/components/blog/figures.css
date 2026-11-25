@@ -13,7 +13,7 @@
   aspect-ratio: 760 / 400;
   min-width: 600px;
   margin-top: 12px;
-  font-family: var(--font-geist-mono), ui-monospace, monospace;
+  font-family: var(--font-graft-mono), ui-monospace, monospace;
   font-size: clamp(9px, calc(1.62cqw * var(--bf-scale, 1)), 13px);
   color: #9a9a9a;
 }
@@ -104,7 +104,7 @@
 }
 .bf-label {
   color: #e6e6e6;
-  font-family: var(--font-geist-sans), ui-sans-serif, sans-serif;
+  font-family: var(--font-graft-sans), ui-sans-serif, sans-serif;
   font-size: 1em;
   letter-spacing: -0.01em;
 }
@@ -140,7 +140,7 @@
   margin: 0 -0.5em;
   padding: 0 0.5em;
   border-radius: 2px;
-  font-family: var(--font-geist-sans), ui-sans-serif, sans-serif;
+  font-family: var(--font-graft-sans), ui-sans-serif, sans-serif;
   font-size: 1em;
   color: #d6d6d6;
 }
@@ -162,7 +162,7 @@
 }
 .bf-flag {
   margin-left: auto;
-  font-family: var(--font-geist-mono), ui-monospace, monospace;
+  font-family: var(--font-graft-mono), ui-monospace, monospace;
   font-size: 0.72em;
   letter-spacing: 0.06em;
   text-transform: uppercase;
@@ -197,7 +197,7 @@
   border: 1px solid rgb(255 255 255 / 0.16);
   border-radius: 1.3em;
   background: #121212;
-  font-family: var(--font-geist-sans), ui-sans-serif, sans-serif;
+  font-family: var(--font-graft-sans), ui-sans-serif, sans-serif;
   font-size: 0.88em;
   line-height: 1.4;
   color: #cfcfcf;
@@ -290,7 +290,7 @@
   padding: 0.5em 0.6em;
   border: 1px solid rgb(255 255 255 / 0.12);
   border-radius: 3px;
-  font-family: var(--font-geist-sans), ui-sans-serif, sans-serif;
+  font-family: var(--font-graft-sans), ui-sans-serif, sans-serif;
   font-size: 0.84em;
   color: #cfcfcf;
 }
@@ -392,7 +392,7 @@
 .bf-copy {
   width: auto !important;
   padding: 0 0.6rem !important;
-  font-family: var(--font-geist-mono), ui-monospace, monospace;
+  font-family: var(--font-graft-mono), ui-monospace, monospace;
   font-size: 0.7rem;
   letter-spacing: 0.06em;
   text-transform: uppercase;
@@ -487,7 +487,7 @@
   left: 0;
   margin-top: 0.4rem;
   text-align: center;
-  font-family: var(--font-geist-mono), ui-monospace, monospace;
+  font-family: var(--font-graft-mono), ui-monospace, monospace;
   font-size: 0.72rem;
   letter-spacing: 0.06em;
   text-transform: uppercase;
@@ -608,7 +608,7 @@
 .bf-item-name {
   overflow: hidden;
   color: #ededed;
-  font-family: var(--font-geist-sans), ui-sans-serif, sans-serif;
+  font-family: var(--font-graft-sans), ui-sans-serif, sans-serif;
   font-size: 0.92em;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -853,7 +853,7 @@
   justify-content: space-between;
   gap: 0.75em;
   color: #8f8f8f;
-  font-family: var(--font-geist-mono), ui-monospace, monospace;
+  font-family: var(--font-graft-mono), ui-monospace, monospace;
   font-size: 0.68rem;
   letter-spacing: 0.08em;
   line-height: 1.5;
@@ -906,7 +906,7 @@
 .blog-video figcaption {
   margin-top: 0.8rem;
   text-align: center;
-  font-family: var(--font-geist-mono), ui-monospace, monospace;
+  font-family: var(--font-graft-mono), ui-monospace, monospace;
   font-size: 0.72rem;
   letter-spacing: 0.06em;
   text-transform: uppercase;

@@ -1,3 +1,4 @@
+import { resolveFarmRendererServerComponentsIslands } from "./renderer-islands";
 import { resolveFarmServerComponentsMode } from "./server-components-mode";
 import type { FarmSchemaConfig } from "./schema";
 import { assertPluginDependencies } from "./plugin-dependencies";
@@ -115,6 +116,10 @@ import type { ResolvedFarmThemeConfig } from "./theme/types";
 import type { OpenAPIPathItemObject, OpenAPISecurityMode } from "./openapi/types";
 import { isFarmRendererDisabled, isReactRenderer, resolveFarmRenderer } from "./renderer";
 import type { FarmRenderer } from "./renderer";
+import {
+  assertFarmDocsAdapterRenderer,
+  getFarmDocsAdapterUIModule,
+} from "./docs/adapter-descriptor";
 import { applyFarmDocsFrameworkAutoDetection } from "./docs/framework-detect";
 import { resolveFarmAPIConfig, type ResolvedFarmAPIConfig } from "./api/config";
 
@@ -1088,10 +1093,8 @@ export async function resolveDocsConfig(
       configOverrides,
     },
   );
-  if (
-    roots.length > 0 &&
-    !(docsOptions.adapter && docsOptions.adapter.server && docsOptions.adapter.react)
-  ) {
+  const adapter = docsOptions.adapter || undefined;
+  if (roots.length > 0 && !(adapter?.server && getFarmDocsAdapterUIModule(adapter))) {
     throw new Error(
       "Docs roots require a docs adapter such as @farming-labs/farmjs; Farm's built-in docs " +
         "renderer serves a single docs root. Install the adapter, or remove the roots from " +
@@ -1269,6 +1272,8 @@ export async function resolveConfig(
     mode,
   });
   userConfig = layerResolution.config;
+  // Throws for a renderer without islands; see `resolveFarmRendererServerComponentsIslands`.
+  const rendererServerComponentsIslands = resolveFarmRendererServerComponentsIslands(userConfig);
 
   if ((userConfig as Record<string, unknown>).typescript !== undefined) {
     logger.warn(
@@ -1282,8 +1287,8 @@ export async function resolveConfig(
     );
   }
 
-  // The docs adapter runtime is React-only today; other renderers keep the
-  // embedded docs handler without any migration notice.
+  // The detected adapter's UI is React's. An app with another renderer keeps the embedded docs
+  // handler without any migration notice, or wires an adapter for its renderer with withDocs().
   if (isReactRenderer(resolveFarmRenderer(userConfig.renderer))) {
     userConfig = await applyFarmDocsFrameworkAutoDetection(userConfig, {
       root: userConfig.root || projectRoot,
@@ -1332,6 +1337,8 @@ export async function resolveConfig(
   const srcDir = userConfig.srcDir || "src";
   setFarmProjectSourceDir(root, srcDir);
   const docs = await resolveDocsConfig(userConfig.docs, { root, srcDir });
+  const renderer = resolveFarmRenderer(userConfig.renderer);
+  assertFarmDocsAdapterRenderer(docs, renderer.name);
   const md = resolveMarkdownConfig(userConfig.md);
   const mdx = resolveMdxConfig(userConfig.mdx);
   const env = resolveEnv(userConfig.env, process.env);
@@ -1410,7 +1417,7 @@ export async function resolveConfig(
     layers: layerResolution.layers,
     outDir: userConfig.outDir || "dist",
     basePath,
-    renderer: resolveFarmRenderer(userConfig.renderer),
+    renderer,
     preset: deploy.preset || "node-server",
     deploy,
     docs,
@@ -1441,6 +1448,8 @@ export async function resolveConfig(
           : "off",
       ppr: false,
       ...userConfig.experimental,
+      // Another renderer's islands run without Farm's server components engine, which renders React.
+      ...(rendererServerComponentsIslands ? { serverComponents: false } : {}),
     },
     agent: resolveFarmAgentConfig(userConfig.agent, {
       docs: docs.enabled,

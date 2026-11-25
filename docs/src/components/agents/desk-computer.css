@@ -76,7 +76,7 @@
 }
 .dc-screen {
   fill: #e5e5e5;
-  font-family: var(--font-geist-mono), ui-monospace, monospace;
+  font-family: var(--font-graft-mono), ui-monospace, monospace;
 }
 .dc-meta {
   fill: #737373;
@@ -162,7 +162,7 @@
 .desk-computer figcaption {
   margin-top: 14px;
   color: #737373;
-  font-family: var(--font-geist-mono), ui-monospace, monospace;
+  font-family: var(--font-graft-mono), ui-monospace, monospace;
   font-size: 10px;
   letter-spacing: 0.08em;
   text-transform: uppercase;

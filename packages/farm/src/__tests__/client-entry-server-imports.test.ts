@@ -12,6 +12,7 @@ const BROWSER_ENTRIES = [
   "renderer-client.ts",
   "client/lifecycle.ts",
   "client/production-runtime.ts",
+  "client/spa-router.ts",
   "api-client.ts",
   "query/client.ts",
   "server-fn-client.ts",
@@ -20,6 +21,7 @@ const BROWSER_ENTRIES = [
   "router.ts",
   "theme/client.tsx",
   "i18n/client.tsx",
+  "islx/actions-client.ts",
 ];
 
 // Server-side observability. Bundling it into the browser ships OpenTelemetry
@@ -85,28 +87,32 @@ function resolveLocal(from: string, specifier: string): string | undefined {
   return undefined;
 }
 
-/** The import chain from `entry` to a server-only module, if one exists. */
-function findServerOnlyChain(entry: string): string[] | undefined {
+/** The import chain from `entry` to a forbidden package or local module, if one exists. */
+function findImportChain(
+  entry: string,
+  forbiddenPackage: (specifier: string) => boolean,
+  forbiddenFiles: ReadonlySet<string> = new Set(),
+): string[] | undefined {
   const start = path.join(SRC, entry);
   const parent = new Map<string, string | null>([[start, null]]);
   const queue = [start];
   const chainTo = (file: string, last: string) => {
     const chain = [last];
     for (let current: string | null = file; current; current = parent.get(current) ?? null) {
-      chain.unshift(path.relative(SRC, current));
+      chain.unshift(path.relative(SRC, current).split(path.sep).join("/"));
     }
     return chain;
   };
   while (queue.length > 0) {
     const file = queue.shift()!;
     for (const specifier of runtimeImports(file)) {
-      if (SERVER_ONLY_PACKAGES.has(specifier)) return chainTo(file, specifier);
+      if (forbiddenPackage(specifier)) return chainTo(file, specifier);
       if (!specifier.startsWith(".")) continue;
       const resolved = resolveLocal(file, specifier);
       if (!resolved || parent.has(resolved)) continue;
       parent.set(resolved, file);
-      if (SERVER_ONLY.has(path.relative(SRC, resolved))) {
-        return chainTo(resolved, "(server-only)");
+      if (forbiddenFiles.has(path.relative(SRC, resolved))) {
+        return chainTo(resolved, "(forbidden)");
       }
       queue.push(resolved);
     }
@@ -116,6 +122,45 @@ function findServerOnlyChain(entry: string): string[] | undefined {
 
 describe("browser entries", () => {
   it.each(BROWSER_ENTRIES)("%s does not import server observability", (entry) => {
-    expect(findServerOnlyChain(entry)).toBeUndefined();
+    expect(
+      findImportChain(entry, (specifier) => SERVER_ONLY_PACKAGES.has(specifier), SERVER_ONLY),
+    ).toBeUndefined();
+  });
+});
+
+// Solid, Vue, Svelte, and custom-renderer apps load these without React installed.
+const RENDERER_NEUTRAL_ENTRIES = [
+  "renderer-client.ts",
+  "store-core.ts",
+  "navigation-neutral.ts",
+  "islx/actions-client.ts",
+  "islx/actions-server.ts",
+];
+const isReactPackage = (specifier: string) =>
+  /^(react|react-dom|@farm\.js\/islx\/react)(\/|$)/.test(specifier) ||
+  specifier.startsWith("@farm.js/react");
+
+describe("renderer-neutral entries", () => {
+  it.each(RENDERER_NEUTRAL_ENTRIES)("%s does not import React", (entry) => {
+    expect(findImportChain(entry, isReactPackage, new Set(["store.ts"]))).toBeUndefined();
+  });
+
+  it("finds the React import in the React store", () => {
+    expect(findImportChain("store.ts", isReactPackage)).toEqual(["store.ts", "react"]);
+  });
+
+  it("finds islx's React runtime in islands mode's islx entries", () => {
+    expect(findImportChain("islx/client.ts", isReactPackage)).toEqual([
+      "islx/client.ts",
+      "@farm.js/islx/react/client",
+    ]);
+  });
+
+  it("finds the React import in the navigation entry other renderers do not load", () => {
+    expect(findImportChain("navigation.ts", isReactPackage)).toEqual([
+      "navigation.ts",
+      "client/router.ts",
+      "react",
+    ]);
   });
 });

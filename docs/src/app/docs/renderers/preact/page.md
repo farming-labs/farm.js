@@ -73,19 +73,19 @@ behavior.
 ## Call FARMJS server code
 
 API routes, endpoint schemas, server functions, middleware, cache, storage, and observability are
-renderer-neutral. Use the generated API client from Preact UI:
+renderer-neutral. Call them from Preact UI with `apiClient`, created once in `src/lib/api.ts` as shown in [API Client](/docs/api-client#create-both-callers-once):
 
 ```tsx
 "use client";
 
 import { useState } from "preact/hooks";
-import { api } from "../lib/api.generated";
+import { apiClient } from "../lib/api";
 
 export function Greeting() {
   const [message, setMessage] = useState("Ready");
 
   const callServer = async () => {
-    const result = await api.greeting.post({ body: { name: "Preact" } });
+    const result = await apiClient.greeting.post({ body: { name: "Preact" } });
     if (result.data) setMessage(result.data.message);
   };
 
@@ -94,18 +94,24 @@ export function Greeting() {
 ```
 
 The endpoint can call a validated `createServerFn`; its handler, database access, and secrets stay
-in the server bundle.
+in the server bundle. With `experimental.serverActions`, browser code can also import the server function and call it
+directly; see [callable actions](/docs/renderers#native-client-bindings).
 
 ## React compatibility
 
 The renderer uses the official `@preact/preset-vite`, which aliases React and React DOM imports to
 `preact/compat`. This lets many existing FARMJS client components and hooks run without shipping a
-second UI runtime. Compatibility for third-party React integration providers still depends on each
-provider, so verify provider UI before relying on it in production.
+second UI runtime. On the server, Farm's own modules, `@farm.js/preact`, and your app's modules use
+`preact/compat` too, so pages that call `notFound()` or `redirect()` or use hooks from
+`@farm.js/preact/bindings` build and render without React installed. A third-party package that
+imports `react` still loads React on the server. Compatibility for third-party React integration
+providers still depends on each provider, so verify provider UI before relying on it in production.
 
-React Server Components remain React-only. Programmatic UI routes, Markdown/MDX visual pages, the
-docs adapter, generated JSX metadata images, and integration UI providers should be treated as
-compatibility surfaces until their Preact paths are covered by dedicated tests.
+React Server Components remain React-only. `withDocs()` from `@farming-labs/farmjs` builds docs
+pages with Preact; see [Docs adapters on any renderer](/docs/docs-engine#docs-adapters-on-any-renderer). Integration UI providers should be
+treated as compatibility surfaces until their Preact paths are covered by dedicated tests. Markdown
+and MDX pages, [generated metadata images](/docs/routing#generated-metadata-images), and
+[programmatic UI routes](/docs/routing#programmatic-routes) render with Preact.
 
 ## Experimental AOT compiler
 

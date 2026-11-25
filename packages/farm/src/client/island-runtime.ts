@@ -134,6 +134,180 @@ export function replayFarmQueuedInteraction(target: Element, kind: unknown): voi
   replayInteraction({ target, kind: toReplayKind(kind) });
 }
 
+/** Kept equal to islx's FORM_REF_PREFIX, which names a server form's action field; a test compares them. */
+export const FARM_ISLANDS_FORM_REF_PREFIX = "$F_REF_";
+
+/**
+ * Whether submitting `form` posts a server action, as islx reads it (`readPostedAction`): a field
+ * named with its reference prefix, on the form or on the button that submits it.
+ */
+function postsServerAction(form: HTMLFormElement, submitter: HTMLElement | null): boolean {
+  const named = (element: Element | null) =>
+    !!element?.getAttribute("name")?.startsWith(FARM_ISLANDS_FORM_REF_PREFIX);
+  return named(submitter) || Array.from(form.elements).some(named);
+}
+
+/**
+ * Holds clicks and submits on islands that have not hydrated in the pre-hydration queue, as the
+ * boot script does, until the returned function runs. Islands mode's entry holds them while islx
+ * loads (RFC 0010): the boot stops holding once the entry runs, and each island's scheduler starts
+ * it and replays them when it reaches it. `island` is the islands' element name.
+ *
+ * With `load`, it also holds the submit of a server component's form, which islx posts without a
+ * page load (`enhanceForms`): `load` loads islx, and releases this hold, then the form is submitted
+ * again. After a failed load it posts natively.
+ */
+export function holdFarmIslandInteractions(
+  island: string,
+  load?: () => Promise<unknown>,
+): () => void {
+  const scope = window as typeof window & { __FARM_PREHYDRATION_CLICK_QUEUE__?: FarmQueuedClick[] };
+  const queue = (scope.__FARM_PREHYDRATION_CLICK_QUEUE__ ??= []);
+  const pending = (node: Element) =>
+    !!node.closest(island) && !node.closest('[data-farm-island-hydrated="true"]');
+  const hold = (event: Event, target: Element, kind: FarmIslandReplayKind) => {
+    const interaction = { target, kind };
+    // Every click is replayed; a form is submitted once (as the scheduler's own hold).
+    if (!submitsForm(interaction) || !queue.some((item) => item?.target === target)) {
+      queue.push(interaction);
+      document.dispatchEvent(
+        new CustomEvent("farm:island-interaction", { detail: { target, kind } }),
+      );
+    }
+    event.preventDefault();
+    event.stopImmediatePropagation();
+  };
+  const onClick = (event: Event) => {
+    const click = event as MouseEvent;
+    if (click.defaultPrevented || click.button !== 0) return;
+    if (click.metaKey || click.altKey || click.ctrlKey || click.shiftKey) return;
+    const target = click.target instanceof Element ? heldClickTarget(click.target) : null;
+    if (target && pending(target)) hold(event, target, "click");
+  };
+  const onSubmit = (event: Event) => {
+    const form = event.target;
+    if (event.defaultPrevented || !(form instanceof Element) || form.nodeName !== "FORM") return;
+    if (pending(form)) hold(event, form, "submit");
+  };
+  // No island owns a server component's form, so no trigger loads islx for it. Bubble phase, as
+  // islx listens, so a handler that prevents the default first still wins. A form is submitted
+  // once: a repeat while islx loads is held, not submitted again.
+  const heldForms = new Set<HTMLFormElement>();
+  const onServerFormSubmit = (event: Event) => {
+    const form = event.target;
+    if (!load || event.defaultPrevented || !(form instanceof HTMLFormElement)) return;
+    const submitter = (event as SubmitEvent).submitter ?? null;
+    if (!postsServerAction(form, submitter)) return;
+    event.preventDefault();
+    if (heldForms.has(form)) return;
+    heldForms.add(form);
+    const submit = () => {
+      heldForms.delete(form);
+      if (!form.isConnected) return;
+      const button = submitter as HTMLButtonElement | null;
+      form.requestSubmit(button?.isConnected && button.form === form ? button : undefined);
+    };
+    load().then(submit, (error: unknown) => {
+      console.error(
+        "[Farm.js] The client runtime failed to load, so the form posts without it.",
+        error,
+      );
+      submit();
+    });
+  };
+  document.addEventListener("click", onClick, true);
+  document.addEventListener("submit", onSubmit, true);
+  document.addEventListener("submit", onServerFormSubmit, false);
+  return () => {
+    document.removeEventListener("click", onClick, true);
+    document.removeEventListener("submit", onSubmit, true);
+    document.removeEventListener("submit", onServerFormSubmit, false);
+  };
+}
+
+/**
+ * Calls `due` once an island under `scope` reaches its trigger, by the rules the boot script and
+ * the scheduler follow, without holding or replaying anything. Islands mode's entry loads islx then
+ * (RFC 0010), and islx's schedulers take over: a held interaction is in the queue they read, and a
+ * trigger that fired fires again for them. A form counts as the boot counts it, as islx is what
+ * posts it without a page load. Returns null when an island is due already (it hydrates at load,
+ * holds an interaction, or is not observable) or a Suspense boundary waits for the browser, else a
+ * function that stops watching.
+ */
+export function watchFarmIslandTriggers(
+  scope: Document | Element,
+  island: string,
+  due: () => void,
+): (() => void) | null {
+  const document = scope.nodeType === 9 ? (scope as Document) : (scope as Element).ownerDocument;
+  // A document still parsing adds islands later, which islx's stream watcher finds.
+  if (document.readyState === "loading") return null;
+  const comments = document.createTreeWalker(scope, NodeFilter.SHOW_COMMENT);
+  while (comments.nextNode()) {
+    const data = (comments.currentNode as Comment).data;
+    if (data === "$?" || data === "$!") return null;
+  }
+  const islands = Array.from(scope.querySelectorAll(island));
+  if (scope.nodeType === 1 && (scope as Element).matches(island)) islands.unshift(scope as Element);
+  // An island inside another hydrates with it, as islx decides.
+  const outermost = islands.filter((element) => {
+    const outer = element.parentElement?.closest(island);
+    return !outer || !scope.contains(outer);
+  });
+  const isDue = (element: Element) => {
+    const strategy = element.getAttribute("strategy");
+    if (hasQueuedTarget(element)) return true;
+    if (strategy === "interaction" || strategy === "idle") return false;
+    if (strategy !== "visible" || typeof IntersectionObserver !== "function") return true;
+    // Islands render with display:contents: the scheduler observes their children instead.
+    return element.getClientRects().length === 0 && element.children.length === 0;
+  };
+  if (outermost.some(isDue)) return null;
+
+  const cleanups: Array<() => void> = [];
+  const stop = () => {
+    for (const cleanup of cleanups.splice(0)) cleanup();
+  };
+  const fire = () => {
+    stop();
+    due();
+  };
+  if (outermost.some((element) => element.getAttribute("strategy") === "idle")) {
+    cleanups.push(runWhenIdle(fire));
+  }
+  for (const element of outermost) {
+    if (element.getAttribute("strategy") !== "visible") continue;
+    const targets = element.getClientRects().length > 0 ? [element] : Array.from(element.children);
+    cleanups.push(observeIslandVisibility(document, targets, fire));
+  }
+
+  const pending = (target: EventTarget | null | undefined) =>
+    target instanceof Element &&
+    scope.contains(target) &&
+    !!target.closest(island) &&
+    !target.closest('[data-farm-island-hydrated="true"]');
+  // A press or focus starts an island, not on a link that navigates (the scheduler's
+  // observeActivation); clicks and submits reach here as the hold's announcements.
+  const activate = (event: Event) => {
+    const target = event.target;
+    if (!(target instanceof Element) || !scope.contains(target)) return;
+    const link = target.closest("a[href]");
+    if (link && !link.getAttribute("href")?.startsWith("#")) return;
+    if (pending(target) || target.closest("form")) fire();
+  };
+  const announced = (event: Event) => {
+    if (pending((event as CustomEvent<{ target?: EventTarget | null }>).detail?.target)) fire();
+  };
+  const listen = (type: string, handler: (event: Event) => void, capture: boolean) => {
+    document.addEventListener(type, handler, capture);
+    cleanups.push(() => document.removeEventListener(type, handler, capture));
+  };
+  listen("pointerdown", activate, true);
+  listen("focusin", activate, true);
+  listen("farm:island-interaction", announced, false);
+  return stop;
+}
+
 function finishIslandHydration(
   container: Element,
   held: readonly FarmQueuedInteraction[] = [],
@@ -174,16 +348,6 @@ export function scheduleFarmIslandHydration<T>({
   const resolvedStrategy = strategy ?? "load";
   if (signal?.aborted) return Promise.resolve(undefined);
 
-  if (resolvedStrategy === "load") {
-    return Promise.resolve()
-      .then(() => (signal?.aborted ? undefined : hydrate()))
-      .then((value) => {
-        if (signal?.aborted) return undefined;
-        finishIslandHydration(container);
-        return value;
-      });
-  }
-
   return new Promise<T | undefined>((resolve, reject) => {
     let started = false;
     let cancelled = false;
@@ -193,11 +357,11 @@ export function scheduleFarmIslandHydration<T>({
     // One-shot triggers, dropped the moment hydration starts: an
     // IntersectionObserver or an idle callback has no reason to fire twice.
     const triggerCleanups = new Set<() => void>();
-    // Interaction capture, kept until hydration finishes. A pointerdown or a
-    // focusin starts hydration, and in a real browser the click the user is
-    // actually making arrives a moment later, still before the chunk has
-    // loaded. Tearing these down at start() would drop that click on the floor
-    // with nothing left to hold or replay it.
+    // Interaction capture, from scheduling until hydration finishes, whatever the strategy: the
+    // server HTML is on screen and clickable all that time. A pointerdown or a focusin starts
+    // hydration, and in a real browser the click the user is actually making arrives a moment
+    // later, still before the chunk has loaded. Tearing these down at start() would drop that
+    // click on the floor with nothing left to hold or replay it.
     const captureCleanups = new Set<() => void>();
     let removeAbortListener: (() => void) | null = null;
 
@@ -221,7 +385,8 @@ export function scheduleFarmIslandHydration<T>({
       started = true;
       cleanupTriggers();
       Promise.resolve()
-        .then(hydrate)
+        // Removed in the same task it was scheduled in, as a navigation does: never hydrated.
+        .then(() => (cancelled || signal?.aborted ? undefined : hydrate()))
         .then(
           (value) => {
             cleanup();
@@ -245,31 +410,6 @@ export function scheduleFarmIslandHydration<T>({
       };
       signal.addEventListener("abort", abort, { once: true });
       removeAbortListener = () => signal.removeEventListener("abort", abort);
-    }
-
-    if (resolvedStrategy === "idle") {
-      triggerCleanups.add(runWhenIdle(start));
-      return;
-    }
-
-    if (resolvedStrategy === "visible") {
-      if (typeof IntersectionObserver !== "function") {
-        start();
-        return;
-      }
-
-      // Isolated boundary markers render with display:contents, so the
-      // container itself has no box and can never intersect. Observe its
-      // element children instead; with nothing observable, start now.
-      const targets =
-        container.getClientRects().length > 0 ? [container] : Array.from(container.children);
-      if (targets.length === 0) {
-        start();
-        return;
-      }
-
-      triggerCleanups.add(observeIslandVisibility(container.ownerDocument, targets, start));
-      return;
     }
 
     const hold = (event: Event, target: Element, kind: FarmIslandReplayKind) => {
@@ -312,10 +452,14 @@ export function scheduleFarmIslandHydration<T>({
     // Observed, not held. These start hydration early so a controlled input has
     // its handlers attached before the value diverges, while letting the native
     // interaction through: swallowing a keystroke or a toggle would be worse
-    // than hydrating late.
+    // than hydrating late. A link that navigates is left alone, as its click
+    // is (heldClickTarget): pressing or focusing it would only load the code of
+    // the page it leaves, and race the navigation for the network.
     const observeActivation = (event: Event) => {
       const target = event.target;
       if (!(target instanceof Element) || !container.contains(target)) return;
+      const link = target.closest("a[href]");
+      if (link && !link.getAttribute("href")?.startsWith("#")) return;
       start();
     };
 
@@ -354,6 +498,36 @@ export function scheduleFarmIslandHydration<T>({
     }
     listen("farm:island-interaction", activateFromInteraction, false);
 
-    if (hasQueuedTarget(container)) start();
+    // Then what starts it: at once, or its idle callback or visibility, as its strategy says, or a
+    // held interaction. An interaction island waits for its activation above.
+    if (resolvedStrategy === "load" || hasQueuedTarget(container)) {
+      start();
+      return;
+    }
+
+    if (resolvedStrategy === "idle") {
+      triggerCleanups.add(runWhenIdle(start));
+      return;
+    }
+
+    if (resolvedStrategy === "visible") {
+      if (typeof IntersectionObserver !== "function") {
+        start();
+        return;
+      }
+
+      // Isolated boundary markers render with display:contents, so the
+      // container itself has no box and can never intersect. Observe its
+      // element children instead; with nothing observable, start now.
+      const targets =
+        container.getClientRects().length > 0 ? [container] : Array.from(container.children);
+      if (targets.length === 0) {
+        start();
+        return;
+      }
+
+      triggerCleanups.add(observeIslandVisibility(container.ownerDocument, targets, start));
+      return;
+    }
   });
 }

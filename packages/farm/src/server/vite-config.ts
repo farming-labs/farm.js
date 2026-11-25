@@ -1,6 +1,13 @@
 import path from "node:path";
 import type { UserConfig as ViteUserConfig } from "vite";
-import { isFarmRendererDisabled, type FarmRenderer } from "../renderer";
+import { isPackageSpecifier } from "../build/node-module-bundle";
+import {
+  getFarmRendererCapabilities,
+  isFarmRendererDisabled,
+  isReactRenderer,
+  type FarmRenderer,
+} from "../renderer";
+import { findFarmAppPackageDir } from "../server-components-status";
 
 const FARM_CLIENT_ENTRY_PATTERN =
   "**/{page,layout,loading,error,not-found,default}.{js,jsx,ts,tsx}";
@@ -24,15 +31,63 @@ export const FARM_CLIENT_OPTIMIZE_DEPS_INCLUDE = [
   "@farm.js/core/query/client",
   "@farm.js/core/server-fn/client",
   "@farm.js/core/server-query/client",
+  // Farm's browser entry imports these and no app file does, so Vite's scan cannot see them. In an
+  // app that installs Farm from the registry, Vite found them on the first page request, bundled
+  // again, and reloaded the page while it loaded.
+  "@farm.js/core/internal/client-runtime",
+  "@farm.js/core/internal/spa-router",
+  "@farm.js/core/router",
+  // The typed API client. The development server excludes the server-only `@farm.js/core/api`,
+  // and Vite's scan skips every subpath of an excluded package, so an app's import of the client
+  // was also found only on the first request.
+  "@farm.js/core/api/client",
   // Islands mode's browser runtime: Farm imports islx, which the app reaches only through Farm.
   "@farm.js/core > @farm.js/islx/client",
   "@farm.js/core > @farm.js/islx/react",
   "@farm.js/core > @farm.js/islx/react/client",
+  // What a browser module's import of a server function compiles to on other renderers (see
+  // `resolveFarmIslxActionsMode`). Found only when that module is first requested, it made Vite
+  // bundle again and reload the page while it loaded.
+  "@farm.js/core/internal/islx-actions-client",
 ] as const;
 
-export function getFarmClientOptimizeDepsInclude(renderer?: FarmRenderer): string[] {
+/**
+ * Whether the package `specifier` names is installed in a `node_modules` directory for the app
+ * in `root`. A workspace package linked into `node_modules` resolves outside it, and Vite serves
+ * such a package as source, as it does when an app file imports one.
+ */
+function isInstalledPackage(root: string, specifier: string): boolean {
+  const parts = specifier.split("/");
+  const name = specifier.startsWith("@") ? parts.slice(0, 2).join("/") : parts[0]!;
+  const directory = findFarmAppPackageDir(root, name);
+  return directory !== undefined && directory.split(path.sep).includes("node_modules");
+}
+
+export function getFarmClientOptimizeDepsInclude(renderer?: FarmRenderer, root?: string): string[] {
   return Array.from(
-    new Set([...FARM_CLIENT_OPTIMIZE_DEPS_INCLUDE, ...(renderer?.optimizeDeps || [])]),
+    new Set([
+      ...FARM_CLIENT_OPTIMIZE_DEPS_INCLUDE,
+      ...(renderer?.optimizeDeps || []),
+      // Farm's browser entry imports a renderer's client module, and no app file does, so Vite's
+      // scan never sees it and finds it only on the first page request, then bundles again. The
+      // React entry imports `react-dom/client` instead, which is already listed. A linked
+      // renderer stays source: pre-bundling it would copy the packages it shares with the app's
+      // components into the bundle, so a hook would read a different copy than the renderer set.
+      ...(renderer &&
+      root &&
+      !isReactRenderer(renderer) &&
+      isPackageSpecifier(renderer.client) &&
+      isInstalledPackage(root, renderer.client)
+        ? [renderer.client]
+        : []),
+      // The islands runtime of a renderer that declares `islands`, which only Farm's entry imports.
+      ...(renderer && !isReactRenderer(renderer) && getFarmRendererCapabilities(renderer).islands
+        ? [
+            "@farm.js/core/internal/renderer-islands",
+            "@farm.js/core > @farm.js/islx/islands/client",
+          ]
+        : []),
+    ]),
   );
 }
 
@@ -54,10 +109,13 @@ export function createFarmClientOptimizeDepsEntries(
 export function createFarmClientOptimizeDepsConfig(
   entries?: readonly string[],
   renderer?: FarmRenderer | false,
+  /** The app root, which a custom renderer's client module is resolved from. */
+  root?: string,
 ): ViteUserConfig["optimizeDeps"] {
   // `renderer: false` serves no browser code, so there is nothing to pre-bundle, and Farm's
   // browser runtimes would pull in React, which a backend-only app does not install.
   if (isFarmRendererDisabled(renderer)) return { noDiscovery: true, include: [] };
+  const jsxImportSource = renderer ? renderer.jsxImportSource : undefined;
   return {
     // Keep normal application dependency discovery for CJS-only packages, but
     // seed every Farm browser runtime so React is present in the first crawl.
@@ -65,11 +123,22 @@ export function createFarmClientOptimizeDepsConfig(
     // Waiting for the crawl avoids serving a partial optimizer generation and
     // then changing browser hashes while hydration is already in progress.
     holdUntilCrawlEnd: true,
-    include: getFarmClientOptimizeDepsInclude(renderer || undefined),
+    include: getFarmClientOptimizeDepsInclude(renderer || undefined, root),
     // Farm's HTML boots through a virtual module and imports route UI lazily.
     // Explicit entries let Vite finish that crawl before a navigation can
     // rotate the optimizer hash underneath a hydrated React runtime.
     ...(entries?.length ? { entries: [...entries] } : {}),
+    // Vite's dependency scan compiles JSX on its own: with the app tsconfig's `jsxImportSource`
+    // when there is one, otherwise as React, whatever the renderer's plugin set for its own
+    // transforms. React is the default already, and naming it here would override a tsconfig
+    // source such as Emotion's. A renderer plugin's own scan setting is merged over this one.
+    ...(jsxImportSource && jsxImportSource !== "react"
+      ? {
+          rolldownOptions: {
+            transform: { jsx: { runtime: "automatic" as const, importSource: jsxImportSource } },
+          },
+        }
+      : {}),
   };
 }
 

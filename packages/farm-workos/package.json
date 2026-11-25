@@ -1,6 +1,6 @@
 {
   "name": "@farm.js/workos",
-  "version": "0.1.78",
+  "version": "0.1.87",
   "description": "WorkOS integration for Farm.js",
   "license": "MIT",
   "repository": {
@@ -35,8 +35,13 @@
     "test": "echo 'No tests in this package'"
   },
   "dependencies": {
-    "@farm.js/core": "workspace:*",
     "@farm.js/integration-utils": "workspace:*",
     "@workos-inc/node": "^8.9.0"
+  },
+  "devDependencies": {
+    "@farm.js/core": "workspace:*"
+  },
+  "peerDependencies": {
+    "@farm.js/core": ">=0.1.78 <0.3.0"
   }
 }

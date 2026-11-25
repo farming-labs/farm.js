@@ -1,14 +1,24 @@
+import { FORM_REF_PREFIX } from "@farm.js/islx";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { FARM_DEPLOYMENT_ID_HEADER } from "../deployment";
 import { FARM_ISLAND_REPLAYABLE_SELECTOR } from "../island";
 import {
   FARM_ISLANDS_BOOT_DEPLOYMENT_HEADER,
+  FARM_ISLANDS_BOOT_FORM_REF_PREFIX,
+  FARM_ISLANDS_BOOT_PREFETCHING_LINK,
   FARM_ISLANDS_BOOT_REPLAYABLE_SELECTOR,
   FARM_ISLANDS_BOOT_VISIBLE_MARGIN,
   type FarmEarlyNavigation,
   startFarmIslandsBoot,
 } from "../client/islands-boot";
 import { observeIslandVisibility } from "../client/island-triggers";
+import {
+  FARM_MAX_HELD_VALUES,
+  FARM_VALUE_SCRIPT_TYPE,
+  FARM_VALUES_HEADER,
+  getFarmIslandValueHeaders,
+} from "../client/island-value-protocol";
+import { type FarmLinkOptions, resolveLinkAttributes } from "../client/link-attributes";
 
 type QueueWindow = Window & {
   __FARM_PREHYDRATION_CLICK_QUEUE__?: unknown[];
@@ -59,6 +69,11 @@ function click(target: Element): boolean {
   target.dispatchEvent(event);
   window.removeEventListener("click", read);
   return prevented ?? event.defaultPrevented;
+}
+
+/** Presses `target` with the primary button, or as `init` says. */
+function press(target: Element, init: MouseEventInit = {}) {
+  target.dispatchEvent(new MouseEvent("pointerdown", { bubbles: true, button: 0, ...init }));
 }
 
 afterEach(async () => {
@@ -158,6 +173,71 @@ describe("startFarmIslandsBoot", () => {
     expect(load).not.toHaveBeenCalled();
     document.querySelector("input")!.dispatchEvent(new FocusEvent("focusin", { bubbles: true }));
     expect(load).toHaveBeenCalledTimes(1);
+  });
+
+  describe("for a server component's form", () => {
+    // What islx renders for <form action={serverAction}> in a server component.
+    const serverForm = `<form><input type="hidden" name="${FORM_REF_PREFIX}0"><input name="title"><button name="intent" value="add">Add</button></form>`;
+    let submits: Array<{ prevented: boolean; submitter: Element | null }>;
+    // jsdom cannot submit a form: the window, which the event reaches last, records it and stops it.
+    const record = (event: Event) => {
+      submits.push({
+        prevented: event.defaultPrevented,
+        submitter: (event as SubmitEvent).submitter,
+      });
+      event.preventDefault();
+    };
+    beforeEach(() => {
+      submits = [];
+      window.addEventListener("submit", record);
+    });
+    afterEach(() => {
+      window.removeEventListener("submit", record);
+      vi.restoreAllMocks();
+    });
+
+    it("reads the field islx names a form's action with", () => {
+      expect(FARM_ISLANDS_BOOT_FORM_REF_PREFIX).toBe(FORM_REF_PREFIX);
+    });
+
+    it("holds its submit until the runtime runs, then submits it again with its button, once", async () => {
+      const load = boot(`<f-island strategy="interaction"></f-island>${serverForm}`);
+      const form = document.querySelector("form")!;
+      const button = form.querySelector("button")!;
+      form.requestSubmit(button);
+      form.requestSubmit(button);
+      expect(load).toHaveBeenCalledTimes(1);
+      expect(submits).toEqual([
+        { prevented: true, submitter: button },
+        { prevented: true, submitter: button },
+      ]);
+      finishLoad!();
+      await settle();
+      expect(submits).toHaveLength(3);
+      expect(submits[2]).toEqual({ prevented: false, submitter: button });
+    });
+
+    it("submits it natively after the runtime fails to load", async () => {
+      document.body.innerHTML = serverForm;
+      const error = vi.spyOn(console, "error").mockImplementation(() => {});
+      // Finished as a failure here, or by the shared cleanup, which releases the boot either way.
+      const load = vi.fn(
+        () =>
+          new Promise<void>((_, reject) => {
+            finishLoad = () => reject(new Error("chunk failed"));
+          }),
+      );
+      started = load;
+      startFarmIslandsBoot(load);
+      document.querySelector("form")!.requestSubmit();
+      finishLoad!();
+      await settle();
+      expect(submits.map((submit) => submit.prevented)).toEqual([true, false]);
+      expect(error).toHaveBeenCalledWith(
+        "[Farm.js] The client runtime failed to load.",
+        expect.any(Error),
+      );
+    });
   });
 
   it("holds a link click until the runtime runs, then clicks the link again", async () => {
@@ -282,9 +362,9 @@ describe("the boot's preloads", () => {
     expect(preloaded()).toEqual([react, theme, shared, router, shared]);
   });
 
-  it("leaves a waiting root's modules for a link outside it", () => {
+  it("leaves a waiting root's modules for a link in it, whose page swaps in while it waits", () => {
     boot(
-      `${runtime} data-farm-root="root" data-farm-root-strategy="interaction"></script><div id="root"></div><a href="/out">Out</a>`,
+      `${runtime} data-farm-root="root" data-farm-root-strategy="interaction"></script><div id="root"><a href="/next">Next</a></div>`,
     );
     hover(document.querySelector("a")!);
     expect(preloaded()).toEqual([react, router, shared]);
@@ -294,6 +374,79 @@ describe("the boot's preloads", () => {
     boot(`${runtime}></script><a href="/a">A</a><a href="/b">B</a>`);
     for (const link of Array.from(document.querySelectorAll("a"))) hover(link);
     expect(preloaded()).toEqual([react, router, shared]);
+  });
+
+  describe("once the page has loaded and the browser is idle", () => {
+    let idle: Array<() => void>;
+    beforeEach(() => {
+      // The last test's boot releases after the links are removed, starting on a link of its own.
+      for (const link of Array.from(document.head.querySelectorAll("link"))) link.remove();
+      idle = [];
+      vi.stubGlobal("requestIdleCallback", (callback: () => void) => idle.push(callback));
+      vi.stubGlobal("cancelIdleCallback", () => {});
+    });
+    const runIdle = () => {
+      for (const callback of idle.splice(0)) callback();
+    };
+
+    it("fetches the entry, its imports and the router a link runs, without running them", () => {
+      const load = boot(
+        `${runtime}></script><f-island strategy="interaction"><button>+</button></f-island><a href="/next">Next</a>`,
+      );
+      expect(document.readyState).toBe("complete");
+      expect(preloaded()).toEqual([]);
+      runIdle();
+      expect(preloaded()).toEqual(["/base/farm-client-h1.js", react, router, shared]);
+      expect(load).not.toHaveBeenCalled();
+      // A link's intent then runs the entry, and fetches nothing again.
+      hover(document.querySelector("a")!);
+      expect(load).toHaveBeenCalledTimes(1);
+      expect(preloaded()).toEqual(["/base/farm-client-h1.js", react, router, shared]);
+    });
+
+    it("fetches nothing on a connection that asks to save data", () => {
+      vi.stubGlobal("navigator", { ...navigator, connection: { saveData: true } });
+      boot(`${runtime}></script><a href="/next">Next</a>`);
+      runIdle();
+      expect(preloaded()).toEqual([]);
+    });
+
+    it("fetches nothing more once the runtime is loading", () => {
+      boot(`${runtime}></script><f-island><button>+</button></f-island><a href="/next">Next</a>`);
+      expect(started).toHaveBeenCalledTimes(1);
+      runIdle();
+      expect(preloaded()).toEqual([react]);
+    });
+  });
+
+  describe("of the renderer (RFC 0010)", () => {
+    const withRenderer = `${runtime} data-farm-preload-renderer="chunks/react-dom.js"`;
+    const reactDom = "/base/chunks/react-dom.js";
+
+    it("leaves it to the entry for a link whose page streams, and fetches it for an island", () => {
+      boot(
+        `${withRenderer}></script><f-island strategy="interaction"><button>+</button></f-island><a href="/next">Next</a>`,
+      );
+      hover(document.querySelector("a")!);
+      expect(preloaded()).toEqual([react, router, shared]);
+      click(document.querySelector("button")!);
+      expect(preloaded()).toEqual([react, router, shared, reactDom]);
+    });
+
+    it("fetches it with the entry when an island starts the runtime on its own trigger", () => {
+      boot(`${withRenderer}></script><f-island strategy="load"><button>+</button></f-island>`);
+      expect(preloaded()).toEqual([react, reactDom]);
+    });
+
+    it("leaves it for a link in a root that waits, and fetches it for an interaction there", () => {
+      boot(
+        `${withRenderer} data-farm-root="root" data-farm-root-strategy="interaction"></script><div id="root"><a href="/next">Next</a><button>Toggle</button></div>`,
+      );
+      hover(document.querySelector("a")!);
+      expect(preloaded()).not.toContain(reactDom);
+      click(document.querySelector("button")!);
+      expect(preloaded()).toContain(reactDom);
+    });
   });
 });
 
@@ -315,7 +468,8 @@ describe("the boot's request for a held link click", () => {
     const [url, init] = pageRequests.mock.calls[0]!;
     expect(url).toBe(new URL("/docs/b#top", document.baseURI).href);
     expect(init.redirect).toBe("manual");
-    // The layouts shown and flush markers, as a navigation the router streams; no held values.
+    // The layouts shown and flush markers, as a navigation the router streams; the page holds no
+    // island values to name.
     expect(init.headers).toEqual({
       accept: "text/html",
       "x-farm-deployment-id": "d1",
@@ -326,24 +480,42 @@ describe("the boot's request for a held link click", () => {
     expect(early()!.response).toBe(pageRequests.mock.results[0]!.value);
   });
 
-  it("asks for the tree when the page's layout hydrates as one root", () => {
+  it("names the island values the page holds, as the router does before islx loads", () => {
+    const key = (index: number) => `k${String(index).padStart(13, "0")}`;
+    const values = Array.from(
+      { length: FARM_MAX_HELD_VALUES + 2 },
+      (_, index) => `<script type="${FARM_VALUE_SCRIPT_TYPE}" name="${key(index)}">{}</script>`,
+    );
+    boot(`<div id="root">${values[1]}${values.join("")}<a href="/next">Next</a></div>`);
+    click(document.querySelector("a")!);
+    const named = pageRequests.mock.calls[0]![1].headers[
+      FARM_VALUES_HEADER.toLowerCase()
+    ] as string;
+    // The latest keys, each once, which is what the router names and its swap keeps.
+    expect(named).toBe(getFarmIslandValueHeaders(document.getElementById("root"))["F-Values"]);
+    expect(named.split(",")).toHaveLength(FARM_MAX_HELD_VALUES);
+    expect(named.split(",")[0]).toBe(key(2));
+  });
+
+  it("asks for the whole page when the page's layout hydrates as one root", () => {
     boot(
       '<script type="module" data-farm-runtime="/farm-client-h1.js" data-farm-root="root" data-farm-root-strategy="interaction"></script><div id="root"><a href="/shop/b">B</a></div>',
     );
     click(document.querySelector("a")!);
-    expect(pageRequests.mock.calls[0]![1].headers).toEqual({
-      accept: "text/html",
-      "f-render": "tree",
-    });
+    // The router swaps such a page in while the root waits, and asks for it whole (RFC 0011).
+    expect(pageRequests.mock.calls[0]![1].headers).toEqual({ accept: "text/html" });
   });
 
   it("requests the page of the last click when two are held", () => {
     boot('<a href="/a">A</a><a href="/b">B</a>');
     const [a, b] = Array.from(document.querySelectorAll("a"));
     click(a!);
+    const first = early()!;
     click(b!);
     expect(early()!.url).toBe(new URL("/b", document.baseURI).href);
     expect(early()!.response).toBe(pageRequests.mock.results[1]!.value);
+    // The router takes only the last, so the first is not left to finish.
+    expect(first.controller.signal.aborted).toBe(true);
   });
 
   it("requests nothing for a hover, a link the router does not take, or once the runtime runs", async () => {
@@ -358,6 +530,89 @@ describe("the boot's request for a held link click", () => {
     finishLoad!();
     await settle();
     click(next!);
+    expect(pageRequests).not.toHaveBeenCalled();
+  });
+});
+
+describe("the boot's request on a link's press", () => {
+  const early = () => (window as QueueWindow).__FARM_EARLY_NAVIGATION__;
+  const link = (options: FarmLinkOptions<string>) => {
+    const anchor = document.createElement("a");
+    for (const [name, value] of Object.entries(resolveLinkAttributes(options))) {
+      if (value !== undefined) anchor.setAttribute(name, value);
+    }
+    return anchor;
+  };
+
+  it("takes a Link that prefetches, as Link writes it, and no other link", () => {
+    for (const prefetch of [undefined, true, "intent", "hover", "viewport", "render"] as const) {
+      expect(link({ href: "/a", prefetch }).matches(FARM_ISLANDS_BOOT_PREFETCHING_LINK)).toBe(true);
+    }
+    for (const prefetch of [false, "none"] as const) {
+      expect(link({ href: "/a", prefetch }).matches(FARM_ISLANDS_BOOT_PREFETCHING_LINK)).toBe(
+        false,
+      );
+    }
+    const plain = document.createElement("a");
+    plain.href = "/a";
+    expect(plain.matches(FARM_ISLANDS_BOOT_PREFETCHING_LINK)).toBe(false);
+  });
+
+  it("requests a Link's page on its press, and its click takes that request", () => {
+    boot('<a href="/docs/b" data-farm-link>B</a>');
+    const anchor = document.querySelector("a")!;
+    press(anchor);
+    expect(pageRequests).toHaveBeenCalledTimes(1);
+    const sent = early()!;
+    expect(sent.url).toBe(new URL("/docs/b", document.baseURI).href);
+    expect(click(anchor)).toBe(true);
+    expect(pageRequests).toHaveBeenCalledTimes(1);
+    expect(early()).toBe(sent);
+    expect(sent.controller.signal.aborted).toBe(false);
+  });
+
+  it("leaves a plain link, a Link that never prefetches and any other press to the click", () => {
+    boot(
+      '<a href="/logout">Sign out</a><a href="/a" data-farm-link data-farm-prefetch="none">A</a>' +
+        '<a href="/b" data-farm-link>B</a>',
+    );
+    const [logout, none, b] = Array.from(document.querySelectorAll("a"));
+    press(logout!);
+    press(none!);
+    press(b!, { button: 2 });
+    press(b!, { metaKey: true });
+    expect(pageRequests).not.toHaveBeenCalled();
+    click(logout!);
+    expect(pageRequests).toHaveBeenCalledTimes(1);
+  });
+
+  it("aborts the request a later press replaces, and requests again once the router would not take it", () => {
+    boot('<a href="/a" data-farm-link>A</a><a href="/b" data-farm-link>B</a>');
+    const [a, b] = Array.from(document.querySelectorAll("a"));
+    press(a!);
+    const first = early()!;
+    press(b!);
+    expect(first.controller.signal.aborted).toBe(true);
+    expect(early()!.url).toBe(new URL("/b", document.baseURI).href);
+    const pressed = early()!;
+    const clock = vi.spyOn(Date, "now").mockReturnValue(pressed.at + 30_001);
+    try {
+      click(b!);
+    } finally {
+      clock.mockRestore();
+    }
+    expect(pageRequests).toHaveBeenCalledTimes(3);
+    expect(pressed.controller.signal.aborted).toBe(true);
+    expect(early()!.response).toBe(pageRequests.mock.results[2]!.value);
+  });
+
+  it("requests nothing on a press once the runtime runs", async () => {
+    boot('<a href="/b" data-farm-link>B</a>');
+    const anchor = document.querySelector("a")!;
+    anchor.dispatchEvent(new MouseEvent("mouseover", { bubbles: true }));
+    finishLoad!();
+    await settle();
+    press(anchor);
     expect(pageRequests).not.toHaveBeenCalled();
   });
 });

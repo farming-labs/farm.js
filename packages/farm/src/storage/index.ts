@@ -4,13 +4,19 @@ import type { SchemaDefinition } from "@farming-labs/orm";
 import {
   databaseAccessor,
   mountSchema,
+  mountType,
   managedOrm,
   managedSqliteName,
   managedSqliteDriver,
   type ManagedSqliteOptions,
   type ManagedSqliteMount,
+  type ManagedStorageType,
 } from "./managed-sqlite";
-export type { ManagedSqliteOptions, ManagedSqliteMount } from "./managed-sqlite";
+export type {
+  ManagedSqliteOptions,
+  ManagedSqliteMount,
+  ManagedStorageType,
+} from "./managed-sqlite";
 import { createStorage, prefixStorage, builtinDrivers, type BuiltinDriverName } from "unstorage";
 import type { Driver, Storage, TransactionOptions } from "unstorage";
 import type { Database } from "db0";
@@ -301,6 +307,8 @@ async function resolveDriver(config?: FarmStorageMountConfig, mount?: string): P
       managedSqliteName(mount, hosted.managed),
       () => import("./libsql-http"),
       hosted.schema,
+      hosted.type,
+      mount,
     );
   }
   const driverInput = config?.driver ?? "memory";
@@ -466,7 +474,21 @@ export function databaseStorage(
   }, ["unstorage/drivers/db0"]);
 }
 
-type FarmStorageOptions = { managed?: true; namespace?: string; schema?: SchemaDefinition };
+/** A hosted key-value mount, read and written with `getStorage()`. */
+export type FarmKvMount = Omit<ManagedSqliteMount, "schema" | "type"> & { type: "kv" };
+/** A hosted SQL mount, read and written with `getDatabase()`. */
+export type FarmSqlMount = Omit<ManagedSqliteMount, "schema" | "type"> & { type: "sql" };
+type FarmSqlMountWithSchema<S extends SchemaDefinition> = FarmSqlMount & { schema: S };
+/** The mount a managed driver helper returns: SQL for a database driver, key-value otherwise. */
+type HostedMount<D extends FarmStorageNamedDriver> = D extends FarmStorageDatabaseDriverName
+  ? FarmSqlMount
+  : FarmKvMount;
+
+type FarmStorageBaseOptions = { managed?: true; namespace?: string };
+/** Options for `farmStorage()`. `type` decides whether the mount holds key-value data or tables. */
+export type FarmStorageOptions =
+  | (FarmStorageBaseOptions & { type: "kv"; schema?: never })
+  | (FarmStorageBaseOptions & { type: "sql"; schema?: SchemaDefinition });
 
 function assertMountSchema(schema: unknown): asserts schema is SchemaDefinition | undefined {
   if (schema !== undefined && !isMountSchema(schema)) {
@@ -474,34 +496,78 @@ function assertMountSchema(schema: unknown): asserts schema is SchemaDefinition 
   }
 }
 
-/** A Farm-hosted SQL and key-value mount. The mount name is its default namespace. */
+function isSqlDriver(driver: unknown): boolean {
+  return (
+    typeof driver === "string" && Object.prototype.hasOwnProperty.call(DATABASE_CONNECTORS, driver)
+  );
+}
+
+/**
+ * A Farm-hosted mount. `type: "kv"` stores key-value data for `getStorage()`; `type: "sql"` stores
+ * tables for `getDatabase()`, optionally typed by an ORM `schema`. The mount name is its default
+ * namespace.
+ */
 export function farmStorage<S extends SchemaDefinition>(
-  options: FarmStorageOptions & { schema: S },
+  options: FarmStorageBaseOptions & { type: "sql"; schema: S },
+): FarmSqlMountWithSchema<S>;
+export function farmStorage(
+  options: FarmStorageBaseOptions & { type: "sql"; schema?: undefined },
+): FarmSqlMount;
+export function farmStorage<S extends SchemaDefinition>(
+  options: FarmStorageBaseOptions & { type: "sql"; schema?: S },
+): FarmSqlMount | FarmSqlMountWithSchema<S>;
+export function farmStorage(
+  options: FarmStorageBaseOptions & { type: "kv"; schema?: never },
+): FarmKvMount;
+/**
+ * @deprecated Choose what the mount holds: `farmStorage({ type: "sql", schema })`. An untyped
+ * mount accepts both `getStorage()` and `getDatabase()`.
+ */
+export function farmStorage<S extends SchemaDefinition>(
+  options: FarmStorageBaseOptions & { type?: undefined; schema: S },
 ): MountWithSchema<S>;
-export function farmStorage(options?: FarmStorageOptions & { schema?: undefined }): BareMount;
+/**
+ * @deprecated Choose what the mount holds: `farmStorage({ type: "kv" })` or
+ * `farmStorage({ type: "sql" })`. An untyped mount accepts both `getStorage()` and `getDatabase()`.
+ */
+export function farmStorage(
+  options?: FarmStorageBaseOptions & { type?: undefined; schema?: undefined },
+): BareMount;
+/** @deprecated Choose what the mount holds: `farmStorage({ type: "sql", schema })`. */
 export function farmStorage<S extends SchemaDefinition>(
-  options: FarmStorageOptions & { schema?: S },
+  options: FarmStorageBaseOptions & { type?: undefined; schema?: S },
 ): BareMount | MountWithSchema<S>;
-export function farmStorage(options: FarmStorageOptions = {}): ManagedSqliteMount {
+export function farmStorage(
+  options: FarmStorageBaseOptions & { type?: ManagedStorageType; schema?: SchemaDefinition } = {},
+): ManagedSqliteMount {
   if (
     !options ||
     typeof options !== "object" ||
     Array.isArray(options) ||
-    Object.keys(options).some((key) => key !== "namespace" && key !== "managed" && key !== "schema")
+    Object.keys(options).some(
+      (key) => key !== "namespace" && key !== "managed" && key !== "schema" && key !== "type",
+    )
   )
     throw new TypeError(
-      "Use farmStorage() or pass only the `managed`, `namespace`, and `schema` options.",
+      'Use farmStorage({ type: "kv" }) or farmStorage({ type: "sql" }), with optional `namespace` and `schema`.',
     );
   if (options.managed !== undefined && options.managed !== true)
     throw new TypeError("Set `managed` to true or omit it when using farmStorage().");
+  if (options.type !== undefined && options.type !== "kv" && options.type !== "sql")
+    throw new TypeError('Set `type` to "kv" or "sql" in farmStorage().');
   assertMountSchema(options.schema);
-  return createManagedMount(options.namespace, options.schema, "farm");
+  if (options.type === "kv" && options.schema)
+    throw new TypeError(
+      'A schema describes tables, so it needs a SQL mount. Use farmStorage({ type: "sql", schema }).',
+    );
+  return createManagedMount(options.namespace, options.schema, "farm", options.type);
 }
 
 function createManagedMount(
   namespace: string | undefined,
   schema: SchemaDefinition | undefined,
   declaredDriver?: string,
+  type?: ManagedStorageType,
 ): ManagedSqliteMount {
   const managed = namespace === undefined ? true : { name: namespace };
   if (managed !== true) managedSqliteName("", managed);
@@ -509,6 +575,7 @@ function createManagedMount(
     driver: "farm-managed-sqlite",
     managed,
     ...(declaredDriver && { declaredDriver }),
+    ...(type && { type }),
     ...(schema && { schema }),
   };
 }
@@ -535,20 +602,43 @@ export function resolveManagedStorageMount(config: unknown): ManagedSqliteMount 
   if (driver !== "farm-managed-sqlite" && !isHostedDriver(driver))
     throw new TypeError("Select a built-in storage driver to use `managed: true`.");
   const declaredDriver = driver === "farm-managed-sqlite" ? options.declaredDriver : driver;
+  let type: unknown;
   if (driver === "farm-managed-sqlite") {
+    type = options.type;
     delete options.declaredDriver;
+    delete options.type;
     if (
       declaredDriver !== undefined &&
       declaredDriver !== "farm" &&
       !isHostedDriver(declaredDriver)
     )
       throw new TypeError("Use a known storage driver in the managed mount descriptor.");
+    if (type !== undefined && type !== "kv" && type !== "sql")
+      throw new TypeError('Use `type: "kv"` or `type: "sql"` in the managed mount descriptor.');
+    if (type === undefined && declaredDriver !== undefined && declaredDriver !== "farm")
+      type = isSqlDriver(declaredDriver) ? "sql" : "kv";
+  } else {
+    // The driver decides what a managed mount holds: a database driver stores tables, every
+    // other driver stores key-value data.
+    type = isSqlDriver(driver) ? "sql" : "kv";
+    if ("type" in options)
+      throw new TypeError(
+        `Remove \`type\`: a managed ${String(driver)} mount always holds ${type === "sql" ? "tables" : "key-value data"}. ` +
+          "Use farmStorage({ type }) to choose.",
+      );
   }
   if (Object.keys(options).some((key) => key !== "namespace" && key !== "schema"))
     throw new TypeError(
       "Remove provider connection settings and driver options when using `managed: true`.",
     );
   assertMountSchema(options.schema);
+  if (type === "kv" && options.schema)
+    throw new TypeError(
+      driver === "farm-managed-sqlite"
+        ? 'A schema describes tables, so it needs a SQL mount. Use farmStorage({ type: "sql", schema }).'
+        : `${String(driver)} stores key-value data, so its mount cannot take a schema. ` +
+            'Use a SQL driver such as sqliteStorage({ managed: true, schema }), or farmStorage({ type: "sql", schema }).',
+    );
   let namespace: string | undefined;
   if (managed === true) namespace = options.namespace as string | undefined;
   else if ((driver === "sqlite" || driver === "farm-managed-sqlite") && !("namespace" in options))
@@ -559,6 +649,7 @@ export function resolveManagedStorageMount(config: unknown): ManagedSqliteMount 
     namespace,
     options.schema,
     typeof declaredDriver === "string" ? declaredDriver : undefined,
+    type as ManagedStorageType | undefined,
   );
 }
 
@@ -582,13 +673,14 @@ function providerStorage<D extends FarmStorageNamedDriver>(driver: D) {
   type HostedOptions =
     | FarmManagedStorageOptions
     | (D extends "sqlite" ? ManagedSqliteOptions : never);
+  // Only a database driver accepts a schema: a managed key-value mount has no tables.
   function storage<S extends SchemaDefinition>(
-    options: HostedOptions & { schema: S },
-  ): MountWithSchema<S>;
-  function storage(options: HostedOptions & { schema?: undefined }): BareMount;
+    options: D extends FarmStorageDatabaseDriverName ? HostedOptions & { schema: S } : never,
+  ): FarmSqlMountWithSchema<S>;
+  function storage(options: HostedOptions & { schema?: undefined }): HostedMount<D>;
   function storage<S extends SchemaDefinition>(
-    options: HostedOptions & { schema?: S },
-  ): BareMount | MountWithSchema<S>;
+    options: D extends FarmStorageDatabaseDriverName ? HostedOptions & { schema?: S } : never,
+  ): FarmSqlMount | FarmSqlMountWithSchema<S>;
   function storage(
     ...args: D extends "memory" | "local"
       ? [options?: NativeOptions<D>]
@@ -730,9 +822,12 @@ declare global {
 }
 
 type AppMounts = FarmJS.StorageRegistry extends { mounts: infer M } ? M : {};
-type DatabaseForMount<M> = M extends { schema: infer S extends SchemaDefinition }
-  ? Awaited<ReturnType<typeof managedOrm<S>>>
-  : Client;
+// A key-value mount has no database: getDatabase() rejects it at runtime, so its type is never.
+type DatabaseForMount<M> = M extends { type: "kv" }
+  ? never
+  : M extends { schema: infer S extends SchemaDefinition }
+    ? Awaited<ReturnType<typeof managedOrm<S>>>
+    : Client;
 type DatabaseForName<N extends string> = N extends keyof AppMounts
   ? DatabaseForMount<AppMounts[N]>
   : Client | DatabaseForMount<AppMounts[keyof AppMounts]>;
@@ -755,6 +850,12 @@ export async function getDatabase<S extends SchemaDefinition<any>>(
       "Configure a managed SQLite mount named " +
         JSON.stringify(name) +
         " before calling getDatabase().",
+    );
+  if (driver[mountType] === "kv")
+    throw new TypeError(
+      `Storage mount ${JSON.stringify(name)} is a key-value mount. ` +
+        `Use getStorage(${JSON.stringify(name)}) to read and write it, ` +
+        'or add a mount with `type: "sql"` for tables.',
     );
   const client = await driver[databaseAccessor]();
   if (options && "raw" in options) return client;

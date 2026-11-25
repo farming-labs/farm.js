@@ -9,10 +9,19 @@
  * that was requested below the base path, method, status, duration, registered MCP tool
  * outcomes and the client the request declares (see classifyFarmClient: a category and a name
  * from Farm's own list, never the header itself). No query strings, fragments, origins,
- * headers, cookies, bodies, IPs or errors.
+ * headers, cookies, request bodies, IPs or errors.
+ *
+ * A registered MCP tool call also sends its arguments and result, unless
+ * `FARMJS_TOOL_PAYLOADS=off`: values under secret-looking keys are replaced first (see
+ * toolPayload), and one larger than Farm Infra keeps is left out.
+ *
+ * A WebMCP tool runs in the visitor's browser, which reports the call to the app at
+ * FARM_WEBMCP_REPORT_PATH (see `@farm.js/webmcp`). The app sends it on as a tool call with
+ * `source: "webmcp"`, under the same rules. The report is unauthenticated, like any page beacon.
  */
 import { AsyncLocalStorage } from "node:async_hooks";
 import type { FarmPlugin, FarmPluginRuntimeAfterEvent } from "../plugin";
+import { validateIntegrationRequestOrigin } from "../integration-request-security";
 import {
   _classifyFarmMCPSession,
   _farmMCPClientSession,
@@ -22,7 +31,7 @@ import {
   type FarmAgentIdentity,
   type FarmClientIdentity,
 } from "../agent-identity";
-import { onFarmEvent } from "../observability";
+import { _farmToolCallPayload, onFarmEvent, type FarmToolCallPayload } from "../observability";
 import { getCurrentRequestOrNull } from "../server/request";
 import { getFarmRouteLabel } from "../route-label";
 import { stripFarmBasePath } from "../base-path";
@@ -47,6 +56,8 @@ export interface FarmInfraAnalyticsExporterOptions {
   /** Needed only for an API key reaching several projects; one project's key names it. */
   projectId?: string;
   environment?: FarmInfraAnalyticsEnvironment;
+  /** Send each MCP tool call's arguments and result. On unless `false`. */
+  toolPayloads?: boolean;
   onDiagnostic?: (event: FarmInfraAnalyticsDiagnostic) => void | Promise<void>;
 }
 
@@ -60,14 +71,32 @@ interface EventBase {
   route: string;
   /** `/products/42` for the route `/products/[id]`; absent when Farm Infra would refuse it. */
   path?: string;
-  requestId: string;
   agent: FarmClientIdentity;
+}
+
+interface ToolCall {
+  kind: "mcp.tool";
+  tool: string;
+  outcome: "success" | "error";
+  /** The call's arguments and result, with secret-looking keys redacted. */
+  arguments?: unknown;
+  result?: unknown;
+  /** The payloads left out because they were larger than Farm Infra keeps. */
+  omitted?: ("arguments" | "result")[];
 }
 
 export type FarmInfraAnalyticsEvent = EventBase &
   (
-    | { kind: "request"; method: string; status: number }
-    | { kind: "mcp.tool"; tool: string; outcome: "success" | "error" }
+    | { requestId: string; kind: "request"; method: string; status: number }
+    | (ToolCall & { requestId: string; source?: undefined })
+    | (ToolCall & {
+        /**
+         * A WebMCP tool the visitor's browser ran and reported. It belongs to no server request,
+         * so it has no `requestId`; `route` and `path` name the page it ran on.
+         */
+        source: "webmcp";
+        requestId?: undefined;
+      })
   );
 
 type Env = Record<string, string | undefined>;
@@ -84,6 +113,14 @@ const ENVIRONMENTS: FarmInfraAnalyticsEnvironment[] = ["production", "staging", 
 const METHODS = new Set(["GET", "HEAD", "POST", "PUT", "PATCH", "DELETE", "OPTIONS", "QUERY"]);
 
 const MAX_QUEUE = 500;
+/** Farm Infra's limits for one request body, and for one tool call argument or result. */
+const MAX_BODY_BYTES = 128 * 1024;
+const MAX_PAYLOAD_BYTES = 8 * 1024;
+const MAX_PAYLOAD_DEPTH = 32;
+/** Keys whose values a tool call payload never sends: `password`, `apiKey`, `x-session-token`. */
+const SECRET_KEY =
+  /pass(?:word|wd|phrase)|secret|token|api[-_]?key|authori[sz]ation|cookie|credential|private[-_]?key|session/i;
+const REDACTED = "[redacted]";
 const MAX_AGE = 300_000;
 const MAX_ATTEMPTS = 5;
 const FLUSH_BUDGET = 5_000;
@@ -131,6 +168,10 @@ export function resolveFarmInfraAnalytics(
   if (env.FARMJS_ENVIRONMENT && !ENVIRONMENTS.includes(env.FARMJS_ENVIRONMENT as never)) {
     return { off: "FARMJS_ENVIRONMENT must be production, staging or development" };
   }
+  const toolPayloads = env.FARMJS_TOOL_PAYLOADS?.trim();
+  if (toolPayloads && toolPayloads !== "on" && toolPayloads !== "off") {
+    return { off: "FARMJS_TOOL_PAYLOADS must be on or off" };
+  }
   let endpoint: URL;
   try {
     endpoint = new URL(EVENTS_PATH, env.FARMJS_API_URL?.trim() || DEFAULT_URL);
@@ -149,6 +190,7 @@ export function resolveFarmInfraAnalytics(
     options: {
       endpoint: endpoint.href,
       key,
+      ...(toolPayloads === "off" ? { toolPayloads: false } : {}),
       ...(ingestionKey
         ? {}
         : { ...(projectId ? { projectId } : {}), environment: defaultFarmInfraEnvironment(env) }),
@@ -176,7 +218,11 @@ const PATH = /^\/(?!\/)[\w!$%&'()*+,\-./:;=@[\]^|~]*$/;
 const MAX_PATH_LENGTH = 1024;
 
 function requestPath(request: Request): string | undefined {
-  const path = stripFarmBasePath(new URL(request.url).pathname);
+  return appPath(new URL(request.url).pathname);
+}
+
+function appPath(pathname: string): string | undefined {
+  const path = stripFarmBasePath(pathname);
   return path.length <= MAX_PATH_LENGTH && PATH.test(path) ? path : undefined;
 }
 
@@ -310,9 +356,17 @@ export function createFarmInfraAnalyticsExporter(
       if (!queue.length || notBefore >= deadline) break;
       if (notBefore > Date.now()) await sleep(notBefore - Date.now());
       if (stopped || Date.now() >= deadline) break;
-      const batch = queue.slice(0, 50);
+      // Tool call payloads make events uneven, so a batch takes as many as fit in one body.
+      const batch: Item[] = [];
+      let bytes = 64;
+      for (const item of queue) {
+        const size = encoder.encode(JSON.stringify(item.event)).length + 1;
+        if (batch.length === 50 || (batch.length && bytes + size > MAX_BODY_BYTES)) break;
+        batch.push(item);
+        bytes += size;
+      }
       const body = JSON.stringify({ schemaVersion: 1, events: batch.map(({ event }) => event) });
-      if (encoder.encode(body).length > 128 * 1024) {
+      if (encoder.encode(body).length > MAX_BODY_BYTES) {
         queue.splice(0, batch.length);
         diagnostic({ code: "dropped", count: batch.length });
         continue;
@@ -388,7 +442,9 @@ export function createFarmInfraAnalyticsExporter(
     if (queue.length) diagnostic({ code: "dropped", count: queue.length });
     queue.length = 0;
   }
-  return { enqueue, flush, close };
+  /** Whether the sender still takes events: it stops for good when Farm Infra refuses it. */
+  const accepting = () => !stopped && !closing;
+  return { enqueue, flush, close, accepting };
 }
 
 interface State {
@@ -517,9 +573,65 @@ function requestEvent(
   };
 }
 
+/**
+ * A tool call argument or result as Farm Infra keeps it: JSON, with each value under a
+ * secret-looking key replaced by `[redacted]`. `"omitted"` when it's larger or deeper than
+ * Farm Infra keeps, and `undefined` when there's nothing to send or it isn't JSON.
+ */
+function toolPayload(value: unknown): { value: unknown } | "omitted" | undefined {
+  let json: unknown;
+  try {
+    const text = JSON.stringify(value);
+    if (text === undefined) return undefined;
+    json = JSON.parse(text);
+  } catch {
+    return undefined;
+  }
+  let deep = false;
+  const redact = (node: unknown, depth: number): unknown => {
+    if (depth > MAX_PAYLOAD_DEPTH) deep = true;
+    if (deep || !node || typeof node !== "object") return node;
+    if (Array.isArray(node)) return node.map((item) => redact(item, depth + 1));
+    return Object.fromEntries(
+      Object.entries(node).map(([key, item]) => [
+        key,
+        SECRET_KEY.test(key) ? REDACTED : redact(item, depth + 1),
+      ]),
+    );
+  };
+  const redacted = redact(json, 0);
+  if (deep || encoder.encode(JSON.stringify(redacted)).length > MAX_PAYLOAD_BYTES) {
+    return "omitted";
+  }
+  return { value: redacted };
+}
+
+const PAYLOAD_KEYS = ["arguments", "result"] as const;
+type PayloadKey = (typeof PAYLOAD_KEYS)[number];
+
+/** `omitted` names payloads already left out, as a browser does for one larger than Farm Infra keeps. */
+function toolPayloadFields(
+  payload: FarmToolCallPayload | undefined,
+  omitted: readonly PayloadKey[] = [],
+) {
+  const fields: { arguments?: unknown; result?: unknown; omitted?: PayloadKey[] } = {};
+  for (const key of PAYLOAD_KEYS) {
+    if (omitted.includes(key)) {
+      (fields.omitted ??= []).push(key);
+      continue;
+    }
+    if (!payload || !(key in payload)) continue;
+    const kept = toolPayload(payload[key]);
+    if (kept === "omitted") (fields.omitted ??= []).push(key);
+    else if (kept) fields[key] = kept.value;
+  }
+  return fields;
+}
+
 function toolEvent(
   metadata: RequestMetadata,
   event: { tool: string; outcome: "success" | "error"; durationMs: number },
+  payloads: boolean,
 ): FarmInfraAnalyticsEvent {
   return {
     id: uuid(),
@@ -532,17 +644,187 @@ function toolEvent(
     tool: event.tool,
     outcome: event.outcome,
     durationMs: duration(event.durationMs),
+    ...(payloads ? toolPayloadFields(_farmToolCallPayload(event)) : {}),
   };
+}
+
+/** Where a page's browser reports the WebMCP tool calls it ran, below the base path. */
+export const FARM_WEBMCP_REPORT_PATH = "/_farm/webmcp/tool-calls";
+
+/** Accepting WebMCP reports from the app's pages. */
+export interface FarmInfraAnalyticsWebMCPOptions {
+  /**
+   * The route payload a request for this page path (with the base path) would get, labeled the
+   * same way, so a call is reported under its page's route template. `/[unmatched]` without one.
+   */
+  route?(pathname: string): object | null | undefined | Promise<object | null | undefined>;
+}
+
+/** Two payloads of 8 KiB each and the call around them, with room to spare. */
+const MAX_REPORT_BYTES = 32 * 1024;
+/** WebMCP's own rule for a tool name, which Farm Infra's admits. */
+const WEBMCP_TOOL = /^[A-Za-z0-9_.-]{1,128}$/;
+/** `location.pathname`: printable ASCII without `?`, `#` or `\`, and no leading `//`. */
+const PAGE_PATH = /^\/(?!\/)[\x21\x22\x24-\x3e\x40-\x5b\x5d-\x7e]*$/;
+const MAX_PAGE_PATH = 2048;
+const REPORT_FIELDS = new Set([
+  "tool",
+  "outcome",
+  "durationMs",
+  "path",
+  ...PAYLOAD_KEYS,
+  "omitted",
+]);
+
+interface WebMCPReport extends FarmToolCallPayload {
+  tool: string;
+  outcome: "success" | "error";
+  durationMs: number;
+  path: string;
+  omitted?: PayloadKey[];
+}
+
+/** The report's fields, exactly, or `undefined`: an unknown field fails it as a bad value does. */
+function webMCPReport(value: unknown): WebMCPReport | undefined {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return undefined;
+  const report = value as Record<string, unknown>;
+  if (Object.keys(report).some((key) => !REPORT_FIELDS.has(key))) return undefined;
+  const { tool, outcome, durationMs, path, omitted } = report;
+  const valid =
+    typeof tool === "string" &&
+    WEBMCP_TOOL.test(tool) &&
+    (outcome === "success" || outcome === "error") &&
+    typeof durationMs === "number" &&
+    Number.isFinite(durationMs) &&
+    durationMs >= 0 &&
+    typeof path === "string" &&
+    path.length <= MAX_PAGE_PATH &&
+    PAGE_PATH.test(path) &&
+    (omitted === undefined ||
+      (Array.isArray(omitted) &&
+        omitted.every(
+          (key, index) =>
+            PAYLOAD_KEYS.includes(key) && omitted.indexOf(key) === index && !(key in report),
+        )));
+  return valid ? (report as unknown as WebMCPReport) : undefined;
+}
+
+/** The body as text, or `null` past MAX_REPORT_BYTES; reading stops there. */
+async function readReport(request: Request): Promise<string | null> {
+  const declared = request.headers.get("content-length");
+  if (declared !== null && Number(declared) > MAX_REPORT_BYTES) return null;
+  if (!request.body) return "";
+  const reader = request.body.getReader();
+  const chunks: Uint8Array[] = [];
+  let size = 0;
+  try {
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      size += value.byteLength;
+      if (size > MAX_REPORT_BYTES) return null;
+      chunks.push(value);
+    }
+  } finally {
+    void reader.cancel().catch(() => {});
+  }
+  const body = new Uint8Array(size);
+  let offset = 0;
+  for (const chunk of chunks) {
+    body.set(chunk, offset);
+    offset += chunk.byteLength;
+  }
+  return new TextDecoder("utf-8", { fatal: true }).decode(body);
+}
+
+const refuse = (status: number, error: string, headers: Record<string, string> = {}) =>
+  Response.json({ error }, { status, headers: { "cache-control": "no-store", ...headers } });
+
+/**
+ * Takes one WebMCP tool call a page's browser reports and queues it as a tool call event.
+ * Same-origin JSON only, at most MAX_REPORT_BYTES, with exactly the report's fields. Answers
+ * 404 once the sender has stopped, so the page stops reporting. Never recorded as a request.
+ */
+async function receiveWebMCPReport(
+  request: Request,
+  exporter: ReturnType<typeof createFarmInfraAnalyticsExporter>,
+  options: FarmInfraAnalyticsExporterOptions,
+  webmcp: FarmInfraAnalyticsWebMCPOptions,
+  waitUntil: (promise: Promise<unknown>) => void,
+): Promise<Response> {
+  if (!exporter.accepting()) return refuse(404, "analytics_off");
+  if (request.method !== "POST") return refuse(405, "method", { allow: "POST" });
+  if (!validateIntegrationRequestOrigin(request).ok) return refuse(403, "origin");
+  const type = request.headers.get("content-type")?.split(";", 1)[0]?.trim().toLowerCase();
+  if (type !== "application/json") return refuse(415, "content_type");
+  let report: WebMCPReport | undefined;
+  try {
+    const text = await readReport(request);
+    if (text === null) return refuse(413, "too_large");
+    report = webMCPReport(JSON.parse(text));
+  } catch {
+    report = undefined;
+  }
+  if (!report) return refuse(400, "invalid_report");
+  let route: object | null | undefined;
+  try {
+    route = await webmcp.route?.(report.path);
+  } catch {
+    route = undefined;
+  }
+  const path = appPath(report.path);
+  exporter.enqueue({
+    id: uuid(),
+    timestamp: new Date().toISOString(),
+    route: routeTemplate(getFarmRouteLabel(route)),
+    ...(path ? { path } : {}),
+    agent: classifyFarmClient(request),
+    kind: "mcp.tool",
+    source: "webmcp",
+    tool: report.tool,
+    outcome: report.outcome,
+    durationMs: duration(report.durationMs),
+    ...(options.toolPayloads !== false ? toolPayloadFields(report, report.omitted) : {}),
+  });
+  waitUntil(exporter.flush());
+  return new Response(null, { status: 204, headers: { "cache-control": "no-store" } });
+}
+
+const webMCPOptions = new WeakMap<object, FarmInfraAnalyticsWebMCPOptions>();
+
+/**
+ * @internal Gives a server's analytics plugin the route matcher for WebMCP reports, for a
+ * server that only has one once the plugin exists (`farm dev`).
+ */
+export function _setFarmInfraAnalyticsWebMCPRoute(
+  plugin: object,
+  route: NonNullable<FarmInfraAnalyticsWebMCPOptions["route"]>,
+): void {
+  const options = webMCPOptions.get(plugin);
+  if (options) options.route = route;
+}
+
+/**
+ * @internal Whether the app's pages report WebMCP tool calls: `webmcp()` is on, without
+ * `analytics: false`.
+ */
+export function _farmWebMCPReportsEnabled(plugins: readonly unknown[] | undefined): boolean {
+  return (plugins ?? []).some((plugin) => {
+    const candidate = plugin as { name?: unknown; client?: { public?: { analytics?: unknown } } };
+    return candidate?.name === "farm:webmcp" && candidate.client?.public?.analytics !== false;
+  });
 }
 
 /** The runtime plugin for already-resolved options, for servers with a plugin runtime. */
 export function farmInfraAnalyticsPlugin(
   options: FarmInfraAnalyticsExporterOptions,
   send?: typeof fetch,
+  runtimeOptions: FarmInfraAnalyticsRuntimeOptions = {},
 ): FarmPlugin<State> {
   // Scoped per instance, so two app instances in one process never share request metadata.
   const contextKey = `${CONTEXT_KEY}.${uuid()}`;
-  return {
+  const webmcp = runtimeOptions.webmcp ? { ...runtimeOptions.webmcp } : undefined;
+  const plugin: FarmPlugin<State> = {
     name: "farm:infra-analytics",
     enforce: "post",
     setup(context) {
@@ -556,6 +838,23 @@ export function farmInfraAnalyticsPlugin(
     runtime: {
       // Recording a request decides nothing about who may read the response.
       cache: "public",
+      ...(webmcp
+        ? {
+            endpoints: [
+              {
+                path: FARM_WEBMCP_REPORT_PATH,
+                handler: (event) =>
+                  receiveWebMCPReport(
+                    event.request,
+                    event.state.exporter,
+                    options,
+                    webmcp,
+                    event.waitUntil,
+                  ),
+              },
+            ],
+          }
+        : {}),
       start(context) {
         const { exporter } = context.state;
         context.state.unsubscribe = onFarmEvent(
@@ -566,7 +865,7 @@ export function farmInfraAnalyticsPlugin(
             const metadata = context.requestContext.get<RequestMetadata>(request, contextKey);
             // Streaming MCP transports can return their HTTP Response before the tool finishes.
             if (!metadata) return;
-            exporter.enqueue(toolEvent(metadata, event));
+            exporter.enqueue(toolEvent(metadata, event, options.toolPayloads !== false));
             metadata.waitUntil(exporter.flush());
           },
           { unfiltered: true },
@@ -577,6 +876,9 @@ export function farmInfraAnalyticsPlugin(
         event.req.set(contextKey, beginRequest(event.request, event.route, event.waitUntil));
       },
       after(event: FarmPluginRuntimeAfterEvent<State>) {
+        // A WebMCP report is analytics plumbing, not app traffic.
+        if (event.kind === "endpoint" && webmcp && event.route?.pattern === FARM_WEBMCP_REPORT_PATH)
+          return;
         // A plugin endpoint answers before any runtime.before hook runs.
         const metadata =
           event.req.get<RequestMetadata>(contextKey) ??
@@ -607,6 +909,13 @@ export function farmInfraAnalyticsPlugin(
       },
     },
   };
+  if (webmcp) webMCPOptions.set(plugin, webmcp);
+  return plugin;
+}
+
+export interface FarmInfraAnalyticsRuntimeOptions {
+  /** Accept the WebMCP tool calls the app's pages report at FARM_WEBMCP_REPORT_PATH. */
+  webmcp?: FarmInfraAnalyticsWebMCPOptions;
 }
 
 export interface FarmInfraAnalyticsRecorder {
@@ -629,15 +938,17 @@ export interface FarmInfraAnalyticsRecorder {
 export function farmInfraAnalyticsRecorder(
   options: FarmInfraAnalyticsExporterOptions,
   send?: typeof fetch,
+  runtimeOptions: FarmInfraAnalyticsRuntimeOptions = {},
 ): FarmInfraAnalyticsRecorder {
   const exporter = createFarmInfraAnalyticsExporter(options, send);
+  const webmcp = runtimeOptions.webmcp;
   const requests = new AsyncLocalStorage<RequestMetadata>();
   const unsubscribe = onFarmEvent(
     (event: unknown) => {
       if (!isToolEvent(event)) return;
       const metadata = requests.getStore();
       if (!metadata) return;
-      exporter.enqueue(toolEvent(metadata, event));
+      exporter.enqueue(toolEvent(metadata, event, options.toolPayloads !== false));
       metadata.waitUntil(exporter.flush());
     },
     { unfiltered: true },
@@ -647,6 +958,14 @@ export function farmInfraAnalyticsRecorder(
       if (runtime.kind === "asset") return handler();
       const background = (promise: Promise<unknown>) =>
         waitUntil ? waitUntil(promise) : void promise.catch(() => {});
+      // Matched as a plugin endpoint is: below the base path, trailing slashes aside.
+      if (
+        webmcp &&
+        stripFarmBasePath(new URL(request.url).pathname).replace(/(.)\/+$/, "$1") ===
+          FARM_WEBMCP_REPORT_PATH
+      ) {
+        return receiveWebMCPReport(request, exporter, options, webmcp, background);
+      }
       const metadata = beginRequest(request, runtime.route, background);
       const startedAt = performance.now();
       let response: Response;
@@ -726,16 +1045,18 @@ function stopReason(event: FarmInfraAnalyticsDiagnostic): string {
 export function createFarmInfraAnalyticsPlugin(
   env: Env = processEnv(),
   warn: (message: string) => void = console.warn,
+  runtimeOptions?: FarmInfraAnalyticsRuntimeOptions,
 ): FarmPlugin<State> | null {
   const options = linkedOptions(env, warn);
-  return options ? farmInfraAnalyticsPlugin(options) : null;
+  return options ? farmInfraAnalyticsPlugin(options, undefined, runtimeOptions) : null;
 }
 
 /** {@link createFarmInfraAnalyticsPlugin} for a production server without a plugin runtime. */
 export function createFarmInfraAnalyticsRecorder(
   env: Env = processEnv(),
   warn: (message: string) => void = console.warn,
+  runtimeOptions?: FarmInfraAnalyticsRuntimeOptions,
 ): FarmInfraAnalyticsRecorder | null {
   const options = linkedOptions(env, warn);
-  return options ? farmInfraAnalyticsRecorder(options) : null;
+  return options ? farmInfraAnalyticsRecorder(options, undefined, runtimeOptions) : null;
 }

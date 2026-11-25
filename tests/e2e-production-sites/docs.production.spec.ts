@@ -84,6 +84,20 @@ test("boots the emitted docs site and navigates into the guide", async ({ page }
 
   await expect(page).toHaveURL(/\/docs\/getting-started$/);
   await expect(page.getByRole("heading", { name: "Getting Started", level: 1 })).toBeVisible();
+  // The docs page imports its config module before it hydrates, so an error thrown there stops
+  // hydration. Wait for one or the other rather than checking errors before that module runs.
+  await expect
+    .poll(
+      async () =>
+        browserErrors.length > 0 ||
+        (await page.evaluate(() => {
+          const root = document.getElementById("farm-docs-root");
+          return (
+            root !== null && Object.keys(root).some((key) => key.startsWith("__reactContainer$"))
+          );
+        })),
+    )
+    .toBe(true);
   expect(browserErrors).toEqual([]);
 });
 
@@ -101,16 +115,16 @@ test("blog connects the index, article, contents, and Markdown mirror", async ({
   // The index features the newest post and lists the rest, so these follow the collection.
   await expect(page.locator(".blog-featured h3 a")).toHaveAttribute(
     "href",
-    "/blog/agent-markdown-scan",
+    "/blog/bring-your-own-renderer",
   );
   await expect(page.locator(".blog-featured .blog-post-meta time")).toHaveText("Nov 2026");
   await expect(page.locator(".blog-featured .blog-post-meta time")).toHaveAttribute(
     "datetime",
-    "2026-11-16",
+    "2026-11-21",
   );
   await expect(page.locator(".blog-featured .blog-post-meta time")).toHaveCSS(
     "font-family",
-    /Geist Sans/,
+    /Graft/,
   );
   const listed = page.locator('.blog-post-list a[href="/blog/0.1.0"]');
   await expect(listed).toHaveCount(1);
@@ -139,7 +153,7 @@ test("blog connects the index, article, contents, and Markdown mirror", async ({
   await expect(page.locator(".blog-read-link")).toHaveText("Read article");
   await expect(page.locator(".blog-read-link")).toHaveAttribute(
     "href",
-    "/blog/agent-markdown-scan",
+    "/blog/bring-your-own-renderer",
   );
   await expect(page.locator(".blog-explore a")).toHaveCount(2);
   await expect(page.locator(".blog-explore a").first()).toHaveAttribute(
@@ -704,6 +718,43 @@ test("article sidebar tracks native navigation, reading position, pointer, and k
   await expect(indicator).toHaveCSS("transition-duration", "0.22s");
 });
 
+test("article sidebar moves straight to a clicked section while the page scrolls smoothly", async ({
+  page,
+}) => {
+  await page.emulateMedia({ reducedMotion: "no-preference" });
+  await page.goto("/blog/0.1.0");
+  await expect(page.locator("html")).toHaveCSS("scroll-behavior", "smooth");
+  const nav = page.locator(".blog-contents-links").first();
+  const viby = nav.getByRole("link", { name: "Built with Farm: Viby" });
+  await expect(nav).toHaveAttribute("data-highlight-ready", "true");
+  // Record each section the sidebar marks current, frame by frame, from before the click until the
+  // smooth scroll has been still for longer than the sidebar waits before measuring again.
+  const marked = page.evaluate(
+    () =>
+      new Promise<string[]>((resolve) => {
+        const links = document.querySelector(".blog-contents-links")!;
+        const seen: string[] = [];
+        let lastY = scrollY;
+        let moved = false;
+        let stillFrames = 0;
+        function frame() {
+          const current = links.querySelector('[aria-current="location"]')?.getAttribute("href");
+          if (current && seen.at(-1) !== current) seen.push(current);
+          if (scrollY !== lastY) moved = true;
+          stillFrames = scrollY === lastY ? stillFrames + 1 : 0;
+          lastY = scrollY;
+          if (moved && stillFrames >= 45) resolve(seen);
+          else requestAnimationFrame(frame);
+        }
+        requestAnimationFrame(frame);
+      }),
+  );
+  await viby.click();
+  expect(await marked).toEqual(["#what-stable-means", "#built-with-farm-viby"]);
+  await expect(page).toHaveURL(/#built-with-farm-viby$/);
+  await expect(viby).toHaveAttribute("aria-current", "location");
+});
+
 test("agents page connects the blog, planned capabilities, and Markdown", async ({ page }) => {
   const errors: string[] = [];
   page.on("pageerror", (error) => errors.push(error.message));
@@ -1034,6 +1085,7 @@ for (const width of [280, 320, 345, 360, 1440]) {
         "/blog/web-to-native",
         "/blog/native-internals",
         "/blog/agent-markdown-scan",
+        "/blog/bring-your-own-renderer",
         "/blog",
         "/",
       ]) {
@@ -1092,6 +1144,7 @@ test("blog figure captions stay in view while their figures scroll sideways", as
       "/blog/web-to-native",
       "/blog/native-internals",
       "/blog/agent-markdown-scan",
+      "/blog/bring-your-own-renderer",
     ]) {
       await page.goto(pathname);
       const result = await page

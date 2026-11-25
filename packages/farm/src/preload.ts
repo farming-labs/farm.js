@@ -441,7 +441,18 @@ function findHtmlLinkElements(html: string): HtmlLinkElement[] {
 // Longest raw-text opener the scan matches at a tag start ("<template", "<textarea",
 // "<noscript") plus its boundary character, with margin.
 const RAW_TEXT_TAG_LOOKAHEAD = 16;
-const PRELOAD_TOKEN = /\bpreload\b/gi;
+// `preload` where it can be a whole token of a `rel` value, which getHtmlPreloadKind splits on
+// whitespace: after a quote, `=` or whitespace, and before a quote, whitespace, `>` or the end.
+// Attribute names such as the islands boot script's `data-farm-preload` never match, so a document
+// whose only `preload` is one of those skips the scan.
+const PRELOAD_TOKEN_SOURCE = String.raw`(?<=[\s"'=])preload(?=[\s"'>]|$)`;
+const PRELOAD_TOKEN = new RegExp(PRELOAD_TOKEN_SOURCE, "gi");
+const ANY_PRELOAD_TOKEN = new RegExp(PRELOAD_TOKEN_SOURCE, "i");
+
+/** @internal Whether `html` can hold a preload link the budget counts. */
+export function hasFarmHtmlPreloadToken(html: string): boolean {
+  return ANY_PRELOAD_TOKEN.test(html);
+}
 
 function findLastPreloadToken(html: string): number {
   let last = -1;

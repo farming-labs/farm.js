@@ -12,7 +12,7 @@ Farm compiles font declarations into ordinary CSS and content-hashed assets. The
 Call `localFont` at module scope in a layout or page. The source can be relative to that module or a package font specifier.
 
 ```tsx title="src/app/layout.tsx"
-import { defineLayoutFonts, localFont } from "@farm.js/core/font";
+import { localFont } from "@farm.js/core/font";
 
 const geist = localFont({
   src: "geist/dist/fonts/geist-sans/Geist-Variable.woff2",
@@ -26,27 +26,36 @@ const geistMono = localFont({
   src: "geist/dist/fonts/geist-mono/GeistMono-Variable.woff2",
   family: "Geist Mono",
   weight: "100 900",
+  variable: "--font-geist-mono",
   fallback: ["ui-monospace", "monospace"],
 });
 
-export const fonts = defineLayoutFonts({
-  body: geist,
-  code: geistMono,
-});
-
 export default function RootLayout({ children }) {
-  return <main className={`${geist.variable} ${geist.className}`}>{children}</main>;
+  return (
+    <main className={`${geist.variable} ${geistMono.variable} ${geist.className}`}>{children}</main>
+  );
 }
 ```
 
 Farm emits the font with a content hash, generates its `@font-face`, and adds a preload hint by default. `display` defaults to `"swap"`.
 
-The optional `fonts` layout export gives semantic roles to those compiled fonts. Framework-owned
-surfaces that render outside the layout's React tree, including built-in Farm Docs, use the layouts
-applicable to the requested path. Resolution runs from the root toward the nearest layout, and a
-nearer layout overrides only the roles it declares. For example, a `/docs/layout.tsx` can replace
-`body` while continuing to inherit `code` from the root layout. Regular application pages continue
-to use the classes or variables applied by their rendered layouts.
+Pages that render outside the layout's React tree, such as built-in Farm Docs, use the fonts the
+layout applies. Farm reads them from the layout when it compiles it for the server: `body` is the
+font whose `className` the layout applies, and `code` is the first other applied font whose
+fallback stack ends in `monospace`. A layout that applies only variables gets its first font that
+is not monospace as `body`.
+
+To choose the roles yourself, export `fonts` from the layout. It replaces what Farm reads:
+
+```tsx title="src/app/layout.tsx"
+import { defineLayoutFonts } from "@farm.js/core/font";
+
+export const fonts = defineLayoutFonts({ body: geist, code: geistMono });
+```
+
+Resolution runs from the root toward the nearest layout, and a nearer layout overrides only the
+roles it has. For example, a `/docs/layout.tsx` can replace `body` while continuing to inherit
+`code` from the root layout.
 
 ### Fonts in `public`
 
@@ -112,6 +121,37 @@ const partner = remoteFont({
   strategy: "external",
 });
 ```
+
+## Fonts from a package
+
+A package can ship its own font declarations, so an app imports a ready font in one line:
+
+```tsx title="src/app/layout.tsx"
+import { BrandSans } from "brand-fonts/farm/sans";
+
+export default function RootLayout({ children }) {
+  return (
+    <html lang="en" className={BrandSans.variable}>
+      <body className={BrandSans.className}>{children}</body>
+    </html>
+  );
+}
+```
+
+The package exports a module that calls `localFont` at module scope, with `src` relative to that module:
+
+```js title="node_modules/brand-fonts/farm/sans.js"
+import { localFont } from "@farm.js/core/font";
+
+export const BrandSans = localFont({
+  src: "../fonts/BrandSans-Variable.woff2",
+  family: "Brand Sans",
+  weight: "100 900",
+  variable: "--font-brand-sans",
+});
+```
+
+Farm finds packages that import `@farm.js/core/font` and compiles them with the app's own modules, on the server and in the browser, in development and in production builds. Ship the module as ES module JavaScript and list `@farm.js/core` as a peer dependency.
 
 ## Returned values
 

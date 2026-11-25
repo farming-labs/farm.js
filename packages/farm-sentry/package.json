@@ -1,6 +1,6 @@
 {
   "name": "@farm.js/sentry",
-  "version": "0.1.78",
+  "version": "0.1.87",
   "description": "Sentry error reporting and tracing for Farm.js",
   "keywords": [
     "error-tracking",
@@ -38,16 +38,15 @@
     "type-check": "tsc --noEmit",
     "test": "vitest run"
   },
-  "dependencies": {
-    "@farm.js/core": "workspace:*"
-  },
   "devDependencies": {
+    "@farm.js/core": "workspace:*",
     "@sentry/node": "^10.71.0",
     "typescript": "^5.3.3",
     "vite": "8.3.4",
     "vitest": "5.0.5"
   },
   "peerDependencies": {
+    "@farm.js/core": ">=0.1.78 <0.3.0",
     "@sentry/node": ">=8.47.0"
   },
   "peerDependenciesMeta": {

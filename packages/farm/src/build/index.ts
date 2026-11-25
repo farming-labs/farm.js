@@ -20,7 +20,7 @@ import { getFarmDocsRouteTypeEntries } from "../docs";
 import { generateFarmTypeArtifacts } from "../type-artifacts";
 import { PluginManager } from "../plugin";
 import { farmEnvironmentFunctionsPlugin } from "../environment-vite";
-import { farmFontImportsPlugin } from "../font-vite";
+import { farmFontImportsPlugin, isFarmLayoutModule } from "../font-vite";
 import { createFarmSourceAlias, mergeFarmViteConfig } from "../server/vite-config";
 import { getFarmRendererComponentExtensions, loadFarmRendererVitePlugins } from "../renderer";
 import { loadFarmProductionVite, type FarmProductionViteRuntime } from "./production-vite";
@@ -200,6 +200,7 @@ async function buildWithProductionNodeEnv(inputConfig: ResolvedFarmConfig, optio
       ],
       suppressLintOnLink: config.suppressLintOnLink,
       componentExtensions: config.renderer.componentExtensions,
+      renderer: config.renderer,
       i18nConfig: config.i18n,
     }).catch((error: unknown) => {
       // Non-fatal; type generation is for DX only. But say so: a silently
@@ -314,7 +315,7 @@ async function createProjectModuleServer(
   root: string,
   buildLifetime: AbortSignal,
 ): Promise<ViteDevServer> {
-  const { farmServerOnlyEntriesPlugin } = await import("../vite");
+  const { farmNavigationPlugin, farmServerOnlyEntriesPlugin } = await import("../vite");
   const rendererVitePlugins = await loadFarmRendererVitePlugins(config.renderer, root, {
     ssr: true,
     buildLifetime,
@@ -335,8 +336,9 @@ async function createProjectModuleServer(
           root,
           basePath: config.basePath,
           publicDir: config.publicDir,
+          isLayoutModule: (id) => isFarmLayoutModule(id, getFarmAppDirectories(config)),
         }),
-        farmEnvironmentFunctionsPlugin(),
+        farmEnvironmentFunctionsPlugin({ renderer: config.renderer }),
         // Route modules load here at build time (rendering config, prerendering): `server-only`
         // resolves as it does in the server build. Module-entry packages load pre-bundled, as in
         // `farm dev`: unbundled, lucide-react alone is ~1,750 modules through the module runner,
@@ -345,6 +347,7 @@ async function createProjectModuleServer(
           prebundleServerPackages: true,
           distDir: config.distDir || ".farm",
         }),
+        farmNavigationPlugin(config.renderer),
       ],
       server: {
         middlewareMode: true,
@@ -416,6 +419,7 @@ async function buildClient(
   const {
     farmI18nClientBridgePlugin,
     farmIslandContainersPlugin,
+    farmNavigationPlugin,
     farmPlugin,
     farmServerOnlyEntriesPlugin,
   } = await import("../vite");
@@ -440,6 +444,7 @@ async function buildClient(
     plugins: [
       farmI18nClientBridgePlugin(),
       farmServerOnlyEntriesPlugin({ distDir: config.distDir || ".farm" }),
+      farmNavigationPlugin(config.renderer),
       farmIslandContainersPlugin(config),
       farmPlugin(config, pluginManager),
       farmEnvironmentFunctionsPlugin(config),

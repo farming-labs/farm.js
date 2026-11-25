@@ -1,5 +1,11 @@
+import { FORM_REF_PREFIX } from "@farm.js/islx";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { scheduleFarmIslandHydration } from "../client/island-runtime";
+import {
+  FARM_ISLANDS_FORM_REF_PREFIX,
+  holdFarmIslandInteractions,
+  scheduleFarmIslandHydration,
+  watchFarmIslandTriggers,
+} from "../client/island-runtime";
 
 describe("scheduleFarmIslandHydration", () => {
   beforeEach(() => {
@@ -169,6 +175,45 @@ describe("scheduleFarmIslandHydration", () => {
     await vi.runAllTimersAsync();
     expect(handled).toEqual(["add", "add", "undo"]);
   });
+
+  // Server HTML is on screen before its island hydrates, so a click on it then would do nothing.
+  for (const strategy of ["load", "idle", "visible"] as const) {
+    it(`replays every click made while a ${strategy} boundary hydrates, and starts it on one`, async () => {
+      vi.useFakeTimers();
+      // Never in view: only the click starts a visible boundary.
+      vi.stubGlobal(
+        "IntersectionObserver",
+        class {
+          observe() {}
+          unobserve() {}
+          disconnect() {}
+        },
+      );
+      const container = document.getElementById("island")!;
+      const button = container.querySelector("button")!;
+      let handledClicks = 0;
+      let finishHydrate!: () => void;
+      const hydrate = vi.fn(
+        () =>
+          new Promise<void>((resolve) => {
+            finishHydrate = () => {
+              button.addEventListener("click", () => handledClicks++);
+              resolve();
+            };
+          }),
+      );
+      const scheduled = scheduleFarmIslandHydration({ container, strategy, hydrate });
+
+      button.click();
+      button.click();
+      await vi.advanceTimersByTimeAsync(0);
+      expect(hydrate).toHaveBeenCalledOnce();
+      finishHydrate();
+      await scheduled;
+      await vi.runAllTimersAsync();
+      expect(handledClicks).toBe(2);
+    });
+  }
 
   it("submits a form once when its submit button is clicked twice before hydration", async () => {
     vi.useFakeTimers();
@@ -500,5 +545,319 @@ describe("scheduleFarmIslandHydration", () => {
 
     await expect(scheduled).resolves.toBe("idle");
     expect(cancelIdleCallback).toHaveBeenCalledWith(7);
+  });
+});
+
+describe("holdFarmIslandInteractions", () => {
+  afterEach(() => {
+    vi.useRealTimers();
+    delete (window as typeof window & { __FARM_PREHYDRATION_CLICK_QUEUE__?: unknown })
+      .__FARM_PREHYDRATION_CLICK_QUEUE__;
+    document.body.innerHTML = "";
+  });
+
+  // Islands mode's entry holds these while islx loads (RFC 0010); no scheduler runs yet.
+  it("holds clicks on islands that have not hydrated until their scheduler replays them", async () => {
+    vi.useFakeTimers();
+    document.body.innerHTML = `
+      <f-island id="waiting"><button type="button">Count</button></f-island>
+      <f-island data-farm-island-hydrated="true"><button type="button">Hydrated</button></f-island>
+      <button type="button" id="outside">Outside</button>`;
+    const container = document.getElementById("waiting")!;
+    const button = container.querySelector("button")!;
+    const hydratedButton = document.querySelector("[data-farm-island-hydrated] button")!;
+    const outside = document.getElementById("outside")!;
+    const seen: string[] = [];
+    document.addEventListener("click", (event) => {
+      seen.push((event.target as Element).textContent ?? "");
+    });
+
+    const release = holdFarmIslandInteractions("f-island");
+    button.click();
+    button.click();
+    hydratedButton.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    outside.click();
+    release();
+    // Once released, a click reaches the page again.
+    outside.click();
+    expect(seen).toEqual(["Hydrated", "Outside", "Outside"]);
+
+    let handledClicks = 0;
+    const scheduled = scheduleFarmIslandHydration({
+      container,
+      strategy: "interaction",
+      hydrate: () => {
+        button.addEventListener("click", () => handledClicks++);
+      },
+    });
+    await scheduled;
+    await vi.runAllTimersAsync();
+    expect(handledClicks).toBe(2);
+  });
+
+  it("holds a form's submit once", () => {
+    document.body.innerHTML = `<f-island><form><input name="q"></form></f-island>`;
+    const form = document.querySelector("form")!;
+    const release = holdFarmIslandInteractions("f-island");
+    const first = new Event("submit", { bubbles: true, cancelable: true });
+    form.dispatchEvent(first);
+    form.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true }));
+    release();
+
+    expect(first.defaultPrevented).toBe(true);
+    const queue = (window as typeof window & { __FARM_PREHYDRATION_CLICK_QUEUE__?: unknown[] })
+      .__FARM_PREHYDRATION_CLICK_QUEUE__;
+    expect(queue).toEqual([{ target: form, kind: "submit" }]);
+  });
+
+  describe("of a server component's form", () => {
+    // What islx renders for <form action={serverAction}> in a server component.
+    const serverForm = `<form><input type="hidden" name="${FORM_REF_PREFIX}0"><input name="title"><button name="intent" value="add">Add</button></form>`;
+    let submits: Array<{ prevented: boolean; submitter: Element | null }>;
+    // jsdom cannot submit a form: the window, which the event reaches last, records it and stops it.
+    const record = (event: Event) => {
+      submits.push({
+        prevented: event.defaultPrevented,
+        submitter: (event as SubmitEvent).submitter,
+      });
+      event.preventDefault();
+    };
+    beforeEach(() => {
+      submits = [];
+      window.addEventListener("submit", record);
+    });
+    afterEach(() => {
+      window.removeEventListener("submit", record);
+      vi.restoreAllMocks();
+    });
+
+    it("reads the field islx names a form's action with", () => {
+      expect(FARM_ISLANDS_FORM_REF_PREFIX).toBe(FORM_REF_PREFIX);
+    });
+
+    it("holds its submit until islx loads, then submits it again with its button, once", async () => {
+      document.body.innerHTML = serverForm;
+      const form = document.querySelector("form")!;
+      const button = form.querySelector("button")!;
+      let finish!: () => void;
+      const load = vi.fn(() => new Promise<void>((resolve) => (finish = resolve)));
+      const release = holdFarmIslandInteractions("f-island", load);
+      form.requestSubmit(button);
+      form.requestSubmit(button);
+      expect(load).toHaveBeenCalledTimes(1);
+      expect(submits).toEqual([
+        { prevented: true, submitter: button },
+        { prevented: true, submitter: button },
+      ]);
+      // The entry's loader releases the hold as islx loads, before the form is submitted again.
+      release();
+      finish();
+      await vi.waitFor(() => expect(submits).toHaveLength(3));
+      expect(submits[2]).toEqual({ prevented: false, submitter: button });
+    });
+
+    it("submits it natively after islx fails to load", async () => {
+      document.body.innerHTML = serverForm;
+      const form = document.querySelector("form")!;
+      const failure = new Error("chunk failed");
+      const error = vi.spyOn(console, "error").mockImplementation(() => {});
+      let fail!: (error: Error) => void;
+      const release = holdFarmIslandInteractions(
+        "f-island",
+        () => new Promise<void>((_, reject) => (fail = reject)),
+      );
+      form.requestSubmit();
+      release();
+      fail(failure);
+      await vi.waitFor(() => expect(submits).toHaveLength(2));
+      expect(submits.map((submit) => submit.prevented)).toEqual([true, false]);
+      expect(error).toHaveBeenCalledWith(expect.stringContaining("posts without it"), failure);
+    });
+
+    it("leaves a form without an action, or any form when it has nothing to load, alone", () => {
+      document.body.innerHTML = `<form id="plain"><input name="q"><button>Search</button></form>${serverForm}`;
+      const load = vi.fn(() => new Promise<void>(() => {}));
+      let release = holdFarmIslandInteractions("f-island", load);
+      document.querySelector<HTMLFormElement>("#plain")!.requestSubmit();
+      release();
+      release = holdFarmIslandInteractions("f-island");
+      document.querySelector<HTMLFormElement>("form:not(#plain)")!.requestSubmit();
+      release();
+      expect(load).not.toHaveBeenCalled();
+      expect(submits.map((submit) => submit.prevented)).toEqual([false, false]);
+    });
+  });
+});
+
+describe("watchFarmIslandTriggers", () => {
+  const queue = () =>
+    ((
+      window as typeof window & { __FARM_PREHYDRATION_CLICK_QUEUE__?: unknown[] }
+    ).__FARM_PREHYDRATION_CLICK_QUEUE__ ??= []);
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    delete (window as typeof window & { __FARM_PREHYDRATION_CLICK_QUEUE__?: unknown })
+      .__FARM_PREHYDRATION_CLICK_QUEUE__;
+    document.body.innerHTML = "";
+  });
+
+  it("finds an island due at once when it hydrates at load, or has no strategy", () => {
+    for (const attribute of ['strategy="load"', ""]) {
+      document.body.innerHTML = `<f-island strategy="interaction"></f-island><f-island ${attribute}><button>A</button></f-island>`;
+      const due = vi.fn();
+      expect(watchFarmIslandTriggers(document, "f-island", due)).toBeNull();
+      expect(due).not.toHaveBeenCalled();
+    }
+  });
+
+  it("finds an island due at once when it holds a click", () => {
+    document.body.innerHTML = '<f-island strategy="interaction"><button>A</button></f-island>';
+    queue().push({ target: document.querySelector("button"), kind: "click" });
+    expect(watchFarmIslandTriggers(document, "f-island", vi.fn())).toBeNull();
+  });
+
+  it("finds islands due at once while a Suspense boundary waits for the browser", () => {
+    for (const marker of ["$?", "$!"]) {
+      document.body.innerHTML = `<!--${marker}--><f-island strategy="interaction"></f-island>`;
+      expect(watchFarmIslandTriggers(document, "f-island", vi.fn())).toBeNull();
+    }
+  });
+
+  it("follows an outer island's strategy, not one inside it", () => {
+    document.body.innerHTML =
+      '<f-island strategy="interaction"><f-island strategy="load"></f-island></f-island>';
+    expect(watchFarmIslandTriggers(document, "f-island", vi.fn())).toBeTypeOf("function");
+  });
+
+  it("calls `due` once on a press or focus inside a waiting island, and stops watching", () => {
+    document.body.innerHTML =
+      '<f-island strategy="interaction"><button>A</button></f-island><button id="outside">B</button>';
+    const due = vi.fn();
+    const stop = watchFarmIslandTriggers(document, "f-island", due);
+    expect(stop).toBeTypeOf("function");
+    document.getElementById("outside")!.dispatchEvent(new Event("pointerdown", { bubbles: true }));
+    expect(due).not.toHaveBeenCalled();
+    const button = document.querySelector("f-island button")!;
+    button.dispatchEvent(new Event("pointerdown", { bubbles: true }));
+    button.dispatchEvent(new FocusEvent("focusin", { bubbles: true }));
+    expect(due).toHaveBeenCalledOnce();
+  });
+
+  it("calls `due` on a held click it is told about", () => {
+    document.body.innerHTML = '<f-island strategy="interaction"><button>A</button></f-island>';
+    const due = vi.fn();
+    watchFarmIslandTriggers(document, "f-island", due);
+    document.dispatchEvent(
+      new CustomEvent("farm:island-interaction", {
+        detail: { target: document.querySelector("button"), kind: "click" },
+      }),
+    );
+    expect(due).toHaveBeenCalledOnce();
+  });
+
+  it("leaves a press on a link that navigates alone, as the scheduler does", () => {
+    document.body.innerHTML =
+      '<f-island strategy="interaction"><a href="/next">Next</a><a href="#part">Part</a></f-island>';
+    const due = vi.fn();
+    watchFarmIslandTriggers(document, "f-island", due);
+    document
+      .querySelector('a[href="/next"]')!
+      .dispatchEvent(new Event("pointerdown", { bubbles: true }));
+    expect(due).not.toHaveBeenCalled();
+    document
+      .querySelector('a[href="#part"]')!
+      .dispatchEvent(new Event("pointerdown", { bubbles: true }));
+    expect(due).toHaveBeenCalledOnce();
+  });
+
+  it("calls `due` when a form is touched, which islx posts without a page load", () => {
+    document.body.innerHTML =
+      '<f-island strategy="interaction"></f-island><form><input name="q" /></form>';
+    const due = vi.fn();
+    watchFarmIslandTriggers(document, "f-island", due);
+    document.querySelector("input")!.dispatchEvent(new FocusEvent("focusin", { bubbles: true }));
+    expect(due).toHaveBeenCalledOnce();
+  });
+
+  it("watches only its scope", () => {
+    document.body.innerHTML =
+      '<main><f-island strategy="interaction"><button>A</button></f-island></main><f-island strategy="interaction"><button>B</button></f-island>';
+    const due = vi.fn();
+    watchFarmIslandTriggers(document.querySelector("main")!, "f-island", due);
+    document
+      .querySelectorAll("button")[1]!
+      .dispatchEvent(new Event("pointerdown", { bubbles: true }));
+    expect(due).not.toHaveBeenCalled();
+    document
+      .querySelectorAll("button")[0]!
+      .dispatchEvent(new Event("pointerdown", { bubbles: true }));
+    expect(due).toHaveBeenCalledOnce();
+  });
+
+  it("calls `due` when an idle island's idle callback runs", () => {
+    let idle: (() => void) | undefined;
+    vi.stubGlobal("requestIdleCallback", (callback: () => void) => ((idle = callback), 1));
+    vi.stubGlobal("cancelIdleCallback", vi.fn());
+    document.body.innerHTML =
+      '<f-island strategy="idle"></f-island><f-island strategy="idle"></f-island>';
+    const due = vi.fn();
+    expect(watchFarmIslandTriggers(document, "f-island", due)).toBeTypeOf("function");
+    expect(due).not.toHaveBeenCalled();
+    idle?.();
+    expect(due).toHaveBeenCalledOnce();
+  });
+
+  it("calls `due` when a visible island's children come into view", () => {
+    const observed: Element[] = [];
+    let notify: IntersectionObserverCallback | undefined;
+    vi.stubGlobal(
+      "IntersectionObserver",
+      class {
+        constructor(callback: IntersectionObserverCallback) {
+          notify = callback;
+        }
+        observe(target: Element) {
+          observed.push(target);
+        }
+        unobserve() {}
+        disconnect() {}
+      },
+    );
+    document.body.innerHTML = '<f-island strategy="visible"><p>Below</p></f-island>';
+    const due = vi.fn();
+    expect(watchFarmIslandTriggers(document, "f-island", due)).toBeTypeOf("function");
+    expect(observed).toEqual([document.querySelector("p")]);
+    notify?.(
+      [{ isIntersecting: true, target: observed[0] } as IntersectionObserverEntry],
+      {} as IntersectionObserver,
+    );
+    expect(due).toHaveBeenCalledOnce();
+  });
+
+  it("finds a visible island with nothing to observe due at once", () => {
+    vi.stubGlobal(
+      "IntersectionObserver",
+      class {
+        observe() {}
+        unobserve() {}
+        disconnect() {}
+      },
+    );
+    document.body.innerHTML = '<f-island strategy="visible"></f-island>';
+    expect(watchFarmIslandTriggers(document, "f-island", vi.fn())).toBeNull();
+  });
+
+  it("stops every trigger when stopped", () => {
+    const cancelIdleCallback = vi.fn();
+    vi.stubGlobal("requestIdleCallback", () => 7);
+    vi.stubGlobal("cancelIdleCallback", cancelIdleCallback);
+    document.body.innerHTML =
+      '<f-island strategy="idle"></f-island><f-island strategy="interaction"><button>A</button></f-island>';
+    const due = vi.fn();
+    watchFarmIslandTriggers(document, "f-island", due)!();
+    expect(cancelIdleCallback).toHaveBeenCalledWith(7);
+    document.querySelector("button")!.dispatchEvent(new Event("pointerdown", { bubbles: true }));
+    expect(due).not.toHaveBeenCalled();
   });
 });

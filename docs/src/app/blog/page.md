@@ -7,6 +7,10 @@ description: "Releases, engineering notes, and ideas from the people building Fa
 
 Releases, engineering notes, and ideas.
 
+## [Build your own renderer, build your own full-stack framework](/blog/bring-your-own-renderer)
+
+A step-by-step guide to plugging any UI library into Farm: a descriptor, three small modules, hooks over Farm's stores, islands, and two ways to use ui-sdk components. Every snippet comes from a working app you can clone, farming-labs/leaf.
+
 ## [I asked 105 developer sites for Markdown. A third answered with HTML.](/blog/agent-markdown-scan)
 
 What 105 developer-tool sites send an AI agent that asks for Markdown. A third answer with only HTML, the median docs page is 35 times bigger as HTML, and the frameworks and build tools developers use are furthest behind.

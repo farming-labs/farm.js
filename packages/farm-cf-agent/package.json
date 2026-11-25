@@ -1,6 +1,6 @@
 {
   "name": "@farm.js/cf-agent",
-  "version": "0.1.78",
+  "version": "0.1.87",
   "description": "First-class Cloudflare Agents integration for Farm.js",
   "keywords": [
     "agents",
@@ -37,10 +37,10 @@
     "type-check": "tsc --noEmit"
   },
   "dependencies": {
-    "@farm.js/core": "workspace:*",
     "jsonc-parser": "^3.3.1"
   },
   "devDependencies": {
+    "@farm.js/core": "workspace:*",
     "@types/node": "^22.20.5",
     "agents": "0.17.4",
     "tsup": "^8.5.1",
@@ -50,6 +50,7 @@
     "wrangler": "4.111.0"
   },
   "peerDependencies": {
+    "@farm.js/core": ">=0.1.78 <0.3.0",
     "agents": ">=0.17.4 <1",
     "wrangler": ">=4.111.0 <5"
   },

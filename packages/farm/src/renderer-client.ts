@@ -8,6 +8,7 @@ import {
   type FarmNavigateOptions,
 } from "./client/spa-router";
 import { subscribeHistoryChange } from "./client/history-sync";
+import { _peekCurrentRequest } from "./server/request-bridge";
 import { getFarmClientDataCache, type FarmClientCacheStatus } from "./client-cache";
 import { attachRevalidationListeners } from "./client-revalidation";
 import type { ServerFn } from "./server-fn";
@@ -30,6 +31,23 @@ import {
 import type { FarmI18nClientSnapshot, FarmI18nLocale, FarmTranslator } from "./i18n/types";
 
 export type { FarmI18nClientSnapshot, FarmI18nLocale, FarmTranslator } from "./i18n/types";
+export { FARM_LINK_OPTION_KEYS, resolveLinkAttributes } from "./client/link-attributes";
+export { resolveImageAttributes } from "./image-attributes";
+export type {
+  FarmImageAttributes,
+  FarmImageLoader,
+  FarmImageLoaderProps,
+  FarmImageOptions,
+  FarmImageStyle,
+  StaticImageData,
+} from "./image-attributes";
+export type {
+  DefaultRouteHref,
+  FarmLinkAttributes,
+  FarmLinkOptions,
+  LinkDefaultRoute,
+} from "./client/link-attributes";
+export type { FarmViewTransitionMode } from "./client/spa-router";
 export { delegateNavigation } from "./client/navigation-delegate";
 export type {
   FarmNavigationDelegate,
@@ -42,10 +60,29 @@ import {
   stripFarmBasePath,
 } from "./base-path";
 
+/**
+ * The state contract every renderer binding reads: a snapshot, and a way to hear that it changed.
+ * Farm's router, action, query, theme, and i18n stores implement it, and so does `createStore`.
+ */
 export interface FarmClientStore<TSnapshot> {
+  /** Returns the current snapshot. It must return the same value until the state changes. */
   getSnapshot(): TSnapshot;
+  /** Calls `listener` after the snapshot changes. Returns a function that unsubscribes. */
   subscribe(listener: () => void): () => void;
 }
+
+export { createStore } from "./store-core";
+export type {
+  Store,
+  StoreApi,
+  StoreFields,
+  StoreKeyListener,
+  StoreKeysListener,
+  StoreListener,
+  StorePatch,
+  StoreState,
+  StoreValueUpdater,
+} from "./store-core";
 
 export interface FarmRendererRouterOptions {
   basePath?: string;
@@ -271,6 +308,52 @@ export function createRendererAction<TInput, TResult, TError extends Error = Err
   } as FarmAction<TInput, TResult, TError>;
 }
 
+/**
+ * Submits a form through an action, as React's `useAction().Form` does: the browser's own
+ * submission is cancelled, the form's fields and the button that submitted it become the action's
+ * `FormData`, a failure stays in the action's `error`, and a successful submission resets the
+ * form. Solid's and Vue's `Form` components and Svelte's `enhance` action call it from their
+ * `submit` listener. A listener that already cancelled the submission keeps it cancelled.
+ */
+export async function submitRendererActionForm(
+  action: Pick<FarmAction<any, any, any>, "submit">,
+  event: Event,
+): Promise<void> {
+  const form = event.target;
+  if (event.defaultPrevented || !isFormElement(form)) return;
+  event.preventDefault();
+  const submitter = (event as SubmitEvent).submitter ?? null;
+  try {
+    await action.submit(createSubmittedFormData(form, submitter));
+  } catch {
+    // The action's snapshot keeps the error, as React's form action does.
+    return;
+  }
+  form.reset();
+}
+
+function isFormElement(value: EventTarget | null): value is HTMLFormElement {
+  return typeof HTMLFormElement !== "undefined" && value instanceof HTMLFormElement;
+}
+
+function createSubmittedFormData(form: HTMLFormElement, submitter: HTMLElement | null): FormData {
+  if (submitter) {
+    try {
+      const data = new FormData(form, submitter);
+      const name = submitter.getAttribute("name");
+      // An engine that ignores the submitter argument leaves the button out.
+      if (!name || data.has(name)) return data;
+    } catch {
+      // Not one of this form's submit buttons: submit the fields alone.
+      return new FormData(form);
+    }
+    const data = new FormData(form);
+    data.append(submitter.getAttribute("name")!, submitter.getAttribute("value") ?? "");
+    return data;
+  }
+  return new FormData(form);
+}
+
 export interface FarmRendererQueryOptions extends ServerQueryFetchOptions {
   enabled?: boolean;
   refetchOnWindowFocus?: boolean;
@@ -325,9 +408,19 @@ export function createRendererQuery<TInput, TData>(
   let cleanupBrowser: (() => void) | undefined;
 
   const run = (force = false) => fetchServerQuery(query, input, { ...options, force });
+  let pendingInvalidation = false;
   const ensureStarted = () => {
     if (options.enabled === false || unsubscribeCache) return;
-    unsubscribeCache = cache.subscribe(key, () => {
+    unsubscribeCache = cache.subscribe(key, (event) => {
+      // As React's useServerQuery does: a query something still observes reads again once the
+      // keys an action invalidated reach it, after any read already in flight.
+      const entry = cache.get(key);
+      if (event === "invalidate") pendingInvalidation = true;
+      else if (entry?.fetching) pendingInvalidation = false;
+      if (pendingInvalidation && entry?.invalidatedAt !== undefined && !entry.fetching) {
+        pendingInvalidation = false;
+        void run().catch(() => undefined);
+      }
       for (const listener of listeners) listener();
     });
     if (!cache.get(key) || cache.isStale(key)) void run().catch(() => undefined);
@@ -415,7 +508,8 @@ function readRendererRouterSnapshot(
   matcher: FarmRouter | null,
   navigation: FarmNavigationState,
 ): FarmRendererRouterSnapshot {
-  if (typeof window === "undefined") {
+  const url = readRendererCurrentUrl();
+  if (!url) {
     return {
       pathname: "/",
       searchParams: new URLSearchParams(),
@@ -425,7 +519,6 @@ function readRendererRouterSnapshot(
     };
   }
 
-  const url = new URL(window.location.href);
   const pathname = stripFarmBasePath(url.pathname, basePath);
   const i18n = getFarmI18nClientState();
   // `pathname` is already basePath-relative; the snapshot's basePath must not
@@ -438,9 +531,25 @@ function readRendererRouterSnapshot(
     pathname,
     searchParams: url.searchParams,
     params: matcher?.match(routePathname)?.params || {},
-    pageState: readPageState(),
+    pageState: typeof window === "undefined" ? null : readPageState(),
     navigation,
   };
+}
+
+/**
+ * The URL being rendered, on either side of hydration. On the server it's the request's, as for
+ * React's `useRouter()`, so a component renders the same path there as in the browser instead of
+ * the site root, which hydration would then disagree with.
+ */
+function readRendererCurrentUrl(): URL | undefined {
+  if (typeof window !== "undefined") return new URL(window.location.href);
+  const request = _peekCurrentRequest();
+  if (!request) return undefined;
+  try {
+    return new URL(request.url);
+  } catch {
+    return undefined;
+  }
 }
 
 function resolveRendererHref(href: string, basePath: string): string {

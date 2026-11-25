@@ -24,6 +24,9 @@ The renderer controls component compilation, element creation, server rendering,
 hydration. FARMJS continues to control route discovery, layouts, API routes, middleware, cache and
 storage, integrations, observability, and deployment output.
 
+To render pages with a UI library that isn't listed, write a
+[custom renderer](/docs/renderers/custom).
+
 ## Feature support
 
 The first two tables are checked against the renderer descriptors and their server/client exports,
@@ -67,12 +70,15 @@ The higher-level framework features below use those adapter primitives:
 | Basic create-app starter                         | Available                | Available                       | Available            | Available            | Available            |
 | Better Auth create-app starter                   | Available                | Native                          | Native               | Native               | Native               |
 | Router state and programmatic navigation         | Available                | Through `preact/compat`         | Solid binding        | Vue binding          | Svelte store         |
-| Callable actions and server queries              | Available                | Through `preact/compat`         | Solid binding        | Vue binding          | Svelte store         |
+| Callable actions and server queries              | Available                | Experimental                    | Experimental         | Experimental         | Experimental         |
 | Client theme and i18n state                      | Available                | Through `preact/compat`         | Solid binding        | Vue binding          | Svelte store         |
-| Renderer-specific `Link` and form components     | Available                | Through `preact/compat`         | Not yet              | Not yet              | Not yet              |
-| Programmatic UI routes                           | Available                | Compatibility surface           | React-oriented today | React-oriented today | React-oriented today |
-| Markdown/MDX visual routes and docs adapter      | Available                | Compatibility surface           | React-oriented today | React-oriented today | React-oriented today |
-| Generated JSX metadata images                    | Available                | Compatibility surface           | React-oriented today | React-oriented today | React-oriented today |
+| Shared client stores (`createStore`)             | Available                | Through `preact/compat`         | Solid binding        | Vue binding          | Svelte store         |
+| Typed `Link` components                          | Available                | Through `preact/compat`         | Solid component      | Vue component        | Svelte component     |
+| Action form components (`useAction().Form`)      | Available                | Through `preact/compat`         | `<action.Form>`      | `<action.Form>`      | `use:action.enhance` |
+| Programmatic UI routes                           | Available                | Available                       | Available            | Available            | Available            |
+| Markdown and MDX pages (`page.md`)               | Available                | Available                       | Available            | Available            | Available            |
+| Docs adapter                                     | Available                | Compatibility surface           | React-oriented today | React-oriented today | React-oriented today |
+| Generated metadata images (`opengraph-image`)    | Available                | Available                       | Available            | Available            | Available            |
 | React Server Components and optimized boundaries | Available experimentally | Not applicable                  | Not applicable       | Not applicable       | Not applicable       |
 | Other integration UI providers and starters      | Available                | Provider-specific compatibility | React-oriented today | React-oriented today | React-oriented today |
 
@@ -115,27 +121,160 @@ and reconnect behavior across all bindings. During server rendering a query bind
 idle snapshot and starts no read, matching React's `useServerQuery`; the browser loads it after
 hydration.
 
+These bindings take a server function or server query, which browser code imports from its server
+module. In a Preact, Solid, Vue, Svelte, or custom-renderer app, turn that on with
+`experimental.serverActions`:
+
+```ts
+export default defineConfig({
+  renderer: solid(),
+  experimental: { serverActions: true },
+});
+```
+
+The browser then gets a reference for each server function instead of its code. Calling it posts
+the input to the current page, whose server runs the function with its validation and middleware
+and sends the result back, on the same actions islands mode uses. A query's result fills the shared
+cache, and a query still on the page reads again when an action invalidates its key. Without the
+flag, the import stops the build with `CLIENT_SERVER_FUNCTION`. Keep server functions in their own
+modules: in the browser, a module that defines one exports only its server functions.
+
+### Action forms
+
+Each binding gives an action a form, as React's `useAction().Form` does. Submitting it sends the
+form's fields, and the name and value of the button that submitted it, to the action as `FormData`.
+A successful submission resets the form. A failed one keeps the fields and leaves the error in the
+action's `error`.
+
+```tsx
+// Solid: `<save.Form>` renders a `<form method="post">` and passes its props through.
+import { useAction } from "@farm.js/solid/bindings";
+import { saveCrop } from "../crops.server";
+
+export default function SaveCrop() {
+  const save = useAction(saveCrop);
+
+  return (
+    <save.Form>
+      <input name="name" />
+      <button type="submit">Save</button>
+      {save.error && <p role="alert">{save.error.message}</p>}
+    </save.Form>
+  );
+}
+```
+
+```vue
+<!-- Vue: `save.Form` renders a `<form method="post">`; attributes and listeners pass through. -->
+<script setup lang="ts">
+import { useAction } from "@farm.js/vue/bindings";
+import { saveCrop } from "../crops.server";
+
+const save = useAction(saveCrop);
+</script>
+
+<template>
+  <save.Form>
+    <input name="name" />
+    <button type="submit">Save</button>
+  </save.Form>
+  <p v-if="save.error.value" role="alert">{{ save.error.value.message }}</p>
+</template>
+```
+
+```svelte
+<!-- Svelte: enhance a form you write. -->
+<script lang="ts">
+  import { createAction } from "@farm.js/svelte/bindings";
+  import { saveCrop } from "../crops.server";
+
+  const save = createAction(saveCrop);
+</script>
+
+<form method="post" use:save.enhance>
+  <input name="name" />
+  <button type="submit">Save</button>
+</form>
+{#if $save.error}<p role="alert">{$save.error.message}</p>{/if}
+```
+
+A submit listener of your own runs first. If it calls `event.preventDefault()`, the action does not
+run. The browser calls the action, so a form submitted with JavaScript turned off posts to the page
+natively instead of reaching it.
+
+### Shared client state
+
+`createStore` from `@farm.js/core/renderer-client` creates an in-memory store that works with every
+renderer. Define it once in a plain module:
+
+```ts
+// src/cart.ts
+import { createStore } from "@farm.js/core/renderer-client";
+
+export const cart = createStore({ items: [] as string[] }, (store) => ({
+  add(item: string) {
+    store.items.set((items) => [...items, item]);
+  },
+}));
+```
+
+Then bind it where a component reads it:
+
+| Renderer | Bind it with                                                        | You get                              |
+| -------- | ------------------------------------------------------------------- | ------------------------------------ |
+| React    | `cart.use("items")`, with `createStore` from `@farm.js/core/client` | The value, as a hook                 |
+| Preact   | The React version, through `preact/compat`                          | The value, as a hook                 |
+| Solid    | `useStore(cart)` from `@farm.js/solid/bindings`                     | An accessor: `state().items`         |
+| Vue      | `useStore(cart)` from `@farm.js/vue/bindings`                       | A read-only ref: `state.value.items` |
+| Svelte   | `createReadable(cart)` from `@farm.js/svelte/bindings`              | A readable store: `$state.items`     |
+
+`get()`, `set()`, `subscribe()`, `reset()`, and field accessors such as `cart.items.set()` work the
+same in every renderer. Outside React, calling a field accessor (`cart.items()`) reads the current
+value; in React it is a hook. The React entry adds `use()` and is otherwise the same store, as
+described in [React](/docs/renderers/react#shared-client-state).
+
+A store defined at module scope is shared by every request on the server. Keep request-specific
+data out of it.
+
 ## Renderer modules
 
 A renderer descriptor names three modules by package specifier. FARMJS resolves each one from the
 app and imports its named exports, in development and in production builds. None of them needs a
-default export.
+default export. [Custom renderers](/docs/renderers/custom) walks through each module in detail.
 
-| Module   | Required named exports                                                              | Optional named exports include                                                                                                                                                    |
-| -------- | ----------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `vite`   | `createFarmRendererPlugin`                                                          |                                                                                                                                                                                   |
-| `server` | `name`, `createElement`, `isValidElement`, `Fragment`, `Suspense`, `renderToString` | `renderToReadableStream`, `renderToPipeableStream`, `renderToStringWithHead`, `ErrorBoundary`, `generateHydrationScript`, `markFunctionComponent`, `configureApp`, `capabilities` |
-| `client` | `createElement`, `Suspense`, `createRoot`, `hydrateRoot`                            | `configureApp`                                                                                                                                                                    |
+| Module   | Required named exports                                                              | Optional named exports include                                                                                                                                   |
+| -------- | ----------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `vite`   | `createFarmRendererPlugin`                                                          |                                                                                                                                                                  |
+| `server` | `name`, `createElement`, `isValidElement`, `Fragment`, `Suspense`, `renderToString` | `renderToReadableStream`, `renderToPipeableStream`, `renderToStringWithHead`, `generateHydrationScript`, `markFunctionComponent`, `configureApp`, `capabilities` |
+| `client` | `createElement`, `Suspense`, `createRoot`, `hydrateRoot`                            | `configureApp`                                                                                                                                                   |
 
+- The development server and `farm build` check the server module's required exports when they load
+  it, and fail with one error that names every missing export.
 - `createFarmRendererPlugin({ ssr, buildLifetime, rendererOptions })` returns a Vite plugin, an
   array of plugins, or a promise of either. `rendererOptions` is the descriptor's `options`.
-- FARMJS composes every route tree with `createElement()`: layouts, the page, and the boundaries for
-  loading, error, and not-found files. The server and client modules must build the same tree from
+- FARMJS composes every route tree with `createElement()`: layouts, the page, loading boundaries,
+  and the error and not-found pages. The server and client modules must build the same tree from
   the same calls.
+- A page that throws under an `error.*` file renders that file inside its layouts as the route's
+  error page, with the error's status, in development and in production. FARMJS no longer reads an
+  `ErrorBoundary` export from the server module.
 - `renderToString()` may return a promise.
 - `createRoot()` and `hydrateRoot()` return a root with `render(element)` and `unmount()`, plus the
   optional `renderRoute()` described under [Re-render behavior](#re-render-behavior).
+- A root from `createRoot()` replaces what is already in its container on its first render, as
+  React's does. Farm creates one over the server's markup when hydration throws, and over the last
+  page when a navigation replaces the root.
 - Both modules must export `configureApp()` when the descriptor sets `appSetup`.
+- A renderer with its own file format lists its extensions in `componentExtensions` and compiles
+  them in the Vite module. FARMJS reads a route's `hydrate` export from the file as written, before
+  that compiler runs, so `hydrate` must be the literal `true` or `false` in any format. A renderer
+  can read its own syntax instead with `hydration.resolve()`, and map its own file convention to
+  routes with `routes()`. See [Route files](/docs/renderers/custom#route-files) and
+  [Hydration](/docs/renderers/custom#hydration).
+- A JSX renderer names its runtime package in `jsxImportSource`. In development, Vite's dependency
+  scan compiles JSX as React unless the app's tsconfig names a source, so FARMJS passes this one to
+  the scan. Without it, an app with no React installed fails the scan and reloads on its first
+  visit.
 
 Check a renderer against the contract types from `@farm.js/core/renderer`. The full list of optional
 server exports is on `FarmServerRendererRuntime`.
@@ -156,8 +295,87 @@ export const clientContract: FarmRendererClientRuntime = client;
 export const viteContract: FarmRendererViteModule = vite;
 ```
 
-The official renderers also run the shared conformance suite in `packages/farm-renderer-tests`, which
-renders through these exports in Node and jsdom. It is not published to npm yet.
+The official renderers also run a shared conformance suite, published as `@farm.js/renderer-tests`.
+It calls these exports in Node and jsdom and fails where a renderer behaves differently from the
+official ones:
+
+```bash
+pnpm add -D @farm.js/renderer-tests vitest
+```
+
+```ts
+// @vitest-environment node
+import { defineRendererServerConformance } from "@farm.js/renderer-tests";
+import * as server from "./server";
+
+defineRendererServerConformance(server);
+```
+
+`defineRendererClientConformance()` checks the client module and needs a jsdom environment. The
+[package README](https://github.com/farming-labs/farm.js/tree/main/packages/farm-renderer-tests)
+lists every suite and what it checks.
+
+For a complete renderer to copy from, see
+[`examples/custom-renderer`](https://github.com/farming-labs/farm.js/tree/main/examples/custom-renderer).
+It renders an app with leaf, a small UI library that isn't one of the official renderers, through
+an adapter written in plain JavaScript: the descriptor, the three modules, router and theme hooks,
+a `Link`, a `.leaf` file format, and the conformance suites. CI runs its browser tests against
+`farm dev` and a production build.
+
+## Client state in a custom renderer
+
+FARMJS keeps its client state in plain stores that any renderer can read. Each one implements
+`FarmClientStore` from `@farm.js/core/renderer-client`:
+
+```ts
+interface FarmClientStore<TSnapshot> {
+  getSnapshot(): TSnapshot;
+  subscribe(listener: () => void): () => void;
+}
+```
+
+| Function                            | The store holds                                                                                                                            |
+| ----------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------ |
+| `createRendererRouter()`            | Pathname, search and route params, page state, and navigation status, with `push`, `replace`, `refresh`, `prefetch`, `back`, and `forward` |
+| `createRendererAction(fn)`          | The status, data, and error of a server function call, with `submit` and `reset`                                                           |
+| `createRendererQuery(query, input)` | A server query's data from the shared browser cache, with `refetch` and `dispose`                                                          |
+| `createRendererTheme()`             | The theme preference and resolved theme, with `setTheme` and `toggleTheme`                                                                 |
+| `createRendererI18n()`              | The locale and a translator, with `setLocale`                                                                                              |
+| `createStore(state)`                | Your app's own state                                                                                                                       |
+
+The Solid, Vue, and Svelte bindings are one short function over this contract plus thin wrappers.
+A custom renderer needs the same function in its own reactivity. For a renderer with React-style
+hooks:
+
+```ts
+import { useEffect, useState } from "my-renderer";
+import { createRendererRouter, type FarmClientStore } from "@farm.js/core/renderer-client";
+
+export function useFarmStore<T>(store: FarmClientStore<T>): T {
+  const [snapshot, setSnapshot] = useState(() => store.getSnapshot());
+  useEffect(() => {
+    // Catch a change between the first render and the subscription.
+    setSnapshot(store.getSnapshot());
+    return store.subscribe(() => setSnapshot(store.getSnapshot()));
+  }, [store]);
+  return snapshot;
+}
+
+export function useRouter() {
+  const [router] = useState(() => createRendererRouter());
+  return { ...useFarmStore(router), push: router.push, replace: router.replace };
+}
+```
+
+- Create a store once per component, not on every render, and unsubscribe when it unmounts.
+- `getSnapshot()` returns the same value until the state changes, so an identity check is enough to
+  skip an update.
+- Call `dispose()` on a query store when its component unmounts.
+- For an action form, call `submitRendererActionForm(action, event)` from the form's `submit`
+  listener. It does what the [action forms](#action-forms) above do: it cancels the browser's
+  submission, sends the fields and submitter as `FormData`, and resets the form on success.
+- During server rendering, a query store returns an idle snapshot and starts no request. The browser
+  loads it after hydration.
 
 ## Renderer capability contract
 
@@ -269,6 +487,9 @@ instantiating them.
 Async plain function components are not part of this contract. Official adapters reject them with
 an actionable error instead of rendering a promise, an empty string, or `[object Object]`. Resolve
 the data before creating the element tree or use the renderer's native asynchronous primitives.
+A page is the exception: with any renderer but React, Farm awaits an async page component itself,
+in development and in production builds, and hands the renderer the elements it returns. That's
+how `page.md` pages render with every renderer.
 
 The field defaults to `false`, so a renderer whose adapter has not been taught to handle function
 components fails with a clear error naming the renderer rather than rendering something broken.
@@ -286,7 +507,14 @@ runtime. Production still checks the function before calling it, but only a prim
 the resolved descriptor can be selected. This keeps the declaration and runtime export in
 agreement instead of treating an accidental export as support. FARMJS uses buffered
 `renderToString()` when neither capability is enabled. Descriptors without a `capabilities` field
-remain buffered for compatibility.
+remain buffered for compatibility. A renderer that exports only `renderToReadableStream()` streams
+in development as well as in production builds.
+
+A render error before any output should fail the stream (`onShellError()`, or an errored Web
+stream), and FARMJS answers with the error's status. After output has started, the status is sent,
+so report the error through the `onError` callback or option and end the stream. FARMJS logs it and
+the response ends with what was sent. In a production build, a Web stream that errors after output
+resets the connection instead.
 
 Farm also uses `renderToString()` for documents it sends whole, such as the not-found and error
 pages with their layouts, so it may return a promise and should wait for the renderer's own async
@@ -294,12 +522,36 @@ content instead of throwing: the official Preact renderer uses `renderToStringAs
 `renderToStringAsync()`, and Vue's `renderToString()` is already async. React renders a document
 that suspends with its streaming renderer and waits for every boundary before sending it.
 
+### Hydration errors
+
+`hydrationFallback` states what a production build does when `hydrateRoot()` throws.
+
+In development, Farm always logs `[Farm.js] Hydration error; rendering the page on the client
+instead:` and renders the route with `createRoot()`, so the page keeps working while you fix it. In
+production, a renderer opts in to the same behavior:
+
+```ts
+capabilities: {
+  hydrationFallback: true,
+},
+```
+
+Without it, a production page whose hydration throws keeps the server's markup, without event
+listeners, and Farm logs `[Farm.js] Hydration error:`. With it, the page works, but the server's
+DOM, focus, and typed input are replaced.
+
+Opt in only when the client module's `createRoot()` replaces what's in its container on its first
+render. The failed hydration leaves the server's markup there, and a root that renders next to it
+shows the page twice. The field defaults to `false`, and no official renderer sets it, so their
+production behavior is unchanged. React recovers from most hydration errors inside `hydrateRoot()`
+itself.
+
 ## Renderer-neutral server code
 
 Keep product and server behavior outside the component runtime whenever possible:
 
 ```ts
-import { createEndpoint } from "@farm.js/core";
+import { createEndpoint } from "@farm.js/core/api";
 import { createServerFn } from "@farm.js/core/server-fn";
 import { z } from "zod";
 
@@ -322,6 +574,13 @@ export const POST = createEndpoint(
 React, Preact, Solid, Vue, and Svelte components can call this endpoint through the same generated client.
 Database access, secrets, validation, cache invalidation, middleware, and the server-function
 handler remain on the server.
+
+Import from a subpath such as `@farm.js/core/api` rather than `@farm.js/core`: the root entry
+imports React, which an app on another renderer doesn't install. `notFound()`, `redirect()`, and
+`permanentRedirect()` from `@farm.js/core/navigation` work with every renderer. Its
+`useRouter()`, `usePathname()`, and `useSearchParams()` are React hooks: Preact runs them through
+`preact/compat`, and with Solid, Vue, Svelte, or a custom renderer they throw, so read the route
+from the renderer's bindings instead.
 
 ## Switch renderers deliberately
 

@@ -9,6 +9,7 @@ import path from "node:path";
 import { performance } from "node:perf_hooks";
 import { parseArgs } from "node:util";
 import { fileURLToPath } from "node:url";
+import { devPortOpen } from "./dev-port.mjs";
 
 const repo = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
 const { values: args } = parseArgs({
@@ -250,17 +251,6 @@ async function freePort() {
   });
 }
 
-function portOpen(port) {
-  return new Promise((resolve) => {
-    const socket = net.connect(port, "127.0.0.1");
-    socket.once("connect", () => {
-      socket.destroy();
-      resolve(true);
-    });
-    socket.once("error", () => resolve(false));
-  });
-}
-
 async function fetchPage(origin, pathname) {
   const response = await fetch(origin + pathname, { headers: { accept: "text/html" } });
   const html = await response.text();
@@ -277,8 +267,9 @@ async function measureDev(root, pages) {
   const output = collect(child);
   const exited = exitOf(child);
   try {
-    while (!(await portOpen(port))) {
-      if (child.exitCode !== null) throw new Error(`farm dev exited:\n${output.join("")}`);
+    while (!(await devPortOpen(port, output))) {
+      if (child.exitCode !== null || child.signalCode !== null)
+        throw new Error(`farm dev exited:\n${output.join("")}`);
       if (performance.now() - started > 180_000)
         throw new Error(`farm dev never listened:\n${output.join("")}`);
       await new Promise((resolve) => setTimeout(resolve, 10));

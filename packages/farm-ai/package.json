@@ -1,6 +1,6 @@
 {
   "name": "@farm.js/ai",
-  "version": "0.1.78",
+  "version": "0.1.87",
   "description": "Farm.js AI route helpers",
   "license": "MIT",
   "repository": {
@@ -31,7 +31,12 @@
     "test": "pnpm run build && node --test test/*.test.mjs"
   },
   "dependencies": {
-    "@farm.js/core": "workspace:*",
     "ai": "^7.0.11"
+  },
+  "devDependencies": {
+    "@farm.js/core": "workspace:*"
+  },
+  "peerDependencies": {
+    "@farm.js/core": ">=0.1.78 <0.3.0"
   }
 }

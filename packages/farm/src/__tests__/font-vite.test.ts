@@ -10,6 +10,7 @@ import { build, createServer, type Plugin, type Rollup } from "vite";
 import { describe, expect, it, vi } from "vitest";
 import {
   farmFontImportsPlugin,
+  isFarmLayoutModule,
   mergeFarmFontCss,
   renderFarmFontDevHead,
   transformFarmFontCalls,
@@ -578,6 +579,124 @@ console.log(demo);`,
 });
 
 describe("font call detection", () => {
+  it("gives a server layout the fonts it applies and leaves the browser module alone", async () => {
+    const temporaryRoot = await fs.mkdtemp(path.join(os.tmpdir(), "farm-font-layout-"));
+    const root = await fs.realpath(temporaryRoot);
+    await fs.mkdir(path.join(root, "app", "declared"), { recursive: true });
+    await fs.writeFile(path.join(root, "sans.woff2"), Buffer.from("sans"));
+    await fs.writeFile(path.join(root, "mono.woff2"), Buffer.from("mono"));
+    // A font package's module: the layout only imports its fonts, as with geist on Next.js.
+    await fs.writeFile(
+      path.join(root, "fonts.ts"),
+      `import { localFont } from "@farm.js/core/font";
+export const Sans = localFont({ src: "./sans.woff2", family: "Sans" });
+export const Mono = localFont({ src: "./mono.woff2", family: "Mono", fallback: ["monospace"] });`,
+    );
+    await fs.writeFile(
+      path.join(root, "app", "layout.ts"),
+      `import { Mono, Sans } from "../fonts";
+export default function Layout() {
+  return \`\${Sans.variable} \${Mono.variable} \${Sans.className}\`;
+}`,
+    );
+    await fs.writeFile(
+      path.join(root, "app", "declared", "layout.ts"),
+      `import { Sans } from "../../fonts";
+export const fonts = { body: Sans };
+export default function Layout() {
+  return Sans.className;
+}`,
+    );
+    const fontModule = fileURLToPath(new URL("../font.ts", import.meta.url));
+    const vite = await createServer({
+      root,
+      configFile: false,
+      logLevel: "silent",
+      plugins: [
+        {
+          name: "font-module",
+          enforce: "pre",
+          resolveId: (id) => (id === "@farm.js/core/font" ? fontModule : null),
+        },
+        farmFontImportsPlugin({ root, isLayoutModule: (id) => id.endsWith("/layout.ts") }),
+      ],
+      server: { middlewareMode: true },
+    });
+
+    try {
+      const layout = await vite.ssrLoadModule("/app/layout.ts");
+      expect(layout.__farmLayoutFonts.body.style.fontFamily).toBe('"Sans"');
+      expect(layout.__farmLayoutFonts.code.style.fontFamily).toBe('"Mono", monospace');
+
+      const declared = await vite.ssrLoadModule("/app/declared/layout.ts");
+      expect(declared.__farmLayoutFonts).toBeUndefined();
+
+      const browser = await vite.environments.client.transformRequest("/app/layout.ts");
+      expect(browser?.code).not.toContain("__farmLayoutFonts");
+    } finally {
+      await vite.close();
+      await fs.rm(root, { recursive: true, force: true });
+    }
+  });
+
+  it("gives a layout its fonts in a production server build, which never starts the app", async () => {
+    const temporaryRoot = await fs.mkdtemp(path.join(os.tmpdir(), "farm-font-layout-build-"));
+    const root = await fs.realpath(temporaryRoot);
+    await fs.mkdir(path.join(root, "src", "app"), { recursive: true });
+    await fs.writeFile(path.join(root, "src", "sans.woff2"), Buffer.from("sans"));
+    await fs.writeFile(
+      path.join(root, "src", "fonts.ts"),
+      `import { localFont } from "@farm.js/core/font";
+export const Sans = localFont({ src: "./sans.woff2", family: "Sans" });`,
+    );
+    await fs.writeFile(
+      path.join(root, "src", "app", "layout.ts"),
+      `import { Sans } from "../fonts";
+export default function Layout() {
+  return Sans.className;
+}`,
+    );
+    const fontModule = fileURLToPath(new URL("../font.ts", import.meta.url));
+
+    try {
+      const result = await build({
+        root,
+        configFile: false,
+        logLevel: "silent",
+        plugins: [
+          {
+            name: "font-module",
+            enforce: "pre",
+            resolveId: (id) => (id === "@farm.js/core/font" ? fontModule : null),
+          },
+          farmPlugin({ root }),
+        ],
+        build: {
+          ssr: path.join(root, "src", "app", "layout.ts"),
+          write: false,
+          rollupOptions: { output: { entryFileNames: "layout.js" } },
+        },
+      });
+      if (Array.isArray(result)) throw new Error("Expected one Vite build output");
+      const layout = (result as Rollup.RollupOutput).output.find(
+        (chunk) => chunk.type === "chunk" && chunk.fileName === "layout.js",
+      ) as Rollup.OutputChunk | undefined;
+      expect(layout?.exports).toContain("__farmLayoutFonts");
+    } finally {
+      await fs.rm(root, { recursive: true, force: true });
+    }
+  });
+
+  it("matches layout modules inside an app directory only", () => {
+    const appDirs = ["/app/src/app", "C:\\site\\src\\app"];
+    expect(isFarmLayoutModule("/app/src/app/layout.tsx", appDirs)).toBe(true);
+    expect(isFarmLayoutModule("/app/src/app/docs/layout.js", appDirs)).toBe(true);
+    expect(isFarmLayoutModule("C:/site/src/app/layout.tsx", appDirs)).toBe(true);
+    expect(isFarmLayoutModule("/app/src/app/page.tsx", appDirs)).toBe(false);
+    expect(isFarmLayoutModule("/app/src/components/layout.tsx", appDirs)).toBe(false);
+    expect(isFarmLayoutModule("/app/src/app/layout.css", appDirs)).toBe(false);
+  });
+
   it("parses only modules that import from a font module", async () => {
     const parse = vi.fn(() => {
       throw new Error("parsed");

@@ -90,7 +90,10 @@ test("WebSocket revocation denies traffic and reconnects without forwarding secr
     assert.equal(connectionHeader, undefined);
     const before = forwarded;
     allowed = false;
-    assert.equal((await fetch(agent.publicUrl)).status, 403);
+    // A stopped preview's address answers like one that isn't running.
+    const denied = await fetch(agent.publicUrl);
+    assert.equal(denied.status, 404);
+    assert.match(await denied.text(), /No active persistent preview is running for "store"/);
     assert.equal(forwarded, before);
     await agent.close();
     await assert.rejects(startTypeScriptPreviewAgent(options));

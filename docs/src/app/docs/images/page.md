@@ -114,6 +114,10 @@ elements themselves. Configure or audit the budget with `performance.preload` in
 
 `placeholder="blur"` uses the placeholder generated for a static import. A string source must provide `blurDataURL` explicitly. Use `unoptimized` to preserve the original URL for a particular image.
 
+## Other renderers
+
+`Image` is a React component. A renderer of your own can build its `Image` from `resolveImageAttributes()` in `@farm.js/core/renderer-client`, which takes the same options and returns the same attributes without loading React. The attributes are named as React names them (`srcSet`, `fetchPriority`, and a `style` object with camelCased keys), as a renderer's `createElement()` takes them. See [Custom renderers](/docs/renderers/custom#images).
+
 ## Configuration
 
 Optimization on Node, Vercel, Netlify, and in development uses [Sharp](https://sharp.pixelplumbing.com/), which the app installs:
