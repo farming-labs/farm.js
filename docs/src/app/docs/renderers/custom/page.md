@@ -601,6 +601,28 @@ preference, and the base path to `href`, and adds the prefetch, `replace`, `scro
 `viewTransition` attributes. Type the props with `FarmLinkOptions` from the same entry to check
 `href` against the app's routes.
 
+## Images
+
+`@farm.js/core/image` is React's `Image`. An `Image` of your own renders an `<img>` with the
+attributes `resolveImageAttributes()` returns. It takes the same options and loads no UI library.
+The attributes use the names `createElement()` takes: `srcSet`, `fetchPriority`, and a `style`
+object with camelCased keys.
+
+```js
+// src/bindings.js
+import { createElement } from "leaf";
+import { resolveImageAttributes } from "@farm.js/core/renderer-client";
+
+export function Image(props) {
+  return createElement("img", resolveImageAttributes(props));
+}
+```
+
+It sizes `src` and `srcSet` to `images.deviceSizes` and `images.imageSizes` through Farm's image
+endpoint, lazy-loads by default, and adds the blur placeholder for `placeholder: "blur"`. `preload`
+sets `loading="eager"` and `fetchPriority="high"`; React's `Image` also preloads the file, which a
+renderer without `preload()` skips. `resolveImageAttributes` ships in the release after 0.1.86.
+
 ## Your own file format
 
 A renderer with its own component format, like `.vue` or `.svelte`, does two things:

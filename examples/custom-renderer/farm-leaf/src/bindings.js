@@ -1,4 +1,4 @@
-// Farm's router, theme, server functions, and server queries as leaf hooks, plus a Link.
+// Farm's router, theme, server functions, and server queries as leaf hooks, plus a Link and an Image.
 //
 // Farm keeps that state in renderer-neutral stores (getSnapshot + subscribe). One hook,
 // useFarmStore, turns any of them into leaf state; the rest are thin wrappers.
@@ -10,6 +10,7 @@ import {
   createRendererQuery,
   createRendererRouter,
   createRendererTheme,
+  resolveImageAttributes,
   resolveLinkAttributes,
 } from "@farm.js/core/renderer-client";
 
@@ -74,4 +75,12 @@ export function Link(props) {
     else anchor[name] = value;
   }
   return createElement("a", { ...anchor, ...resolveLinkAttributes(options) });
+}
+
+/**
+ * An image Farm's image endpoint resizes: the same options as React's `Image` from
+ * `@farm.js/core/image`, rendered as leaf's own `<img>`.
+ */
+export function Image(props) {
+  return createElement("img", resolveImageAttributes(props));
 }

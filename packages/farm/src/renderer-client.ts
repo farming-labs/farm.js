@@ -32,6 +32,15 @@ import type { FarmI18nClientSnapshot, FarmI18nLocale, FarmTranslator } from "./i
 
 export type { FarmI18nClientSnapshot, FarmI18nLocale, FarmTranslator } from "./i18n/types";
 export { FARM_LINK_OPTION_KEYS, resolveLinkAttributes } from "./client/link-attributes";
+export { resolveImageAttributes } from "./image-attributes";
+export type {
+  FarmImageAttributes,
+  FarmImageLoader,
+  FarmImageLoaderProps,
+  FarmImageOptions,
+  FarmImageStyle,
+  StaticImageData,
+} from "./image-attributes";
 export type {
   DefaultRouteHref,
   FarmLinkAttributes,

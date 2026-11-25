@@ -84,6 +84,24 @@ test("a Link navigates on the client and the layout keeps its state", async ({ p
   expect(await readDocumentMark(page)).toBe("first");
 });
 
+test("an Image from farm-leaf's bindings serves a static import through Farm's image endpoint", async ({
+  page,
+}) => {
+  await page.goto("/about");
+  const image = page.locator("img#field");
+  await expect(image).toHaveAttribute("width", "240");
+  await expect(image).toHaveAttribute("height", "160");
+  await expect(image).toHaveAttribute("loading", "lazy");
+  await expect(image).toHaveAttribute("srcset", /\/_farm\/image\?url=.+&w=\d+&q=75 1x, .+ 2x$/);
+  // The blur placeholder from the static import, as a style the leaf element carries.
+  await expect(image).toHaveAttribute("style", /background-image:\s*url\("data:image\//);
+  await expect
+    .poll(() =>
+      image.evaluate((element: HTMLImageElement) => element.complete && element.naturalWidth),
+    )
+    .toBeGreaterThan(0);
+});
+
 test("router.push from a leaf hook navigates without a document load", async ({ page }) => {
   await gotoHydrated(page, "/");
   await markDocument(page);
