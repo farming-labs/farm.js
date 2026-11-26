@@ -38,6 +38,7 @@
   },
   "dependencies": {
     "@stylexjs/unplugin": "^0.19.0",
+    "parse5": "7.3.0",
     "unplugin": "^2.3.11"
   },
   "devDependencies": {
