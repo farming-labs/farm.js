@@ -282,6 +282,40 @@ describe("local() jobs runtime", () => {
     expect(again.status).toBe(409);
   });
 
+  it.each(["claim", "retry"])("recovers an interrupted %s index write", async (phase) => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    const storage = memory();
+    let interruptIndex = phase === "claim";
+    const tasks = defineTasks({
+      work: task({
+        run(_input: unknown, context) {
+          if (phase === "retry" && context.run?.attempt === 1) {
+            interruptIndex = true;
+            throw new Error("Retry this task");
+          }
+          return "recovered";
+        },
+      }),
+    });
+    const first = harness(tasks, { storage, leaseMs: 1000 });
+    const { body } = await first.trigger("work", {});
+    const setItem = storage.setItem.bind(storage);
+    vi.spyOn(storage, "setItem").mockImplementation(async (key, value, opts) => {
+      if (interruptIndex && key.startsWith("due:")) {
+        interruptIndex = false;
+        throw new Error("Interrupted due index write");
+      }
+      return setItem(key, value, opts);
+    });
+
+    expect((await first.tick()).status).toBe(500);
+    const recovered = harness(tasks, { storage, leaseMs: 1000 });
+    expect((await recovered.tick()).body.started).toBe(0);
+    vi.setSystemTime(Date.now() + 2000);
+    expect((await recovered.tick()).body.completed).toBe(1);
+    expect((await recovered.status("work", body.handleId)).body.output).toBe("recovered");
+  });
+
   it("recovers a run whose process stopped mid-attempt once the lease ends", async () => {
     vi.useFakeTimers({ toFake: ["Date"] });
     vi.setSystemTime(new Date("2026-01-01T00:00:00.000Z"));
