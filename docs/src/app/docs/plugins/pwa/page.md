@@ -222,6 +222,8 @@ array when the app should not ship a service worker.
 | `staticRoutes` | `true`               | Every emitted static page, a route list, or `false`. |
 | `images`       | `"swr"`              | SWR options, `true`, `"swr"`, or `false`.            |
 
+With `staticRoutes: true`, a directory named `c#` is available offline at `/c%23`.
+
 `offline` and explicit `staticRoutes` entries must be stable root-relative application paths.
 URLs, query strings, fragments, dot segments, backslashes, control characters, and encoded path
 separators are rejected.
