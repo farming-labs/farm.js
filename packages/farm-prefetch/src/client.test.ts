@@ -298,6 +298,25 @@ describe("startPrefetchRuntime", () => {
     expect(observeForPrefetch).not.toHaveBeenCalled();
   });
 
+  it("checks the current data-saving preference for plain links", async () => {
+    const connection = { saveData: false };
+    Object.defineProperty(window.navigator, "connection", {
+      configurable: true,
+      value: connection,
+    });
+    const router = createRouter();
+    start(options({ mode: "render" }), router);
+    connection.saveData = true;
+    document.body.innerHTML = '<a href="/blocked">Blocked</a>';
+    await wait();
+    expect(router.fetched).not.toHaveBeenCalled();
+
+    connection.saveData = false;
+    document.body.innerHTML = '<a href="/allowed">Allowed</a>';
+    await wait();
+    expect(router.fetched.mock.calls).toEqual([["/allowed"]]);
+  });
+
   it("stays off when the browser asks to save data", async () => {
     Object.defineProperty(window.navigator, "connection", {
       configurable: true,

@@ -71,7 +71,7 @@ with every problem listed at once.
 `router.prefetch`. The plugin puts its rules in front of it, so they hold everywhere:
 
 - a path `deny` names, or `allow` leaves out, is never prefetched
-- under `Save-Data` or `prefers-reduced-data: reduce`, nothing is prefetched
+- when `Save-Data` or `prefers-reduced-data: reduce` becomes active, subsequent prefetches are skipped, including those from plain links added after startup
 
 A blocked prefetch resolves without a request, and the click fetches the page. To keep `Link`'s
 prefetching as it is and only add rules, use `mode: "none"`:
