@@ -419,9 +419,13 @@ function createLocalRuntime(
       return skipped;
     }
     if (indexEntry && record.dueKey !== indexEntry) {
-      // A stale index entry left by a write that was interrupted.
+      // A claim or retry may have persisted the run but not its replacement due key.
+      // Keep this entry discoverable until the current schedule is indexed again.
+      const dueKey = record.dueKey;
+      const needsRepair = dueKey !== null && (await storage.getItem(dueKey)) == null;
+      if (needsRepair) await storage.setItem(dueKey, id);
       await storage.removeItem(indexEntry);
-      return skipped;
+      if (!needsRepair) return skipped;
     }
     if (TERMINAL_STATES.has(record.state) || record.runAt > now || inFlight.has(id)) {
       return skipped;

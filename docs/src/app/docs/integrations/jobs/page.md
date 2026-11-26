@@ -163,6 +163,9 @@ returns what it did: `{ started, completed, failed, retried, expired, removed }`
 | `retentionMs`    | `604800000` (7 days)                   | How long a finished run stays readable through `status`.                                     |
 | `tickLimit`      | `25`                                   | Most runs one tick starts.                                                                   |
 
+If a claim or retry is interrupted between storage writes, a later tick can recover the schedule
+from the previous due entry. The existing lease and attempt limit still apply.
+
 ### What a task receives
 
 `run(input, context)` receives `context.run` (`{ id, attempt }`), a `context.signal` that aborts when
