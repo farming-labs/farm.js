@@ -1,19 +1,34 @@
+import { parse, defaultTreeAdapter } from "parse5";
+
 const STYLEX_DEVELOPMENT_CSS = "/virtual:stylex.css";
 const STYLEX_DEVELOPMENT_RUNTIME = "/@id/virtual:stylex:runtime";
 
 /** Add StyleX's development CSS before paint and connect its HMR runtime. */
 export function injectStylexDevelopmentAssets(html: string, basePath = "/"): string {
-  const closingHead = html.search(/<\/head\s*>/i);
-  if (closingHead < 0) return html;
-  const head = html.slice(0, closingHead);
+  const candidate = /<\/head\s*>/i.exec(html);
+  if (!candidate) return html;
+  // Most documents only need their head parsed. A comment or script can contain the first match.
+  const end = candidate.index + candidate[0].length;
+  let head = parseHead(html.slice(0, end));
+  if (!head?.sourceCodeLocation?.endTag && end < html.length) head = parseHead(html);
+  const closingHead = head?.sourceCodeLocation?.endTag?.startOffset;
+  if (!head || closingHead === undefined) return html;
+
+  const elements = head.childNodes.filter(defaultTreeAdapter.isElementNode);
+  const hasAsset = (tag: string, marker: string) =>
+    elements.some(
+      (node) =>
+        node.tagName === tag &&
+        node.attrs.some((attr) => attr.name === "data-farm-stylex" && attr.value === marker),
+    );
   const cssUrl = withBasePath(STYLEX_DEVELOPMENT_CSS, basePath);
   const runtimeUrl = withBasePath(STYLEX_DEVELOPMENT_RUNTIME, basePath);
 
   const tags: string[] = [];
-  if (!hasStylexAsset(head, "link", "css")) {
+  if (!hasAsset("link", "css")) {
     tags.push(`<link rel="stylesheet" href="${cssUrl}" data-farm-stylex="css">`);
   }
-  if (!hasStylexAsset(head, "script", "runtime")) {
+  if (!hasAsset("script", "runtime")) {
     tags.push(`<script type="module" src="${runtimeUrl}" data-farm-stylex="runtime"></script>`);
   }
   if (tags.length === 0) return html;
@@ -35,25 +50,14 @@ export function stripStylexDevelopmentBasePath(url: string, basePath: string): s
   return url;
 }
 
-function hasStylexAsset(html: string, tagName: "link" | "script", value: string): boolean {
-  const tags =
-    tagName === "link"
-      ? html.matchAll(/<link\b(?:[^>"']|"[^"]*"|'[^']*')*>/gi)
-      : html.matchAll(/<script\b(?:[^>"']|"[^"]*"|'[^']*')*>/gi);
-
-  for (const tag of tags) {
-    const attributes = tag[0].slice(tagName.length + 1, -1);
-    const parsed = attributes.matchAll(
-      /([^\s"'<>=]+)(?:\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s"'=<>]+)))?/g,
-    );
-    for (const attribute of parsed) {
-      const attributeValue = attribute[2] ?? attribute[3] ?? attribute[4];
-      if (attribute[1]?.toLowerCase() === "data-farm-stylex" && attributeValue === value) {
-        return true;
-      }
-    }
-  }
-  return false;
+function parseHead(source: string) {
+  const document = parse(source, { sourceCodeLocationInfo: true });
+  const root = document.childNodes
+    .filter(defaultTreeAdapter.isElementNode)
+    .find((node) => node.tagName === "html");
+  return root?.childNodes
+    .filter(defaultTreeAdapter.isElementNode)
+    .find((node) => node.tagName === "head");
 }
 
 function withBasePath(url: string, basePath: string): string {

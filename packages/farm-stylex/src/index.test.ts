@@ -54,6 +54,20 @@ describe("stylex plugin", () => {
     expect((second as string).match(/virtual:stylex:runtime/g)).toHaveLength(1);
   });
 
+  it("ignores head tags and asset markers inside comments", async () => {
+    const plugin = stylex();
+    await plugin.configure?.({ plugins: [plugin] }, {
+      config: {} as never,
+      isDev: true,
+      isProd: false,
+    } as never);
+    const comment = '<!-- <link data-farm-stylex="css"> insert before </head> -->';
+    const html = `<html><head>${comment}</head><body></body></html>`;
+    const result = await plugin.render?.html?.(html, { pathname: "/" }, { config: {} } as never);
+    expect(result).toContain(`${comment}<link rel="stylesheet"`);
+    expect(result).toContain('data-farm-stylex="runtime"></script></head>');
+  });
+
   it("prefixes development assets with Farm's base path", async () => {
     const plugin = stylex();
     const configured = await plugin.configure?.({ basePath: "/docs/", plugins: [plugin] }, {

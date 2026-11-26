@@ -3755,6 +3755,9 @@ importers:
       '@stylexjs/unplugin':
         specifier: ^0.19.0
         version: 0.19.0(supports-color@10.2.2)(unplugin@2.3.11)
+      parse5:
+        specifier: 7.3.0
+        version: 7.3.0
       unplugin:
         specifier: ^2.3.11
         version: 2.3.11

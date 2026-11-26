@@ -129,7 +129,8 @@ HMR runtime are either enabled together or omitted together.
 - Rules found while Farm evaluates server-rendered routes are included in the browser-linked
   production stylesheet, including styles owned by server components.
 - Development CSS is served from a same-origin virtual endpoint and is injected into Farm's
-  managed `<head>` before the document reaches the browser.
+  managed `<head>` before the document reaches the browser. HTML comments can contain example tags
+  without affecting stylesheet or HMR script placement.
 - Production rules are lowered using the project's Browserslist targets and appended to Farm's
   emitted stylesheet. If the application has no other CSS, StyleX emits a fallback stylesheet.
 - Enabling the plugin adds compiler work only to modules importing a configured StyleX source.
