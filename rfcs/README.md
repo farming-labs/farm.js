@@ -18,3 +18,4 @@ implementation changes default behavior.
 | [0011: A first navigation out of a root that has not hydrated](./0011-waiting-root-navigation.md)        | Implemented (islands mode)                 |                                                            |
 | [0012: An islands interface for renderers](./0012-renderer-islands-interface.md)                         | Draft, open for discussion                 |                                                            |
 | [0013: A smaller islands runtime for pages that hydrate at load](./0013-smaller-islands-runtime.md)      | Implemented (islands mode)                 |                                                            |
+| [0014: Experimental Rust API routes](./0014-experimental-rust-api-routes.md)                             | Experimental, opt-in                       |                                                            |

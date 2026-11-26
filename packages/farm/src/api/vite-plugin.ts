@@ -41,7 +41,7 @@ import type { PluginRoutesFactory } from "./route";
 import { sendWebResponse } from "../server/response";
 import { resolveFarmRequestURL } from "../server/request";
 import type { FarmRequest } from "../types";
-import { isFarmAPIRouteFileName } from "./route-files";
+import { hasPolyroutePlugin, isFarmAPIRouteFileName } from "./route-files";
 import { _withAfterNodeMiddleware } from "../after";
 import { _runWithAPIRequestRuntime } from "./server-context";
 import { isProgrammaticRoutesFileName } from "../routes-shared";
@@ -351,6 +351,7 @@ export function farmApiPlugin(options: FarmApiPluginOptions = {}): Plugin {
     enforce: "pre",
 
     configureServer(server: ViteDevServer) {
+      const polyroute = hasPolyroutePlugin(server.config.plugins);
       projectRoot = server.config.root;
       devServer = server;
       // Discover API routes in /api directory
@@ -372,7 +373,7 @@ export function farmApiPlugin(options: FarmApiPluginOptions = {}): Plugin {
             const fullPath = path.join(dir, entry.name);
             if (entry.isDirectory()) {
               files.push(...findRouteFiles(fullPath));
-            } else if (isFarmAPIRouteFileName(entry.name)) {
+            } else if (isFarmAPIRouteFileName(entry.name, polyroute)) {
               files.push(fullPath);
             }
           }
@@ -786,7 +787,10 @@ export function farmApiPlugin(options: FarmApiPluginOptions = {}): Plugin {
       }
 
       // Handle file-based route updates
-      if (normalizedFile.includes("/api/") && fileName.startsWith("route.")) {
+      if (
+        normalizedFile.includes("/api/") &&
+        isFarmAPIRouteFileName(fileName, hasPolyroutePlugin(server.config.plugins))
+      ) {
         const shortPath = normalizedFile.split("/api/")[1] || normalizedFile;
         log(`API route updated: ${shortPath}`);
 

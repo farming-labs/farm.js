@@ -19,6 +19,27 @@ afterEach(() => {
 });
 
 describe("APIRouteManager", () => {
+  it("discovers route.rs only when the Polyroute Vite plugin is active", async () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), "farm-polyroute-"));
+    tempDirs.push(root);
+    const dir = path.join(root, "api", "scores");
+    fs.mkdirSync(dir, { recursive: true });
+    fs.writeFileSync(path.join(dir, "route.rs"), "");
+    const plugins: { name: string }[] = [];
+    const manager = new APIRouteManager(root, {
+      config: { plugins },
+      environments: { ssr: { runner: { import: async () => ({ GET: () => new Response() }) } } },
+    } as any);
+    await manager.discoverRoutes();
+    expect(manager.getRoutes().size).toBe(0);
+    plugins.push({ name: "polyroute" });
+    await manager.discoverRoutes();
+    expect(manager.getRoutes().get("/api/scores")?.methods).toEqual(["GET"]);
+    fs.unlinkSync(path.join(dir, "route.rs"));
+    await manager.discoverRoutes();
+    expect(manager.getRoutes().size).toBe(0);
+  });
+
   it("discovers JSX route files", async () => {
     const root = fs.mkdtempSync(path.join(os.tmpdir(), "farm-api-route-"));
     tempDirs.push(root);

@@ -274,6 +274,7 @@ import {
   generateFarmIntegrationProviderServerModules,
   isRendererCompiledComponent,
 } from "../integration-provider-build";
+import { hasPolyroutePlugin } from "../api/route-files";
 import { loadFarmProductionVite, type FarmProductionViteRuntime } from "../build/production-vite";
 import {
   includesTailwindVitePlugin,
@@ -1753,7 +1754,7 @@ export async function buildUniversal(
 
     const { bundle: ssrBundle, entryFile: ssrEntryFile, configuredHeaderRoutes } = ssrResult;
     assertServerReadSSRAssetsSupported(ssrBundle, preset, root);
-    await writeSSRAssetsToClient(ssrBundle, clientOutputDir);
+    await writeSSRAssetsToClient(ssrBundle, clientOutputDir, ssrResult.polyroute);
     if (!rendererDisabled) {
       await writeFarmVideoPlayerToClient(clientOutputDir);
     }
@@ -1867,9 +1868,13 @@ function varyFarmNitroCacheRules(
  * Publish the SSR assets a rendered page can point the browser at. Assets that only server code
  * reads from its own output directory stay with the server bundle and out of the public output.
  */
-async function writeSSRAssetsToClient(bundle: OutputBundle, outputDir: string): Promise<void> {
+async function writeSSRAssetsToClient(
+  bundle: OutputBundle,
+  outputDir: string,
+  polyroute: boolean,
+): Promise<void> {
   const fs = await import("fs/promises");
-  const serverOnlyAssets = collectServerOnlySSRAssets(bundle);
+  const serverOnlyAssets = collectServerOnlySSRAssets(bundle, polyroute);
   for (const [fileName, output] of Object.entries(bundle)) {
     if (output.type !== "asset" || serverOnlyAssets.has(fileName)) continue;
     if (fileName === "farm-fonts.css") {
@@ -6823,6 +6828,7 @@ async function buildSSRInMemory(
 ): Promise<{
   bundle: OutputBundle;
   entryFile: string;
+  polyroute: boolean;
   configuredHeaderRoutes: UniversalConfiguredHeaderRoute[];
 }> {
   const viteBuild = productionVite.build;
@@ -6860,6 +6866,7 @@ async function buildSSRInMemory(
     });
   }
 
+  let polyroute = false;
   let ssrBundle: OutputBundle;
   let ssrEntryFile: string;
 
@@ -7331,20 +7338,28 @@ async function buildSSRInMemory(
         },
         {
           name: "capture-ssr-bundle",
-          generateBundle(_options, bundle) {
-            ssrBundle = bundle;
+          configResolved(config) {
+            polyroute = hasPolyroutePlugin(config.plugins);
+          },
+          enforce: "post",
+          generateBundle: {
+            // Retain assets emitted by user plugins, including post-generateBundle hooks.
+            order: "post",
+            handler(_options, bundle) {
+              ssrBundle = bundle;
 
-            // Find entry file
-            for (const [fileName, file] of Object.entries(bundle)) {
-              if (file.type === "chunk" && file.isEntry) {
-                ssrEntryFile = fileName;
-                break;
+              // Find entry file
+              for (const [fileName, file] of Object.entries(bundle)) {
+                if (file.type === "chunk" && file.isEntry) {
+                  ssrEntryFile = fileName;
+                  break;
+                }
               }
-            }
 
-            if (!ssrEntryFile) {
-              throw new Error("No entry point found in SSR bundle");
-            }
+              if (!ssrEntryFile) {
+                throw new Error("No entry point found in SSR bundle");
+              }
+            },
           },
         },
       ],
@@ -7379,6 +7394,7 @@ async function buildSSRInMemory(
   }
 
   return {
+    polyroute,
     bundle: ssrBundle!,
     entryFile: ssrEntryFile!,
     configuredHeaderRoutes,

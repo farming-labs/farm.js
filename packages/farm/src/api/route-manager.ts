@@ -28,7 +28,7 @@ import {
   resolveAPIRouteEndpoint,
   type APIRouteMatch,
 } from "./runtime";
-import { isFarmAPIRouteFileName } from "./route-files";
+import { hasPolyroutePlugin, isFarmAPIRouteFileName } from "./route-files";
 import { resolveRouteOpenAPIConfig } from "../openapi/route-config";
 import type { RouteOpenAPIConfig } from "../openapi/types";
 import { AmbiguousRouteError, NonTerminalCatchAllRouteError } from "../routing/specificity";
@@ -173,7 +173,10 @@ export class APIRouteManager {
   /**
    * Recursively find all route.ts files
    */
-  private findRouteFiles(dir: string): string[] {
+  private findRouteFiles(
+    dir: string,
+    polyroute = hasPolyroutePlugin(this.viteServer?.config?.plugins),
+  ): string[] {
     const files: string[] = [];
 
     if (!fs.existsSync(dir)) {
@@ -186,8 +189,8 @@ export class APIRouteManager {
       const fullPath = path.join(dir, entry.name);
 
       if (entry.isDirectory()) {
-        files.push(...this.findRouteFiles(fullPath));
-      } else if (isFarmAPIRouteFileName(entry.name)) {
+        files.push(...this.findRouteFiles(fullPath, polyroute));
+      } else if (isFarmAPIRouteFileName(entry.name, polyroute)) {
         files.push(fullPath);
       }
     }
