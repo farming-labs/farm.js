@@ -161,12 +161,12 @@ export interface GenerateServiceWorkerOptions {
 export function generateServiceWorker(options: GenerateServiceWorkerOptions): string {
   const routeFiles = Object.fromEntries(
     Object.entries(options.staticRoutes).map(([route, file]) => [
-      encodeRoutePathname(route),
+      encodeRoutePathname(route, options.basePath),
       toPublicUrl(file, options.basePath, options.htmlBasePath ?? "/"),
     ]),
   );
   const offlineFile = options.offlineRoute
-    ? (routeFiles[encodeRoutePathname(options.offlineRoute)] ?? null)
+    ? (routeFiles[encodeRoutePathname(options.offlineRoute, options.basePath)] ?? null)
     : null;
   const cacheScope = createHash("sha256")
     .update(normalizeBasePath(options.basePath))
@@ -517,8 +517,12 @@ function toPublicUrl(file: string, basePath: string, fileBasePath = basePath): s
 // it percent-encodes ordinary path characters such as @ , = + ; $ that browsers
 // leave untouched, so a route like /@alice would be keyed as /%40alice and never
 // match a navigation to /@alice, silently falling through to the offline page.
-function encodeRoutePathname(pathname: string): string {
-  return new URL(pathname, "http://farm.localhost").pathname;
+function encodeRoutePathname(pathname: string, basePath: string): string {
+  // The mount is already a URL path. Only the emitted filename has literal percent signs.
+  const route = stripBasePath(pathname, basePath).replaceAll("%", "%25");
+  const url = new URL("http://farm.localhost");
+  url.pathname = withBasePath(route, basePath);
+  return url.pathname;
 }
 
 function encodePathname(pathname: string): string {

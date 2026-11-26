@@ -69,26 +69,25 @@ describe("static routes under a base path", () => {
     }
   });
 
-  it("matches a static route with URL-path-safe punctuation offline", async () => {
-    // A browser leaves '@' unencoded in location.pathname, so the STATIC_ROUTES
-    // key must be "/app/@alice" — not the encodeURIComponent form
-    // "/app/%40alice" — or the offline navigation lookup misses and the
-    // precached page is never served.
-    const input = await output({ "index.html": "home", "@alice/index.html": "profile" });
+  it.each([
+    ["@alice", "@alice"],
+    ["c#", "c%23"],
+    ["100%", "100%25"],
+    ["literal%23", "literal%2523"],
+  ])("navigates offline to a static directory named %s", async (name, encoded) => {
+    const input = await output({ "index.html": "home", [name + "/index.html"]: "profile" });
     const result = await writePwaBuildArtifacts({
       ...input,
       options: resolvePwaOptions({ cache: "auto" }),
     });
-    expect(result.staticRoutes["/app/@alice"]).toBe("@alice/index.html");
-    // The precache URL and the STATIC_ROUTES *value* keep '@' literal too, the
-    // same form the browser requests, so a direct asset fetch and the offline
-    // navigation lookup hit the same cache key.
-    expect(result.precacheUrls).toContain("/app/@alice/index.html");
+    expect(result.staticRoutes["/app/" + name]).toBe(name + "/index.html");
+    const url = "/app/" + encoded;
+    expect(result.precacheUrls).toContain(url + "/index.html");
 
     const listeners = new Map<string, (event: any) => void>();
     const cached = new Map([
       ["/app/index.html", "home"],
-      ["/app/@alice/index.html", "profile"],
+      [url + "/index.html", "profile"],
     ]);
     runInNewContext(await readFile(result.workerPath, "utf8"), {
       URL,
@@ -108,7 +107,7 @@ describe("static routes under a base path", () => {
 
     let response!: Promise<Response>;
     listeners.get("fetch")!({
-      request: { method: "GET", mode: "navigate", url: "https://example.com/app/@alice" },
+      request: { method: "GET", mode: "navigate", url: "https://example.com" + url },
       respondWith(value: Promise<Response>) {
         response = value;
       },
