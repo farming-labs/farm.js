@@ -80,6 +80,29 @@ describe("redisRateLimitStorage", () => {
   });
 });
 
+describe.each([
+  { name: "redisCache", create: redisCache },
+  { name: "redisRateLimitStorage", create: redisRateLimitStorage },
+])("$name client factory", ({ create }) => {
+  it("shares each connection attempt and retries after a rejection", async () => {
+    let attempts = 0;
+    const adapter = create({
+      client: async () => {
+        if (++attempts === 1) throw new Error("Redis offline");
+        return new FakeRedis();
+      },
+    });
+    const read = () => adapter.get!("key");
+    const first = await Promise.allSettled([read(), read()]);
+    expect(first.map((result) => result.status)).toEqual(["rejected", "rejected"]);
+    expect(attempts).toBe(1);
+
+    await expect(Promise.all([read(), read()])).resolves.toEqual([null, null]);
+    await expect(read()).resolves.toBeNull();
+    expect(attempts).toBe(2);
+  });
+});
+
 class FakeRedis implements FarmRedisClient {
   readonly evalCalls: Array<{ script: string; numberOfKeys: number; args: string[] }> = [];
   private values = new Map<string, string>();

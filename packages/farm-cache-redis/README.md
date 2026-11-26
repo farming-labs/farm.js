@@ -29,6 +29,9 @@ export default defineConfig({
 Farm uses the shared adapter for cached queries, ISR and PPR output, and tag/path invalidation.
 Application code keeps using the cache APIs from `@farm.js/core/cache`.
 
+Both Redis adapters share one pending client factory call. If it rejects, the waiting operations
+receive the error and the next operation tries the factory again.
+
 Entries with a finite `revalidate` are written with a Redis `PX` expiry that covers the fresh window
 plus one more `revalidate` window of stale serving (at least 60 seconds). Entries without a
 `revalidate` have no expiry and stay until they are replaced or invalidated.

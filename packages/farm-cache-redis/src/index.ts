@@ -55,6 +55,19 @@ end
 return { count, ttl }
 `;
 
+function lazyRedisClient<T extends FarmRedisClient>(source: T | (() => T | Promise<T>)) {
+  let pending: Promise<T> | undefined;
+  return () => {
+    pending ??= Promise.resolve()
+      .then(() => (typeof source === "function" ? source() : source))
+      .catch((error) => {
+        pending = undefined;
+        throw error;
+      });
+    return pending;
+  };
+}
+
 /**
  * Create a Redis-backed Farm cache with atomic tag versions and regeneration
  * leases.
@@ -65,14 +78,7 @@ export function redisCache(options: RedisCacheOptions): FarmCacheAdapter {
   }
 
   const prefix = normalizePrefix(options.prefix || "farm-cache", "redisCache");
-  let clientPromise: Promise<FarmRedisClient> | undefined;
-
-  const getClient = () => {
-    clientPromise ??= Promise.resolve(
-      typeof options.client === "function" ? options.client() : options.client,
-    );
-    return clientPromise;
-  };
+  const getClient = lazyRedisClient(options.client);
   const key = (value: string) => `${prefix}:${value}`;
 
   return {
@@ -148,13 +154,7 @@ export function redisRateLimitStorage(options: RedisRateLimitOptions): RateLimit
   }
 
   const prefix = normalizePrefix(options.prefix || "farm-ratelimit", "redisRateLimitStorage");
-  let clientPromise: Promise<FarmRedisRateLimitClient> | undefined;
-  const getClient = () => {
-    clientPromise ??= Promise.resolve(
-      typeof options.client === "function" ? options.client() : options.client,
-    );
-    return clientPromise;
-  };
+  const getClient = lazyRedisClient(options.client);
   const key = (value: string) => `${prefix}:${value}`;
 
   return {
