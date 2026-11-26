@@ -1531,6 +1531,12 @@ test("a first navigation out of a layout root that waits shows the next page bef
   await expect(page.locator("h1")).toHaveText("Waiting b");
   expect(renderer.requested).toEqual([]);
   await expect(page.locator("#root")).not.toHaveAttribute("data-farm-island-hydrated", "true");
+  // Traversing these two history entries also keeps the layout waiting for an interaction.
+  await page.goBack();
+  await expect(page.locator("h1")).toHaveText("Waiting a");
+  await page.goForward();
+  await expect(page.locator("h1")).toHaveText("Waiting b");
+  expect(renderer.requested).toEqual([]);
   // The root waits for a click on the next page, as a first load of that page would.
   await page.getByRole("button", { name: "Toggle theme" }).click();
   await expect.poll(() => renderer.requested.length).toBeGreaterThan(0);
