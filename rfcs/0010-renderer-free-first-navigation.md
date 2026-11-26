@@ -1,13 +1,13 @@
 # A first navigation that does not wait for the renderer
 
-Status: Implemented (islands mode, web) in #3061. React joined the renderer it loads later, and
+Status: Implemented (islands mode, web) in 0.1.79 ([#3061](https://github.com/farming-labs/farm.js/pull/3061)). React joined the renderer it loads later, and
 islands that wait for their triggers no longer load it (see Results).
 
 ## Problem
 
 An islands page loads no client runtime: its boot script (2.2 KB br) loads the runtime when a link
 or a waiting client component shows intent (RFC 0003, sections 10 and 11). A link click made before
-the runtime runs is held, and the boot sends the page request with it (#3042, open). The page
+the runtime runs is held, and the boot sends the page request with it ([#3042](https://github.com/farming-labs/farm.js/pull/3042)). The page
 renders once the runtime and the router have loaded and run.
 
 The runtime is 81.6 KB br, and React DOM is two thirds of it. On
