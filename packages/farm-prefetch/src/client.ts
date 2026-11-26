@@ -96,8 +96,6 @@ export function startPrefetchRuntime(
   router?: PrefetchRouter | null,
 ): PrefetchRuntime {
   if (typeof router?.prefetch !== "function") return { close: ignore };
-  // Plain links call the router's own method; their rules are checked below.
-  const prefetch = router.prefetch.bind(router);
   const removeGate = gateRouterPrefetch(router as RouterWithPrefetch, options, runtimeWindow);
   if (isDataSaving(runtimeWindow)) return { close: removeGate };
   const observe = router.observeForPrefetch?.bind(router);
@@ -135,7 +133,7 @@ export function startPrefetchRuntime(
     if (href === null) return;
     // Like Link: a prefetch that fails leaves the click to fetch the page.
     Promise.resolve()
-      .then(() => prefetch(href))
+      .then(() => router?.prefetch?.(href))
       .then(ignore, ignore);
   }
 
