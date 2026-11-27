@@ -373,6 +373,7 @@ ${
 `
     : ""
 }
+  let lastHistoryHref = location.href;
   // Root component that manages RSC state
   function BrowserRoot() {
     const [payload, set] = React.useState(initial);
@@ -423,8 +424,16 @@ ${withPlugins(`
 `)}    
     // Set up client-side navigation
     React.useEffect(() => {
-      // Re-fetch RSC when URL changes
-      const nav = () => refetch(location.href${withPlugins(", { action: 'pop', from: null }")});
+      const nav = (event) => {
+        const previous = lastHistoryHref;
+        lastHistoryHref = location.href;
+        // Native fragment clicks and traversal emit popstate. Synthetic events can request a refresh.
+        if (
+          event.isTrusted && previous !== lastHistoryHref &&
+          previous.split('#', 1)[0] === lastHistoryHref.split('#', 1)[0]
+        ) return;
+        return refetch(location.href${withPlugins(", { action: 'pop', from: null }")});
+      };
       
       // Handle browser back/forward
       window.addEventListener('popstate', nav);
@@ -442,10 +451,8 @@ ${withPlugins(`
           if (e.metaKey || e.altKey || e.ctrlKey || e.shiftKey) return;
           if (e.button !== 0) return;
 
-          // Same-document fragment link: let the browser update the hash and
-          // scroll to the anchor natively. Refetching the route here would
-          // discard the browser's fragment scroll and re-render for nothing.
-          if (a.hash && a.pathname === location.pathname && a.search === location.search) {
+          // The hash getter is empty for a trailing '#', which still scrolls to the top.
+          if (a.href.includes('#') && a.pathname === location.pathname && a.search === location.search) {
             return;
           }
 
@@ -494,6 +501,7 @@ ${withPlugins(`
     }
 ${withPlugins("    const fromHref = location.href;\n")}    if (action === 'replace') history.replaceState(null, '', url.href);
     else history.pushState(null, '', url.href);
+    lastHistoryHref = location.href;
     await refetch(location.href${withPlugins(", { action, from: fromHref }")});
   }
   farmNavigateRef.current = navigate;
@@ -557,6 +565,7 @@ ${withPlugins(`        if (session) {
           const target = dest.pathname + dest.search + dest.hash;
           if (target !== location.pathname + location.search + location.hash) {
             history.replaceState(null, '', target);
+            lastHistoryHref = location.href;
           }
         }
       }

@@ -281,6 +281,17 @@ describe("startFarmIslandsBoot", () => {
     expect(load).not.toHaveBeenCalled();
   });
 
+  it.each(["#bottom", "#"])(
+    "does not request the page for a path-qualified %s link",
+    (fragment) => {
+      boot(`<a href="${location.pathname}${location.search}${fragment}" data-farm-link>Here</a>`);
+      const link = document.querySelector("a")!;
+      press(link);
+      click(link);
+      expect(pageRequests).not.toHaveBeenCalled();
+    },
+  );
+
   it("leaves a link press and click to the browser when it inherits a named target", () => {
     const load = boot('<a href="/next" data-farm-link>Next</a>');
     const base = document.createElement("base");

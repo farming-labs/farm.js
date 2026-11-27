@@ -305,10 +305,10 @@ export function Nav() {
 }
 ```
 
-Same-page fragment links (such as `#settings`) and Back/Forward between those
-fragments keep the current page mounted without loading route data. Native
-anchor scrolling and `hashchange` listeners still work. A different pathname,
-query string, or intercepted-route context still performs route navigation.
+On `/docs`, both `#settings` and `/docs#settings` scroll to the anchor without loading
+route data. Back and Forward between fragments keep the page mounted. Native
+`hashchange` listeners still work, and `<a href="#">` scrolls to the top. A different
+pathname, query string, or intercepted-route context still performs route navigation.
 
 #### Link in Solid, Vue, and Svelte
 

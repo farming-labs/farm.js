@@ -4655,7 +4655,7 @@ function isFarmDocsPath() {
 // Farm.js Client Runtime (no client components)
 ${cssImport}
 ${layoutImports}
-import { createClientCancellation, createClientPluginManager, createPluginlessClientRuntime, getFarmIslandValueHeaders, getHashTargetElement, installChunkErrorRecovery, installFarmLinkPrefetch, isFarmBlockedNavigationURL, isFarmExternalNavigationURL, readFarmLinkNavigateOptions, targetsCurrentContext, rememberFarmLinkLocale, reconcileFarmDocumentHead, runFarmNavigationDelegates, setFarmBasePath, setFarmTrailingSlashPreference, stripFarmBasePath } from "@farm.js/core/internal/client-runtime";
+import { createClientCancellation, createClientPluginManager, createPluginlessClientRuntime, getFarmIslandValueHeaders, getHashTargetElement, installChunkErrorRecovery, installFarmLinkPrefetch, isFarmBlockedNavigationURL, isFarmExternalNavigationURL, isFarmSameDocumentFragment, readFarmLinkNavigateOptions, targetsCurrentContext, rememberFarmLinkLocale, reconcileFarmDocumentHead, runFarmNavigationDelegates, setFarmBasePath, setFarmTrailingSlashPreference, stripFarmBasePath } from "@farm.js/core/internal/client-runtime";
 import { createFarmDeploymentMismatchError, createFarmDeploymentRequestHeaders, isFarmDeploymentMismatchResponse } from "@farm.js/core/deployment";
 ${clientPluginEntry.imports}
 ${clientCachePersistence.imports}
@@ -4871,6 +4871,7 @@ ${generateUniversalRouterStateProperties()}
         }
       });
     }
+    if (isFarmSameDocumentFragment(url.href, window.location.href)) return;
     
     const pathname = url.pathname + url.search;
     if (this.readFreshPrefetch(pathname) !== undefined) return;
@@ -5230,7 +5231,7 @@ ${lazyRoot ? "" : layoutImports}
 ${rendererClientImports}
 ${isolatedHydrationImport}
 ${providerClientCode.imports}
-import { createClientCancellation, createClientPluginManager, createPluginlessClientRuntime, getFarmIslandValueHeaders, getHashTargetElement, keepFarmIslandValues, installChunkErrorRecovery, installFarmLinkPrefetch, isFarmBlockedNavigationURL, isFarmExternalNavigationURL, readFarmLinkNavigateOptions, targetsCurrentContext, rememberFarmLinkLocale, reconcileFarmDocumentHead, replayFarmQueuedInteraction, runFarmNavigationDelegates, scheduleFarmIslandHydration, createFarmSearchParams, searchParamsToObject, setFarmBasePath, setFarmTrailingSlashPreference, stripFarmBasePath } from "@farm.js/core/internal/client-runtime";
+import { createClientCancellation, createClientPluginManager, createPluginlessClientRuntime, getFarmIslandValueHeaders, getHashTargetElement, keepFarmIslandValues, installChunkErrorRecovery, installFarmLinkPrefetch, isFarmBlockedNavigationURL, isFarmExternalNavigationURL, isFarmSameDocumentFragment, readFarmLinkNavigateOptions, targetsCurrentContext, rememberFarmLinkLocale, reconcileFarmDocumentHead, replayFarmQueuedInteraction, runFarmNavigationDelegates, scheduleFarmIslandHydration, createFarmSearchParams, searchParamsToObject, setFarmBasePath, setFarmTrailingSlashPreference, stripFarmBasePath } from "@farm.js/core/internal/client-runtime";
 import { createFarmDeploymentMismatchError, createFarmDeploymentRequestHeaders, isFarmDeploymentMismatchResponse } from "@farm.js/core/deployment";
 ${lazyMatcher ? "" : 'import { createFarmRouter, isFarmRouteActive, matchFarmRoute } from "@farm.js/core/router";'}
 ${clientPluginEntry.imports}
@@ -6701,6 +6702,7 @@ ${
         }
       });
     }
+    if (isFarmSameDocumentFragment(url.href, window.location.href)) return;
     prefetchFarmClientRouteTable();
     
     // A prefetch warms an ordinary future navigation, which reads the bare
