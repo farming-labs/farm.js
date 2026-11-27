@@ -52,14 +52,14 @@ Run `farm dev --port 3000`, then try `curl 'http://localhost:3000/api/examples/q
 
 ### Run the whole order locally
 
-The same endpoint is part of a runnable checkout app. Its demo buys three bags, delivers a simulated payment for the quoted amount, and approves a refund for the same order. You can run it without a payment account or an Infra key. [Open the complete example](https://github.com/farming-labs/farm.js/tree/d32d31e09/examples/agent)
+The same endpoint is part of a runnable checkout app. Its demo buys three bags, delivers a simulated payment for the quoted amount, and approves a refund for the same order. You can run it without a payment account or an Infra key. [Open the complete example](https://github.com/farming-labs/farm.js/tree/9aa9670ee9aa/examples/agent)
 
 From a terminal with Node 24 and pnpm 8.12.1:
 
 ```sh
 git clone https://github.com/farming-labs/farm.js.git
 cd farm.js
-git checkout --detach d32d31e09
+git checkout --detach 9aa9670ee9aa
 pnpm install --frozen-lockfile
 pnpm --filter @farm.js/core build
 pnpm --filter @farm.js/cli build
@@ -67,7 +67,22 @@ pnpm --filter @farm.js/agent build
 pnpm --dir examples/agent smoke
 ```
 
-Watch for **“Checkout is waiting for payment.”** The script has started an agent run and read its status back from the server. Next it delivers `payment.succeeded` with that order’s ID and the price it just fetched. The checkout records 3,600 cents. Finally, the refund agent pauses for approval. The script supplies the decision, checks the final reply, and shuts down its local server. To keep the app open and inspect its quote responses and agent manifest yourself, run `pnpm --dir examples/agent dev`. [HTTP requests in execution order](https://github.com/farming-labs/farm.js/blob/d32d31e09/examples/agent/scripts/smoke.mjs)
+Watch for **“Checkout is waiting for payment.”** The script has started an agent run and read its status back from the server. Next it delivers `payment.succeeded` with that order’s ID and the price it just fetched. The checkout records 3,600 cents. Finally, the refund agent pauses for approval. The script supplies the decision, checks the final reply, and shuts down its local server. To keep the app open and inspect its quote responses and agent manifest yourself, run `pnpm --dir examples/agent dev`. [HTTP requests in execution order](https://github.com/farming-labs/farm.js/blob/9aa9670ee9aa/examples/agent/scripts/smoke.mjs)
+
+<span id="checkout-with-polyroute" className="blog-heading-anchor" />
+
+### Pack the same order with Rust
+
+The shop sells three bags. How many boxes should the warehouse get ready? The checkout example includes a Rust endpoint for that question. Turn on Polyroute and the same demo sends the quantity from the TypeScript quote to `GET /api/examples/packing?quantity=3` before it delivers the payment event.
+
+```sh
+rustup target add wasm32-wasip2
+pnpm --dir examples/agent smoke:polyroute
+```
+
+Look for **“Rust packing plan: 3 bags in 1 box.”** A box holds four bags. To try a different order, start `pnpm --dir examples/agent dev:polyroute` and open `/api/examples/packing?quantity=5`. The response is `{"quantity":5,"bagsPerBox":4,"boxes":2}`. The quote, packing route, checkout agent, and refund agent all run on the same Farm server. The ordinary `smoke` command leaves the Rust route off. [Read the Rust handler](https://github.com/farming-labs/farm.js/blob/9aa9670ee9aa/examples/agent/src/app/api/examples/packing/route.rs)
+
+To try the production build, run `pnpm --dir examples/agent build:polyroute`, then `pnpm --dir examples/agent smoke:polyroute:production`. The second command starts the built Node server and runs the same order against its packaged WebAssembly files.
 
 ### Explore the rest of the release
 
@@ -78,7 +93,6 @@ For a storefront, you might also need a native packing screen, a custom renderer
 | Render the checkout page              | In `examples/server-components`, run `pnpm build:islands`, then `node .farm/.output-islands/server/index.mjs`. Open `/stream` for the early and late counters. At `/action-state`, type “canvas bag” and vote. The server returns the new count and choice. Stop the server and repeat with `pnpm build:rsc` and `.farm/.output-rsc/server/index.mjs`. The interaction stays the same while the navigation payload changes. [Rendering example](https://github.com/farming-labs/farm.js/tree/b8995c309d5f/examples/server-components) |
 | Update an item count                  | Run `pnpm --dir examples/react-compiler experiment`. Its production browser checks exercise inputs, counters, and keyed rows. Inspect the compiler report at `examples/react-compiler/.farm/react-compiler.json` to see what compiled. For an alternative UI library, open the [Leaf island example](https://github.com/farming-labs/leaf/tree/7da8b6a) and click the two controls independently. [Compiler example](https://github.com/farming-labs/farm.js/tree/b8995c309d5f/examples/react-compiler)                               |
 | Open the packing screen               | Run `pnpm --dir examples/mobile report` to see how Farm classifies each screen. With the Android or iOS toolchain installed, follow the mobile example and open `/kit`: the packing checklist is native-only. For a desktop window, `pnpm --dir examples/desktop-electrobun dev` opens the separate desktop app. [Mobile](https://github.com/farming-labs/farm.js/tree/b8995c309d5f/examples/mobile) · [Desktop](https://github.com/farming-labs/farm.js/tree/b8995c309d5f/examples/desktop-electrobun)                               |
-| Move expensive work into Rust         | Keep the price calculation in TypeScript. To try a CPU-heavy route, enable Polyroute in `examples/api-server` using the pinned setup, build for Node, and request `/primes?limit=10`. Expect four primes. The TypeScript todo routes still work in that server. [Rust setup and measured costs](#put-one-compute-heavy-endpoint-in-rust)                                                                                                                                                                                              |
 | Let an assistant look something up    | Run `pnpm --dir examples/api-mcp dev` and send the README’s `search_projects` request with the demo reader token. The tool returns a validated result, and that token can only read. For a tool attached to an open web page, run the WebMCP demo in a supported browser and inspect its registered tools. [Server tools](https://github.com/farming-labs/farm.js/tree/b8995c309d5f/examples/api-mcp) · [Browser tools](https://github.com/farming-labs/farm.js/tree/b8995c309d5f/examples/webmcp-demo)                               |
 | Wait for payment and approve a refund | The checkout agent waits for `payment.succeeded` with the matching order ID. Its sibling refund agent pauses for a person. Read the two agent functions alongside the local run above. One resumes on a matching event, and the other resumes on an approval. [Checkout and refund source](https://github.com/farming-labs/farm.js/tree/b8995c309d5f/examples/agent/src/agents)                                                                                                                                                       |
 | Persist data and run background work  | Run the basic example and open `/storage-demo` to exercise a storage mount, then `/feature-lab/integrations` to inspect the integration example. Start the jobs example with `JOBS_RUNTIME=local` to keep runs on disk. The same example shows the configuration for an external job provider. [Storage playground](https://github.com/farming-labs/farm.js/tree/b8995c309d5f/examples/basic/src/app/storage-demo) · [Jobs](https://github.com/farming-labs/farm.js/tree/b8995c309d5f/examples/jobs-integration)                      |
@@ -117,20 +131,11 @@ An empty title fails validation. A valid one gets a 201. File routes feed Farm's
 
 ## Put one compute-heavy endpoint in Rust
 
-In the experimental Polyroute integration, the unit you move to Rust is a route. Keep the todo handlers in TypeScript and add a prime-counting handler at `src/app/api/primes/route.rs`. The opt-in is a Vite plugin:
+In the experimental Polyroute integration, the unit you move to Rust is a route. The checkout moves packing to Rust and keeps pricing in TypeScript. Its Farm config loads the Polyroute Vite plugin when you enable it for development or a build. The built server uses the compiled route. [Checkout configuration](https://github.com/farming-labs/farm.js/blob/9aa9670ee9aa/examples/agent/farm.config.ts)
 
-```ts
-import { defineConfig } from "@farm.js/core";
-import { polyroute } from "@farming-labs/polyroute";
+Farm discovers the URL and runs its usual middleware. Polyroute compiles the handler to WebAssembly and supplies the Fetch adapter. In the separate prime-counting benchmark, `GET /api/primes?limit=10` returns `{"limit":10,"primes":4}`. The Rust handler decides which methods it accepts. Use `fetch` to call it: the TypeScript client generator cannot infer the schema from Rust. Removing the plugin turns Rust discovery off.
 
-export default defineConfig({
-  vite: { plugins: [polyroute()] },
-});
-```
-
-Farm discovers the URL and runs its usual middleware. Polyroute compiles the handler to WebAssembly and supplies the Fetch adapter. In the example, `GET /api/primes?limit=10` returns `{"limit":10,"primes":4}`. The Rust handler decides which methods it accepts. Use `fetch` to call it: the TypeScript client generator cannot infer the schema from Rust. Removing the plugin turns Rust discovery off.
-
-The initial verified combination is a Node server with Polyroute's default V8 WebAssembly runtime. The source setup pins Polyroute, adds the `wasm32-wasip2` target on the build machine, and packages the compiled assets with `farm build --preset node-server`. Deploy that complete output. The benchmark gives a reason to choose your endpoint carefully: at ten connections, warm p95 on the CPU-heavy request went from 57.92 ms in TypeScript to 35.00 ms in Rust. The light request went from 3.08 ms to 4.06 ms. Those are warm measurements of one endpoint on one Mac. The TypeScript control also varied by 17% between runs on the light case. [Pinned setup and example](https://github.com/farming-labs/farm.js/blob/b8995c309/docs/src/app/docs/api-routes/page.md#experimental-rust-routes) · [Benchmark method and results](https://github.com/farming-labs/polyroute/blob/6ec6f02cac043b21be23f33e19bd5dd70a7212a8/docs/benchmarks/2026-11-26-farm-route-output.md)
+The initial verified combination is a Node server with Polyroute's default V8 WebAssembly runtime. The checkout pins `@farming-labs/polyroute@0.1.0-beta.0` from npm. Add the `wasm32-wasip2` target on the build machine and package the compiled assets with `farm build --preset node-server`. Deploy that complete output. The benchmark gives a reason to choose your endpoint carefully: at ten connections, warm p95 on the CPU-heavy request went from 57.92 ms in TypeScript to 35.00 ms in Rust. The light request went from 3.08 ms to 4.06 ms. Those are warm measurements of one endpoint on one Mac. The TypeScript control also varied by 17% between runs on the light case. [Pinned setup and example](https://github.com/farming-labs/farm.js/blob/db718d5f8/docs/src/app/docs/api-routes/page.md#experimental-rust-routes) · [Benchmark method and results](https://github.com/farming-labs/polyroute/blob/6ec6f02cac043b21be23f33e19bd5dd70a7212a8/docs/benchmarks/2026-11-26-farm-route-output.md)
 
 <span id="give-one-route-a-native-screen" className="blog-heading-anchor" />
 
