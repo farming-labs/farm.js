@@ -14,7 +14,9 @@ describe("package manifest", () => {
 
     expect(manifest.dependencies?.["@farm.js/core"]).toBeUndefined();
     // 0.1.28 is the first core whose plugin entry exports resolveFarmDevtoolsConfig.
-    expect(manifest.peerDependencies?.["@farm.js/core"]).toBe(">=0.1.28 <0.3.0");
+    expect(manifest.peerDependencies?.["@farm.js/core"]).toBe(
+      ">=0.1.28 <0.4.0 || >=0.2.0-beta.0 <0.2.0",
+    );
     expect(manifest.devDependencies?.["@farm.js/core"]).toBe("workspace:*");
   });
 

@@ -12,7 +12,7 @@ This package is in beta. See [Stability and Support](https://farmjs.dev/docs/sta
 pnpm add @farm.js/core @farm.js/solid solid-js
 ```
 
-`@farm.js/core` (`>=0.1.0 <0.3.0`) and `solid-js` (`^1.9.18`) are peer dependencies.
+`@farm.js/core` (`>=0.1.0 <0.4.0 || >=0.2.0-beta.0 <0.2.0`) and `solid-js` (`^1.9.18`) are peer dependencies.
 `vite-plugin-solid` is installed with the adapter.
 
 To start a new project with Solid already selected:
