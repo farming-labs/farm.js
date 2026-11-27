@@ -7,9 +7,7 @@ description: "What changed since Farm.js 0.1, from backend-only apps and Rust en
 
 KinfeMichael Tariku · Nov 2026
 
-Field Notes is a small note-taking app we built to show how Farm.js works on the web and on a phone. In a browser, you open a page to write a note. In the mobile app, the editor slides up from the bottom of the screen. Both use the same server function to save what you wrote. [Field Notes source](https://github.com/farming-labs/farm.js/tree/v0.1.87/examples/mobile)
-
-You can start even smaller, with just the API that saves the note. Add a page and Farm renders it with React. Decide which controls hydrate in the browser, then decide whether any screen needs its own native implementation. The API that saves the note can stay put through all of those choices.
+You can build a Farm.js app with just an API. When you need a screen, you can add a web page or a mobile screen that uses the same API.
 
 **The 0.2 plan promotes the React compiler and server components out of experimental configuration.** Those are two independent choices. Server components decide what crosses from server to browser. The compiler decides how an eligible React component updates the DOM once it is running. The plan keeps both opt-in. The compiler already accepts its new spelling in the 0.1 series; the top-level server-components setting shown below is the planned 0.2 spelling.
 
@@ -67,7 +65,7 @@ The initial verified combination is a Node server with Polyroute's default V8 We
 
 ## Give one route a native screen
 
-The new-note page already has a form. This export on that page tells the phone how to open it:
+To open a form as a modal on a phone, add this to its page:
 
 ```ts
 import type { FarmMobilePageConfig } from "@farm.js/core/mobile";
@@ -75,9 +73,9 @@ import type { FarmMobilePageConfig } from "@farm.js/core/mobile";
 export const mobile = { presentation: "modal" } satisfies FarmMobilePageConfig;
 ```
 
-In the mobile shell, Farm can show it in a WebView and let the native navigator handle tabs, pushes, modals, and back gestures. In Field Notes, each tab remembers its own stack. You can open a note, switch to Settings, and come back to the note you were reading. [How the web shell handles navigation](https://farmjs.dev/docs/mobile/shell)
+The mobile app opens the form over the current screen. Dismiss it and you’re back where you started. Farm can also show web pages inside native tabs and keep your place when you switch tabs. [How the web shell handles navigation](https://farmjs.dev/docs/mobile/shell)
 
-When a screen needs a device feature, put a `page.native.tsx` beside its web page. Field Notes does this for its camera route. The native screen reads notes through the app’s API, imports the server function that creates a quick note, and can open the web form when you want the full editor. You can override a screen for Android. You can also make a route native-only: the example’s packing checklist lives at `/kit` in the app and returns 404 on the web. [Native screens](https://farmjs.dev/docs/mobile/native-screens)
+For a screen that uses the camera, put a `page.native.tsx` beside its web page. The phone opens the native screen at the same URL. Both screens can call the same API. You can also add a screen that only exists in the mobile app. [Native screens](https://farmjs.dev/docs/mobile/native-screens)
 
 There’s a useful middle ground. The smaller Trail Guide example has no hand-written native screens. With `mobile.native.auto` enabled, Farm analyzes pages and can draw the ones it recognizes with native views from the server’s output. The route report shows which path a page takes. Start there before committing to a rewrite. The mobile builds need their platform toolchains, including Xcode for iOS. [Trail Guide and its config](https://github.com/farming-labs/farm.js/tree/v0.1.87/examples/mobile-minimal)
 
@@ -242,4 +240,4 @@ The CLI prints a public URL and a dashboard link for that session. A teammate ca
 - **Seeing what happened.** DevTools exposes plugin order and hooks. The analyzer can find broken internal links after a build.
 - **Everyday web work.** Development and production builds share Vite 8. There are typed JSON-LD helpers, generated social images, opt-in docs prerendering, navigation announcements for screen readers, and plugins for prefetch, navigation progress, and scroll restoration. [Prefetch](https://farmjs.dev/docs/plugins/prefetch) · [Scroll restoration](https://farmjs.dev/docs/plugins/scroll-restoration)
 
-If you’re upgrading an existing app, start with its config. Keep the current rendering mode explicit when migrating, then enable the React compiler report if you want to see which client updates Farm can compile. For a new service, try the todo API first. You can send it a request before you decide whether your app needs a web page or a native screen. [Upgrade guide](https://farmjs.dev/docs/upgrading) · [Todo API](https://github.com/farming-labs/farm.js/tree/v0.1.87/examples/api-server) · [Field Notes](https://github.com/farming-labs/farm.js/tree/v0.1.87/examples/mobile)
+If you’re upgrading an existing app, start with its config. Keep the current rendering mode explicit when migrating, then enable the React compiler report if you want to see which client updates Farm can compile. For a new service, try the todo API first. You can send it a request before you decide whether your app needs a web page or a native screen. [Upgrade guide](https://farmjs.dev/docs/upgrading) · [Todo API](https://github.com/farming-labs/farm.js/tree/v0.1.87/examples/api-server) · [Mobile example](https://github.com/farming-labs/farm.js/tree/v0.1.87/examples/mobile)
