@@ -15,6 +15,77 @@ The 0.1 announcement also sketched a hosted service for apps and agents. With 0.
 
 Farm 0.1.0 already had typed routes, five renderers, server functions, MCP tools, and production deployments. Most examples here run on 0.1.87. The Rust integration described below landed afterward on main. [Original 0.1 announcement](https://farmjs.dev/blog/0.1.0)
 
+<span id="try-the-checkout-example" className="blog-heading-anchor" />
+
+## Try the checkout example
+
+Imagine a shop that sells canvas bags for $12 each. A shopper wants a price, the warehouse wants a packing screen, and customer support needs to approve refunds. Start with the part you can try right here. Open [a quote for one bag](/api/examples/quote?quantity=1), then [a quote for three](/api/examples/quote?quantity=3). Both links call a real Farm endpoint on this site. The price changes from 1,200 to 3,600 cents. Try [a quantity of zero](/api/examples/quote?quantity=0) to see the validation error. These requests only calculate a price.
+
+### Start with one file
+
+This is the handler behind those links. Put it at `src/app/api/examples/quote/route.ts` in a Farm app with Zod installed. Use `renderer: false` to run it as a service, or keep the default React renderer to serve a checkout page alongside it.
+
+```ts
+import { createEndpoint } from "@farm.js/core/api";
+import { z } from "zod";
+
+export const GET = createEndpoint(
+  "/api/examples/quote",
+  {
+    method: "GET",
+    query: z.object({ quantity: z.coerce.number().int().min(1).max(20) }),
+  },
+  async ({ query }) => {
+    const unitPriceCents = 1200;
+    return {
+      item: "Canvas bag",
+      currency: "USD",
+      quantity: query.quantity,
+      unitPriceCents,
+      totalCents: query.quantity * unitPriceCents,
+    };
+  },
+);
+```
+
+Run `farm dev --port 3000`, then try `curl 'http://localhost:3000/api/examples/quote?quantity=3'`. A web page, a native screen, and a terminal can all read the same answer. To see the public contract readers of this site get, open [its OpenAPI document](/openapi.json) and search for `/api/examples/quote`. An agent reading the instructions can also request [this article as Markdown](/blog/0.2.md).
+
+### Run the whole order locally
+
+The same endpoint is part of a runnable checkout app. Its demo buys three bags, delivers a simulated payment for the quoted amount, and approves a refund for the same order. You can run it without a payment account or an Infra key. [Open the complete example](https://github.com/farming-labs/farm.js/tree/d32d31e09/examples/agent)
+
+From a terminal with Node 24 and pnpm 8.12.1:
+
+```sh
+git clone https://github.com/farming-labs/farm.js.git
+cd farm.js
+git checkout --detach d32d31e09
+pnpm install --frozen-lockfile
+pnpm --filter @farm.js/core build
+pnpm --filter @farm.js/cli build
+pnpm --filter @farm.js/agent build
+pnpm --dir examples/agent smoke
+```
+
+Watch for **“Checkout is waiting for payment.”** The script has started an agent run and read its status back from the server. Next it delivers `payment.succeeded` with that order’s ID and the price it just fetched. The checkout records 3,600 cents. Finally, the refund agent pauses for approval. The script supplies the decision, checks the final reply, and shuts down its local server. To keep the app open and inspect its quote responses and agent manifest yourself, run `pnpm --dir examples/agent dev`. [HTTP requests in execution order](https://github.com/farming-labs/farm.js/blob/d32d31e09/examples/agent/scripts/smoke.mjs)
+
+### Explore the rest of the release
+
+For a storefront, you might also need a native packing screen, a custom renderer, or a nightly reconciliation job. The companion examples below show those choices individually. From the same checkout, run `pnpm build` to build the other workspace packages before starting their examples. Each rendering engine runs in its own build. The phone and desktop examples need their platform tools, and the hosted services use your own Farm Infra workspace.
+
+| Part of the order                     | Try it and see what changes                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                           |
+| ------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Render the checkout page              | In `examples/server-components`, run `pnpm build:islands`, then `node .farm/.output-islands/server/index.mjs`. Open `/stream` for the early and late counters. At `/action-state`, type “canvas bag” and vote. The server returns the new count and choice. Stop the server and repeat with `pnpm build:rsc` and `.farm/.output-rsc/server/index.mjs`. The interaction stays the same while the navigation payload changes. [Rendering example](https://github.com/farming-labs/farm.js/tree/b8995c309d5f/examples/server-components) |
+| Update an item count                  | Run `pnpm --dir examples/react-compiler experiment`. Its production browser checks exercise inputs, counters, and keyed rows. Inspect the compiler report at `examples/react-compiler/.farm/react-compiler.json` to see what compiled. For an alternative UI library, open the [Leaf island example](https://github.com/farming-labs/leaf/tree/7da8b6a) and click the two controls independently. [Compiler example](https://github.com/farming-labs/farm.js/tree/b8995c309d5f/examples/react-compiler)                               |
+| Open the packing screen               | Run `pnpm --dir examples/mobile report` to see how Farm classifies each screen. With the Android or iOS toolchain installed, follow the mobile example and open `/kit`: the packing checklist is native-only. For a desktop window, `pnpm --dir examples/desktop-electrobun dev` opens the separate desktop app. [Mobile](https://github.com/farming-labs/farm.js/tree/b8995c309d5f/examples/mobile) · [Desktop](https://github.com/farming-labs/farm.js/tree/b8995c309d5f/examples/desktop-electrobun)                               |
+| Move expensive work into Rust         | Keep the price calculation in TypeScript. To try a CPU-heavy route, enable Polyroute in `examples/api-server` using the pinned setup, build for Node, and request `/primes?limit=10`. Expect four primes. The TypeScript todo routes still work in that server. [Rust setup and measured costs](#put-one-compute-heavy-endpoint-in-rust)                                                                                                                                                                                              |
+| Let an assistant look something up    | Run `pnpm --dir examples/api-mcp dev` and send the README’s `search_projects` request with the demo reader token. The tool returns a validated result, and that token can only read. For a tool attached to an open web page, run the WebMCP demo in a supported browser and inspect its registered tools. [Server tools](https://github.com/farming-labs/farm.js/tree/b8995c309d5f/examples/api-mcp) · [Browser tools](https://github.com/farming-labs/farm.js/tree/b8995c309d5f/examples/webmcp-demo)                               |
+| Wait for payment and approve a refund | The checkout agent waits for `payment.succeeded` with the matching order ID. Its sibling refund agent pauses for a person. Read the two agent functions alongside the local run above. One resumes on a matching event, and the other resumes on an approval. [Checkout and refund source](https://github.com/farming-labs/farm.js/tree/b8995c309d5f/examples/agent/src/agents)                                                                                                                                                       |
+| Persist data and run background work  | Run the basic example and open `/storage-demo` to exercise a storage mount, then `/feature-lab/integrations` to inspect the integration example. Start the jobs example with `JOBS_RUNTIME=local` to keep runs on disk. The same example shows the configuration for an external job provider. [Storage playground](https://github.com/farming-labs/farm.js/tree/b8995c309d5f/examples/basic/src/app/storage-demo) · [Jobs](https://github.com/farming-labs/farm.js/tree/b8995c309d5f/examples/jobs-integration)                      |
+| Publish the storefront                | Open `/feature-lab/metadata/123` in the basic example and inspect the generated social image. Try `/prefetch-e2e` to see how links behave before navigation. The docs example shows how the guides themselves are served. [Metadata and navigation examples](https://github.com/farming-labs/farm.js/tree/b8995c309d5f/examples/basic/src/app) · [Docs app example](https://github.com/farming-labs/farm.js/tree/b8995c309d5f/examples/docs-integration)                                                                              |
+
+**Take the quote to Farm Infra.** Keep the local app running and run `farm preview --port 3000 --expires 30m` in a second terminal. Open the public URL with `/api/examples/quote?quantity=3` appended. Open the session in **Previews**, then make the invalid request and compare the two HTTP statuses. When you connect a deployed project, **Storage** holds order records, **Webhooks** receives payment events, **Cron jobs** schedules reconciliation, and **Agents** shows refund approvals. The [Infra walkthrough](#farm-infra) covers the setup for each, along with project analytics, tool calls, site audits, chat notifications, and team access.
+
 <span id="start-with-just-an-api" className="blog-heading-anchor" />
 
 ## Start with just an API
