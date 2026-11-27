@@ -58,6 +58,19 @@ test("links inherit the document target and can override it on the anchor", asyn
   await expect(page.locator("h1")).toHaveText("Waiting b");
 });
 
+test("links with a download attribute download the destination", async ({ page }) => {
+  await page.goto("/context/wait/a");
+  await hydrated(page);
+  const next = page.locator("[data-next]");
+  for (const filename of ["", "waiting.html"]) {
+    await next.evaluate((anchor, name) => anchor.setAttribute("download", name), filename);
+    const [download] = await Promise.all([page.waitForEvent("download"), next.click()]);
+    expect(await download.failure()).toBeNull();
+    if (filename) expect(download.suggestedFilename()).toBe(filename);
+    await expect(page).toHaveURL(/\/context\/wait\/a$/);
+  }
+});
+
 test("server components render on the server and their code stays there", async ({
   page,
   request,
@@ -1167,8 +1180,29 @@ test("client components use Farm's router hooks, page state, blocker and Link", 
   await expect(page.getByTestId("probe-navigation")).toHaveText("navigation: idle");
   await page.getByRole("button", { name: "page state: none" }).click();
   await expect(page.getByRole("button", { name: "page state: details" })).toBeVisible();
-  await page.getByRole("link", { name: "link home" }).click();
+  const home = page.getByRole("link", { name: "link home" });
+  const documentId = randomUUID();
+  const historyLength = await home.evaluate((anchor, id) => {
+    document.documentElement.dataset.clickTest = id;
+    anchor.addEventListener(
+      "click",
+      (event) => {
+        anchor.setAttribute("data-already-prevented", String(event.defaultPrevented));
+        event.preventDefault();
+      },
+      { once: true },
+    );
+    return history.length;
+  }, documentId);
+  await home.click();
+  await expect(home).toHaveAttribute("data-already-prevented", "false");
+  await expect(page).toHaveURL(/\/hooks$/);
+  expect(await page.evaluate(() => history.length)).toBe(historyLength);
+  await home.click();
   await expect(page).toHaveURL(/\/$/);
+  await expect(page.getByRole("heading", { name: "Home", exact: true })).toBeVisible();
+  await expect(page.locator("html")).toHaveAttribute("data-click-test", documentId);
+  expect(await page.evaluate(() => history.length)).toBe(historyLength + 1);
   expect(errors).toEqual([]);
 });
 

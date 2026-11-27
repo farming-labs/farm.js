@@ -242,6 +242,9 @@ Links inherit the first `<base target>` in the document when the anchor has no t
 `target`. For example, `<base target="_blank">` opens links in a new tab, and
 `<a href="/about" target="_self">` opens in the current tab.
 
+A click handler can cancel link navigation with `event.preventDefault()`. Links with a
+`download` attribute use the browser's download behavior, including when the attribute has no filename.
+
 Relative navigation, prefetch, and shallow history URLs resolve against the current document in
 development and production. For example, `?tab=settings` from `/users/123?tab=profile` keeps
 `/users/123`, and `456` from `/users/123` resolves to `/users/456`.

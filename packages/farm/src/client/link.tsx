@@ -243,6 +243,12 @@ function LinkInner<TRoute extends string = DefaultRouteHref, THref extends strin
       if (event.button !== 0) return;
 
       if (typeof window !== "undefined") {
+        // The RSC document listener handles untargeted links after app handlers can cancel them.
+        if (
+          !event.currentTarget.target &&
+          (window as Window & { __FARM_RSC_HYDRATED?: boolean }).__FARM_RSC_HYDRATED
+        )
+          return;
         event.preventDefault();
         if (isFarmLocaleChangeHref(localizedHref)) {
           rememberFarmLinkLocale(event.currentTarget);

@@ -117,7 +117,7 @@ describe("the RSC router offers in-app navigations to navigation delegates", () 
     const handleClick = extract(
       generateClientEntry(context),
       "const handleClick = (e) => {",
-      "document.addEventListener('click', handleClick, true);",
+      "document.addEventListener('click', handleClick);",
       { navigate, location, nav: vi.fn() },
     )("return handleClick;") as (event: unknown) => void;
     const click = (attributes: string[]) => {
