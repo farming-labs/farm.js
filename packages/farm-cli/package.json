@@ -1,6 +1,6 @@
 {
   "name": "@farm.js/cli",
-  "version": "0.1.87",
+  "version": "0.2.0-beta.0",
   "description": "CLI for Farm.js framework",
   "keywords": [
     "@farm.js/cli",
