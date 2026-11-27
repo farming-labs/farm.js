@@ -34,6 +34,12 @@ export function isFarmScriptURL(href: string): boolean {
   }
 }
 
+/** Compare resolved URLs, including a trailing "#" that the hash getter treats as empty. */
+export function isFarmSameDocumentFragment(href: string, currentHref: string): boolean {
+  const fragment = href.indexOf("#");
+  return fragment >= 0 && href.slice(0, fragment) === currentHref.split("#", 1)[0];
+}
+
 export function isFarmExternalNavigationURL(url: URL, currentOrigin: string): boolean {
   return (url.protocol !== "http:" && url.protocol !== "https:") || url.origin !== currentOrigin;
 }

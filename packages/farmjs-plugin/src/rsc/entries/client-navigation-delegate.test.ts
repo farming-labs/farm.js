@@ -62,7 +62,7 @@ function createNavigate(options: { delegate: (context: any) => boolean | Promise
     generateClientEntry(context),
     "async function navigate(href, action) {",
     "farmNavigateRef.current = navigate;",
-    { location, history, refetch, runFarmNavigationDelegates, URL },
+    { lastHistoryHref: location.href, location, history, refetch, runFarmNavigationDelegates, URL },
   )("return navigate;") as (href: string, action: "push" | "replace") => Promise<void>;
   return { navigate, location, history, refetch, runFarmNavigationDelegates };
 }

@@ -10,6 +10,7 @@ export default function HashPage() {
       <p id="bottom" data-testid="bottom">
         Bottom
       </p>
+      <a href="#">Back to top</a>
     </section>
   );
 }

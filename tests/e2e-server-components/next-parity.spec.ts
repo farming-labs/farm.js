@@ -187,9 +187,32 @@ test("unicode search params reach the page, on a load and on a client navigation
 test("a link to a hash on the page scrolls to its element", async ({ page }) => {
   await page.goto("/next/hash");
   await hydrated(page);
+  const routeRequests: string[] = [];
+  page.on("request", (request) => {
+    const { pathname } = new URL(request.url());
+    if (pathname === "/next/hash" || pathname === "/next/hash.rsc") routeRequests.push(pathname);
+  });
   await page.getByRole("link", { name: "To the bottom" }).click();
   await expect(page).toHaveURL(/#bottom$/);
   await expect.poll(() => page.evaluate(() => window.scrollY)).toBeGreaterThan(1000);
+
+  await page.getByRole("link", { name: "Back to top" }).click();
+  await expect(page).toHaveURL(/#$/);
+  await expect.poll(() => page.evaluate(() => window.scrollY)).toBe(0);
+
+  await page.goBack();
+  await expect(page).toHaveURL(/#bottom$/);
+  await expect.poll(() => page.evaluate(() => window.scrollY)).toBeGreaterThan(1000);
+  await page.goForward();
+  await expect(page).toHaveURL(/#$/);
+  await expect.poll(() => page.evaluate(() => window.scrollY)).toBe(0);
+  expect(routeRequests).toEqual([]);
+
+  await page.getByRole("link", { name: "Children", exact: true }).click();
+  await expect(page.getByRole("heading", { name: "Children" })).toBeVisible();
+  await page.goBack();
+  await expect(page).toHaveURL(/\/next\/hash#$/);
+  await expect(page.getByRole("heading", { name: "Hash", exact: true })).toBeVisible();
 });
 
 // actions: a server action that calls redirect(), and useFormStatus while it runs.

@@ -1,4 +1,5 @@
 // @vitest-environment node
+import { isFarmSameDocumentFragment } from "../client/navigation-url";
 import { getFarmIslandValueHeaders } from "../client/island-value-protocol";
 import { readFileSync } from "node:fs";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -38,6 +39,7 @@ for (const [index, renderer] of ["html", "react"].entries()) {
       };
       const router = new Function(
         "window",
+        "isFarmSameDocumentFragment",
         "createClientCancellation",
         "createFarmDeploymentRequestHeaders",
         "isFarmDeploymentMismatchResponse",
@@ -52,6 +54,7 @@ for (const [index, renderer] of ["html", "react"].entries()) {
       `,
       )(
         window,
+        isFarmSameDocumentFragment,
         createClientCancellation,
         createFarmDeploymentRequestHeaders,
         isFarmDeploymentMismatchResponse,
@@ -82,6 +85,15 @@ for (const [index, renderer] of ["html", "react"].entries()) {
           : router.fetchPage(url, fresh, !prefetch, signal);
       return { router, window, requests, fetch, page };
     }
+
+    it("skips named and empty fragments of the current page when prefetching", async () => {
+      const { router, window, fetch } = setup(true);
+      window.location.href = "https://app.test/about?tab=one#old";
+      const named = router.prefetch("/about?tab=one#section");
+      const empty = router.prefetch("/about?tab=one#");
+      expect(fetch).not.toHaveBeenCalled();
+      await Promise.all([named, empty]);
+    });
 
     it("shares pending HTML, releases the record, and reuses the completed prefetch", async () => {
       const { page, requests, fetch, router } = setup();

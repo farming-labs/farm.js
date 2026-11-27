@@ -26,6 +26,7 @@ function buildRefetch(deps: Record<string, unknown>) {
 
 function deps(res: any, location: any, history: any) {
   return {
+    lastHistoryHref: "",
     debug: () => {},
     fetch: vi.fn(async () => res),
     createFarmDeploymentRequestHeaders: () => ({}),

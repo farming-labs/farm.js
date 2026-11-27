@@ -55,6 +55,13 @@ describe("navigation during prefetch", () => {
     return { done };
   }
 
+  it("skips prefetching fragments of the current page", async () => {
+    const named = router.prefetch("/start#section");
+    const empty = router.prefetch("/start#");
+    expect(fetchPageData).not.toHaveBeenCalled();
+    await Promise.all([named, empty]);
+  });
+
   it("uses one JSON request when navigation catches an in-flight prefetch", async () => {
     const prefetched = router.prefetch("/destination");
     const navigation = await navigate();
