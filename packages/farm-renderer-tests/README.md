@@ -2,7 +2,7 @@
 
 **The conformance suite Farm.js runs against its official renderers, published so you can run it against yours.**
 
-Each `define*Conformance` function registers Vitest suites that call your renderer's modules the
+Each `test*` function registers Vitest suites that call your renderer's modules the
 way Farm does and fail where your renderer behaves differently from the official ones.
 
 ## Install
@@ -18,20 +18,17 @@ Vitest 5 is a peer dependency: the suites register with your project's own Vites
 ```ts
 // test/server.test.ts
 // @vitest-environment node
-import {
-  defineRendererDescriptorConformance,
-  defineRendererServerConformance,
-} from "@farm.js/renderer-tests";
+import { testDescriptor, testServer } from "@farm.js/renderer-tests";
 import { myRenderer } from "../src/index";
 import * as server from "../src/server";
 
-defineRendererDescriptorConformance({
+testDescriptor({
   name: "my-renderer",
   createDescriptor: myRenderer,
   expected: { server: "my-renderer/server", client: "my-renderer/client" },
 });
 
-defineRendererServerConformance(server);
+testServer(server);
 ```
 
 The client suite needs a DOM. Install `jsdom` and run it in that environment:
@@ -39,11 +36,11 @@ The client suite needs a DOM. Install `jsdom` and run it in that environment:
 ```ts
 // test/client.test.ts
 // @vitest-environment jsdom
-import { defineRendererClientConformance } from "@farm.js/renderer-tests";
+import { testClient } from "@farm.js/renderer-tests";
 import * as client from "../src/client";
 import * as server from "../src/server";
 
-defineRendererClientConformance({
+testClient({
   name: "my-renderer",
   client,
   server,
@@ -52,29 +49,26 @@ defineRendererClientConformance({
 });
 ```
 
-| Function                               | What it checks                                                                                                                       |
-| -------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------ |
-| `defineRendererDescriptorConformance`  | The descriptor names all three modules and returns fresh arrays on each call.                                                        |
-| `defineRendererServerConformance`      | Element primitives, escaping, React-style props, function components, error boundaries, and shell errors in each stream.             |
-| `defineRendererClientConformance`      | The client exports Farm imports, mounting and updating a root, a new root replacing existing markup, events, and hydrating in place. |
-| `defineRendererServerQueryConformance` | Server renders never share the browser query cache between visitors.                                                                 |
-| `defineRendererNativeTreeConformance`  | The mobile native tier reads your server markup the same way as any other renderer's.                                                |
-| `defineRendererIslandsConformance`     | `withIsland()` writes islands Farm's runtime starts, and `wrapClientGraph()` and `isolateServerPageGraph()` turn them off and on.    |
-| `defineRendererSourceConformance`      | `routes()`, `hydration.resolve()` and `compile()` give the answer you list for each file in your format, every time.                 |
+| Function          | What it checks                                                                                                                       |
+| ----------------- | ------------------------------------------------------------------------------------------------------------------------------------ |
+| `testDescriptor`  | The descriptor names all three modules and returns fresh arrays on each call.                                                        |
+| `testServer`      | Element primitives, escaping, React-style props, function components, error boundaries, and shell errors in each stream.             |
+| `testClient`      | The client exports Farm imports, mounting and updating a root, a new root replacing existing markup, events, and hydrating in place. |
+| `testServerQuery` | Server renders never share the browser query cache between visitors.                                                                 |
+| `testNativeTree`  | The mobile native tier reads your server markup the same way as any other renderer's.                                                |
+| `testIslands`     | `withIsland()` writes islands Farm's runtime starts, and `wrapClientGraph()` and `isolateServerPageGraph()` turn them off and on.    |
+| `testSource`      | `routes()`, `hydration.resolve()` and `compile()` give the answer you list for each file in your format, every time.                 |
 
 A renderer that declares `capabilities.islands`, or reads its own file format, runs two more.
 List files in your format, relative to the project root, with what each hook should say about them:
 
 ```ts
 // test/server.test.ts
-import {
-  defineRendererIslandsConformance,
-  defineRendererSourceConformance,
-} from "@farm.js/renderer-tests";
+import { testIslands, testSource } from "@farm.js/renderer-tests";
 
-defineRendererIslandsConformance({ name: "my-renderer", server });
+testIslands({ name: "my-renderer", server });
 
-defineRendererSourceConformance({
+testSource({
   name: "my-renderer",
   createDescriptor: myRenderer,
   files: [
@@ -88,6 +82,20 @@ defineRendererSourceConformance({
   ],
 });
 ```
+
+## Migrating existing tests
+
+The previous names remain available as deprecated aliases. Update imports and calls using this table.
+
+| Previous name                          | New name          |
+| -------------------------------------- | ----------------- |
+| `defineRendererDescriptorConformance`  | `testDescriptor`  |
+| `defineRendererServerConformance`      | `testServer`      |
+| `defineRendererClientConformance`      | `testClient`      |
+| `defineRendererServerQueryConformance` | `testServerQuery` |
+| `defineRendererNativeTreeConformance`  | `testNativeTree`  |
+| `defineRendererIslandsConformance`     | `testIslands`     |
+| `defineRendererSourceConformance`      | `testSource`      |
 
 ## What it doesn't do
 

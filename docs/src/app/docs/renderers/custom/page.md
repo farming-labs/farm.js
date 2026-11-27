@@ -1025,30 +1025,27 @@ pnpm add -D @farm.js/renderer-tests vitest jsdom
 ```ts
 // test/server.test.js
 // @vitest-environment node
-import {
-  defineRendererDescriptorConformance,
-  defineRendererServerConformance,
-} from "@farm.js/renderer-tests";
+import { testDescriptor, testServer } from "@farm.js/renderer-tests";
 import { leaf } from "../src/index.js";
 import * as server from "../src/server.js";
 
-defineRendererDescriptorConformance({
+testDescriptor({
   name: "leaf",
   createDescriptor: leaf,
   expected: { vite: "farm-leaf/vite", server: "farm-leaf/server", client: "farm-leaf/client" },
 });
 
-defineRendererServerConformance(server);
+testServer(server);
 ```
 
 ```ts
 // test/client.test.js
 // @vitest-environment jsdom
-import { defineRendererClientConformance } from "@farm.js/renderer-tests";
+import { testClient } from "@farm.js/renderer-tests";
 import * as client from "../src/client.js";
 import * as server from "../src/server.js";
 
-defineRendererClientConformance({
+testClient({
   name: "leaf",
   client,
   server,
@@ -1063,14 +1060,11 @@ leaves out, is skipped:
 
 ```ts
 // test/server.test.js
-import {
-  defineRendererIslandsConformance,
-  defineRendererSourceConformance,
-} from "@farm.js/renderer-tests";
+import { testIslands, testSource } from "@farm.js/renderer-tests";
 
-defineRendererIslandsConformance({ name: "leaf", server });
+testIslands({ name: "leaf", server });
 
-defineRendererSourceConformance({
+testSource({
   name: "leaf",
   createDescriptor: leaf,
   files: [
@@ -1093,20 +1087,20 @@ defineRendererSourceConformance({
 
 Both ship in the `@farm.js/renderer-tests` release after `0.1.0-beta.3`.
 
-- **`defineRendererDescriptorConformance`**: the descriptor names all three modules and returns
+- **`testDescriptor`**: the descriptor names all three modules and returns
   fresh arrays on each call.
-- **`defineRendererServerConformance`**: element primitives, escaping, React-style props, function
+- **`testServer`**: element primitives, escaping, React-style props, function
   components, async components, error boundaries, and shell errors in each stream you export.
-- **`defineRendererClientConformance`**: the exports Farm imports, mounting and updating a root,
+- **`testClient`**: the exports Farm imports, mounting and updating a root,
   events, and hydrating in place.
-- **`defineRendererServerQueryConformance`**: a server render never shares the browser query cache
+- **`testServerQuery`**: a server render never shares the browser query cache
   between visitors.
-- **`defineRendererNativeTreeConformance`**: the mobile native tier reads your server markup like any
+- **`testNativeTree`**: the mobile native tier reads your server markup like any
   other renderer's.
-- **`defineRendererIslandsConformance`**: `withIsland()` writes an island with its source, export,
+- **`testIslands`**: `withIsland()` writes an island with its source, export,
   strategy, and props script, keeps the server HTML when a prop can't reach the browser, and
   `wrapClientGraph()` and `isolateServerPageGraph()` turn islands off and on again.
-- **`defineRendererSourceConformance`**: `routes()` maps each file to the route you expect, with a
+- **`testSource`**: `routes()` maps each file to the route you expect, with a
   pattern Farm can serve; `hydration.resolve()` reads each file's settings; and `compile()` returns
   a module with `"use client"` where Farm looks for it. Each answers the same way every time.
 

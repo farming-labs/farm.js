@@ -1,11 +1,7 @@
 // @vitest-environment node
 
 import { Writable } from "node:stream";
-import {
-  defineRendererDescriptorConformance,
-  defineRendererNativeTreeConformance,
-  defineRendererServerConformance,
-} from "@farm.js/renderer-tests";
+import { testDescriptor, testNativeTree, testServer } from "@farm.js/renderer-tests";
 import { createFarmNativeTreeResponse } from "@farm.js/core/internal/production-runtime";
 import { lazy } from "preact/compat";
 import { describe, expect, it } from "vitest";
@@ -20,7 +16,7 @@ import {
   renderToReadableStream,
 } from "../server";
 
-defineRendererDescriptorConformance({
+testDescriptor({
   name: "preact",
   createDescriptor: preact,
   expected: {
@@ -35,8 +31,8 @@ defineRendererDescriptorConformance({
   },
 });
 
-defineRendererServerConformance(serverRuntime);
-defineRendererNativeTreeConformance(serverRuntime, async (html) => {
+testServer(serverRuntime);
+testNativeTree(serverRuntime, async (html) => {
   // As a mobile app's server answers a native-tier screen: the page's HTML read into a tree.
   const response = await createFarmNativeTreeResponse({
     request: new Request("https://app.example/trails", {

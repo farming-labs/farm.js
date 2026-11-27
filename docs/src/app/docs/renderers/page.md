@@ -305,13 +305,13 @@ pnpm add -D @farm.js/renderer-tests vitest
 
 ```ts
 // @vitest-environment node
-import { defineRendererServerConformance } from "@farm.js/renderer-tests";
+import { testServer } from "@farm.js/renderer-tests";
 import * as server from "./server";
 
-defineRendererServerConformance(server);
+testServer(server);
 ```
 
-`defineRendererClientConformance()` checks the client module and needs a jsdom environment. The
+`testClient()` checks the client module and needs a jsdom environment. The
 [package README](https://github.com/farming-labs/farm.js/tree/main/packages/farm-renderer-tests)
 lists every suite and what it checks.
 

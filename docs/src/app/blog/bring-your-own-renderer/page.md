@@ -555,14 +555,11 @@ One call per module:
 
 ```ts
 // packages/farm-leaf/test/server.test.ts
-import {
-  defineRendererDescriptorConformance,
-  defineRendererServerConformance,
-} from "@farm.js/renderer-tests";
+import { testDescriptor, testServer } from "@farm.js/renderer-tests";
 import { leaf } from "../src/index.js";
 import * as server from "../src/server.js";
 
-defineRendererDescriptorConformance({
+testDescriptor({
   name: "leaf",
   createDescriptor: leaf,
   expected: {
@@ -574,17 +571,17 @@ defineRendererDescriptorConformance({
   },
 });
 
-defineRendererServerConformance(server);
+testServer(server);
 ```
 
 ```ts
 // packages/farm-leaf/test/client.test.ts
 // @vitest-environment jsdom
-import { defineRendererClientConformance } from "@farm.js/renderer-tests";
+import { testClient } from "@farm.js/renderer-tests";
 import * as client from "../src/client.js";
 import * as server from "../src/server.js";
 
-defineRendererClientConformance({ name: "leaf", client, server, reconcilesRerenders: true });
+testClient({ name: "leaf", client, server, reconcilesRerenders: true });
 ```
 
 The suite checks the exports, renders and hydrates real trees, and checks that a re-render keeps the DOM when you say it does.

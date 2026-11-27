@@ -1,10 +1,10 @@
 // @vitest-environment node
 
 import {
-  defineRendererDescriptorConformance,
-  defineRendererIslandsConformance,
-  defineRendererServerConformance,
-  defineRendererSourceConformance,
+  testDescriptor,
+  testIslands,
+  testServer,
+  testSource,
 } from "@farm.js/renderer-tests";
 import { createElement } from "leaf";
 import { describe, expect, it } from "vitest";
@@ -12,7 +12,7 @@ import { compileLeaf, componentName } from "../src/compile.js";
 import { leaf } from "../src/index.js";
 import * as server from "../src/server.js";
 
-defineRendererDescriptorConformance({
+testDescriptor({
   name: "leaf",
   createDescriptor: leaf,
   expected: {
@@ -30,7 +30,7 @@ defineRendererDescriptorConformance({
   },
 });
 
-defineRendererServerConformance(server);
+testServer(server);
 
 describe("leaf/server streaming", () => {
   const decoder = new TextDecoder();
@@ -110,11 +110,11 @@ describe("leaf files", () => {
 });
 
 // withIsland, wrapClientGraph and isolateServerPageGraph, the exports capabilities.islands needs.
-defineRendererIslandsConformance({ name: "leaf", server });
+testIslands({ name: "leaf", server });
 
 // The descriptor's routes(), hydration.resolve() and compile(), on .leaf files like the example
 // app's.
-defineRendererSourceConformance({
+testSource({
   name: "leaf",
   createDescriptor: leaf,
   files: [
