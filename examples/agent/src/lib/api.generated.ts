@@ -7,10 +7,15 @@
 
 import type { PluginAPIRouter } from "@farm.js/core/api";
 import type FarmPluginConfig0 from "../../farm.config";
+import type { GET as GET_examples_quote } from "../app/api/examples/quote/route";
 
 // Type-only representation of your API routes
 export type APIRouter = PluginAPIRouter<typeof FarmPluginConfig0> & {
-
+  examples: {
+    quote: {
+      get: typeof GET_examples_quote;
+    };
+  };
 };
 
 // Pass this schema-free manifest to createApiClients({ routes: apiRoutes }).
@@ -22,5 +27,9 @@ export const apiRoutes = [
   {
     path: "/api/agent/[...path]",
     methods: ["DELETE", "GET", "POST"],
+  },
+  {
+    path: "/api/examples/quote",
+    methods: ["GET"],
   },
 ] as const;

@@ -1,3 +1,5 @@
+import assert from "node:assert/strict";
+import { randomUUID } from "node:crypto";
 import { spawn } from "node:child_process";
 import { createServer } from "node:net";
 import { dirname, resolve } from "node:path";
@@ -30,14 +32,36 @@ try {
     throw new Error(`The refund agent is missing from ${JSON.stringify(manifest)}.`);
   }
 
-  const started = await post("/api/agent/agents/refund/runs", { input: { orderId: "A1" } });
+  const quoteResponse = await fetch(`${origin}/api/examples/quote?quantity=3`);
+  assert.equal(quoteResponse.status, 200);
+  const quote = await quoteResponse.json();
+  assert.equal(quote.totalCents, 3600);
+  const invalid = await fetch(`${origin}/api/examples/quote?quantity=0`);
+  assert.equal(invalid.status, 400);
+
+  // Use a fresh order so a retained payment event from an earlier run cannot match.
+  const orderId = randomUUID();
+  const checkout = await post("/api/agent/agents/checkout/runs", { input: { orderId } });
+  await waitForStatus(checkout.id, "waiting");
+  console.log("Checkout is waiting for payment.");
+
+  await post("/api/agent/events", {
+    id: `payment-${orderId}`,
+    name: "payment.succeeded",
+    data: { orderId, amount: quote.totalCents },
+  });
+  const paid = await waitForStatus(checkout.id, "completed");
+  assert.deepEqual(paid.output, { orderId, paid: 3600 });
+  console.log("Checkout recorded the demo payment of 3600 cents.");
+
+  const started = await post("/api/agent/agents/refund/runs", { input: { orderId } });
   const paused = await waitForStatus(started.id, "interrupted");
   if (paused.interrupt?.name !== "approve-refund") {
     throw new Error(`The run paused on ${JSON.stringify(paused.interrupt)}, not approve-refund.`);
   }
   await post(`/api/agent/runs/${started.id}/resume`, { answer: { approved: true } });
   const finished = await waitForStatus(started.id, "completed");
-  if (finished.output !== "refunded A1") throw new Error(`The run finished with ${finished.output}.`);
+  if (finished.output !== `refunded ${orderId}`) throw new Error(`The run finished with ${finished.output}.`);
 
   console.log(`The refund agent paused for approval and finished at ${origin}`);
 } catch (error) {
