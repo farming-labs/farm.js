@@ -7,9 +7,9 @@ description: "What changed since Farm.js 0.1, from backend-only apps and Rust en
 
 KinfeMichael Tariku · Nov 2026
 
-Open Field Notes in a browser and `/notes/new` is a form. Open it on a phone and the same route slides up as a modal. Save a note and the app calls `createNote`, then opens the new note in the Notes tab. The phone has its own navigation stack. The app still has one place where a note gets created. [Field Notes source](https://github.com/farming-labs/farm.js/tree/v0.1.87/examples/mobile)
+Field Notes is a small note-taking app we built to show how Farm.js works on the web and on a phone. In a browser, you open a page to write a note. In the mobile app, the editor slides up from the bottom of the screen. Both use the same server function to save what you wrote. [Field Notes source](https://github.com/farming-labs/farm.js/tree/v0.1.87/examples/mobile)
 
-The form is one way into the 0.2 release. Start at its other end and you get a perfectly useful Farm app with just an API route. Add a page and Farm renders it with React. Decide which controls hydrate in the browser, then decide whether any screen needs its own native implementation. The API that saves the note can stay put through all of those choices.
+You can start even smaller, with just the API that saves the note. Add a page and Farm renders it with React. Decide which controls hydrate in the browser, then decide whether any screen needs its own native implementation. The API that saves the note can stay put through all of those choices.
 
 **The 0.2 plan promotes the React compiler and server components out of experimental configuration.** Those are two independent choices. Server components decide what crosses from server to browser. The compiler decides how an eligible React component updates the DOM once it is running. The plan keeps both opt-in. The compiler already accepts its new spelling in the 0.1 series; the top-level server-components setting shown below is the planned 0.2 spelling.
 
