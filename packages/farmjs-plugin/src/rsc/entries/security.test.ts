@@ -711,6 +711,7 @@ describe("RSC client link interceptor respects modified and non-primary clicks",
       origin,
       download: false,
       target: "",
+      ownerDocument: { querySelector: () => null },
       hasAttribute: () => false,
       ...overrides,
     };

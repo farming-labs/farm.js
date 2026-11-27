@@ -32,6 +32,32 @@ async function hydrated(page: Page) {
   await page.waitForLoadState("networkidle");
 }
 
+test("links inherit the document target and can override it on the anchor", async ({ page }) => {
+  await page.goto("/context/wait/a");
+  await hydrated(page);
+  await page.evaluate(() => {
+    const base = document.createElement("base");
+    base.target = "_blank";
+    document.head.prepend(base);
+    const plain = document.createElement("a");
+    plain.href = "/context/wait/b";
+    plain.target = "";
+    plain.textContent = "Plain link with empty target";
+    document.body.append(plain);
+  });
+  const next = page.locator("[data-next]");
+  for (const link of [next, page.getByRole("link", { name: "Plain link with empty target" })]) {
+    const [tab] = await Promise.all([page.waitForEvent("popup"), link.click()]);
+    await expect(tab).toHaveURL(/\/context\/wait\/b$/);
+    await expect(page).toHaveURL(/\/context\/wait\/a$/);
+    await tab.close();
+  }
+
+  await next.evaluate((anchor) => anchor.setAttribute("target", "_self"));
+  await next.click();
+  await expect(page.locator("h1")).toHaveText("Waiting b");
+});
+
 test("server components render on the server and their code stays there", async ({
   page,
   request,

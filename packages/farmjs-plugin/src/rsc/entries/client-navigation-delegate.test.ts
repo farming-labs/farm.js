@@ -129,6 +129,7 @@ describe("the RSC router offers in-app navigations to navigation delegates", () 
         hash: "",
         download: false,
         target: "",
+        ownerDocument: { querySelector: () => null },
         hasAttribute: (name: string) => attributes.includes(name),
       };
       const event = {

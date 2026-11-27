@@ -1,5 +1,12 @@
 import type { FarmViewTransitionMode } from "./spa-router";
 
+/** An absent or empty anchor target inherits the document's first base target. */
+export function targetsCurrentContext(anchor: HTMLAnchorElement): boolean {
+  const target =
+    anchor.target || anchor.ownerDocument.querySelector<HTMLBaseElement>("base[target]")?.target;
+  return !target || target === "_self";
+}
+
 /** The navigation options `Link` writes into its anchor. */
 export interface FarmLinkNavigateOptions {
   replace: boolean;

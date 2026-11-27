@@ -3,6 +3,7 @@
 import type React from "react";
 import { forwardRef, useEffect, useRef, useCallback, type AnchorHTMLAttributes } from "react";
 import { isFarmBlockedNavigationURL, resolveFarmNavigationURL } from "./navigation-url";
+import { targetsCurrentContext } from "./link-navigation";
 import type { FarmViewTransitionMode } from "./spa-router";
 import { isFarmLocaleChangeHref, rememberFarmLinkLocale } from "../i18n/client-state";
 import { useOptionalFarm } from "../provider";
@@ -237,7 +238,7 @@ function LinkInner<TRoute extends string = DefaultRouteHref, THref extends strin
       if (event.defaultPrevented) return;
       if (isExternal) return;
       if (event.currentTarget.hasAttribute("download")) return;
-      if (target && target !== "_self") return;
+      if (!targetsCurrentContext(event.currentTarget)) return;
       if (isModifierEvent(event)) return;
       if (event.button !== 0) return;
 
@@ -263,7 +264,6 @@ function LinkInner<TRoute extends string = DefaultRouteHref, THref extends strin
       replace,
       scroll,
       viewTransition,
-      target,
       isExternal,
       isScriptHref,
       onClick,
