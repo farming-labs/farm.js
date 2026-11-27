@@ -877,7 +877,7 @@
     "lint": "biome lint .",
     "lint:fix": "biome lint --write .",
     "format": "biome format --write .",
-    "type-check": "tsc --noEmit",
+    "type-check": "tsc -p tsconfig.check.json --noEmit",
     "clean": "rm -rf dist"
   },
   "dependencies": {
