@@ -7,14 +7,20 @@ import { fileURLToPath } from "node:url";
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const port = await availablePort();
-const origin = `http://localhost:${port}`;
+const origin = `http://127.0.0.1:${port}`;
 let output = "";
 
-const farm = spawn("farm", ["dev", "--port", String(port)], {
+const production = process.argv.includes("--production");
+const args = production
+  ? [resolve(root, ".farm/.output/server/index.mjs")]
+  : ["dev", "--host", "127.0.0.1", "--port", String(port)];
+const farm = spawn(production ? process.execPath : "farm", args, {
   cwd: root,
   env: {
     ...process.env,
     NO_COLOR: "1",
+    HOST: "127.0.0.1",
+    PORT: String(port),
     AGENT_DATA: ".data/smoke",
   },
   stdio: ["ignore", "pipe", "pipe"],
@@ -27,7 +33,9 @@ for (const stream of [farm.stdout, farm.stderr]) {
 }
 
 try {
-  const manifest = await (await waitForResponse(`${origin}/api/agent/manifest.json`, 60_000)).json();
+  const manifest = await (
+    await waitForResponse(`${origin}/api/agent/manifest.json`, 60_000)
+  ).json();
   if (!manifest.agents?.some((agent) => agent.name === "refund")) {
     throw new Error(`The refund agent is missing from ${JSON.stringify(manifest)}.`);
   }
@@ -38,6 +46,25 @@ try {
   assert.equal(quote.totalCents, 3600);
   const invalid = await fetch(`${origin}/api/examples/quote?quantity=0`);
   assert.equal(invalid.status, 400);
+
+  const packingUrl = `${origin}/api/examples/packing`;
+  const planResponse = await fetch(`${packingUrl}?quantity=${quote.quantity}`);
+  if (process.env.FARM_CHECKOUT_POLYROUTE === "1") {
+    assert.equal(planResponse.status, 200);
+    const plan = await planResponse.json();
+    assert.deepEqual(plan, { quantity: quote.quantity, bagsPerBox: 4, boxes: 1 });
+    const larger = await fetch(`${packingUrl}?quantity=5`);
+    assert.equal((await larger.json()).boxes, 2);
+    for (const query of ["", "?quantity=0", "?quantity=21", "?quantity=1&quantity=2"]) {
+      assert.equal((await fetch(packingUrl + query)).status, 400, query);
+    }
+    const unsupported = await fetch(packingUrl, { method: "POST" });
+    assert.equal(unsupported.status, 405);
+    assert.equal(unsupported.headers.get("allow"), "GET");
+    console.log(`Rust packing plan: ${plan.quantity} bags in ${plan.boxes} box.`);
+  } else {
+    assert.equal(planResponse.status, 404);
+  }
 
   // Use a fresh order so a retained payment event from an earlier run cannot match.
   const orderId = randomUUID();
@@ -61,7 +88,8 @@ try {
   }
   await post(`/api/agent/runs/${started.id}/resume`, { answer: { approved: true } });
   const finished = await waitForStatus(started.id, "completed");
-  if (finished.output !== `refunded ${orderId}`) throw new Error(`The run finished with ${finished.output}.`);
+  if (finished.output !== `refunded ${orderId}`)
+    throw new Error(`The run finished with ${finished.output}.`);
 
   console.log(`The refund agent paused for approval and finished at ${origin}`);
 } catch (error) {
@@ -77,7 +105,8 @@ async function post(path, body) {
     headers: { "content-type": "application/json" },
     body: JSON.stringify(body),
   });
-  if (!response.ok) throw new Error(`POST ${path} returned ${response.status}: ${await response.text()}`);
+  if (!response.ok)
+    throw new Error(`POST ${path} returned ${response.status}: ${await response.text()}`);
   return response.json();
 }
 
@@ -111,15 +140,13 @@ async function availablePort() {
   return await new Promise((resolvePort, reject) => {
     const server = createServer();
     server.once("error", reject);
-    server.listen(0, "localhost", () => {
+    server.listen(0, "127.0.0.1", () => {
       const address = server.address();
       if (!address || typeof address === "string") {
         reject(new Error("Unable to allocate a port."));
         return;
       }
-      server.close((error) =>
-        error ? reject(error) : resolvePort(address.port),
-      );
+      server.close((error) => (error ? reject(error) : resolvePort(address.port)));
     });
   });
 }

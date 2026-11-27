@@ -8,6 +8,10 @@
     "build": "farm build",
     "start": "farm start",
     "smoke": "node scripts/smoke.mjs",
+    "dev:polyroute": "FARM_CHECKOUT_POLYROUTE=1 farm dev",
+    "build:polyroute": "FARM_CHECKOUT_POLYROUTE=1 farm build --preset node-server",
+    "smoke:polyroute": "FARM_CHECKOUT_POLYROUTE=1 node scripts/smoke.mjs",
+    "smoke:polyroute:production": "FARM_CHECKOUT_POLYROUTE=1 node scripts/smoke.mjs --production",
     "type-check": "tsc --noEmit"
   },
   "dependencies": {
@@ -20,6 +24,7 @@
   },
   "devDependencies": {
     "@farm.js/cli": "workspace:*",
+    "@farming-labs/polyroute": "0.1.0-beta.0",
     "@types/react": "^18.2.45",
     "@types/react-dom": "^18.2.18",
     "typescript": "^5.3.3",
