@@ -431,8 +431,9 @@ ${withPlugins(`
       
       // Intercept link clicks for client-side navigation
       const handleClick = (e) => {
-        const a = e.target.closest('a');
-        if (a?.href && a.origin === location.origin && !a.download && !a.target) {
+        if (e.defaultPrevented) return;
+        const a = e.target.closest?.('a');
+        if (a?.href && a.origin === location.origin && !a.hasAttribute('download') && !a.target) {
           const baseTarget = a.ownerDocument.querySelector('base[target]')?.target;
           if (baseTarget && baseTarget.toLowerCase() !== '_self') return;
           // Check for special attributes that should skip SPA navigation
@@ -455,11 +456,11 @@ ${withPlugins(`
         }
       };
       
-      document.addEventListener('click', handleClick, true);
+      document.addEventListener('click', handleClick);
       
       return () => {
         window.removeEventListener('popstate', nav);
-        document.removeEventListener('click', handleClick, true);
+        document.removeEventListener('click', handleClick);
       };
     }, []);
     
