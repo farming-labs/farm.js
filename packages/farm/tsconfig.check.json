@@ -1,0 +1,11 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "paths": {
+      "@farm.js/core/internal/client-error-overlay": ["./src/client/runtime-error-overlay.ts"],
+      // Check islx declarations against the React types that core builds with, even when
+      // pnpm hoists a different major. This config is only used by TypeScript.
+      "react": ["./node_modules/@types/react"]
+    }
+  }
+}
