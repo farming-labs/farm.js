@@ -238,6 +238,7 @@ export const durableAgentsSections = [
   ["make-the-real-side-effect-safe-to-repeat", "Make the real side effect safe to repeat"],
   ["use-your-agent-framework", "Use your agent framework"],
   ["keep-your-existing-web-app", "Keep your existing web app"],
+  ["how-farm-discovers-your-agents", "How Farm discovers your agents"],
   ["choose-what-farm-infra-handles", "Choose what Farm Infra handles"],
   [
     "add-the-other-infrastructure-when-the-app-needs-it",

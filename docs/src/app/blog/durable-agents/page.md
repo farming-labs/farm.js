@@ -185,7 +185,17 @@ The import path should match your app's alias. Without a host `waitUntil` callba
 
 When mounting an AI SDK agent this way, also pass `adapters: [aiSdkAdapter]`, imported from `agent-unit/adapters/ai-sdk`. The build command discovers adapters automatically; a manually created unit receives them explicitly.
 
-A Farm app has a dedicated integration.
+<span id="how-farm-discovers-your-agents" className="blog-heading-anchor" />
+
+## How Farm discovers your agents
+
+In a Farm app, the integration connects the agent directory to the app's development server and production build. File discovery decides which agents exist. Framework detection decides which adapters to load. Each adapter recognizes the agent object exported by a file.
+
+### Register the integration once
+
+The app needs `@farm.js/agent` and `agent-unit`. An AI SDK agent also needs `ai` and its model provider package, such as `@ai-sdk/openai`.
+
+Start with this `farm.config.ts`.
 
 ```ts
 import { defineConfig } from "@farm.js/core";
@@ -193,12 +203,154 @@ import { agent } from "@farm.js/agent";
 
 export default defineConfig({
   integrations: {
-    agent: agent({ storage: "farmjs" }),
+    agent: agent(),
   },
 });
 ```
 
-That integration discovers agents in `src/agents` and mounts them at `/api/agent`. The agent function itself keeps the same step and approval code. [Mounting the engine](https://github.com/farming-labs/agent-unit/blob/5bb0d40725236bcf436926408c37e79711ad9b7d/README.md#mount-it-in-an-existing-app) · [Farm integration](https://farmjs.dev/docs/integrations/agent)
+The defaults are `src/agents` for files and `/api/agent` for the API. If the app changes Farm's `srcDir`, the default agent folder follows that directory. In development, the default run store is local. Production storage choices are covered below.
+
+### Give each agent a file and a default export
+
+A project with the refund agent from earlier and an AI SDK support agent can look like this.
+
+```text
+farm.config.ts
+package.json
+src/
+  agents/
+    refund.ts
+    support.ts
+```
+
+`refund.ts` default-exports the `defineAgent(...)` function shown earlier. `support.ts` can default-export this AI SDK agent.
+
+```ts
+// src/agents/support.ts
+import { ToolLoopAgent } from "ai";
+import { openai } from "@ai-sdk/openai";
+
+export default new ToolLoopAgent({
+  model: openai("gpt-4.1-mini"),
+  instructions: "Help customers understand their orders.",
+});
+```
+
+Farm passes the discovered modules to agent-unit. The filenames become the public names `refund` and `support`.
+
+For a larger agent, use a directory with an `index.ts` entry.
+
+```text
+src/
+  agents/
+    refund.ts
+    support/
+      index.ts
+      tools.ts
+```
+
+The scanner registers `support/index.ts` as `support`. The entry can import `tools.ts` as a helper. A top-level `src/agents/tools.ts` would itself be discovered as an agent, so keep helper modules inside an agent directory or outside the discovery folder.
+
+| File                          | Discovery result                     |
+| ----------------------------- | ------------------------------------ |
+| `src/agents/refund.ts`        | Agent named `refund`                 |
+| `src/agents/support/index.ts` | Agent named `support`                |
+| `src/agents/support/tools.ts` | Helper imported by the support entry |
+| `src/agents/refund.test.ts`   | Skipped                              |
+| `src/agents/_shared.ts`       | Skipped                              |
+
+Test files, declaration files, and names beginning with `_` or `.` are excluded. Using both `support.ts` and `support/index.ts` produces a duplicate-name error. Discovery checks direct files and each immediate child directory's index entry.
+
+### Let dependencies select the framework adapters
+
+With `framework` omitted, agent-unit reads the app's own `package.json`. These declared dependencies enable the corresponding built-in adapters.
+
+| Package declared by the app | Adapter         |
+| --------------------------- | --------------- |
+| `ai`                        | `ai-sdk`        |
+| `@mastra/core`              | `mastra`        |
+| `@openai/agents`            | `openai-agents` |
+| `@langchain/langgraph`      | `langgraph`     |
+
+Detection checks `dependencies`, `devDependencies`, `peerDependencies`, and `optionalDependencies`. Declare the frameworks the app uses in its own manifest.
+
+For example, declaring `ai` loads the AI SDK adapter. That adapter recognizes the `ToolLoopAgent` exported by `support.ts`. The plain TypeScript `refund.ts` uses agent-unit's built-in `defineAgent` support.
+
+Declaring several supported frameworks makes their adapters available together. Each agent module still needs to export an object an adapter can recognize. An installed dependency selects a candidate adapter; the exported agent object determines which adapter runs it.
+
+### Select a framework explicitly when you want to
+
+For an app using AI SDK agents, the same configuration can name the adapter.
+
+```ts
+export default defineConfig({
+  integrations: {
+    agent: agent({
+      framework: "ai-sdk",
+    }),
+  },
+});
+```
+
+The accepted framework names are `"ai-sdk"`, `"mastra"`, `"openai-agents"`, and `"langgraph"`. Explicit selection limits automatic built-in adapter loading to that framework. If the app does not declare the required package, the build reports the package to install.
+
+The agent directory and framework are independent options. To keep agents elsewhere and expose them under a different API prefix, set both paths.
+
+```ts
+export default defineConfig({
+  integrations: {
+    agent: agent({
+      agentsDir: "src/workflows",
+      basePath: "/api/workflows",
+      framework: "ai-sdk",
+    }),
+  },
+});
+```
+
+`agentsDir` is relative to the app root. Farm requires `basePath` to be `/api` or a path under it. With these settings, `src/workflows/support.ts` is called through `POST /api/workflows/agents/support/runs`.
+
+### Call the discovered agent
+
+Using the default paths, the TypeScript refund agent receives this request.
+
+```http
+POST /api/agent/agents/refund/runs
+Content-Type: application/json
+
+{"input":{"orderId":"bag-order-123"}}
+```
+
+The support agent receives its own input at a different URL.
+
+```http
+POST /api/agent/agents/support/runs
+Content-Type: application/json
+
+{"input":"How can I return my order?"}
+```
+
+The agent's code determines the input it accepts. The shared API provides the operations around that input.
+
+| Request                                | Purpose                                    |
+| -------------------------------------- | ------------------------------------------ |
+| `GET /api/agent/manifest.json`         | Inspect the registered agents              |
+| `POST /api/agent/agents/refund/runs`   | Start the refund agent                     |
+| `GET /api/agent/runs/<run-id>`         | Read status, output, or a pending approval |
+| `GET /api/agent/runs/<run-id>/events`  | Read the run's event stream                |
+| `POST /api/agent/runs/<run-id>/resume` | Supply an approval answer                  |
+
+After the refund pauses, the resume request's body is `{"answer":{"approved":true}}`. Farm middleware and integration guards apply to these API paths, so use the app's authorization rules for starting, reading, and answering runs.
+
+### Follow discovery through development and production
+
+In development, `farm dev` passes the configured directory to agent-unit's development handler. It loads agents from source and reloads changes.
+
+During `farm build`, the integration adds agent-unit to Farm's Nitro build. The build discovers the agent entries, includes the selected framework adapters, and bundles the engine into the output for the app's deployment target. The deployed server executes those bundled agents.
+
+A renamed file changes the public agent name. Check the manifest when adding or renaming an agent, and update callers that use its previous name.
+
+For hosted run storage, add `storage: "farmjs"` to the same `agent({...})` options. That setting chooses where run progress is saved. File discovery and adapter selection still follow the configuration above. The next section explains the runtime key, callback URL, and optional Infra features. [Farm agent integration](https://farmjs.dev/docs/integrations/agent)
 
 <span id="choose-what-farm-infra-handles" className="blog-heading-anchor" />
 
