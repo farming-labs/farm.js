@@ -67,12 +67,13 @@ serves it through the same API router and middleware as a TypeScript handler. Re
 turns Rust route discovery off. This early integration has been tested with the Node server
 target and Polyroute’s default V8 WebAssembly runtime.
 
-Rust route discovery requires a Farm build that includes [Farm.js #3194](https://github.com/farming-labs/farm.js/pull/3194).
-The published `@farm.js/core@0.1.87` does not discover `route.rs`. If you're using Farm
-from source with that change, install the Polyroute beta in your app and add the Rust build target.
+Rust route discovery first shipped in Farm `0.2.0-beta.0`. To use the versions tested
+together, install Farm core, the CLI, and Polyroute in your app. Add the Rust target on
+the machine where you build the app.
 
 ```sh
-pnpm add -D @farming-labs/polyroute@beta
+pnpm add --save-exact @farm.js/core@0.2.0-beta.0
+pnpm add -D --save-exact @farm.js/cli@0.2.0-beta.0 @farming-labs/polyroute@0.1.0-beta.0
 rustup target add wasm32-wasip2
 ```
 
