@@ -60,6 +60,46 @@ from the generated router. Both callers reuse this route definition: `api` dispa
 the server and `apiClient` sends HTTP requests. Endpoint middleware runs for both; outer HTTP
 middleware is not replayed by direct calls. Never import endpoint modules into the shared caller file.
 
+## Experimental Rust routes
+
+Opt in by adding Polyroute to `vite.plugins`. Farm discovers `src/app/api/**/route.rs` and
+serves it through the same API router and middleware as a TypeScript handler. Removing the plugin
+turns Rust route discovery off. This early integration has been tested with the Node server
+target and Polyroute’s default V8 WebAssembly runtime.
+
+Polyroute is available from source. Build the tested revision in a sibling checkout:
+
+```sh
+git clone https://github.com/farming-labs/polyroute.git ../polyroute
+git -C ../polyroute checkout 6ec6f02cac043b21be23f33e19bd5dd70a7212a8
+(cd ../polyroute && pnpm install --frozen-lockfile && pnpm --filter @farming-labs/polyroute build)
+pnpm add -D @farming-labs/polyroute@link:../polyroute/packages/polyroute
+rustup target add wasm32-wasip2
+```
+
+```ts
+import { defineConfig } from "@farm.js/core";
+import { polyroute } from "@farming-labs/polyroute";
+
+export default defineConfig({
+  vite: { plugins: [polyroute()] },
+});
+```
+
+For example, put the [prime-counting handler](https://github.com/farming-labs/polyroute/blob/6ec6f02cac043b21be23f33e19bd5dd70a7212a8/examples/polyglot/app/api/primes/route.rs)
+at `src/app/api/primes/route.rs`. Start `farm dev` and request `/api/primes?limit=10` to get
+`{"limit":10,"primes":4}`. The Rust handler decides which HTTP methods it accepts.
+Call it with `fetch`. Farm’s TypeScript client generator cannot infer a Rust schema.
+
+Run `farm build --preset node-server` on a machine with the Rust toolchain. Deploy the entire
+Node output so the compiled Wasm files travel with the Fetch adapter. The running server needs
+Node. Provider deployments, Go, and Python are outside the verified Farm surface.
+
+Use this for an endpoint whose latency is dominated by computation. In the local Farm benchmark
+at ten connections, Rust lowered warm p95 for the CPU-heavy request from 57.92 ms to 35.00 ms.
+For a light request on that same route it increased p95 from 3.08 ms to 4.06 ms. Measure your
+own endpoint before choosing it. [Benchmark methodology and results](https://github.com/farming-labs/polyroute/blob/6ec6f02cac043b21be23f33e19bd5dd70a7212a8/docs/benchmarks/2026-11-26-farm-route-output.md).
+
 ## MCP tool opt-in
 
 When `@farm.js/mcp` is installed, a typed endpoint can opt into the authenticated MCP transport

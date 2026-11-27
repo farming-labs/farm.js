@@ -60,7 +60,10 @@ export function collectServerReadSSRAssets(bundle: Rollup.OutputBundle): Set<str
  * public URL (`?url` and image imports, metadata images) or through a stylesheet `url()`; an
  * asset that is also referenced that way is browser-reachable by design.
  */
-export function collectServerOnlySSRAssets(bundle: Rollup.OutputBundle): Set<string> {
+export function collectServerOnlySSRAssets(
+  bundle: Rollup.OutputBundle,
+  polyroute = false,
+): Set<string> {
   const serverOnly = new Set<string>();
   const publicReferenceSources: string[] = [];
 
@@ -86,6 +89,8 @@ export function collectServerOnlySSRAssets(bundle: Rollup.OutputBundle): Set<str
     }
   }
   for (const fileName of serverOnly) {
+    // Polyroute also uses the basename as a lookup key in its server-side module table.
+    if (polyroute && /(?:^|\/)polyroute\/[a-f0-9]+\/[^/]+\.wasm$/.test(fileName)) continue;
     const name = path.posix.basename(fileName);
     if (publicReferenceSources.some((source) => source.includes(name))) {
       serverOnly.delete(fileName);

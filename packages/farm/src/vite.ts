@@ -12,6 +12,7 @@ import {
 } from "./dev-module";
 import { createBundledEnv } from "./env";
 import { createRunnableDevEnvironment, parseSync } from "vite";
+import { hasPolyroutePlugin, isFarmAPIRouteFileName } from "./api/route-files";
 import { initSync as initModuleLexer, parse as lexModule } from "es-module-lexer";
 import type {
   AliasOptions,
@@ -2447,11 +2448,12 @@ export function farmPlugin(
           routeModuleExtensions.has(match[1].toLowerCase())
         );
       };
+      const polyroute = hasPolyroutePlugin(server.config.plugins);
       const isApiRouteFile = (file: string) => {
         const normalized = file.replace(/\\/g, "/");
         return (
           appDirSlugs.some((appDir) => normalized.startsWith(`${appDir}/api/`)) &&
-          /route\.(ts|tsx|js|jsx)$/.test(normalized)
+          isFarmAPIRouteFileName(path.posix.basename(normalized), polyroute)
         );
       };
       const isProgrammaticRouteFile = (file: string) => {
@@ -2540,6 +2542,7 @@ export function farmPlugin(
           const isRouteRefreshEvent =
             (ev !== "change" || isStaticMetadataImageFile(file)) &&
             (isAppRuntimeFile(file) ||
+              (polyroute && isApiRouteFile(file)) ||
               isRendererRouteFile(file) ||
               isProgrammaticRouteFile(file) ||
               (isProgrammaticRouteSourceFile(file) &&
@@ -6218,7 +6221,10 @@ if (import.meta.hot) {
 
       if (
         currentFarmConfig &&
-        /\/route\.(?:ts|tsx|js|jsx)$/.test(normalizedFile) &&
+        isFarmAPIRouteFileName(
+          path.posix.basename(normalizedFile),
+          hasPolyroutePlugin(server.config.plugins),
+        ) &&
         getFarmAppDirectories(currentFarmConfig).some((appDir) =>
           normalizedFile.startsWith(`${toPosixPath(appDir)}/api/`),
         )

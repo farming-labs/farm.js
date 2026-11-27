@@ -108,6 +108,50 @@ async function withProductionServer(
 }
 
 describe("SSR assets in the public output", () => {
+  it("packages a late Polyroute server asset beside the route and keeps it private", async () => {
+    const root = await createServerWasmFixture();
+    await writeModule(root, "src/app/api/rust/route.rs", "// handled by the fixture compiler");
+    const asset = "polyroute/abc012/route.core.wasm";
+    const config = await resolveConfig(
+      {
+        root,
+        renderer: false,
+        vite: {
+          plugins: [
+            {
+              name: "polyroute",
+              enforce: "pre",
+              load(id) {
+                if (!id.endsWith("/route.rs")) return;
+                return `import { readFile } from "node:fs/promises";
+            const files = { "route.core.wasm": new URL("./${asset}", import.meta.url) };
+            export async function GET() {
+              const data = await readFile(files["route.core.wasm"]);
+              return Response.json([...data]);
+            }`;
+              },
+              generateBundle: {
+                order: "post",
+                handler() {
+                  this.emitFile({ type: "asset", fileName: asset, source: ADD_WASM });
+                },
+              },
+            },
+          ],
+        },
+      },
+      "production",
+    );
+    await build(config, { root, preset: "node-server" });
+    const output = path.join(root, ".farm/.output");
+    expect(await listRelativeFiles(path.join(output, "public"))).not.toContain(asset);
+    await withProductionServer(path.join(output, "server"), async (origin) => {
+      const response = await fetch(origin + "/api/rust");
+      expect(response.status).toBe(200);
+      expect(await response.json()).toEqual([...ADD_WASM]);
+    });
+  });
+
   it("keeps an asset only server code reads out of the public output", async () => {
     const root = await createServerWasmFixture();
     // A copy an earlier build published; without a client build nothing else clears it.

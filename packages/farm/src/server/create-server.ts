@@ -46,6 +46,7 @@ import {
   mergeFarmViteConfig,
 } from "./vite-config";
 import { FARM_VERSION } from "../version";
+import { hasPolyroutePlugin } from "../api/route-files";
 import { getFarmAppDirectories } from "../layers";
 import { createCliColors } from "../cli-colors";
 import { createFarmThemeCssPlugin } from "../theme/vite";
@@ -407,6 +408,20 @@ export async function createServer(
           root: projectRoot,
           css: shouldUseProjectPostcss ? undefined : { postcss: { plugins: [] } },
           plugins: [
+            {
+              name: "farm:experimental-polyroute-hmr",
+              applyToEnvironment: (env) =>
+                env.name === "ssr" && hasPolyroutePlugin(env.getTopLevelConfig().plugins),
+              hotUpdate({ type, file }) {
+                if (type !== "delete" || path.basename(file) !== "route.rs") return;
+                const mounted = getFarmAppDirectories(finalConfig).some((dir) => {
+                  const relative = path.relative(path.join(dir, "api"), file);
+                  return !relative.startsWith(".." + path.sep) && !path.isAbsolute(relative);
+                });
+                // Discovery removes the endpoint. The runner must not import the deleted entry again.
+                if (mounted) return [];
+              },
+            },
             farmDesktopDevGuardPlugin(finalConfig.basePath),
             createFarmThemeCssPlugin(finalConfig.theme, finalConfig.basePath),
             ...(tailwindVitePlugin ? [tailwindVitePlugin] : []),

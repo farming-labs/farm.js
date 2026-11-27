@@ -68,3 +68,10 @@ Netlify, or another target.
 
 The todo store lives in process memory, so it resets on restart and is not shared between server
 instances. Use a database or Farm storage in a real app.
+
+## Experimental Rust route
+
+The example includes a CPU-bound handler in [`src/app/api/primes/route.rs`](./src/app/api/primes/route.rs).
+To enable it, follow the [Polyroute setup](../../docs/src/app/docs/api-routes/page.md#experimental-rust-routes)
+and add `vite: { plugins: [polyroute()] }` to this example's config. The example's API base path
+makes `GET /primes?limit=10` return `{"limit":10,"primes":4}`. Removing the plugin disables the route.
