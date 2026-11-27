@@ -7,6 +7,10 @@ description: "Releases, engineering notes, and ideas from the people building Fa
 
 Releases, engineering notes, and ideas.
 
+## [Build durable agents with your framework and Farm Infra](/blog/durable-agents)
+
+Build a refund agent that waits for approval and resumes after a restart. Keep your agent framework and web app, then choose Farm Infra storage, wake-ups, and approvals.
+
 ## [Build your own renderer, build your own full-stack framework](/blog/bring-your-own-renderer)
 
 A step-by-step guide to plugging any UI library into Farm: a descriptor, three small modules, hooks over Farm's stores, islands, and two ways to use ui-sdk components. Every snippet comes from a working app you can clone, farming-labs/leaf.
