@@ -50,7 +50,7 @@
     "wrangler": "4.111.0"
   },
   "peerDependencies": {
-    "@farm.js/core": ">=0.1.78 <0.3.0",
+    "@farm.js/core": ">=0.1.78 <0.4.0 || >=0.2.0-beta.0 <0.2.0",
     "agents": ">=0.17.4 <1",
     "wrangler": ">=4.111.0 <5"
   },

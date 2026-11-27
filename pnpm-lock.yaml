@@ -55,6 +55,9 @@ importers:
       miniflare:
         specifier: 4.20260710.0
         version: 4.20260710.0
+      semver:
+        specifier: 7.8.5
+        version: 7.8.5
       supports-color:
         specifier: ^10.2.2
         version: 10.2.2

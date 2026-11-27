@@ -1,6 +1,6 @@
 {
   "name": "@farm.js/otel",
-  "version": "0.1.0-beta.80",
+  "version": "0.1.0-beta.81",
   "description": "OpenTelemetry SDK setup for Farm.js applications",
   "license": "MIT",
   "repository": {
@@ -47,7 +47,7 @@
     "typescript": "^5.3.3"
   },
   "peerDependencies": {
-    "@farm.js/core": ">=0.1.78 <0.3.0"
+    "@farm.js/core": ">=0.1.78 <0.4.0 || >=0.2.0-beta.0 <0.2.0"
   },
   "engines": {
     "node": ">=22.13.0"

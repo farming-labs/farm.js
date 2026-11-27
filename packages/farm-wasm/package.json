@@ -1,6 +1,6 @@
 {
   "name": "@farm.js/wasm",
-  "version": "0.1.0-beta.53",
+  "version": "0.1.0-beta.54",
   "description": "WebAssembly imports and browser workers for Farm.js applications",
   "keywords": [
     "farm.js",
@@ -50,7 +50,7 @@
     "wabt": "^1.0.39"
   },
   "peerDependencies": {
-    "@farm.js/core": ">=0.1.78 <0.3.0"
+    "@farm.js/core": ">=0.1.78 <0.4.0 || >=0.2.0-beta.0 <0.2.0"
   },
   "engines": {
     "node": ">=22.13.0"

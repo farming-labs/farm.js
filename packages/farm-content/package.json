@@ -1,6 +1,6 @@
 {
   "name": "@farm.js/content",
-  "version": "0.1.0-beta.53",
+  "version": "0.1.0-beta.54",
   "description": "Typed local content collections for Farm.js applications",
   "keywords": [
     "content",
@@ -62,7 +62,7 @@
     "vitest": "5.0.5"
   },
   "peerDependencies": {
-    "@farm.js/core": ">=0.1.78 <0.3.0"
+    "@farm.js/core": ">=0.1.78 <0.4.0 || >=0.2.0-beta.0 <0.2.0"
   },
   "engines": {
     "node": ">=22.13.0"

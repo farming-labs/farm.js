@@ -1,6 +1,6 @@
 {
   "name": "@farm.js/cache-redis",
-  "version": "0.1.0-beta.56",
+  "version": "0.1.0-beta.57",
   "description": "Distributed Redis cache and atomic rate-limit adapters for Farm.js",
   "keywords": [
     "cache",
@@ -45,6 +45,6 @@
     "vitest": "5.0.5"
   },
   "peerDependencies": {
-    "@farm.js/core": ">=0.1.78 <0.3.0"
+    "@farm.js/core": ">=0.1.78 <0.4.0 || >=0.2.0-beta.0 <0.2.0"
   }
 }

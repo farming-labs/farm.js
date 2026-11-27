@@ -11,6 +11,22 @@ test("public packages share the app's core and accept the next core minor", () =
   assert.deepEqual(findCoreDependencyProblems(readPublicPackages()), []);
 });
 
+test("core peers must accept the actual prerelease as well as the next stable minor", () => {
+  const core = { name: "@farm.js/core", version: "0.2.0-beta.0", manifest: {} };
+  const devDependencies = { "@farm.js/core": "workspace:*" };
+  function check(range) {
+    return findCoreDependencyProblems([
+      core,
+      {
+        name: "adapter",
+        manifest: { devDependencies, peerDependencies: { "@farm.js/core": range } },
+      },
+    ]);
+  }
+  assert.match(check(">=0.1.78 <0.4.0").join("\n"), /excludes the workspace core 0.2.0-beta.0/);
+  assert.deepEqual(check(">=0.1.78 <0.4.0 || >=0.2.0-beta.0 <0.2.0"), []);
+});
+
 test("reports pinned cores and peer ranges that refuse the next minor", () => {
   const core = { name: "@farm.js/core", version: "0.1.78", manifest: {} };
   const pkg = (name, manifest) => ({ name, version: "0.1.0", manifest });
