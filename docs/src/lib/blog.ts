@@ -178,8 +178,37 @@ export const rendererSections = [
   ["what-building-leaf-fixed-in-farm", "What leaf fixed"],
 ] as const satisfies BlogSections;
 
+export const durableAgentsPost: BlogPost = {
+  href: "/blog/durable-agents",
+  title: "Build durable agents with your framework and Farm Infra",
+  description:
+    "Keep your agent framework, make work resumable with agent-unit, and choose Farm Infra storage, wake-ups, and approvals.",
+  ...AUTHOR,
+  date: "Nov 2026",
+  dateTime: "2026-11-27",
+  category: "Tutorial",
+};
+
+export const durableAgentsSections = [
+  ["start-with-a-refund-that-waits", "Start with a refund that waits"],
+  ["make-the-real-side-effect-safe-to-repeat", "Make the real side effect safe to repeat"],
+  ["use-your-agent-framework", "Use your agent framework"],
+  ["keep-your-existing-web-app", "Keep your existing web app"],
+  ["how-farm-discovers-your-agents", "How Farm discovers your agents"],
+  ["choose-what-farm-infra-handles", "Choose what Farm Infra handles"],
+  [
+    "add-the-other-infrastructure-when-the-app-needs-it",
+    "Add the other infrastructure when the app needs it",
+  ],
+  [
+    "check-the-pause-before-adding-a-real-payment-provider",
+    "Check the pause before adding a real payment provider",
+  ],
+] as const satisfies BlogSections;
+
 /** Every post. The index features the first and lists the rest. */
 export const posts: readonly { post: BlogPost; sections: BlogSections }[] = [
+  { post: durableAgentsPost, sections: durableAgentsSections },
   { post: rendererPost, sections: rendererSections },
   { post: agentScanPost, sections: agentScanSections },
   { post: nativeInternalsPost, sections: nativeInternalsSections },

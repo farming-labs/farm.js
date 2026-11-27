@@ -2,6 +2,7 @@ import type { ReactNode } from "react";
 import { BlogFigure } from "./figures";
 import { ReleaseArtwork } from "./release-artwork";
 import {
+  durableAgentsPost,
   agentNativePost,
   agentScanPost,
   launchPost,
@@ -24,6 +25,23 @@ export interface PostArt {
 }
 
 export const POST_ART: Record<string, PostArt> = {
+  [durableAgentsPost.href]: {
+    heading: (
+      <>
+        Build durable agents <span>with your framework and Farm Infra.</span>
+      </>
+    ),
+    header: (
+      <div className="blog-post-artwork">
+        <BlogFigure fit kind="agent-layers" />
+      </div>
+    ),
+    card: (
+      <div className="blog-post-artwork">
+        <BlogFigure fit kind="agent-layers" />
+      </div>
+    ),
+  },
   [rendererPost.href]: {
     heading: (
       <>
