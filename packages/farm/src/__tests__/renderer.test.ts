@@ -3,10 +3,7 @@
 import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
-import {
-  defineRendererDescriptorConformance,
-  defineRendererServerConformance,
-} from "@farm.js/renderer-tests";
+import { testDescriptor, testServer } from "@farm.js/renderer-tests";
 import { describe, expect, it } from "vitest";
 import {
   assertFarmRendererStreamingRuntime,
@@ -20,7 +17,7 @@ import {
 } from "../renderer";
 import * as serverRuntime from "../renderer/react/server";
 
-defineRendererDescriptorConformance({
+testDescriptor({
   name: "react",
   createDescriptor: () => resolveFarmRenderer(),
   expected: {
@@ -38,7 +35,7 @@ defineRendererDescriptorConformance({
   },
 });
 
-defineRendererServerConformance(serverRuntime);
+testServer(serverRuntime);
 
 describe("renderer configuration", () => {
   it("keeps React as the default renderer", () => {

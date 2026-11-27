@@ -84,7 +84,7 @@ async function settleClientRender(assertion: () => void): Promise<void> {
   throw error;
 }
 
-export function defineRendererDescriptorConformance(options: {
+export function testDescriptor(options: {
   name: string;
   createDescriptor(): RendererDescriptorFixture;
   expected: Partial<RendererDescriptorFixture>;
@@ -107,7 +107,7 @@ export function defineRendererDescriptorConformance(options: {
   });
 }
 
-export function defineRendererServerConformance(runtime: RendererServerFixture): void {
+export function testServer(runtime: RendererServerFixture): void {
   describe(`${runtime.name} server conformance`, () => {
     it("exposes FARMJS element primitives", () => {
       expect(runtime.Fragment).toBeTruthy();
@@ -352,7 +352,7 @@ export function defineRendererServerConformance(runtime: RendererServerFixture):
   });
 }
 
-export function defineRendererClientConformance(options: {
+export function testClient(options: {
   name: string;
   client: RendererClientFixture;
   server: Pick<RendererServerFixture, "createElement" | "renderToString">;
@@ -532,7 +532,7 @@ export type RendererServerQueryFixture = (input: undefined) => Promise<{ email: 
  * renderer's server query binding and prints `account=<email>` or
  * `account=loading`.
  */
-export function defineRendererServerQueryConformance(options: {
+export function testServerQuery(options: {
   name: string;
   renderQuery(query: RendererServerQueryFixture): string | Promise<string>;
 }): void {
@@ -583,7 +583,7 @@ export interface RendererNativeTreeNode {
  * markup the same way: its comment markers, hydration keys, and fragment boundaries included.
  * `toTree` turns a page's HTML into the native tree, as a mobile app's server would answer it.
  */
-export function defineRendererNativeTreeConformance(
+export function testNativeTree(
   runtime: RendererServerFixture,
   toTree: (html: string) => Promise<{ unsupported: string[]; root: RendererNativeTreeNode }>,
 ): void {
@@ -685,10 +685,7 @@ function readIsland(html: string): { attributes: string; inner: string } | undef
  * runtime starts, and `wrapClientGraph()` and `isolateServerPageGraph()`, when exported, turn
  * islands off and on again around a tree that hydrates as one root.
  */
-export function defineRendererIslandsConformance(options: {
-  name: string;
-  server: RendererIslandsServerFixture;
-}): void {
+export function testIslands(options: { name: string; server: RendererIslandsServerFixture }): void {
   const { server } = options;
   const reference: RendererIslandReference = {
     src: "/src/components/counter.tsx",
@@ -907,7 +904,7 @@ function expectRendererHydration(value: unknown, where: string): void {
  * returns a module whose `"use client"` Farm can find. A hook your descriptor doesn't have, or a
  * field a file leaves out, is skipped. Each hook must give the same answer for the same file.
  */
-export function defineRendererSourceConformance(options: {
+export function testSource(options: {
   name: string;
   createDescriptor(): RendererSourceDescriptorFixture;
   /** The project root: `routes()` gets it, and the other hooks get each file's path under it. */
@@ -1007,3 +1004,24 @@ export function defineRendererSourceConformance(options: {
     );
   });
 }
+
+/** @deprecated Use {@link testDescriptor}. */
+export const defineRendererDescriptorConformance = testDescriptor;
+
+/** @deprecated Use {@link testServer}. */
+export const defineRendererServerConformance = testServer;
+
+/** @deprecated Use {@link testClient}. */
+export const defineRendererClientConformance = testClient;
+
+/** @deprecated Use {@link testServerQuery}. */
+export const defineRendererServerQueryConformance = testServerQuery;
+
+/** @deprecated Use {@link testNativeTree}. */
+export const defineRendererNativeTreeConformance = testNativeTree;
+
+/** @deprecated Use {@link testIslands}. */
+export const defineRendererIslandsConformance = testIslands;
+
+/** @deprecated Use {@link testSource}. */
+export const defineRendererSourceConformance = testSource;
