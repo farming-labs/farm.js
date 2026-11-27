@@ -433,6 +433,8 @@ ${withPlugins(`
       const handleClick = (e) => {
         const a = e.target.closest('a');
         if (a?.href && a.origin === location.origin && !a.download && !a.target) {
+          const baseTarget = a.ownerDocument.querySelector('base[target]')?.target;
+          if (baseTarget && baseTarget.toLowerCase() !== '_self') return;
           // Check for special attributes that should skip SPA navigation
           if (a.hasAttribute('data-native') || a.hasAttribute('data-reload')) {
             return;

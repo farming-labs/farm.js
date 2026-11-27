@@ -7281,7 +7281,7 @@ import { createClientPluginManager } from '@farm.js/core/plugin/client'
 // Not @farm.js/core/client: that module's graph imports react, which other renderers' apps lack.
 import { SPARouter } from '@farm.js/core/internal/spa-router'
 import { isFarmRouteActive } from '@farm.js/core/router'
-import { installChunkErrorRecovery, installFarmLinkPrefetch, isFarmBlockedNavigationURL, readFarmLinkNavigateOptions, rememberFarmLinkLocale, replayFarmQueuedInteraction, scheduleFarmIslandHydration, createFarmSearchParams, searchParamsToObject, setFarmBasePath, setFarmTrailingSlashPreference, stripFarmBasePath } from '@farm.js/core/internal/client-runtime'
+import { installChunkErrorRecovery, installFarmLinkPrefetch, isFarmBlockedNavigationURL, readFarmLinkNavigateOptions, targetsCurrentContext, rememberFarmLinkLocale, replayFarmQueuedInteraction, scheduleFarmIslandHydration, createFarmSearchParams, searchParamsToObject, setFarmBasePath, setFarmTrailingSlashPreference, stripFarmBasePath } from '@farm.js/core/internal/client-runtime'
 import { reviveDeferredData } from '@farm.js/core/deferred'
 import {
   createFarmDeploymentMismatchError,
@@ -9261,8 +9261,7 @@ document.addEventListener('click', function(event) {
   if (href.startsWith('#')) return;
   
   // Don't intercept if target is set to open in new window
-  const linkTarget = target.getAttribute('target');
-  if (linkTarget && linkTarget !== '_self') return;
+  if (!targetsCurrentContext(target)) return;
   
   // Don't intercept modifier clicks (Ctrl+Click = new tab)
   if (isModifierEvent(event)) return;

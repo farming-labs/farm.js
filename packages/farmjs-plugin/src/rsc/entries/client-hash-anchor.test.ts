@@ -49,6 +49,7 @@ const anchor = (over: Record<string, unknown>) => ({
   hash: "",
   download: "",
   target: "",
+  ownerDocument: { querySelector: () => null },
   hasAttribute: () => false,
   ...over,
 });

@@ -96,7 +96,10 @@ function routedLink(target: EventTarget | null): HTMLAnchorElement | null {
   if (!anchor || !href) return null;
   if (anchor.hasAttribute("download") || href.startsWith("#") || href.startsWith("//")) return null;
   if (/^[a-zA-Z][a-zA-Z\d+.-]*:/.test(href)) return null;
-  if (anchor.target && anchor.target !== "_self") return null;
+  // Keep the boot entry independent of the client runtime's targetsCurrentContext helper.
+  const linkTarget =
+    anchor.target || document.querySelector<HTMLBaseElement>("base[target]")?.target;
+  if (linkTarget && linkTarget !== "_self") return null;
   return anchor;
 }
 

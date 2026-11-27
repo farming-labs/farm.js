@@ -281,6 +281,22 @@ describe("startFarmIslandsBoot", () => {
     expect(load).not.toHaveBeenCalled();
   });
 
+  it("leaves a link press and click to the browser when it inherits a named target", () => {
+    const load = boot('<a href="/next" data-farm-link>Next</a>');
+    const base = document.createElement("base");
+    base.target = "preview";
+    document.head.append(base);
+    try {
+      const link = document.querySelector("a")!;
+      press(link);
+      expect(click(link)).toBe(false);
+      expect(pageRequests).not.toHaveBeenCalled();
+      expect(load).not.toHaveBeenCalled();
+    } finally {
+      base.remove();
+    }
+  });
+
   it("holds clicks in a root that waits, and starts on its press", () => {
     const load = boot(
       '<script type="module" data-farm-runtime="/r.js" data-farm-root="root" data-farm-root-strategy="interaction"></script>' +
