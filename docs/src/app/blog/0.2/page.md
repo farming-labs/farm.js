@@ -17,13 +17,13 @@ Farm 0.1.0 already had typed routes, five renderers, server functions, MCP tools
 
 <span id="try-the-checkout-example" className="blog-heading-anchor" />
 
-## Try the checkout example
+## Follow one order through the code
 
-Imagine a shop that sells canvas bags for $12 each. A shopper wants a price, the warehouse wants a packing screen, and customer support needs to approve refunds. Start with the part you can try right here. Open [a quote for one bag](/api/examples/quote?quantity=1), then [a quote for three](/api/examples/quote?quantity=3). Both links call a real Farm endpoint on this site. The price changes from 1,200 to 3,600 cents. Try [a quantity of zero](/api/examples/quote?quantity=0) to see the validation error. These requests only calculate a price.
+I’ll use a shop that sells canvas bags for $12 each. The example follows one order through a price quote, a Rust packing calculation, a payment event, and a refund decision.
 
-### Start with one file
+### Calculate the price in TypeScript
 
-This is the handler behind those links. Put it at `src/app/api/examples/quote/route.ts` in a Farm app with Zod installed. Use `renderer: false` to run it as a service, or keep the default React renderer to serve a checkout page alongside it.
+The file `src/app/api/examples/quote/route.ts` defines the quote endpoint. Zod validates the quantity before the handler calculates the price.
 
 ```ts
 import { createEndpoint } from "@farm.js/core/api";
@@ -48,57 +48,179 @@ export const GET = createEndpoint(
 );
 ```
 
-Run `farm dev --port 3000`, then try `curl 'http://localhost:3000/api/examples/quote?quantity=3'`. A web page, a native screen, and a terminal can all read the same answer. To see the public contract readers of this site get, open [its OpenAPI document](/openapi.json) and search for `/api/examples/quote`. An agent reading the instructions can also request [this article as Markdown](/blog/0.2.md).
+A request to `GET /api/examples/quote?quantity=3` returns this object. Prices use cents.
 
-### Run the whole order locally
-
-The same endpoint is part of a runnable checkout app. Its demo buys three bags, delivers a simulated payment for the quoted amount, and approves a refund for the same order. You can run it without a payment account or an Infra key. [Open the complete example](https://github.com/farming-labs/farm.js/tree/9aa9670ee9aa/examples/agent)
-
-From a terminal with Node 24 and pnpm 8.12.1:
-
-```sh
-git clone https://github.com/farming-labs/farm.js.git
-cd farm.js
-git checkout --detach 9aa9670ee9aa
-pnpm install --frozen-lockfile
-pnpm --filter @farm.js/core build
-pnpm --filter @farm.js/cli build
-pnpm --filter @farm.js/agent build
-pnpm --dir examples/agent smoke
+```json
+{
+  "item": "Canvas bag",
+  "currency": "USD",
+  "quantity": 3,
+  "unitPriceCents": 1200,
+  "totalCents": 3600
+}
 ```
 
-Watch for **“Checkout is waiting for payment.”** The script has started an agent run and read its status back from the server. Next it delivers `payment.succeeded` with that order’s ID and the price it just fetched. The checkout records 3,600 cents. Finally, the refund agent pauses for approval. The script supplies the decision, checks the final reply, and shuts down its local server. To keep the app open and inspect its quote responses and agent manifest yourself, run `pnpm --dir examples/agent dev`. [HTTP requests in execution order](https://github.com/farming-labs/farm.js/blob/9aa9670ee9aa/examples/agent/scripts/smoke.mjs)
+The docs site serves this same handler. You can open [the three-bag quote](/api/examples/quote?quantity=3) or [a quantity of zero](/api/examples/quote?quantity=0) to see the response and validation error. Its schema is also included in [the OpenAPI document](/openapi.json).
 
 <span id="checkout-with-polyroute" className="blog-heading-anchor" />
 
-### Pack the same order with Rust
+### Calculate the packing plan in Rust
 
-The shop sells three bags. How many boxes should the warehouse get ready? The checkout example includes a Rust endpoint for that question. Turn on Polyroute and the same demo sends the quantity from the TypeScript quote to `GET /api/examples/packing?quantity=3` before it delivers the payment event.
+Each box holds four bags. The file `src/app/api/examples/packing/route.rs` accepts the quantity and calculates the number of boxes. Here is the complete handler, including its method and quantity checks.
 
-```sh
-rustup target add wasm32-wasip2
-pnpm --dir examples/agent smoke:polyroute
+```rust
+use wstd::http::body::IncomingBody;
+use wstd::http::server::{Finished, Responder};
+use wstd::http::{IntoBody, Method, Request, Response, StatusCode};
+
+const BAGS_PER_BOX: u32 = 4;
+
+#[wstd::http_server]
+async fn main(request: Request<IncomingBody>, responder: Responder) -> Finished {
+    let response = Response::builder().header("content-type", "application/json");
+    if request.method() != Method::GET {
+        return responder
+            .respond(
+                response
+                    .status(StatusCode::METHOD_NOT_ALLOWED)
+                    .header("allow", "GET")
+                    .body(r#"{"error":"Use GET to request a packing plan."}"#.into_body())
+                    .unwrap(),
+            )
+            .await;
+    }
+
+    let mut quantities = request
+        .uri()
+        .query()
+        .unwrap_or_default()
+        .split('&')
+        .map(|pair| pair.split_once('=').unwrap_or((pair, "")))
+        .filter_map(|(name, value)| (name == "quantity").then_some(value));
+    let quantity = quantities
+        .next()
+        .and_then(|value| value.parse::<u32>().ok());
+    let (status, body) = match (quantity, quantities.next()) {
+        (Some(quantity @ 1..=20), None) => (
+            StatusCode::OK,
+            format!(
+                r#"{{"quantity":{quantity},"bagsPerBox":{BAGS_PER_BOX},"boxes":{}}}"#,
+                quantity.div_ceil(BAGS_PER_BOX)
+            ),
+        ),
+        _ => (
+            StatusCode::BAD_REQUEST,
+            r#"{"error":"Supply one quantity between 1 and 20."}"#.to_owned(),
+        ),
+    };
+    responder
+        .respond(response.status(status).body(body.into_body()).unwrap())
+        .await
+}
 ```
 
-Look for **“Rust packing plan: 3 bags in 1 box.”** A box holds four bags. To try a different order, start `pnpm --dir examples/agent dev:polyroute` and open `/api/examples/packing?quantity=5`. The response is `{"quantity":5,"bagsPerBox":4,"boxes":2}`. The quote, packing route, checkout agent, and refund agent all run on the same Farm server. The ordinary `smoke` command leaves the Rust route off. [Read the Rust handler](https://github.com/farming-labs/farm.js/blob/9aa9670ee9aa/examples/agent/src/app/api/examples/packing/route.rs)
+Polyroute compiles this file to WebAssembly and gives Farm a Fetch handler. Farm discovers its URL alongside the TypeScript route. The browser calls both endpoints with ordinary `fetch`.
 
-To try the production build, run `pnpm --dir examples/agent build:polyroute`, then `pnpm --dir examples/agent smoke:polyroute:production`. The second command starts the built Node server and runs the same order against its packaged WebAssembly files.
+```ts
+const quoteResponse = await fetch("/api/examples/quote?quantity=3");
+if (!quoteResponse.ok) throw new Error("Could not quote the order.");
+const quote = await quoteResponse.json();
 
-### Explore the rest of the release
+const packingResponse = await fetch(`/api/examples/packing?quantity=${quote.quantity}`);
+if (!packingResponse.ok) throw new Error("Could not calculate the packing plan.");
+const packing = await packingResponse.json();
+```
 
-For a storefront, you might also need a native packing screen, a custom renderer, or a nightly reconciliation job. The companion examples below show those choices individually. From the same checkout, run `pnpm build` to build the other workspace packages before starting their examples. Each rendering engine runs in its own build. The phone and desktop examples need their platform tools, and the hosted services use your own Farm Infra workspace.
+For those three bags, `packing` is `{"quantity":3,"bagsPerBox":4,"boxes":1}`. For five bags, it contains `"boxes":2`. This small calculation makes the connection between the two routes easy to follow. The compute-heavy benchmark later in the article measures when moving work to Rust helps.
 
-| Part of the order                     | Try it and see what changes                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                           |
-| ------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Render the checkout page              | In `examples/server-components`, run `pnpm build:islands`, then `node .farm/.output-islands/server/index.mjs`. Open `/stream` for the early and late counters. At `/action-state`, type “canvas bag” and vote. The server returns the new count and choice. Stop the server and repeat with `pnpm build:rsc` and `.farm/.output-rsc/server/index.mjs`. The interaction stays the same while the navigation payload changes. [Rendering example](https://github.com/farming-labs/farm.js/tree/b8995c309d5f/examples/server-components) |
-| Update an item count                  | Run `pnpm --dir examples/react-compiler experiment`. Its production browser checks exercise inputs, counters, and keyed rows. Inspect the compiler report at `examples/react-compiler/.farm/react-compiler.json` to see what compiled. For an alternative UI library, open the [Leaf island example](https://github.com/farming-labs/leaf/tree/7da8b6a) and click the two controls independently. [Compiler example](https://github.com/farming-labs/farm.js/tree/b8995c309d5f/examples/react-compiler)                               |
-| Open the packing screen               | Run `pnpm --dir examples/mobile report` to see how Farm classifies each screen. With the Android or iOS toolchain installed, follow the mobile example and open `/kit`: the packing checklist is native-only. For a desktop window, `pnpm --dir examples/desktop-electrobun dev` opens the separate desktop app. [Mobile](https://github.com/farming-labs/farm.js/tree/b8995c309d5f/examples/mobile) · [Desktop](https://github.com/farming-labs/farm.js/tree/b8995c309d5f/examples/desktop-electrobun)                               |
-| Let an assistant look something up    | Run `pnpm --dir examples/api-mcp dev` and send the README’s `search_projects` request with the demo reader token. The tool returns a validated result, and that token can only read. For a tool attached to an open web page, run the WebMCP demo in a supported browser and inspect its registered tools. [Server tools](https://github.com/farming-labs/farm.js/tree/b8995c309d5f/examples/api-mcp) · [Browser tools](https://github.com/farming-labs/farm.js/tree/b8995c309d5f/examples/webmcp-demo)                               |
-| Wait for payment and approve a refund | The checkout agent waits for `payment.succeeded` with the matching order ID. Its sibling refund agent pauses for a person. Read the two agent functions alongside the local run above. One resumes on a matching event, and the other resumes on an approval. [Checkout and refund source](https://github.com/farming-labs/farm.js/tree/b8995c309d5f/examples/agent/src/agents)                                                                                                                                                       |
-| Persist data and run background work  | Run the basic example and open `/storage-demo` to exercise a storage mount, then `/feature-lab/integrations` to inspect the integration example. Start the jobs example with `JOBS_RUNTIME=local` to keep runs on disk. The same example shows the configuration for an external job provider. [Storage playground](https://github.com/farming-labs/farm.js/tree/b8995c309d5f/examples/basic/src/app/storage-demo) · [Jobs](https://github.com/farming-labs/farm.js/tree/b8995c309d5f/examples/jobs-integration)                      |
-| Publish the storefront                | Open `/feature-lab/metadata/123` in the basic example and inspect the generated social image. Try `/prefetch-e2e` to see how links behave before navigation. The docs example shows how the guides themselves are served. [Metadata and navigation examples](https://github.com/farming-labs/farm.js/tree/b8995c309d5f/examples/basic/src/app) · [Docs app example](https://github.com/farming-labs/farm.js/tree/b8995c309d5f/examples/docs-integration)                                                                              |
+### Connect Polyroute and the agents
 
-**Take the quote to Farm Infra.** Keep the local app running and run `farm preview --port 3000 --expires 30m` in a second terminal. Open the public URL with `/api/examples/quote?quantity=3` appended. Open the session in **Previews**, then make the invalid request and compare the two HTTP statuses. When you connect a deployed project, **Storage** holds order records, **Webhooks** receives payment events, **Cron jobs** schedules reconciliation, and **Agents** shows refund approvals. The [Infra walkthrough](#farm-infra) covers the setup for each, along with project analytics, tool calls, site audits, chat notifications, and team access.
+This is the example’s `farm.config.ts`. The `FARM_CHECKOUT_POLYROUTE` environment variable enables Rust routes when set to `1`. The `import.meta.env?.SSR` guard keeps the build plugin out of the built server, which uses the compiled Wasm. The agent integration discovers the functions in `src/agents` and serves them under `/api/agent`.
+
+```ts
+/// <reference types="vite/client" />
+import { agent } from "@farm.js/agent";
+import { defineConfig } from "@farm.js/core";
+
+// The built server also loads this config for its agent integration. It only needs the compiled route.
+const plugins = [];
+if (!import.meta.env?.SSR && process.env.FARM_CHECKOUT_POLYROUTE === "1") {
+  const { polyroute } = await import("@farming-labs/polyroute");
+  plugins.push(polyroute());
+}
+
+export default defineConfig({
+  vite: { plugins },
+  integrations: {
+    // The agents in src/agents, served under /api/agent in farm dev and built into the server.
+    agent: agent({
+      name: "farm-agents",
+      storage: { driver: "fs-lite", base: process.env.AGENT_DATA ?? ".data/agents" },
+    }),
+  },
+});
+```
+
+The example stores agent runs on the local filesystem. Polyroute is experimental, and this example has been verified with its Node server output. The repository README includes the toolchain and build instructions. [Complete example and setup](https://github.com/farming-labs/farm.js/tree/9aa9670ee9aa/examples/agent)
+
+### Wait for the payment
+
+The checkout function in `src/agents/checkout.ts` waits for a `payment.succeeded` event with the same order ID. When that event arrives, the run resumes and returns the amount paid.
+
+```ts
+import { defineAgent } from "agent-unit";
+
+export default defineAgent(async (input: { orderId: string }, run) => {
+  const payment = await run.waitFor<{ orderId: string; amount: number }>("payment.succeeded", {
+    match: { orderId: input.orderId },
+    timeout: "1h",
+  });
+  return { orderId: input.orderId, paid: payment.amount };
+});
+```
+
+The example starts a run by sending this request.
+
+```http
+POST /api/agent/agents/checkout/runs
+Content-Type: application/json
+
+{"input":{"orderId":"bag-order-123"}}
+```
+
+After the run reports `waiting`, the demo supplies the payment event below. Its `amount` comes from the quote’s `totalCents`. A real shop would deliver this event after verifying its payment provider’s webhook.
+
+```http
+POST /api/agent/events
+Content-Type: application/json
+
+{
+  "id": "payment-bag-order-123",
+  "name": "payment.succeeded",
+  "data": {"orderId":"bag-order-123","amount":3600}
+}
+```
+
+The completed run returns `{"orderId":"bag-order-123","paid":3600}`. The `match` condition ensures another order’s payment cannot resume this checkout.
+
+### Ask a person before refunding
+
+The refund agent uses `run.interrupt` to pause for a decision. These lines from `src/agents/refund.ts` show the approval step after the order lookup.
+
+```ts
+const { approved } = await run.interrupt<{ approved: boolean }>("approve-refund", order);
+return approved ? `refunded ${order.id}` : `kept ${order.id}`;
+```
+
+A request to `POST /api/agent/agents/refund/runs` with `{"input":{"orderId":"bag-order-123"}}` starts that agent. Once it reports `interrupted`, the caller supplies the decision at `POST /api/agent/runs/<run-id>/resume`.
+
+```json
+{ "answer": { "approved": true } }
+```
+
+The run resumes and returns `"refunded bag-order-123"`. This demo uses a placeholder order lookup and returns a message for the refund. A real refund handler would load the paid order and call the payment provider after approval. [Refund agent source](https://github.com/farming-labs/farm.js/blob/9aa9670ee9aa/examples/agent/src/agents/refund.ts)
+
+The complete flow is now visible in the code. TypeScript calculates the price, Rust calculates the boxes, the checkout waits for its payment, and the refund waits for a person. The sections below show the rendering choices, native screens, compiler, integrations, and Farm Infra features around that app.
 
 <span id="start-with-just-an-api" className="blog-heading-anchor" />
 

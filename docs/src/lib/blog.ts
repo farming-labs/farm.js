@@ -190,7 +190,7 @@ export const releasePreviewPost: BlogPost = {
 };
 
 export const releasePreviewSections = [
-  ["try-the-checkout-example", "Try the checkout example"],
+  ["try-the-checkout-example", "Follow one order through the code"],
   ["start-with-just-an-api", "Backend-only apps", "Start with just an API"],
   [
     "put-one-compute-heavy-endpoint-in-rust",
