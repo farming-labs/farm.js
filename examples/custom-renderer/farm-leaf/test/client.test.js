@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 
-import { defineRendererClientConformance } from "@farm.js/renderer-tests";
+import { testClient } from "@farm.js/renderer-tests";
 import { createElement, useEffect, useState } from "leaf";
 import { createRoot, hydrateRoot } from "leaf/dom";
 import { renderToString } from "leaf/server";
@@ -8,7 +8,7 @@ import { describe, expect, it } from "vitest";
 import * as client from "../src/client.js";
 import * as server from "../src/server.js";
 
-defineRendererClientConformance({
+testClient({
   name: "leaf",
   client,
   server,

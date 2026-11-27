@@ -252,6 +252,7 @@ export const durableAgentsSections = [
 
 /** Every post. The index features the first and lists the rest. */
 export const posts: readonly { post: BlogPost; sections: BlogSections }[] = [
+  { post: durableAgentsPost, sections: durableAgentsSections },
   { post: rendererPost, sections: rendererSections },
   { post: agentScanPost, sections: agentScanSections },
   { post: nativeInternalsPost, sections: nativeInternalsSections },

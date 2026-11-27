@@ -1,6 +1,6 @@
 {
   "name": "@farm.js/pwa",
-  "version": "0.1.0-beta.58",
+  "version": "0.1.0-beta.59",
   "description": "Installable, offline-aware Progressive Web Apps for Farm.js",
   "keywords": [
     "farm.js",
@@ -45,7 +45,7 @@
     "vitest": "5.0.5"
   },
   "peerDependencies": {
-    "@farm.js/core": ">=0.1.78 <0.3.0"
+    "@farm.js/core": ">=0.1.78 <0.4.0 || >=0.2.0-beta.0 <0.2.0"
   },
   "engines": {
     "node": ">=22.13.0"

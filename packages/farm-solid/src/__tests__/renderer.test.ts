@@ -2,10 +2,10 @@
 
 import { Writable } from "node:stream";
 import {
-  defineRendererDescriptorConformance,
-  defineRendererNativeTreeConformance,
-  defineRendererServerConformance,
-  defineRendererServerQueryConformance,
+  testDescriptor,
+  testNativeTree,
+  testServer,
+  testServerQuery,
 } from "@farm.js/renderer-tests";
 import { createFarmNativeTreeResponse } from "@farm.js/core/internal/production-runtime";
 import { Suspense, createResource, createSignal, createUniqueId } from "solid-js";
@@ -28,7 +28,7 @@ import {
   UNIQUE_ID_ISLAND_HTML,
 } from "./unique-id-island.fixture";
 
-defineRendererDescriptorConformance({
+testDescriptor({
   name: "solid",
   createDescriptor: solid,
   expected: {
@@ -43,8 +43,8 @@ defineRendererDescriptorConformance({
   },
 });
 
-defineRendererServerConformance(serverRuntime);
-defineRendererNativeTreeConformance(serverRuntime, async (html) => {
+testServer(serverRuntime);
+testNativeTree(serverRuntime, async (html) => {
   // As a mobile app's server answers a native-tier screen: the page's HTML read into a tree.
   const response = await createFarmNativeTreeResponse({
     request: new Request("https://app.example/trails", {
@@ -60,7 +60,7 @@ defineRendererNativeTreeConformance(serverRuntime, async (html) => {
   return response.json();
 });
 
-defineRendererServerQueryConformance({
+testServerQuery({
   name: "solid",
   renderQuery(query) {
     const Account = () => {

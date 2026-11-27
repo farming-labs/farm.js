@@ -692,7 +692,7 @@ describe("generated server action security", () => {
 describe("RSC client link interceptor respects modified and non-primary clicks", () => {
   function extractHandleClickFactory(entry: string) {
     const start = entry.indexOf("const handleClick = (e) => {");
-    const end = entry.indexOf("document.addEventListener('click', handleClick, true);", start);
+    const end = entry.indexOf("document.addEventListener('click', handleClick);", start);
     expect(start).toBeGreaterThan(-1);
     expect(end).toBeGreaterThan(start);
     const slice = entry.slice(start, end);

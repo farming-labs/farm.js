@@ -12,7 +12,7 @@ This package is in beta. See [Stability and Support](https://farmjs.dev/docs/sta
 pnpm add @farm.js/core @farm.js/preact preact
 ```
 
-`@farm.js/core` (`>=0.1.0 <0.3.0`) and `preact` (`^10.29.8`) are peer dependencies. The Vite
+`@farm.js/core` (`>=0.1.0 <0.4.0 || >=0.2.0-beta.0 <0.2.0`) and `preact` (`^10.29.8`) are peer dependencies. The Vite
 preset (`@preact/preset-vite`) and `preact-render-to-string` are installed with the adapter.
 
 To start a new project with Preact already selected:

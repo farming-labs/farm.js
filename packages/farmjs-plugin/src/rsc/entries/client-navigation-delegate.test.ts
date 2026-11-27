@@ -62,7 +62,7 @@ function createNavigate(options: { delegate: (context: any) => boolean | Promise
     generateClientEntry(context),
     "async function navigate(href, action) {",
     "farmNavigateRef.current = navigate;",
-    { location, history, refetch, runFarmNavigationDelegates, URL },
+    { lastHistoryHref: location.href, location, history, refetch, runFarmNavigationDelegates, URL },
   )("return navigate;") as (href: string, action: "push" | "replace") => Promise<void>;
   return { navigate, location, history, refetch, runFarmNavigationDelegates };
 }
@@ -117,7 +117,7 @@ describe("the RSC router offers in-app navigations to navigation delegates", () 
     const handleClick = extract(
       generateClientEntry(context),
       "const handleClick = (e) => {",
-      "document.addEventListener('click', handleClick, true);",
+      "document.addEventListener('click', handleClick);",
       { navigate, location, nav: vi.fn() },
     )("return handleClick;") as (event: unknown) => void;
     const click = (attributes: string[]) => {

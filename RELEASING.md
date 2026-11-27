@@ -10,10 +10,12 @@ the shared version.
 ## How packages depend on core
 
 Every public package except `@farm.js/core` and `@farm.js/cli` declares core as a peer range,
-such as `">=0.1.78 <0.3.0"`, with `"workspace:*"` in `devDependencies` for local development.
+such as `">=0.1.78 <0.4.0 || >=0.2.0-beta.0 <0.2.0"`, with `"workspace:*"` in `devDependencies` for local development.
 Never put core in `dependencies`: pnpm publishes `workspace:*` as the exact core version of that
 release, so an app on a newer core installs a second copy of core for each such package.
 
+npm excludes prereleases from ordinary stable ranges. The second comparator set admits the
+0.2.0 beta line while the first preserves each package's stable core floor.
 The range's upper bound must accept the next core minor. Independently versioned packages are not
 republished on every release, so a package that refuses the next minor stops installing with npm
 the day it ships. `pnpm test` enforces both rules. When a release moves core to a new minor, raise

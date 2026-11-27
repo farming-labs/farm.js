@@ -1,6 +1,6 @@
 {
   "name": "@farm.js/ai",
-  "version": "0.1.87",
+  "version": "0.2.0-beta.0",
   "description": "Farm.js AI route helpers",
   "license": "MIT",
   "repository": {
@@ -37,6 +37,6 @@
     "@farm.js/core": "workspace:*"
   },
   "peerDependencies": {
-    "@farm.js/core": ">=0.1.78 <0.3.0"
+    "@farm.js/core": ">=0.1.78 <0.4.0 || >=0.2.0-beta.0 <0.2.0"
   }
 }

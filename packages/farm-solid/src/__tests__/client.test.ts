@@ -1,4 +1,4 @@
-import { defineRendererClientConformance } from "@farm.js/renderer-tests";
+import { testClient } from "@farm.js/renderer-tests";
 import * as clientRuntime from "../client";
 
 interface SolidHydrationBootstrap {
@@ -13,7 +13,7 @@ declare global {
   var _$HY: SolidHydrationBootstrap | undefined;
 }
 
-defineRendererClientConformance({
+testClient({
   reconcilesRerenders: false,
   name: "solid",
   client: clientRuntime,

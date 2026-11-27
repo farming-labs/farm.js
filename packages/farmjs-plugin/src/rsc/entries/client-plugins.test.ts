@@ -71,6 +71,7 @@ function buildRefetch(deps: Record<string, unknown>) {
     "async function refetch(url, navigation) {",
     "// A root layout that renders <html>",
     {
+      lastHistoryHref: "",
       debug: () => {},
       createFarmDeploymentRequestHeaders: () => ({}),
       farmDeploymentId: "plugins-test",
@@ -366,7 +367,14 @@ describe("the RSC browser entry and client plugins", () => {
       generateClientEntry(withPlugins),
       "async function navigate(href, action) {",
       "farmNavigateRef.current = navigate;",
-      { location, history, refetch, runFarmNavigationDelegates: async () => false, URL },
+      {
+        lastHistoryHref: location.href,
+        location,
+        history,
+        refetch,
+        runFarmNavigationDelegates: async () => false,
+        URL,
+      },
     )("return navigate;") as (href: string, action: "push" | "replace") => Promise<void>;
 
     await navigate("/notes/2", "push");
@@ -377,9 +385,27 @@ describe("the RSC browser entry and client plugins", () => {
     expect(history.pushState).toHaveBeenCalledWith(null, "", "https://app.test/notes/2");
 
     // Back and forward are navigations too, from a page the browser already left.
-    expect(generateClientEntry(withPlugins)).toContain(
-      "const nav = () => refetch(location.href, { action: 'pop', from: null });",
-    );
+    const pop = extract(
+      generateClientEntry(withPlugins),
+      "const nav = (event) => {",
+      "// Handle browser back/forward",
+      {
+        location,
+        lastHistoryHref: location.href,
+        refetch,
+      },
+    )("return nav;");
+    refetch.mockClear();
+    history.pushState(null, "", "/notes/2#");
+    await pop({ isTrusted: true });
+    expect(refetch).not.toHaveBeenCalled();
+    history.replaceState(null, "", "/notes/2#refresh");
+    await pop({ isTrusted: false });
+    expect(refetch).toHaveBeenCalledWith(location.href, { action: "pop", from: null });
+    refetch.mockClear();
+    history.pushState(null, "", "/notes/2?tab=1");
+    await pop({ isTrusted: true });
+    expect(refetch).toHaveBeenCalledWith(location.href, { action: "pop", from: null });
   });
 
   it("starts hydration hooks around hydrateRoot and reports a failed hydration", () => {

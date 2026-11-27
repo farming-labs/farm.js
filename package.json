@@ -100,6 +100,7 @@
     "@types/better-sqlite3": "^7.6.13",
     "@types/node": "^22.20.5",
     "miniflare": "4.20260710.0",
+    "semver": "7.8.5",
     "supports-color": "^10.2.2",
     "turbo": "^1.11.2",
     "typescript": "^5.3.3"

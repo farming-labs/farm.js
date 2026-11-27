@@ -1,6 +1,6 @@
 {
   "name": "@farm.js/desktop",
-  "version": "0.1.0-beta.8",
+  "version": "0.1.0-beta.9",
   "description": "Desktop shells for Farm.js apps (farm dev --desktop, farm build --desktop). Ships the Electrobun shell.",
   "keywords": [
     "desktop",
@@ -43,7 +43,7 @@
     "vitest": "5.0.5"
   },
   "peerDependencies": {
-    "@farm.js/core": ">=0.1.78 <0.3.0",
+    "@farm.js/core": ">=0.1.78 <0.4.0 || >=0.2.0-beta.0 <0.2.0",
     "electrobun": "^2.0.5"
   },
   "peerDependenciesMeta": {

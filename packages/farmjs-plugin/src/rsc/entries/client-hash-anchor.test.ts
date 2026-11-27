@@ -62,17 +62,17 @@ describe("RSC client navigation and same-document fragment links", () => {
     href: "https://app.test/docs",
   };
 
-  it("lets the browser handle a pure fragment link without refetching", () => {
+  it.each(["#usage", "#"])("lets the browser handle %s without refetching", (fragment) => {
     const history = { pushState: vi.fn() };
     const nav = vi.fn();
     const handleClick = buildHandleClick(location, history, nav);
 
     const event = clickEvent(
       anchor({
-        href: "https://app.test/docs#usage",
+        href: location.href + fragment,
         pathname: "/docs",
         search: "",
-        hash: "#usage",
+        hash: new URL(location.href + fragment).hash,
       }),
     );
     handleClick(event);

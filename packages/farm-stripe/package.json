@@ -1,6 +1,6 @@
 {
   "name": "@farm.js/stripe",
-  "version": "0.1.87",
+  "version": "0.2.0-beta.0",
   "description": "Stripe billing integration for Farm.js",
   "license": "MIT",
   "repository": {
@@ -46,6 +46,6 @@
     "@farm.js/core": "workspace:*"
   },
   "peerDependencies": {
-    "@farm.js/core": ">=0.1.78 <0.3.0"
+    "@farm.js/core": ">=0.1.78 <0.4.0 || >=0.2.0-beta.0 <0.2.0"
   }
 }

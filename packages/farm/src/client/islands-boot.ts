@@ -12,6 +12,7 @@
  * script: a module it shared with the entry, or an import of the entry itself, would change how
  * the entry splits into chunks, and every page that loads the runtime at once would pay for it.
  */
+import { isFarmSameDocumentFragment } from "./navigation-url";
 import type { FarmIslandReplayKind } from "../island";
 
 /** Kept equal to FARM_ISLAND_REPLAYABLE_SELECTOR (island.ts); a test compares them. */
@@ -267,6 +268,7 @@ export function startFarmIslandsBoot(load: () => Promise<unknown> = loadFarmClie
   // It names the island values the page holds, as the router does before islx loads
   // (getFarmIslandValueHeaders): the router's swap keeps them, so the server leaves them out.
   const requestPage = (href: string) => {
+    if (isFarmSameDocumentFragment(href, location.href)) return;
     const scope = window as Window & {
       __FARM_DEPLOYMENT_ID__?: string;
       __FARM_EARLY_NAVIGATION__?: FarmEarlyNavigation;

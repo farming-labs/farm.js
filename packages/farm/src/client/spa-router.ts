@@ -12,6 +12,7 @@ import { getHashTargetElement } from "./hash-target";
 import {
   isFarmBlockedNavigationURL,
   isFarmExternalNavigationURL,
+  isFarmSameDocumentFragment,
   resolveFarmNavigationURL,
 } from "./navigation-url";
 import { applyFarmMetadataToDocument, type NavigationMetadata } from "./metadata-reconciler";
@@ -587,6 +588,7 @@ export class SPARouter {
     if (isFarmLocaleChangeHref(href)) return;
     const url = resolveFarmNavigationURL(href, window.location.href);
     if (isFarmExternalNavigationURL(url, window.location.origin)) return;
+    if (isFarmSameDocumentFragment(url.href, window.location.href)) return;
     if (this.options.shouldUseDocumentNavigation(url.pathname)) return;
     const fullPath = url.pathname + url.search;
     const interceptFrom = window.location.pathname + window.location.search;

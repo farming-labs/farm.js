@@ -1,10 +1,10 @@
 // @vitest-environment jsdom
 
-import { defineRendererClientConformance } from "@farm.js/renderer-tests";
+import { testClient } from "@farm.js/renderer-tests";
 import * as clientRoots from "../renderer/react/client";
 import * as serverRuntime from "../renderer/react/server";
 
-defineRendererClientConformance({
+testClient({
   reconcilesRerenders: true,
   name: "react",
   client: {

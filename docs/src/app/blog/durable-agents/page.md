@@ -478,5 +478,3 @@ restarted.close();
 For production verification, pause a run on the actual deployment, restart it, and answer the saved run ID. Check that the completed lookup is replayed and that the provider receives the same idempotency key if an unfinished refund is retried.
 
 The agent code describes the work. The journal preserves progress. Your chosen host runs it, and Farm Infra supplies the storage, clock, or human decision your app needs.
-
-For the wider framework release, read the [Farm.js 0.2 preview](/blog/0.2).

@@ -1,6 +1,6 @@
 {
   "name": "@farm.js/mcp",
-  "version": "0.1.0-beta.54",
+  "version": "0.1.0-beta.55",
   "description": "Compose Farm.js API routes and standalone tools in one MCP server",
   "keywords": [
     "agents",
@@ -52,7 +52,7 @@
     "vitest": "5.0.5"
   },
   "peerDependencies": {
-    "@farm.js/core": ">=0.1.78 <0.3.0"
+    "@farm.js/core": ">=0.1.78 <0.4.0 || >=0.2.0-beta.0 <0.2.0"
   },
   "engines": {
     "node": ">=22.13.0"

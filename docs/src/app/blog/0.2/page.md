@@ -374,7 +374,7 @@ Open `/islands/leaf` at the address printed by the dev server. Click one planter
 
 ## An agent can read part of a page or wait an hour for an event
 
-For a complete walkthrough, read [Build durable agents with your framework and Farm Infra](/blog/durable-agents). It shows the agent code, how to mount it in an existing app, and how to choose hosted storage, wake-ups, and approvals.
+For a complete walkthrough, read [Build durable agents with your framework and Farm Infra](https://farmjs.dev/blog/durable-agents). It shows the agent code, how to mount it in an existing app, and how to choose hosted storage, wake-ups, and approvals.
 
 Try these against the running docs site:
 

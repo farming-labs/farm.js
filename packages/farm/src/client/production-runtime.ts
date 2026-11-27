@@ -16,7 +16,11 @@ export { installFarmLinkPrefetch } from "./link-prefetch";
 export { readFarmLinkNavigateOptions, targetsCurrentContext } from "./link-navigation";
 export { rememberFarmLinkLocale } from "../i18n/client-state";
 export { createFarmMetadataHeadReconciler, reconcileFarmDocumentHead } from "./document-head";
-export { isFarmBlockedNavigationURL, isFarmExternalNavigationURL } from "./navigation-url";
+export {
+  isFarmBlockedNavigationURL,
+  isFarmExternalNavigationURL,
+  isFarmSameDocumentFragment,
+} from "./navigation-url";
 export { getFarmIslandValueHeaders, keepFarmIslandValues } from "./island-value-protocol";
 export { createClientCancellation } from "../client-cancellation";
 export { applyFarmCacheInvalidations } from "../cache-invalidation";

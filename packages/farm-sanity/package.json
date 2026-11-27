@@ -1,6 +1,6 @@
 {
   "name": "@farm.js/sanity",
-  "version": "0.1.87",
+  "version": "0.2.0-beta.0",
   "description": "Sanity CMS integration for Farm.js",
   "license": "MIT",
   "repository": {
@@ -45,7 +45,7 @@
   },
   "peerDependencies": {
     "@farm.js/content": "workspace:^",
-    "@farm.js/core": ">=0.1.78 <0.3.0",
+    "@farm.js/core": ">=0.1.78 <0.4.0 || >=0.2.0-beta.0 <0.2.0",
     "@sanity/client": "^7.0.0 || ^8.0.0"
   },
   "peerDependenciesMeta": {
