@@ -93,8 +93,9 @@ references unchanged. `--dry-run` prints the package-manager commands without in
 ## Diagnose a project
 
 `farm doctor` probes the running app first and falls back to config and filesystem checks when
-none answers. It is read-only by default and exits non-zero only when a check fails, so it can run
-in CI. `--fix` applies safe additive corrections, such as creating a missing `src/app/layout.tsx`,
+none answers. A completed report exits 0 for success or warnings and 1 for failed checks. In CI,
+use `--json` to read the report. Invalid arguments in JSON mode exit 2 and return
+`error.code` set to `DOCTOR_INVALID_ARGUMENTS`. `--fix` applies safe additive corrections, such as creating a missing `src/app/layout.tsx`,
 and never overwrites application files.
 
 ## Telemetry

@@ -109,7 +109,25 @@ Doctor uses these health rules:
 | ----------- | ------------------------------------------ |
 | `ready`     | No failed or warning checks; exits 0.      |
 | `attention` | At least one warning; exits 0.             |
-| `error`     | At least one failed check; exits non-zero. |
+| `error`     | At least one failed check; exits 1.        |
+
+An invalid invocation of `farm doctor --json` exits 2 before checking or fixing the project.
+Read `error.code` to identify the failure and `error.message` to correct the command.
+For example, `farm doctor --json --timeout 12ms` writes this document to stdout:
+
+```json
+{
+  "schemaVersion": 1,
+  "error": {
+    "code": "DOCTOR_INVALID_ARGUMENTS",
+    "message": "Pass an integer from 1 to 2147483647 milliseconds to `--timeout`."
+  }
+}
+```
+
+`--timeout` takes whole milliseconds from 1 through 2147483647. `--port` takes an
+integer from 1 through 65535. Use `--host` for a hostname or IP address and `--url`
+for an absolute HTTP or HTTPS URL.
 
 This makes a basic CI check straightforward:
 
