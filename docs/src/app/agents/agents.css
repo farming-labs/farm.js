@@ -88,7 +88,7 @@
   line-height: 1.65;
   text-wrap: balance;
 }
-/* Hero actions: Get started, the agent docs, and the agent prompt, in the page's mono button style. */
+/* Hero actions: Get started, and the agent prompt, in the page's mono button style. */
 .agents-cta {
   display: flex;
   flex-wrap: wrap;
@@ -98,7 +98,6 @@
   margin-top: 32px;
 }
 .agents-cta-start,
-.agents-cta-docs,
 .agents-cta-prompt {
   display: inline-flex;
   align-items: center;
@@ -119,7 +118,6 @@
     color 150ms cubic-bezier(0.22, 1, 0.36, 1);
 }
 .agents-cta-start:active,
-.agents-cta-docs:active,
 .agents-cta-prompt:active {
   transform: translateY(1px);
 }
@@ -129,23 +127,7 @@
   background: #ededed;
   color: #080808;
 }
-/* Too narrow for two buttons in a row: one full-width column instead of a ragged stack. */
-@media (max-width: 359px) {
-  .agents-cta {
-    flex-direction: column;
-    align-items: stretch;
-  }
-  .agents-cta > * {
-    justify-content: center;
-  }
-}
-.agents-cta-docs {
-  padding: 0 20px;
-  border-color: rgb(255 255 255 / 0.18);
-  background: #000;
-  color: #ededed;
-}
-:is(.agents-cta-start, .agents-cta-docs) > span {
+.agents-cta-start > span {
   opacity: 0.55;
 }
 .agents-cta-prompt {
@@ -225,10 +207,6 @@
   .agents-cta-start:hover {
     border-color: #fff;
     background: #fff;
-  }
-  .agents-cta-docs:hover {
-    border-color: rgb(255 255 255 / 0.42);
-    background: #0f0f0f;
   }
   .agents-cta-prompt:hover {
     --agents-cta-prompt-bg: #0f0f0f;
