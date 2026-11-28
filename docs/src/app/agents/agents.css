@@ -88,51 +88,160 @@
   line-height: 1.65;
   text-wrap: balance;
 }
-/* Hero signup: the email field and button share one bordered bar in the page's mono style. */
-.agents-signup {
-  max-width: 30rem;
-  margin: 32px auto 0;
-  scroll-margin-top: 80px;
+/* Hero actions: Get started, and the agent prompt, in the page's mono button style. */
+.agents-cta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  margin-top: 32px;
 }
-.agents-signup .agent-waitlist {
-  margin: 0;
-  padding: 0;
-  border: 0;
+.agents-cta-start,
+.agents-cta-prompt {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  min-height: 44px;
+  border: 1px solid;
+  border-radius: 0;
+  font-family: var(--font-graft-mono), monospace;
+  font-size: 11px;
+  font-weight: 400;
+  letter-spacing: 0;
+  text-transform: uppercase;
+  white-space: nowrap;
+  cursor: pointer;
+  transition:
+    background-color 150ms cubic-bezier(0.22, 1, 0.36, 1),
+    border-color 150ms cubic-bezier(0.22, 1, 0.36, 1),
+    color 150ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+.agents-cta-start:active,
+.agents-cta-prompt:active {
+  transform: translateY(1px);
+}
+.agents-cta-start {
+  padding: 0 20px;
+  border-color: #ededed;
+  background: #ededed;
+  color: #080808;
+}
+.agents-cta-start > span {
+  opacity: 0.55;
+}
+.agents-cta-prompt {
+  /* Opaque, so the marks' knockout discs match the button in every state. */
+  --agents-cta-prompt-bg: #000;
+  padding: 0 16px 0 4px;
+  border-color: rgb(255 255 255 / 0.18);
+  background: var(--agents-cta-prompt-bg);
+  color: #ededed;
+}
+/* The marks are laid out spread apart and drawn overlapping toward the middle; hover lets them
+   relax back to their spread positions. Transforms only, so the button never changes width. */
+.agents-cta-marks {
+  display: flex;
+}
+.agents-cta-marks > span {
+  position: relative;
+  display: grid;
+  place-items: center;
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  background: var(--agents-cta-prompt-bg);
+  color: #b7b7b7;
+  transition:
+    transform 140ms cubic-bezier(0.22, 1, 0.36, 1),
+    background-color 150ms cubic-bezier(0.22, 1, 0.36, 1),
+    color 150ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+.agents-cta-marks > span + span {
+  margin-left: 2px;
+}
+.agents-cta-marks > :nth-child(1) {
+  z-index: 3;
+  transform: translateX(9px);
+}
+.agents-cta-marks > :nth-child(2) {
+  z-index: 2;
+}
+.agents-cta-marks > :nth-child(3) {
+  z-index: 1;
+  transform: translateX(-9px);
+}
+.agents-cta-prompt:is(:focus-visible, [data-sw-state="hover"], [data-sw-state="press"])
+  .agents-cta-marks
+  > span {
+  color: #ededed;
+  transform: none;
+  transition-duration: 180ms;
+}
+.agents-cta-marks svg {
+  width: 13px;
+  height: 13px;
+}
+/* Every label sits in one cell, so the copied state never changes the button's width. */
+.agents-cta-labels {
+  display: grid;
   text-align: left;
 }
-.agents-signup .agent-waitlist label {
-  position: absolute;
-  width: 1px;
-  height: 1px;
-  overflow: hidden;
-  clip-path: inset(50%);
-  white-space: nowrap;
+.agents-cta-labels > span {
+  grid-area: 1 / 1;
+  visibility: hidden;
 }
-.agents-signup .agent-waitlist-row {
-  flex-direction: row;
-  gap: 4px;
-  padding: 4px;
-  border: 1px solid var(--farm-line);
-  background: #050505;
-  transition: border-color 160ms;
+.agents-cta-labels > [data-active] {
+  visibility: visible;
 }
-.agents-signup .agent-waitlist-row:focus-within {
-  border-color: rgb(255 255 255 / 0.4);
+.agents-cta-icon {
+  width: 14px;
+  height: 14px;
+  color: #929292;
+  transition: color 150ms cubic-bezier(0.22, 1, 0.36, 1);
 }
-.agents-signup .agent-waitlist input {
-  border: 0;
-  background: transparent;
-  font-size: 15px;
+.agents-cta-prompt[data-state="copied"] .agents-cta-icon {
+  color: #ededed;
 }
-.agents-signup .agent-waitlist input:focus-visible {
-  outline: none;
+@media (hover: hover) and (pointer: fine) {
+  .agents-cta-start:hover {
+    border-color: #fff;
+    background: #fff;
+  }
+  .agents-cta-prompt:hover {
+    --agents-cta-prompt-bg: #0f0f0f;
+    border-color: rgb(255 255 255 / 0.42);
+  }
+  .agents-cta-prompt:hover .agents-cta-marks > span {
+    color: #ededed;
+    transform: none;
+    transition-duration: 180ms;
+  }
+  .agents-cta-prompt:hover .agents-cta-icon {
+    color: #ededed;
+  }
 }
-.agents-signup .agent-waitlist button {
-  min-width: 0;
-  padding: 0 18px;
+/* The hero's SelectionWire demo drags a wire into the prompt button and the cursor clicks it.
+   These states are the demo's only; nothing is copied. */
+.agents-cta-prompt[data-sw-state="target"] {
+  outline: 1px dashed rgb(255 255 255 / 0.4);
+  outline-offset: 3px;
 }
-.agents-signup :is(.agent-waitlist-note, .agent-waitlist-status) {
-  text-align: center;
+.agents-cta-prompt:is([data-sw-state="linked"], [data-sw-state="on"]) {
+  outline: 1px solid rgb(255 255 255 / calc(0.6 * var(--sw-fade, 1)));
+  outline-offset: 3px;
+}
+.agents-cta-prompt[data-sw-state="hover"] {
+  --agents-cta-prompt-bg: #0f0f0f;
+  border-color: rgb(255 255 255 / 0.42);
+  outline: 1px solid #fff;
+  outline-offset: 3px;
+}
+.agents-cta-prompt[data-sw-state="press"] {
+  --agents-cta-prompt-bg: #1f1f1f;
+  border-color: rgb(255 255 255 / 0.42);
+  outline: 1px solid #fff;
+  outline-offset: 3px;
 }
 .agent-artwork {
   position: relative;
@@ -418,16 +527,6 @@
   .agents-intro {
     font-size: 14px;
   }
-  .agents-signup .agent-waitlist input {
-    min-height: 44px;
-    padding: 8px 10px;
-    font-size: 16px;
-  }
-  .agents-signup .agent-waitlist button {
-    min-height: 44px;
-    padding: 0 12px;
-    font-size: 9px;
-  }
   .agent-art-caption {
     left: 24px;
     right: 24px;
@@ -468,6 +567,9 @@
   .agent-ascii-row {
     animation: none;
     opacity: 0.65;
+  }
+  .agents-cta-marks > span {
+    transition-property: background-color, color;
   }
 }
 
