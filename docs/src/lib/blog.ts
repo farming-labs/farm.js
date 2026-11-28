@@ -255,9 +255,10 @@ export const durableAgentsSections = [
 ] as const satisfies BlogSections;
 
 /** Every post. The index features the first and lists the rest. */
+// The index features the first entry, so the 0.2 preview stays pinned above newer posts.
 export const posts: readonly { post: BlogPost; sections: BlogSections }[] = [
-  { post: durableAgentsPost, sections: durableAgentsSections },
   { post: releasePreviewPost, sections: releasePreviewSections },
+  { post: durableAgentsPost, sections: durableAgentsSections },
   { post: rendererPost, sections: rendererSections },
   { post: agentScanPost, sections: agentScanSections },
   { post: nativeInternalsPost, sections: nativeInternalsSections },

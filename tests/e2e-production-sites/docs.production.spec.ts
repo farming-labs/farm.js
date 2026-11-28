@@ -112,12 +112,12 @@ test("blog connects the index, article, contents, and Markdown mirror", async ({
   await expect(page.locator(".blog-featured h3 a > span")).toHaveCSS("display", "inline");
   await expect(page.locator(".blog-featured h3")).toHaveCSS("text-wrap", "balance");
   await expect(page.getByRole("link", { name: /Follow the releases/i })).toHaveCount(0);
-  // The index features the newest post and lists the rest, so these follow the collection.
-  await expect(page.locator(".blog-featured h3 a")).toHaveAttribute("href", "/blog/durable-agents");
+  // The index features the first post in the collection and lists the rest.
+  await expect(page.locator(".blog-featured h3 a")).toHaveAttribute("href", "/blog/0.2");
   await expect(page.locator(".blog-featured .blog-post-meta time")).toHaveText("Nov 2026");
   await expect(page.locator(".blog-featured .blog-post-meta time")).toHaveAttribute(
     "datetime",
-    "2026-11-27",
+    "2026-11-26",
   );
   await expect(page.locator(".blog-featured .blog-post-meta time")).toHaveCSS(
     "font-family",
@@ -148,7 +148,7 @@ test("blog connects the index, article, contents, and Markdown mirror", async ({
   await expect(page.locator(".blog-featured-bottom img")).toHaveAttribute("width", "36");
   await expect(page.locator(".blog-author small")).toHaveCSS("margin-top", "0px");
   await expect(page.locator(".blog-read-link")).toHaveText("Read article");
-  await expect(page.locator(".blog-read-link")).toHaveAttribute("href", "/blog/durable-agents");
+  await expect(page.locator(".blog-read-link")).toHaveAttribute("href", "/blog/0.2");
   await expect(page.locator(".blog-explore a")).toHaveCount(2);
   await expect(page.locator(".blog-explore a").first()).toHaveAttribute(
     "href",
@@ -416,12 +416,15 @@ test("blog enhancements survive client navigation, re-entry, and back/forward wi
     };
   });
 
-  // Each page has its own header artwork: the index features the newest post's scripted figure,
-  // and the launch post keeps the release reel.
+  // Each page has its own release reel: the index features the 0.2 preview's, and the launch post
+  // keeps its own.
   async function checkArtwork(where: "index" | "article") {
     expect(await page.evaluate(() => Reflect.get(window, "blogNavigationDocument"))).toBe(true);
     if (where === "index") {
-      await expect(page.locator(".blog-featured [data-figure]")).toHaveAttribute("data-ready", "");
+      await expect(page.locator(".blog-featured > .blog-release-art")).toHaveAttribute(
+        "data-motion",
+        "running",
+      );
     } else {
       // The reel pauses when it scrolls out of view, and the post list sits below the fold, so
       // bring it on screen before asking whether it is running.
@@ -1188,10 +1191,10 @@ for (const width of [320, 390, 768]) {
       await page.goto("/blog");
       await expect(page.getByRole("heading", { level: 1 })).toBeVisible();
       await page.evaluate(() => document.fonts.ready);
-      // The featured card's figure reads without script and stays inside the card.
+      // The featured card's artwork renders without script and stays inside the card.
       expect(
         await page
-          .locator(".blog-featured [data-figure] .bf-stage")
+          .locator(".blog-featured > .blog-release-art")
           .first()
           .evaluate((stage) => {
             const art = stage.getBoundingClientRect();
