@@ -40,6 +40,64 @@
     }
   ],
   "paths": {
+    "/api/examples/quote": {
+      "get": {
+        "operationId": "getExampleQuote",
+        "summary": "Calculate a canvas bag price for the checkout example",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "quantity",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 20
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Quote in US cents",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": ["item", "currency", "quantity", "unitPriceCents", "totalCents"],
+                  "properties": {
+                    "item": {
+                      "type": "string"
+                    },
+                    "currency": {
+                      "const": "USD"
+                    },
+                    "quantity": {
+                      "type": "integer"
+                    },
+                    "unitPriceCents": {
+                      "type": "integer"
+                    },
+                    "totalCents": {
+                      "type": "integer"
+                    }
+                  }
+                },
+                "example": {
+                  "item": "Canvas bag",
+                  "currency": "USD",
+                  "quantity": 3,
+                  "unitPriceCents": 1200,
+                  "totalCents": 3600
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "The quantity is missing or is outside the allowed range of integers."
+          }
+        }
+      }
+    },
     "/api/docs": {
       "get": {
         "tags": ["Docs"],

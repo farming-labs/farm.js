@@ -11,6 +11,10 @@ Releases, engineering notes, and ideas.
 
 Build a refund agent that waits for approval and resumes after a restart. Keep your agent framework and web app, then choose Farm Infra storage, wake-ups, and approvals.
 
+## [Farm.js 0.2 preview. From an API route to a native screen.](/blog/0.2)
+
+What changed since Farm.js 0.1, from backend-only apps and Rust endpoints to React rendering, native screens, and Farm Infra.
+
 ## [Build your own renderer, build your own full-stack framework](/blog/bring-your-own-renderer)
 
 A step-by-step guide to plugging any UI library into Farm: a descriptor, three small modules, hooks over Farm's stores, islands, and two ways to use ui-sdk components. Every snippet comes from a working app you can clone, farming-labs/leaf.

@@ -8,6 +8,15 @@ import {
 import { createHighlighterCoreSync } from "shiki/core";
 import { createJavaScriptRegexEngine } from "shiki/engine/javascript";
 import bash from "shiki/langs/bash.mjs";
+import dotenv from "shiki/langs/dotenv.mjs";
+import html from "shiki/langs/html.mjs";
+import http from "shiki/langs/http.mjs";
+import javascript from "shiki/langs/javascript.mjs";
+import json from "shiki/langs/json.mjs";
+import jsx from "shiki/langs/jsx.mjs";
+import markdown from "shiki/langs/markdown.mjs";
+import rust from "shiki/langs/rust.mjs";
+import tsx from "shiki/langs/tsx.mjs";
 import typescript from "shiki/langs/typescript.mjs";
 import vesper from "shiki/themes/vesper.mjs";
 import { AgentWaitlist } from "./components/agents/waitlist";
@@ -20,7 +29,7 @@ import { getSectionId } from "./lib/blog";
 // Load the blog's grammars once, with the same dark palette as the docs.
 const highlighter = createHighlighterCoreSync({
   themes: [vesper],
-  langs: [bash, typescript],
+  langs: [bash, dotenv, html, http, javascript, json, jsx, markdown, rust, tsx, typescript],
   engine: createJavaScriptRegexEngine(),
 });
 const languages = new Set(highlighter.getLoadedLanguages());
@@ -64,17 +73,30 @@ function Code({ children, className, ...props }: ComponentPropsWithoutRef<"code"
   );
 }
 
+const LANGUAGE_LABELS = new Map([
+  ["bash", "Terminal"],
+  ["sh", "Terminal"],
+  ["ts", "TypeScript"],
+  ["typescript", "TypeScript"],
+  ["tsx", "React (TSX)"],
+  ["js", "JavaScript"],
+  ["javascript", "JavaScript"],
+  ["jsx", "React (JSX)"],
+  ["json", "JSON"],
+  ["rust", "Rust"],
+  ["http", "HTTP"],
+  ["html", "HTML"],
+  ["dotenv", "Environment"],
+  ["md", "Markdown"],
+  ["markdown", "Markdown"],
+]);
+
 function Pre({ children, ...props }: ComponentPropsWithoutRef<"pre">) {
   const code = isValidElement<{ className?: string; children?: unknown }>(children)
     ? children.props
     : undefined;
   const language = code?.className?.match(/language-([^\s]+)/)?.[1];
-  const label =
-    language === "bash" || language === "sh"
-      ? "Terminal"
-      : language === "ts" || language === "typescript"
-        ? "TypeScript"
-        : "Code";
+  const label = LANGUAGE_LABELS.get(language ?? "") ?? "Code";
   return (
     <div className="blog-code-block">
       <div className="blog-code-toolbar">

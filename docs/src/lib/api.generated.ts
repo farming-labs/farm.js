@@ -7,6 +7,7 @@
 
 import type { POST as POST_agents_check } from "../app/api/agents/check/route";
 import type { GET as GET_cron_heartbeat } from "../app/api/cron/heartbeat/route";
+import type { GET as GET_examples_quote } from "../app/api/examples/quote/route";
 import type { GET as GET_stats } from "../app/api/stats/route";
 import type { POST as POST_telemetry_dashboard_session } from "../app/api/telemetry/dashboard/session/route";
 import type { POST as POST_telemetry_v1_events } from "../app/api/telemetry/v1/events/route";
@@ -23,6 +24,11 @@ export type APIRouter = {
   cron: {
     heartbeat: {
       get: typeof GET_cron_heartbeat;
+    };
+  };
+  examples: {
+    quote: {
+      get: typeof GET_examples_quote;
     };
   };
   stats: {
@@ -56,6 +62,10 @@ export const apiRoutes = [
   },
   {
     path: "/api/cron/heartbeat",
+    methods: ["GET"],
+  },
+  {
+    path: "/api/examples/quote",
     methods: ["GET"],
   },
   {

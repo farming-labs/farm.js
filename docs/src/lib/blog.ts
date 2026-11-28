@@ -178,6 +178,54 @@ export const rendererSections = [
   ["what-building-leaf-fixed-in-farm", "What leaf fixed"],
 ] as const satisfies BlogSections;
 
+export const releasePreviewPost: BlogPost = {
+  href: "/blog/0.2",
+  title: "Farm.js 0.2 preview. From an API route to a native screen.",
+  description:
+    "What changed since Farm.js 0.1, from backend-only apps and Rust endpoints to React rendering, native screens, and Farm Infra.",
+  ...AUTHOR,
+  date: "Nov 2026",
+  dateTime: "2026-11-26",
+  category: "Release preview",
+};
+
+export const releasePreviewSections = [
+  [
+    "try-the-checkout-example",
+    "Follow one order through the code",
+    "Follow one order through the code",
+  ],
+  ["start-with-just-an-api", "Backend-only apps", "Start with just an API"],
+  [
+    "put-one-compute-heavy-endpoint-in-rust",
+    "Rust routes with Polyroute",
+    "Put one compute-heavy endpoint in Rust",
+  ],
+  ["give-one-route-a-native-screen", "Mobile and desktop", "Give one route a native screen"],
+  [
+    "send-the-page-as-html-hydrate-the-controls-that-need-it",
+    "Islands and React Flight",
+    "Send the page as HTML. Hydrate the controls that need it.",
+  ],
+  [
+    "what-the-farm-react-compiler-does-on-a-click",
+    "React compiler",
+    "What the Farm React compiler does on a click",
+  ],
+  ["bring-your-own-renderer", "Custom renderers", "Bring your own renderer"],
+  [
+    "an-agent-can-read-part-of-a-page-or-wait-an-hour-for-an-event",
+    "Durable agents",
+    "An agent can read part of a page or wait an hour for an event",
+  ],
+  ["farm-infra", "Farm Infra", "Farm Infra, from a checkout preview to a production incident"],
+  [
+    "the-rest-of-the-release-matters-when-you-operate-the-app",
+    "Other improvements",
+    "Other improvements",
+  ],
+] as const satisfies BlogSections;
+
 export const durableAgentsPost: BlogPost = {
   href: "/blog/durable-agents",
   title: "Build durable agents with your framework and Farm Infra",
@@ -209,6 +257,7 @@ export const durableAgentsSections = [
 /** Every post. The index features the first and lists the rest. */
 export const posts: readonly { post: BlogPost; sections: BlogSections }[] = [
   { post: durableAgentsPost, sections: durableAgentsSections },
+  { post: releasePreviewPost, sections: releasePreviewSections },
   { post: rendererPost, sections: rendererSections },
   { post: agentScanPost, sections: agentScanSections },
   { post: nativeInternalsPost, sections: nativeInternalsSections },
