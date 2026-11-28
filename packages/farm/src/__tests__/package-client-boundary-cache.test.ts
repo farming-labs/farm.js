@@ -536,6 +536,42 @@ describe("incremental dev replans", () => {
     expect(replanned).toEqual(await fresh());
   });
 
+  it("maps each file plans read to its watched path once, however many route modules read it", async () => {
+    const { root } = createProject();
+    const config = await resolveConfig({ root, srcDir: "src" }, "development");
+    const routeManager = new RouteManager(config);
+    await routeManager.discoverRoutes();
+    routeManager.trackSourceChanges();
+    // The layout, the home page, the docs page and both server-utils pages read ui-kit's entry.
+    const uiKit = path.join(root, "node_modules", "ui-kit", "dist", "index.js");
+    const segment = `${path.sep}node_modules${path.sep}`;
+    const lastIndexOf = String.prototype.lastIndexOf;
+    let lookups = 0;
+    vi.spyOn(String.prototype, "lastIndexOf").mockImplementation(function (
+      this: string,
+      ...args: [string, number?]
+    ) {
+      if (args[0] === segment && String(this) === uiKit) lookups++;
+      return Reflect.apply(lastIndexOf, this, args);
+    });
+    routeManager.generateClientManifest(root);
+    expect(lookups).toBe(1);
+
+    // The docs and blog pages replan; the docs page reads ui-kit's entry again.
+    const clientNav = path.join(root, "src", "components", "client-nav.tsx");
+    fs.writeFileSync(
+      clientNav,
+      '"use client";\nimport { Icon1 } from "ui-kit/icons";\nexport const island = "idle";\nexport function ClientNav() { return <Icon1 />; }\n',
+    );
+    routeManager.noteSourceChange(clientNav, "update");
+    const replanned = routeManager.regenerateClientManifest(root);
+    vi.restoreAllMocks();
+    expect(lookups).toBe(1);
+    const manager = new RouteManager(config);
+    await manager.discoverRoutes();
+    expect(replanned).toEqual(manager.generateClientManifest(root));
+  });
+
   it("replans every route module without tracking", async () => {
     const { root, routeManager } = await plannedProject();
     const config = await resolveConfig({ root, srcDir: "src" }, "development");
