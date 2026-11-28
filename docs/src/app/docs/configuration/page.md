@@ -384,6 +384,10 @@ or under the pointer, or a pointer or focus on any link) or, at the latest, on t
 navigation. A navigation that cannot load the table, such as one from a page whose deployment no
 longer serves it, loads the next page as a document.
 
+Farm's hydration analysis follows path aliases from `tsconfig.json` (or `jsconfig.json`),
+including relative `extends` chains. Its alias cache tracks those config files so editing,
+removing, or creating an inherited config refreshes the next source analysis.
+
 Farm aliases `@/` to `srcDir`. Aliases in `vite.resolve.alias` come before Farm's in dev and in
 both builds, and Vite uses the first one that matches, so an app alias for part of `@/` wins for
 the imports it matches and Farm's `@` handles the rest. For example, this sends

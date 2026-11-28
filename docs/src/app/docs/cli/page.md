@@ -28,6 +28,27 @@ React is the default renderer. `--renderer preact`, `--renderer solid`, `--rende
 `--renderer svelte` are available with the Basic starter; integration starters currently target React. See
 [Renderers](/docs/renderers) for setup and feature compatibility.
 
+## Discover commands from an agent
+
+Run `farm agent commands --json` to read the built-in commands and flags from the
+installed CLI. Discovery works outside a Farm project and does not load project
+configuration. For example, list the commands that accept `--json`:
+
+```bash
+farm agent commands --json | jq -r '.commands[] | select(any(.options[]; .long == "--json")) | .path | join(" ")'
+```
+
+The result contains `schemaVersion` (currently `1`), `cliVersion`, and a flat
+`commands` array. Each entry has a tokenized `path` (for example,
+`["schema", "check"]`), a description, aliases for its final token, positional
+arguments with `required` and `variadic` indicators, and options. Each option
+includes its flags, description, short or long spelling when available, and
+whether its value is required, optional, or absent. Consumers should accept
+additional fields in version 1. Project-specific commands such as
+`farm <plugin> migrate` are outside the built-in catalog.
+
+Run `farm agent commands` for a plain-text list.
+
 ## Common commands
 
 | Command                               | Purpose                                                               |
@@ -235,7 +256,7 @@ Pass `--port` or `--url` when the app runs somewhere else. An explicitly request
 
 Project checks cover Node and pnpm support, package-manager and workspace resolution, generated type freshness, selected renderer and integration entrypoints, routing, deployment, storage, and schedules. The command is read-only by default: it does not install dependencies, run package-manager scripts, update generated files, or contact providers. Registry access is opt-in.
 
-The command exits with a non-zero status only when a check fails. Warnings keep a zero exit status, so CI can distinguish broken configuration from production-readiness advice. `--json` prints the complete report without terminal formatting and preserves the same exit-code contract.
+A completed check exits 0 for a ready report or warnings and 1 for failed checks. With `--json`, an invalid invocation exits 2 and prints an error object with code `DOCTOR_INVALID_ARGUMENTS` on stdout.
 
 `farm doctor --fix` applies only corrections Farm can make without replacing application code. Today that means creating a missing `src/app/layout.tsx`; an existing file is never overwritten. The command reruns diagnostics after each correction and reports exactly which files it created.
 

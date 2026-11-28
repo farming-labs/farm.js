@@ -156,7 +156,8 @@ and never reach the browser.
 - **`dedupe`**: packages that must resolve to one copy in the app, passed to Vite's
   `resolve.dedupe`. List a runtime whose hooks keep module-level state.
 - **`optimizeDeps`**: packages Vite pre-bundles in development before the first page load. Farm adds
-  the `client` module itself when it names a package.
+  the `client` module itself when it names a package, and `@farm.js/core/renderer-client`, which
+  your bindings import.
 - **`buildConcurrency`**: `"parallel"` (the default) or `"serial"`. A production build compiles the
   browser and server graphs at the same time. Set `"serial"` when your compiler plugin keeps
   process-global mutable caches; the official Vue renderer does, because `@vitejs/plugin-vue` shares

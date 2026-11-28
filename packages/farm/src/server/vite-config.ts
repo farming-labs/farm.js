@@ -80,6 +80,11 @@ export function getFarmClientOptimizeDepsInclude(renderer?: FarmRenderer, root?:
       isInstalledPackage(root, renderer.client)
         ? [renderer.client]
         : []),
+      // Farm's renderer API, which a renderer's bindings import. An app's components reach it only
+      // through them, from files Vite's scan may not read, such as a custom renderer's own format.
+      // Served as source from a linked renderer, its imports were found on the first page request,
+      // and Vite bundled again and reloaded the page while it loaded.
+      ...(renderer && !isReactRenderer(renderer) ? ["@farm.js/core/renderer-client"] : []),
       // The islands runtime of a renderer that declares `islands`, which only Farm's entry imports.
       ...(renderer && !isReactRenderer(renderer) && getFarmRendererCapabilities(renderer).islands
         ? [

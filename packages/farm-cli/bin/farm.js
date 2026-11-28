@@ -12,7 +12,7 @@ try {
   }, 10_000).unref();
 } catch {}
 
-const { Command, program } = require("commander");
+const { Command, CommanderError, program } = require("commander");
 const { version } = require("../package.json");
 
 const banner = `
@@ -89,7 +89,7 @@ function telemetryDeployTarget(commandPath, options) {
 
 program.hook("preAction", (_command, actionCommand) => {
   const commandPath = telemetryCommandPath(actionCommand);
-  if (commandPath.startsWith("telemetry")) return;
+  if (commandPath.startsWith("telemetry") || commandPath === "agent:commands") return;
   const { resolveFarmTelemetryCommand, trackFarmCommand } = require("../dist/telemetry.js");
   const command = resolveFarmTelemetryCommand(commandPath);
   if (!command) return;
@@ -472,8 +472,43 @@ schemaCommand
     process.stdout.write(`${output}\n`, () => process.exit(report.ok ? 0 : 1));
   });
 
-program
-  .command("doctor")
+class DoctorCommand extends Command {
+  error(message, options) {
+    if (this.opts().json) {
+      throw new CommanderError(2, "DOCTOR_INVALID_ARGUMENTS", message);
+    }
+    super.error(message, options);
+  }
+}
+
+function parseDoctorProbeOptions(options) {
+  for (const key of ["root", "config"]) {
+    if (options[key] === "") throw new Error(`Pass a path to \`--${key}\`.`);
+  }
+  const timeoutMs = Number(options.timeout);
+  if (!/^\d+$/.test(options.timeout) || timeoutMs < 1 || timeoutMs > 2_147_483_647) {
+    throw new Error("Pass an integer from 1 to 2147483647 milliseconds to `--timeout`.");
+  }
+  const port = options.port === undefined ? undefined : parsePortOption(options.port);
+  if (
+    options.url !== undefined &&
+    (!/^https?:\/\//i.test(options.url) || !URL.canParse(options.url))
+  ) {
+    throw new Error("Pass an absolute HTTP or HTTPS URL to `--url`.");
+  }
+  if (options.host !== undefined) {
+    const host = require("node:net").isIPv6(options.host) ? `[${options.host}]` : options.host;
+    if (/[\s/\\@?#]/.test(host) || !URL.canParse(`http://${host}:80`)) {
+      throw new Error("Pass a hostname or IP address to `--host`. Set the port with `--port`.");
+    }
+  }
+  return { timeoutMs, port };
+}
+
+const doctorCommand = new DoctorCommand("doctor").copyInheritedSettings(program);
+program.addCommand(doctorCommand);
+doctorCommand
+  .allowExcessArguments(false)
   .description("Inspect project configuration and the running Farm runtime")
   .option("-r, --root <root>", "Root directory", process.cwd())
   .option("-c, --config <config>", "Path to farm config file")
@@ -486,22 +521,23 @@ program
   .option("--timeout <ms>", "Live runtime probe timeout in milliseconds", "1200")
   .option("--json", "Print machine-readable JSON")
   .action(async (options) => {
+    let probe;
+    try {
+      probe = parseDoctorProbeOptions(options);
+    } catch (error) {
+      doctorCommand.error(error.message);
+    }
     try {
       const { formatFarmDoctorReport, runFarmDoctor } = require("../dist/index.js");
-      const timeoutMs = Number.parseInt(options.timeout, 10);
-      if (!Number.isFinite(timeoutMs) || timeoutMs <= 0) {
-        throw new Error("--timeout must be a positive number of milliseconds.");
-      }
       const report = await runFarmDoctor({
         root: options.root,
         configPath: options.config,
-        port: options.port,
+        ...probe,
         host: options.host,
         url: options.url,
         offline: options.offline,
         registry: options.registry,
         fix: options.fix,
-        timeoutMs,
       });
       console.log(options.json ? JSON.stringify(report, null, 2) : formatFarmDoctorReport(report));
       if (report.health === "error") process.exitCode = 1;
@@ -513,7 +549,50 @@ program
 
 const agentCommand = program
   .command("agent")
-  .description("Check how AI agents can read and use a Farm app");
+  .description("Discover Farm CLI commands and check how agents can use an app");
+
+function listCommands(parent, path = []) {
+  return parent.commands.flatMap((command) => {
+    const commandPath = [...path, command.name()];
+    const entry = {
+      path: commandPath,
+      description: command.description(),
+      aliases: command.aliases(),
+      arguments: command.registeredArguments.map((argument) => ({
+        name: argument.name(),
+        required: argument.required,
+        variadic: argument.variadic,
+      })),
+      options: command
+        .createHelp()
+        .visibleOptions(command)
+        .map((option) => ({
+          flags: option.flags,
+          long: option.long,
+          short: option.short,
+          value: option.required ? "required" : option.optional ? "optional" : "none",
+          description: option.description,
+        })),
+    };
+    return [entry, ...listCommands(command, commandPath)];
+  });
+}
+
+agentCommand
+  .command("commands")
+  .description("List the built-in commands and flags in this Farm CLI")
+  .option("--json", "Print the versioned command catalog as JSON")
+  .allowExcessArguments(false)
+  .action((options) => {
+    const commands = listCommands(program);
+    if (options.json) {
+      console.log(JSON.stringify({ schemaVersion: 1, cliVersion: version, commands }));
+    } else {
+      for (const command of commands) {
+        console.log(`farm ${command.path.join(" ")}  ${command.description}`);
+      }
+    }
+  });
 
 agentCommand
   .command("check [url]")
@@ -1056,6 +1135,13 @@ async function dispatchSchemaMigrate() {
 dispatchSchemaMigrate()
   .then((handled) => (handled ? undefined : program.parseAsync()))
   .catch((error) => {
+    if (error instanceof CommanderError && error.code === "DOCTOR_INVALID_ARGUMENTS") {
+      console.log(
+        JSON.stringify({ schemaVersion: 1, error: { code: error.code, message: error.message } }),
+      );
+      process.exitCode = error.exitCode;
+      return;
+    }
     console.error("Farm CLI failed:", error);
     process.exitCode = 1;
   });
