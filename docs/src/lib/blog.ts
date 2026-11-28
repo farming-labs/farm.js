@@ -190,7 +190,11 @@ export const releasePreviewPost: BlogPost = {
 };
 
 export const releasePreviewSections = [
-  ["try-the-checkout-example", "Follow one order through the code"],
+  [
+    "try-the-checkout-example",
+    "Follow one order through the code",
+    "Follow one order through the code",
+  ],
   ["start-with-just-an-api", "Backend-only apps", "Start with just an API"],
   [
     "put-one-compute-heavy-endpoint-in-rust",
@@ -217,8 +221,8 @@ export const releasePreviewSections = [
   ["farm-infra", "Farm Infra", "Farm Infra, from a checkout preview to a production incident"],
   [
     "the-rest-of-the-release-matters-when-you-operate-the-app",
-    "Operating a Farm app",
-    "The rest of the release matters when you operate the app",
+    "Other improvements",
+    "Other improvements",
   ],
 ] as const satisfies BlogSections;
 
@@ -253,6 +257,7 @@ export const durableAgentsSections = [
 /** Every post. The index features the first and lists the rest. */
 export const posts: readonly { post: BlogPost; sections: BlogSections }[] = [
   { post: durableAgentsPost, sections: durableAgentsSections },
+  { post: releasePreviewPost, sections: releasePreviewSections },
   { post: rendererPost, sections: rendererSections },
   { post: agentScanPost, sections: agentScanSections },
   { post: nativeInternalsPost, sections: nativeInternalsSections },
