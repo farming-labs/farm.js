@@ -28,6 +28,27 @@ React is the default renderer. `--renderer preact`, `--renderer solid`, `--rende
 `--renderer svelte` are available with the Basic starter; integration starters currently target React. See
 [Renderers](/docs/renderers) for setup and feature compatibility.
 
+## Discover commands from an agent
+
+Run `farm agent commands --json` to read the built-in commands and flags from the
+installed CLI. Discovery works outside a Farm project and does not load project
+configuration. For example, list the commands that accept `--json`:
+
+```bash
+farm agent commands --json | jq -r '.commands[] | select(any(.options[]; .long == "--json")) | .path | join(" ")'
+```
+
+The result contains `schemaVersion` (currently `1`), `cliVersion`, and a flat
+`commands` array. Each entry has a tokenized `path` (for example,
+`["schema", "check"]`), a description, aliases for its final token, positional
+arguments with `required` and `variadic` indicators, and options. Each option
+includes its flags, description, short or long spelling when available, and
+whether its value is required, optional, or absent. Consumers should accept
+additional fields in version 1. Project-specific commands such as
+`farm <plugin> migrate` are outside the built-in catalog.
+
+Run `farm agent commands` for a plain-text list.
+
 ## Common commands
 
 | Command                               | Purpose                                                               |

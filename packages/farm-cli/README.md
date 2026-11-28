@@ -41,6 +41,9 @@ React is the default renderer. `--skip-install` writes the files without install
 
 ## Commands
 
+Agents can run `farm agent commands --json` outside a project to discover the installed CLI's
+built-in commands, arguments, and options. See [The CLI command catalog](https://farmjs.dev/docs/cli#discover-commands-from-an-agent) for the JSON contract.
+
 | Command                           | What it does                                                                     |
 | --------------------------------- | -------------------------------------------------------------------------------- |
 | `farm dev`                        | Start the development server. `--port`, `--host`, and `--cron` are available.    |

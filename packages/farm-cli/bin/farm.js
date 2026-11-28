@@ -89,7 +89,7 @@ function telemetryDeployTarget(commandPath, options) {
 
 program.hook("preAction", (_command, actionCommand) => {
   const commandPath = telemetryCommandPath(actionCommand);
-  if (commandPath.startsWith("telemetry")) return;
+  if (commandPath.startsWith("telemetry") || commandPath === "agent:commands") return;
   const { resolveFarmTelemetryCommand, trackFarmCommand } = require("../dist/telemetry.js");
   const command = resolveFarmTelemetryCommand(commandPath);
   if (!command) return;
@@ -513,7 +513,50 @@ program
 
 const agentCommand = program
   .command("agent")
-  .description("Check how AI agents can read and use a Farm app");
+  .description("Discover Farm CLI commands and check how agents can use an app");
+
+function listCommands(parent, path = []) {
+  return parent.commands.flatMap((command) => {
+    const commandPath = [...path, command.name()];
+    const entry = {
+      path: commandPath,
+      description: command.description(),
+      aliases: command.aliases(),
+      arguments: command.registeredArguments.map((argument) => ({
+        name: argument.name(),
+        required: argument.required,
+        variadic: argument.variadic,
+      })),
+      options: command
+        .createHelp()
+        .visibleOptions(command)
+        .map((option) => ({
+          flags: option.flags,
+          long: option.long,
+          short: option.short,
+          value: option.required ? "required" : option.optional ? "optional" : "none",
+          description: option.description,
+        })),
+    };
+    return [entry, ...listCommands(command, commandPath)];
+  });
+}
+
+agentCommand
+  .command("commands")
+  .description("List the built-in commands and flags in this Farm CLI")
+  .option("--json", "Print the versioned command catalog as JSON")
+  .allowExcessArguments(false)
+  .action((options) => {
+    const commands = listCommands(program);
+    if (options.json) {
+      console.log(JSON.stringify({ schemaVersion: 1, cliVersion: version, commands }));
+    } else {
+      for (const command of commands) {
+        console.log(`farm ${command.path.join(" ")}  ${command.description}`);
+      }
+    }
+  });
 
 agentCommand
   .command("check [url]")

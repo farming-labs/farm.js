@@ -585,6 +585,9 @@ A static page any middleware guards renders on request. On Vercel, a middleware 
 it may import only web APIs and the Edge runtime's Node modules (`async_hooks`, `events`, `buffer`,
 `assert`, `util`), and the build stops on any other Node import.
 
+Use `farm agent commands --json` to discover the installed CLI's built-in commands before
+choosing flags. For example, look up `["doctor"]` in `commands[].path` for its options.
+
 Current diagnostic and migration commands include:
 
 ```bash
