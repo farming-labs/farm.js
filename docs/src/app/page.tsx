@@ -59,6 +59,8 @@ import {
   SiteFooter as Footer,
 } from "../components/site-chrome";
 import { BenchmarkSection } from "../components/home/benchmark-section";
+import { RuntimeBenchmarkSection } from "../components/home/runtime-section";
+import { compilerSwapSpeedup } from "../lib/runtime-benchmarks";
 import { HeroTitle } from "../components/home/hero-title";
 import {
   HighlightedCode,
@@ -1151,8 +1153,10 @@ function DeveloperExperienceGrid() {
       <FeatureCell
         body={
           <>
-            Farm prepares safe state updates at build time and updates the DOM directly. React
-            handles anything the compiler cannot safely optimize.
+            Farm prepares safe state updates at build time and updates the DOM directly, so a row
+            swap runs{" "}
+            <span className="font-mono font-bold text-white">{compilerSwapSpeedup}× faster</span>{" "}
+            than plain React. React handles anything the compiler cannot safely optimize.
           </>
         }
         className="border-t border-white/12 lg:border-l"
@@ -1819,6 +1823,7 @@ export default function HomePage(_props: PageProps) {
             <EcosystemStrip />
             <DeveloperExperienceGrid />
             <BenchmarkSection />
+            <RuntimeBenchmarkSection />
             <IntegrationsSection />
             <FoundationGrid />
             <AgentSectionIntro />
