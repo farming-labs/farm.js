@@ -311,7 +311,7 @@ mount, and shortcut together.
 | serverActions | Restricting trusted action origins and request body size.                              |
 | images        | Configuring responsive widths, remote allowlists, formats, and optimizer limits.       |
 | performance   | Budgeting image and font preload hints without changing the rendered resources.        |
-| experimental  | Auditing or enabling opt-in rendering experiments such as isolated hydration and PPR.  |
+| experimental  | Auditing or enabling opt-in rendering experiments such as islands and PPR.             |
 | openapi       | Publishing API reference docs.                                                         |
 | vite          | Passing extra Vite options such as plugins, `define`, `resolve.alias`, and `css`.      |
 
@@ -939,8 +939,8 @@ through `apiMcp()` in `plugins` is not listed; use the top-level `mcp` config.
 ## Isolated client hydration
 
 React applications can keep using `"use client"` without enabling React Server Components. By
-default, Farm preserves its compatible route-wide hydration behavior. The isolated hydration
-experiment lets an otherwise server-rendered page or layout ship and hydrate eligible client leaves
+default, Farm preserves its compatible route-wide hydration behavior. This experiment lets an
+otherwise server-rendered page or layout ship and hydrate its eligible client components as islands
 instead of the complete route module:
 
 ```ts
@@ -955,11 +955,11 @@ export default defineConfig({
 
 The option has three modes:
 
-| Mode        | Behavior                                                                     |
-| ----------- | ---------------------------------------------------------------------------- |
-| `"off"`     | Keeps route-wide hydration. This is the default.                             |
-| `"analyze"` | Reports eligible boundaries without changing emitted code or runtime work.   |
-| `"enabled"` | Hydrates safe client leaves independently and keeps unsupported routes safe. |
+| Mode        | Behavior                                                                      |
+| ----------- | ----------------------------------------------------------------------------- |
+| `"off"`     | Keeps route-wide hydration. This is the default.                              |
+| `"analyze"` | Reports eligible boundaries without changing emitted code or runtime work.    |
+| `"enabled"` | Hydrates safe client components as islands and keeps unsupported routes safe. |
 
 The mode applies to synchronous pages and layouts, which have a route-wide alternative. An `async`
 page or layout has none, so its eligible client components always hydrate as islands, in every
@@ -971,8 +971,8 @@ see [Islands](/docs/renderers/custom#islands) for what it implements. `"enabled"
 
 An eligible boundary is a local, statically analyzable `"use client"` module with a default or
 named capitalized component export and serializable props. Farm preserves its server-rendered HTML,
-emits the client component as a separate browser chunk, and hydrates that leaf as its own React
-root. Sibling leaves receive independent roots. Client components imported by another client
+emits the client component as a separate browser chunk, and hydrates that island as its own React
+root. Sibling islands get their own roots. Client components imported by another client
 component stay in their parent's root, so Farm never creates overlapping roots for one client
 graph. Props travel in an HTML-safe, non-executable JSON payload. Plain objects, arrays, strings,
 booleans, finite numbers, and `null` are supported.
@@ -984,21 +984,22 @@ only while rendering, Farm preserves the SSR output and leaves that boundary ine
 development diagnostic. Module-load and root-render failures likewise restore the original server
 HTML and report the boundary reference plus the original error.
 
-An integration provider is route-wide by default because an independent root cannot inherit its
-context. A provider that is safe to instantiate around every isolated root can declare
-`supportsIsolatedHydration: true`; otherwise Farm retains route-wide hydration for the app.
+An integration provider is route-wide by default because an island's root cannot inherit its
+context. A provider that is safe to create again around every island can declare `islands: true`;
+otherwise Farm retains route-wide hydration for the app. The older name,
+`supportsIsolatedHydration: true`, still works.
 
-Farm also applies a measured graph-cost guard. Up to four statically bounded isolated roots can use
-the isolated plan. A page or layout with a larger client graph stays on route-wide hydration and
+Farm also applies a measured graph-cost guard. Up to four statically bounded islands can hydrate
+on their own. A page or layout with a larger client graph stays on route-wide hydration and
 prints the owner, detected count, and limit. Lists whose boundary count depends on runtime data also
 stay route-wide because Farm cannot prove their root cost before streaming. In the maintained
 40-sample Chrome browser benchmark, eight independent roots were the first stress shape to exceed the
 route-wide hydration budget. See the [raw samples and full cost table](https://github.com/farming-labs/farm.js/blob/main/benchmarks/isolated-hydration/results/latest.md).
 The same report includes compiler-enabled route-wide and isolated controls. It verifies that every
-measured leaf actually compiled, then checks initial hydration and repeated state updates
+measured island actually compiled, then checks initial hydration and repeated state updates
 independently.
 
-SPA navigation preserves isolated roots that live in a shared layout, including their state and DOM
+SPA navigation preserves islands that live in a shared layout, including their state and DOM
 identity. Farm unmounts roots in the outgoing route subtree before replacing it, then hydrates only
 the boundaries introduced by the incoming fragment. Superseded navigation work is aborted before it
 can hydrate stale HTML.

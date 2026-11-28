@@ -180,6 +180,7 @@ import {
   getIntegrationDocumentNavigationMatchers,
   getIntegrationProviders,
   matchIntegrationRoute,
+  providerSupportsIslands,
 } from "./integrations";
 import type { FarmDiscoveredWorkflow } from "./workflows";
 import { resolveFarmRouteContext, withFarmRouteContext } from "./route-context";
@@ -5519,7 +5520,7 @@ export function farmPlugin(
               "rsc",
             hasUnsupportedIntegrationProvider: integrationProviders
               .filter((provider) => provider.component || provider.type === "clerk")
-              .some((provider) => provider.supportsIsolatedHydration !== true),
+              .some((provider) => !providerSupportsIslands(provider)),
           },
         );
 

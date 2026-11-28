@@ -5,7 +5,11 @@ import {
   generateFarmIntegrationProviderClientCode,
   generateFarmIntegrationProviderServerModules,
 } from "../integration-provider-build";
-import { defineIntegration, getIntegrationProviders } from "../integrations";
+import {
+  defineIntegration,
+  getIntegrationProviders,
+  providerSupportsIslands,
+} from "../integrations";
 import { REACT_RENDERER } from "../renderer";
 import { ServerRenderer } from "../server/renderer";
 
@@ -23,6 +27,7 @@ describe("integration providers", () => {
     });
     const providers = getIntegrationProviders({ acme });
     expect(providers[0]?.component).toBe(AcmeProvider);
+    expect(providers[0]?.islands).toBeUndefined();
     expect(providers[0]?.supportsIsolatedHydration).toBeUndefined();
 
     const renderer = new ServerRenderer(
@@ -158,6 +163,27 @@ describe("integration providers", () => {
     });
 
     expect(getIntegrationProviders({ acme })[0]?.supportsIsolatedHydration).toBe(true);
+  });
+
+  it("reads islands: true, and the deprecated supportsIsolatedHydration: true", () => {
+    const provider = { name: "acme", type: "client" };
+    expect(providerSupportsIslands(provider)).toBe(false);
+    expect(providerSupportsIslands({ ...provider, islands: true })).toBe(true);
+    expect(providerSupportsIslands({ ...provider, supportsIsolatedHydration: true })).toBe(true);
+    // The new name wins when a provider sets both.
+    expect(
+      providerSupportsIslands({ ...provider, islands: false, supportsIsolatedHydration: true }),
+    ).toBe(false);
+
+    const acme = defineIntegration({
+      category: "custom",
+      type: "acme",
+      instance: {},
+      providers: [
+        { ...provider, component: { module: "@/components/acme-provider" }, islands: true },
+      ],
+    });
+    expect(getIntegrationProviders({ acme })[0]?.islands).toBe(true);
   });
 
   it("resolves provider paths relative to the app root", () => {

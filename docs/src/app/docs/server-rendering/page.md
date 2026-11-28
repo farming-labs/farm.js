@@ -241,8 +241,8 @@ Farm uses the same isolated boundary metadata for Vite development, streamed or 
 statically generated HTML. In development, updating a client module rerenders every live boundary
 created from that module without importing or replacing its server-owned layout; sibling boundary
 state stays mounted. If one page needs the route-wide fallback, that fallback stays on the page
-boundary and does not promote otherwise eligible client leaves in its server-owned layout.
-Farm also keeps graphs above four statically bounded isolated roots route-wide. Data-dependent
+boundary, and the islands in its server-owned layout stay islands.
+Farm also keeps graphs above four statically bounded islands route-wide. Data-dependent
 boundary lists use the same fallback because their root count is unknown before streaming. This
 measured guard prevents request, marker, root, and hydration overhead from growing past the first
 observed crossover; the [benchmark report](https://github.com/farming-labs/farm.js/blob/main/benchmarks/isolated-hydration/results/latest.md) includes route-wide, isolated, and RSC controls with raw samples.
@@ -297,7 +297,7 @@ Navigating away cancels pending island work and unmounts its roots without waiti
 React's early-update diagnostic during that synchronous cancellation is expected; hydration
 mismatches, updates to live roots, and other errors are still reported.
 
-Islands have the same limits as [isolated client leaves](#isolated-client-leaves-without-rsc):
+Islands have the same limits as [islands without server components](#islands-without-server-components):
 
 - Props must be serializable. Server-rendered JSX passed as `children` or another prop
   (`<ClientShell><ServerList /></ClientShell>`) crosses only under a hydrating layout (above);
@@ -305,8 +305,8 @@ Islands have the same limits as [isolated client leaves](#isolated-client-leaves
 - A client component must export each component by name (`export function Name`,
   `export { Name }`, `export { Name } from "./name"`, or `export default`), not through
   `export *`.
-- An integration provider that wraps the whole route, and does not declare
-  `supportsIsolatedHydration: true`, keeps its routes route-wide.
+- An integration provider that wraps the whole route, and does not declare `islands: true`, keeps
+  its routes route-wide.
 
 When one of these applies, the route stays server-rendered, its client components are not
 interactive, and Farm logs a warning naming the module and the reason. Fix the reason, or render
@@ -334,16 +334,16 @@ so does a layout where each element of the package closes itself and takes no el
 icons do. A package component that wraps content, such as a provider, fails the build instead: render
 it from a local `"use client"` module.
 
-### Isolated client leaves without RSC
+### Islands without server components
 
 `"use client"` also remains available in a normal React SSR application. Set
-`experimental.isolatedClientHydration` to `"analyze"` to audit which local client leaves Farm can
-split without changing runtime behavior, or to `"enabled"` to hydrate safe leaves independently.
+`experimental.isolatedClientHydration` to `"analyze"` to audit which local client components Farm
+can split without changing runtime behavior, or to `"enabled"` to hydrate them as islands.
 Unsupported routes keep the existing route-wide ownership model. See
 [Isolated client hydration](/docs/configuration#isolated-client-hydration) for the modes and safety
 rules. This experiment is disabled when RSC owns the route. Integration providers also keep the
-route-wide root unless they explicitly declare that they can be recreated around independent
-isolated roots.
+route-wide root unless they declare `islands: true`: that they can be created again around each
+island.
 
 ## React Server Components
 

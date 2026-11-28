@@ -217,11 +217,11 @@ export interface FarmRendererCapabilities {
   /**
    * Whether the server module exports `withIsland`, so a client component rendered from server
    * output hydrates as its own island when the app sets
-   * `experimental.isolatedClientHydration: "enabled"`. Experimental.
+   * `experimental.serverComponents: { mode: "islands" }`. Experimental.
    *
    * Farm wraps each export of a client module in the server graph with `withIsland`, and the
    * browser starts each island with the client module's `createElement` and `hydrateRoot`.
-   * Without it, those apps take the path they take today.
+   * Without it, that config fails `farm dev` and `farm build`.
    */
   islands: boolean;
 }

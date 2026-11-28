@@ -210,7 +210,7 @@ React unless `onUnsupported: "error"` deliberately makes them a build error.
 
 The compiler and [isolated client hydration](/docs/configuration#isolated-client-hydration) optimize
 different parts of the same client component. Isolated hydration keeps the server-owned layout out
-of the browser graph and gives an eligible client leaf its own root. The compiler keeps React in
+of the browser graph and hydrates an eligible client component as an island with its own root. The compiler keeps React in
 charge of that root's SSR, hydration, events, and unmounting, then patches compiler-proven state
 bindings directly after mount.
 

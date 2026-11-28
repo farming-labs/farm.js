@@ -649,9 +649,31 @@ export default function Layout({ children }) { return <><One /><Two /><Three />{
 
       expect(logger.warn).toHaveBeenCalledWith(
         expect.stringContaining(
-          'integration provider "acme" does not declare supportsIsolatedHydration: true',
+          'not as islands, because integration provider "acme" doesn\'t declare `islands: true`',
         ),
       );
+
+      // A provider that declares islands, under either name, keeps them.
+      for (const flag of [{ islands: true }, { supportsIsolatedHydration: true }]) {
+        vi.mocked(logger.warn).mockClear();
+        mockConfig.integrations = {
+          acme: defineIntegration({
+            category: "custom",
+            type: "acme",
+            instance: {},
+            providers: [
+              {
+                name: "acme",
+                type: "client",
+                component: { module: "@/components/acme-provider" },
+                ...flag,
+              },
+            ],
+          }),
+        };
+        new RouteManager(mockConfig).generateClientManifest(mockConfig.root);
+        expect(logger.warn).not.toHaveBeenCalledWith(expect.stringContaining("not as islands"));
+      }
     });
 
     it("should discover page/layout/loading/error files", async () => {

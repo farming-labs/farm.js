@@ -70,7 +70,7 @@ import {
   type ClientModuleHydrationPlan,
   type IsolatedClientBoundaryReference,
 } from "../utils/client-component";
-import { getIntegrationProviders } from "../integrations";
+import { getIntegrationProviders, providerSupportsIslands } from "../integrations";
 import type { MetadataImageKind } from "../metadata";
 import type { FarmIslandStrategy } from "../island";
 import type { FarmServerRendererRuntime } from "../renderer";
@@ -1088,7 +1088,7 @@ export class RouteManager {
       (provider) => provider.component || provider.type === "clerk",
     );
     const unsupportedIntegrationProvider = integrationProviders.find(
-      (provider) => provider.supportsIsolatedHydration !== true,
+      (provider) => !providerSupportsIslands(provider),
     );
     if (
       this.config.experimental?.isolatedClientHydration === "enabled" &&
@@ -1096,7 +1096,7 @@ export class RouteManager {
       unsupportedIntegrationProvider
     ) {
       logger.warn(
-        `[Farm.js] isolated hydration kept route-wide because integration provider "${unsupportedIntegrationProvider.name}" does not declare supportsIsolatedHydration: true.`,
+        `[Farm.js] Client components hydrate with their route, not as islands, because integration provider "${unsupportedIntegrationProvider.name}" doesn't declare \`islands: true\`.`,
       );
     }
     const isolatedMode = resolveFarmIsolatedClientHydrationMode(
