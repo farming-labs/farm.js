@@ -273,10 +273,11 @@ export const polyrouteBetaSections = [
 ] as const satisfies BlogSections;
 
 /** Every post. The index features the first and lists the rest. */
+// The index features the first entry, so the 0.2 preview stays pinned above newer posts.
 export const posts: readonly { post: BlogPost; sections: BlogSections }[] = [
+  { post: releasePreviewPost, sections: releasePreviewSections },
   { post: polyrouteBetaPost, sections: polyrouteBetaSections },
   { post: durableAgentsPost, sections: durableAgentsSections },
-  { post: releasePreviewPost, sections: releasePreviewSections },
   { post: rendererPost, sections: rendererSections },
   { post: agentScanPost, sections: agentScanSections },
   { post: nativeInternalsPost, sections: nativeInternalsSections },

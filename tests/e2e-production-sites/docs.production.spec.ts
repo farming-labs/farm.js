@@ -80,6 +80,10 @@ test("boots the emitted docs site and navigates into the guide", async ({ page }
 
   const getStarted = page.getByRole("link", { name: "Get Started", exact: true }).first();
   await expect(getStarted).toBeVisible();
+  const heroAgents = page.locator('a.farm-action-link[href="/agents"]');
+  await expect(heroAgents).toHaveCount(1);
+  await expect(heroAgents).toBeVisible();
+  await expect(heroAgents).toHaveText(/Agents/);
   await getStarted.click();
 
   await expect(page).toHaveURL(/\/docs\/getting-started$/);
@@ -112,15 +116,12 @@ test("blog connects the index, article, contents, and Markdown mirror", async ({
   await expect(page.locator(".blog-featured h3 a > span")).toHaveCSS("display", "inline");
   await expect(page.locator(".blog-featured h3")).toHaveCSS("text-wrap", "balance");
   await expect(page.getByRole("link", { name: /Follow the releases/i })).toHaveCount(0);
-  // The index features the newest post and lists the rest, so these follow the collection.
-  await expect(page.locator(".blog-featured h3 a")).toHaveAttribute(
-    "href",
-    "/blog/rust-and-go-routes",
-  );
+  // The index features the first post in the collection and lists the rest.
+  await expect(page.locator(".blog-featured h3 a")).toHaveAttribute("href", "/blog/0.2");
   await expect(page.locator(".blog-featured .blog-post-meta time")).toHaveText("Nov 2026");
   await expect(page.locator(".blog-featured .blog-post-meta time")).toHaveAttribute(
     "datetime",
-    "2026-11-28",
+    "2026-11-26",
   );
   await expect(page.locator(".blog-featured .blog-post-meta time")).toHaveCSS(
     "font-family",
@@ -151,7 +152,7 @@ test("blog connects the index, article, contents, and Markdown mirror", async ({
   await expect(page.locator(".blog-featured-bottom img")).toHaveAttribute("width", "36");
   await expect(page.locator(".blog-author small")).toHaveCSS("margin-top", "0px");
   await expect(page.locator(".blog-read-link")).toHaveText("Read article");
-  await expect(page.locator(".blog-read-link")).toHaveAttribute("href", "/blog/rust-and-go-routes");
+  await expect(page.locator(".blog-read-link")).toHaveAttribute("href", "/blog/0.2");
   await expect(page.locator(".blog-explore a")).toHaveCount(2);
   await expect(page.locator(".blog-explore a").first()).toHaveAttribute(
     "href",
@@ -419,12 +420,15 @@ test("blog enhancements survive client navigation, re-entry, and back/forward wi
     };
   });
 
-  // Each page has its own header artwork: the index features the newest post's scripted figure,
-  // and the launch post keeps the release reel.
+  // Each page has its own release reel: the index features the 0.2 preview's, and the launch post
+  // keeps its own.
   async function checkArtwork(where: "index" | "article") {
     expect(await page.evaluate(() => Reflect.get(window, "blogNavigationDocument"))).toBe(true);
     if (where === "index") {
-      await expect(page.locator(".blog-featured [data-figure]")).toHaveAttribute("data-ready", "");
+      await expect(page.locator(".blog-featured > .blog-release-art")).toHaveAttribute(
+        "data-motion",
+        "running",
+      );
     } else {
       // The reel pauses when it scrolls out of view, and the post list sits below the fold, so
       // bring it on screen before asking whether it is running.
@@ -808,7 +812,7 @@ test("agents page connects the blog, planned capabilities, and Markdown", async 
       .locator(".truncate")
       .evaluateAll((labels) => labels.every((label) => label.scrollWidth <= label.clientWidth)),
   ).toBe(true);
-  // The site banner has its own "Read the announcement" link; use the agents page's section link.
+  // Pick the agents page's section link by its anchor, not by its text alone.
   await page
     .getByRole("link", { name: "Read the announcement", exact: true })
     .and(page.locator('[href$="#agent-infrastructure"]'))
@@ -874,7 +878,8 @@ test("blog and agents omit removed illustrations after navigation", async ({ pag
   await page.getByRole("link", { name: "Explore agent infrastructure", exact: true }).click();
   await expect(page).toHaveURL(/\/agents$/);
   await expect(page.locator("[data-story], .farm-story, .agents-illustration")).toHaveCount(0);
-  await expect(page.getByRole("form", { name: "Agent infrastructure waitlist" })).toHaveCount(1);
+  await expect(page.locator(".agents-cta-start")).toHaveAttribute("href", "/docs/getting-started");
+  await expect(page.locator(".agents-cta-prompt")).toHaveCount(1);
   await expect(page.locator(".agents-capabilities article")).toHaveCount(4);
   expect(
     await page
@@ -951,21 +956,27 @@ test("agents page stays readable on mobile and without JavaScript", async ({
     const page = await context.newPage();
     try {
       await page.goto("/agents");
-      const form = page.getByRole("form", { name: "Agent infrastructure waitlist" });
+      const start = page.locator(".agents-cta-start");
+      const prompt = page.locator(".agents-cta-prompt");
+      await expect(page.locator('input[type="email"], [data-agent-waitlist-root]')).toHaveCount(0);
+      await expect(start).toHaveAttribute("href", "/docs/getting-started");
+      await expect(prompt).toBeVisible();
       if (javaScriptEnabled) {
-        const email = form.getByLabel("Email address");
-        const submit = form.getByRole("button");
-        await expect(submit).toHaveAttribute("data-sw-state", "on");
-        await submit.evaluate((button) => {
+        await expect(prompt).toHaveAttribute("data-sw-state", "on");
+        await prompt.evaluate((button) => {
           button.dataset.swState = "press";
         });
-        await submit.hover();
-        await expect(submit).toHaveCSS("background-color", "rgb(204, 204, 204)");
-        await email.focus();
-        await expect(submit).toHaveAttribute("data-sw-state", "off");
-        await expect(page.locator(".farm-sw-wire")).toHaveCSS("opacity", "0");
-        await page.getByRole("link", { name: "Skip to content" }).focus();
-        await expect(submit).toHaveAttribute("data-sw-state", "on");
+        await prompt.hover();
+        await expect(prompt).toHaveCSS("background-color", "rgb(31, 31, 31)");
+        await context.grantPermissions(["clipboard-read", "clipboard-write"]);
+        const idleWidth = (await prompt.boundingBox())!.width;
+        await prompt.click();
+        await expect(prompt).toHaveAttribute("data-state", "copied");
+        await expect(prompt).toHaveAccessibleName("Prompt copied");
+        expect((await prompt.boundingBox())!.width).toBe(idleWidth);
+        const copied = await page.evaluate(() => navigator.clipboard.readText());
+        expect(copied).toContain("https://farmjs.dev/skill.md");
+        expect(copied).toContain("https://farmjs.dev/docs/plugins/mcp.md");
       }
       for (const width of [320, 390, 768, 1024, 1440]) {
         await page.setViewportSize({ width, height: 900 });
@@ -998,14 +1009,11 @@ test("agents page stays readable on mobile and without JavaScript", async ({
         expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(
           true,
         );
-        if (javaScriptEnabled) {
-          await expect(form).toBeVisible();
-          for (const control of [form.getByLabel("Email address"), form.getByRole("button")]) {
-            const box = await control.boundingBox();
-            expect(box!.height).toBeGreaterThanOrEqual(44);
-            expect(box!.x).toBeGreaterThanOrEqual(0);
-            expect(box!.x + box!.width).toBeLessThanOrEqual(width);
-          }
+        for (const control of [start, prompt]) {
+          const box = await control.boundingBox();
+          expect(box!.height).toBeGreaterThanOrEqual(44);
+          expect(box!.x).toBeGreaterThanOrEqual(0);
+          expect(box!.x + box!.width).toBeLessThanOrEqual(width);
         }
       }
       await page.setViewportSize({ width: 390, height: 900 });
@@ -1191,10 +1199,10 @@ for (const width of [320, 390, 768]) {
       await page.goto("/blog");
       await expect(page.getByRole("heading", { level: 1 })).toBeVisible();
       await page.evaluate(() => document.fonts.ready);
-      // The featured card's figure reads without script and stays inside the card.
+      // The featured card's artwork renders without script and stays inside the card.
       expect(
         await page
-          .locator(".blog-featured [data-figure] .bf-stage")
+          .locator(".blog-featured > .blog-release-art")
           .first()
           .evaluate((stage) => {
             const art = stage.getBoundingClientRect();

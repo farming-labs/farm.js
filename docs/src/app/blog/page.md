@@ -7,6 +7,10 @@ description: "Releases, engineering notes, and ideas from the people building Fa
 
 Releases, engineering notes, and ideas.
 
+## [Farm.js 0.2 preview. From an API route to a native screen.](/blog/0.2)
+
+What changed since Farm.js 0.1, from backend-only apps and Rust endpoints to React rendering, native screens, and Farm Infra.
+
 ## [Rust and Go API routes are in public beta](/blog/rust-and-go-routes)
 
 Farm now serves route.rs and route.go next to route.ts through the experimental Polyroute plugin. How to try it, how it works, what the numbers say, and what the beta does not do yet.
@@ -14,10 +18,6 @@ Farm now serves route.rs and route.go next to route.ts through the experimental 
 ## [Build durable agents with your framework and Farm Infra](/blog/durable-agents)
 
 Build a refund agent that waits for approval and resumes after a restart. Keep your agent framework and web app, then choose Farm Infra storage, wake-ups, and approvals.
-
-## [Farm.js 0.2 preview. From an API route to a native screen.](/blog/0.2)
-
-What changed since Farm.js 0.1, from backend-only apps and Rust endpoints to React rendering, native screens, and Farm Infra.
 
 ## [Build your own renderer, build your own full-stack framework](/blog/bring-your-own-renderer)
 

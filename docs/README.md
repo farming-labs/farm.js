@@ -21,8 +21,10 @@ Open [http://localhost:3000](http://localhost:3000).
 
 ## Agent waitlist database
 
-The `/agents` form posts to `/api/waitlist`. `WaitlistEntry` in `prisma/schema.prisma`
-stores the normalized email (unique), signup description, and creation/update timestamps.
+The `AgentWaitlist` form posts to `/api/waitlist`. No page renders it since `/agents` switched
+to Get started and an agent prompt; the route and table keep existing signups.
+`WaitlistEntry` in `prisma/schema.prisma` stores the normalized email (unique), signup
+description, and creation/update timestamps.
 Repeat submissions update that record instead of creating duplicates.
 
 Set a server-only `WAITLIST_DATABASE_URL` in `docs/.env.local` for a dedicated Postgres
