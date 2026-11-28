@@ -297,6 +297,8 @@ declare module "@farm.js/core" {
     name: string;
     type: string;
     props?: Record<string, unknown>;
+    islands?: boolean;
+    /** @deprecated Use `islands: true`. */
     supportsIsolatedHydration?: boolean;
     component?: import("react").ComponentType<FarmIntegrationProviderProps>;
   }

@@ -471,9 +471,13 @@ export interface FarmIntegrationProvider {
   type: string;
   props?: Record<string, unknown>;
   /**
-   * The provider can be instantiated independently around each isolated
-   * client root without relying on context or state owned by the route root.
-   * Providers are treated as route-wide unless they explicitly opt in.
+   * The provider can be created again around each island, without context or state from the
+   * route's root. Without it, an app whose routes this provider wraps hydrates each route whole.
+   */
+  islands?: boolean;
+  /**
+   * @deprecated Use `islands: true`. Farm reads both. An integration that supports cores older
+   * than this name keeps this one: those cores don't read `islands`.
    */
   supportsIsolatedHydration?: boolean;
   component?:
@@ -1367,6 +1371,7 @@ export function getIntegrationProviders(
         name: provider.name,
         type: provider.type,
         props: provider.props,
+        islands: provider.islands,
         supportsIsolatedHydration: provider.supportsIsolatedHydration,
         component: provider.component,
       });
@@ -1374,6 +1379,16 @@ export function getIntegrationProviders(
   }
 
   return providers;
+}
+
+/**
+ * Whether an integration provider can be created again around each island: `islands: true`, or
+ * the deprecated `supportsIsolatedHydration: true`.
+ */
+export function providerSupportsIslands(
+  provider: Pick<FarmIntegrationProvider, "islands" | "supportsIsolatedHydration">,
+): boolean {
+  return (provider.islands ?? provider.supportsIsolatedHydration) === true;
 }
 
 export function isFarmIntegrationProviderComponentReference(
