@@ -105,11 +105,11 @@ A report includes `source`, `health`, project and target metadata, status totals
 
 Doctor uses these health rules:
 
-| Result      | Exit behavior                              |
-| ----------- | ------------------------------------------ |
-| `ready`     | No failed or warning checks; exits 0.      |
-| `attention` | At least one warning; exits 0.             |
-| `error`     | At least one failed check; exits 1.        |
+| Result      | Exit behavior                         |
+| ----------- | ------------------------------------- |
+| `ready`     | No failed or warning checks; exits 0. |
+| `attention` | At least one warning; exits 0.        |
+| `error`     | At least one failed check; exits 1.   |
 
 An invalid invocation of `farm doctor --json` exits 2 before checking or fixing the project.
 Read `error.code` to identify the failure and `error.message` to correct the command.
