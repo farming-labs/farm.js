@@ -159,14 +159,14 @@ function getColumnRangeLabel(key: MetricKey) {
   return `${formatMetricValue(key, minimum)} → ${formatMetricValue(key, maximum)}`;
 }
 
-function ComparisonPanel({
+export function ComparisonPanel({
   description,
   icon: Icon,
   illustration,
   label,
   title,
 }: {
-  description: string;
+  description: ReactNode;
   icon: ComponentType<{
     "aria-hidden"?: boolean;
     className?: string;
