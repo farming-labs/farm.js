@@ -4,6 +4,7 @@ import type { FarmRequest, FarmResponse } from "../types";
 import type { ResolvedFarmI18nConfig } from "../i18n/types";
 import { resolveFarmRequestURL } from "../server/request";
 import { createConfigRewriteMatcher } from "./config-routes";
+import { toFarmRouteConditionHeaders } from "./route-conditions";
 
 export const FARM_CONFIG_REWRITES_PLUGIN_NAME = "farm:rewrites";
 
@@ -41,7 +42,7 @@ export function createRewritesPlugin(
         await overrideBeforeRequest(req, res, context);
       }
       const url = resolveFarmRequestURL(req);
-      const destinationUrl = matchRewrite(url);
+      const destinationUrl = matchRewrite(url, toFarmRouteConditionHeaders(req.headers));
       if (destinationUrl) {
         req.url =
           destinationUrl.origin === url.origin

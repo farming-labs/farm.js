@@ -1017,6 +1017,81 @@ describe("resolveConfig", () => {
     ]);
   });
 
+  it("rejects malformed has/missing conditions in redirects and rewrites", async () => {
+    await expect(
+      resolveConfig(
+        {
+          redirects: [
+            {
+              source: "/old",
+              destination: "/new",
+              has: [{ type: "cookie", key: "beta", value: "([" }],
+            },
+          ],
+        },
+        "production",
+      ),
+    ).rejects.toThrow('redirects[0].has[0].value "([" is not a valid regular expression');
+
+    await expect(
+      resolveConfig(
+        {
+          redirects: [{ source: "/old", destination: "/new", has: [{ type: "host" }] }],
+        },
+        "production",
+      ),
+    ).rejects.toThrow('redirects[0].has[0].value is required for a "host" condition');
+
+    await expect(
+      resolveConfig(
+        {
+          rewrites: [
+            {
+              source: "/old",
+              destination: "/new",
+              missing: [{ type: "header", key: "" }],
+            },
+          ],
+        },
+        "production",
+      ),
+    ).rejects.toThrow("rewrites[0].missing[0].key must be a non-empty string");
+
+    const config = await resolveConfig(
+      {
+        redirects: [
+          {
+            source: "/old",
+            destination: "/new",
+            has: [{ type: "cookie", key: "beta", value: "^on$" }],
+          },
+        ],
+        rewrites: [
+          {
+            source: "/docs",
+            destination: "/api/docs",
+            missing: [{ type: "query", key: "preview" }],
+          },
+        ],
+      },
+      "production",
+    );
+    expect(await config.redirects()).toEqual([
+      {
+        source: "/old",
+        destination: "/new",
+        has: [{ type: "cookie", key: "beta", value: "^on$" }],
+      },
+    ]);
+    expect(await config.rewrites()).toEqual([
+      {
+        source: "/docs",
+        destination: "/api/docs",
+        missing: [{ type: "query", key: "preview" }],
+      },
+    ]);
+  });
+
   it("applies security.csp after ordinary and route-rule headers", async () => {
     const config = await resolveConfig(
       {

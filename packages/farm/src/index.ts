@@ -341,6 +341,8 @@ export type {
   RedirectConfig,
   HeaderConfig,
   RewriteConfig,
+  FarmRouteCondition,
+  FarmRouteConditionType,
   ImageConfig,
   I18nConfig,
   FarmI18nCookieConfig,

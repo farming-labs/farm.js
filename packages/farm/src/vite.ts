@@ -351,6 +351,7 @@ import { FARM_VIDEO_PLAYER_HTML } from "./video-player";
 import { FARM_CONFIG_HEADERS_PLUGIN_NAME } from "./plugins/headers";
 import { FARM_CONFIG_REDIRECTS_PLUGIN_NAME, getConfigRedirectMatcher } from "./plugins/redirects";
 import { FARM_CONFIG_REWRITES_PLUGIN_NAME } from "./plugins/rewrites";
+import { toFarmRouteConditionHeaders } from "./plugins/route-conditions";
 import { isFarmPreviewDeploymentEnvironment } from "./deployment-environment";
 import { FARM_PREVIEW_ROBOTS_TAG } from "./preview-noindex";
 import {
@@ -3320,7 +3321,10 @@ export function farmPlugin(
                 );
               }
               for (const matchRedirect of configRedirectMatchers) {
-                redirect ??= matchRedirect(parsedRequestUrl);
+                redirect ??= matchRedirect(
+                  parsedRequestUrl,
+                  toFarmRouteConditionHeaders(req.headers),
+                );
               }
             } catch (error) {
               await emitPluginError("before-request", error, { urlPath: requestUrl });

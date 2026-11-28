@@ -4,6 +4,7 @@ import type { FarmRequest, FarmResponse } from "../types";
 import type { ResolvedFarmI18nConfig } from "../i18n/types";
 import { resolveFarmRequestURL } from "../server/request";
 import { createConfigRedirectMatcher, type FarmConfigRedirectMatcher } from "./config-routes";
+import { toFarmRouteConditionHeaders } from "./route-conditions";
 
 export type { FarmConfigRedirectMatcher } from "./config-routes";
 
@@ -43,7 +44,10 @@ export function createRedirectsPlugin(
       if (overrideBeforeRequest) {
         await overrideBeforeRequest(req, res, context);
       }
-      const redirect = matchRedirect(resolveFarmRequestURL(req));
+      const redirect = matchRedirect(
+        resolveFarmRequestURL(req),
+        toFarmRouteConditionHeaders(req.headers),
+      );
       if (!redirect) return;
 
       // The same response the production entry sends.

@@ -48,7 +48,12 @@ import {
 } from "../agent-mcp";
 import { FARM_VERSION } from "../version";
 import { canFarmSkipKeptLayoutRender } from "../islands-kept-layouts";
-import type { RedirectConfig, ResolvedFarmConfig, RewriteConfig } from "../config";
+import type {
+  FarmRouteCondition,
+  RedirectConfig,
+  ResolvedFarmConfig,
+  RewriteConfig,
+} from "../config";
 import { hasCustomFarmRouteContext, resolveDeployOutputPath } from "../config";
 import {
   FARM_CLIENT_BOOT_SRC_PLACEHOLDER,
@@ -3526,6 +3531,81 @@ function interpolateRedirectDestination(destination, params) {
 `.trim();
 }
 
+export function generateConfigRouteConditionsSource(): string {
+  // Evaluates `has`/`missing` conditions on config redirects and rewrites.
+  // Must stay in parity with packages/farm/src/plugins/route-conditions.ts:
+  // every `has` condition must hold and no `missing` condition may hold; a
+  // missing `value` is a presence check, otherwise an unanchored regex test.
+  // `url` is the request URL and `headers` its request headers.
+  return `
+function readFarmRouteCookieValue(cookieHeader, name) {
+  if (!cookieHeader) return undefined;
+  var parts = cookieHeader.split(";");
+  for (var i = 0; i < parts.length; i++) {
+    var part = parts[i];
+    var separator = part.indexOf("=");
+    var cookieName = (separator === -1 ? part : part.slice(0, separator)).trim();
+    if (cookieName !== name) continue;
+    var raw = separator === -1 ? "" : part.slice(separator + 1).trim();
+    try {
+      return decodeURIComponent(raw);
+    } catch {
+      return raw;
+    }
+  }
+  return undefined;
+}
+
+function readFarmRouteConditionValue(condition, url, headers) {
+  if (condition.type === "cookie") {
+    return readFarmRouteCookieValue(headers ? headers.get("cookie") : null, condition.key);
+  }
+  if (condition.type === "header") {
+    var value = headers ? headers.get(condition.key) : null;
+    return value === null ? undefined : value;
+  }
+  if (condition.type === "query") {
+    return url.searchParams.get(condition.key) === null
+      ? undefined
+      : url.searchParams.get(condition.key);
+  }
+  if (condition.type === "host") {
+    return url.hostname.toLowerCase();
+  }
+  return undefined;
+}
+
+function matchFarmRouteCondition(condition, url, headers) {
+  if (condition.type === "query") {
+    // A repeated parameter satisfies the condition when any value does.
+    var values = url.searchParams.getAll(condition.key);
+    if (condition.value === undefined) return values.length > 0;
+    var pattern = new RegExp(condition.value);
+    for (var i = 0; i < values.length; i++) {
+      if (pattern.test(values[i])) return true;
+    }
+    return false;
+  }
+  var actual = readFarmRouteConditionValue(condition, url, headers);
+  if (actual === undefined) return false;
+  if (condition.value === undefined) return true;
+  return new RegExp(condition.value).test(actual);
+}
+
+function matchesFarmRouteConditions(has, missing, url, headers) {
+  var conditions = has || [];
+  for (var i = 0; i < conditions.length; i++) {
+    if (!matchFarmRouteCondition(conditions[i], url, headers)) return false;
+  }
+  conditions = missing || [];
+  for (var j = 0; j < conditions.length; j++) {
+    if (matchFarmRouteCondition(conditions[j], url, headers)) return false;
+  }
+  return true;
+}
+`.trim();
+}
+
 export function generateUniversalRouterStateProperties(streamNavigations = false): string {
   return `
 ${
@@ -6935,13 +7015,20 @@ async function buildSSRInMemory(
     config.rewrites(),
     config.headers(),
   ]);
-  const redirectRoutes: ProgrammaticRedirectRoute[] = [
+  const redirectRoutes: Array<
+    ProgrammaticRedirectRoute & {
+      has?: FarmRouteCondition[];
+      missing?: FarmRouteCondition[];
+    }
+  > = [
     ...routeManager.getRedirects(),
     ...configuredRedirects.map((redirect: RedirectConfig) => ({
       source: redirect.source,
       destination: redirect.destination,
       permanent: redirect.permanent,
       statusCode: redirect.statusCode,
+      has: redirect.has,
+      missing: redirect.missing,
     })),
   ];
   const errorRoutes: UniversalBoundaryRoute[] = Array.from(
@@ -11258,10 +11345,15 @@ async function handleApplicationMetadataRouteRequest(request, routePathname) {
 
 ${generateRedirectInterpolationSource()}
 
-function matchRedirectRoute(pathname, locale, search) {
+${generateConfigRouteConditionsSource()}
+
+function matchRedirectRoute(pathname, locale, search, url, headers) {
   for (const redirect of redirectRoutes) {
     const params = matchRuntimePathPattern(redirect.source, pathname);
     if (!params) continue;
+    // A rule whose conditions fail is skipped, so a later rule for the same
+    // source can still apply, as in development.
+    if (!matchesFarmRouteConditions(redirect.has, redirect.missing, url, headers)) continue;
     const destination = interpolateRedirectDestination(redirect.destination, params);
     // Sources match the app-relative path, so an internal destination is app-relative
     // too: send the browser to it inside the basePath, as a localized one already is.
@@ -11277,10 +11369,13 @@ function matchRedirectRoute(pathname, locale, search) {
   return null;
 }
 
-function matchRewriteRoute(pathname, locale) {
+function matchRewriteRoute(pathname, locale, url, headers) {
   for (const rewrite of configuredRewriteRoutes) {
     const params = matchRuntimePathPattern(rewrite.source, pathname);
     if (!params) continue;
+    // A rule whose conditions fail is skipped, so a later rule for the same
+    // source can still apply, as in development.
+    if (!matchesFarmRouteConditions(rewrite.has, rewrite.missing, url, headers)) continue;
     const destination = interpolateRedirectDestination(rewrite.destination, params);
     return locale && destination.startsWith("/") && !destination.startsWith("//")
       ? localizeFarmHref(destination, locale, farmI18nConfig)
@@ -11994,6 +12089,8 @@ async function resolveFarmRequestInContext(
       routePathname,
       farmLocaleResolution?.locale,
       url.search,
+      url,
+      request.headers,
     );
     if (redirectMatch) {
       return farmOwnedResponse("Redirecting to " + redirectMatch.destination, {
@@ -12009,6 +12106,8 @@ async function resolveFarmRequestInContext(
       const rewriteDestination = matchRewriteRoute(
         routePathname,
         farmLocaleResolution?.locale,
+        url,
+        request.headers,
       );
       if (rewriteDestination) {
         let rewrittenRequest = createRewrittenRequest(request, rewriteDestination);
