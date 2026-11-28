@@ -17,7 +17,7 @@ Ask in [GitHub Discussions](https://github.com/farming-labs/farm.js/discussions)
 
 ## Email
 
-Write to [contact@farming-labs.dev](mailto:contact@farming-labs.dev) for anything that should not be public: partnerships, press, questions about the [agent infrastructure waitlist](/agents#waitlist), or a request about data described in the [privacy notice](/privacy).
+Write to [contact@farming-labs.dev](mailto:contact@farming-labs.dev) for anything that should not be public: partnerships, press, questions about [agent infrastructure](/agents), or a request about data described in the [privacy notice](/privacy).
 
 ## Security issues
 

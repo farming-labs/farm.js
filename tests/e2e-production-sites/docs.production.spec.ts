@@ -80,6 +80,10 @@ test("boots the emitted docs site and navigates into the guide", async ({ page }
 
   const getStarted = page.getByRole("link", { name: "Get Started", exact: true }).first();
   await expect(getStarted).toBeVisible();
+  const heroAgents = page.locator('a.farm-action-link[href="/agents"]');
+  await expect(heroAgents).toHaveCount(1);
+  await expect(heroAgents).toBeVisible();
+  await expect(heroAgents).toHaveText(/Agents/);
   await getStarted.click();
 
   await expect(page).toHaveURL(/\/docs\/getting-started$/);
@@ -871,7 +875,8 @@ test("blog and agents omit removed illustrations after navigation", async ({ pag
   await page.getByRole("link", { name: "Explore agent infrastructure", exact: true }).click();
   await expect(page).toHaveURL(/\/agents$/);
   await expect(page.locator("[data-story], .farm-story, .agents-illustration")).toHaveCount(0);
-  await expect(page.getByRole("form", { name: "Agent infrastructure waitlist" })).toHaveCount(1);
+  await expect(page.locator(".agents-cta-start")).toHaveAttribute("href", "/docs/getting-started");
+  await expect(page.locator(".agents-cta-prompt")).toHaveCount(1);
   await expect(page.locator(".agents-capabilities article")).toHaveCount(4);
   expect(
     await page
@@ -948,21 +953,27 @@ test("agents page stays readable on mobile and without JavaScript", async ({
     const page = await context.newPage();
     try {
       await page.goto("/agents");
-      const form = page.getByRole("form", { name: "Agent infrastructure waitlist" });
+      const start = page.locator(".agents-cta-start");
+      const prompt = page.locator(".agents-cta-prompt");
+      await expect(page.locator('input[type="email"], [data-agent-waitlist-root]')).toHaveCount(0);
+      await expect(start).toHaveAttribute("href", "/docs/getting-started");
+      await expect(prompt).toBeVisible();
       if (javaScriptEnabled) {
-        const email = form.getByLabel("Email address");
-        const submit = form.getByRole("button");
-        await expect(submit).toHaveAttribute("data-sw-state", "on");
-        await submit.evaluate((button) => {
+        await expect(prompt).toHaveAttribute("data-sw-state", "on");
+        await prompt.evaluate((button) => {
           button.dataset.swState = "press";
         });
-        await submit.hover();
-        await expect(submit).toHaveCSS("background-color", "rgb(204, 204, 204)");
-        await email.focus();
-        await expect(submit).toHaveAttribute("data-sw-state", "off");
-        await expect(page.locator(".farm-sw-wire")).toHaveCSS("opacity", "0");
-        await page.getByRole("link", { name: "Skip to content" }).focus();
-        await expect(submit).toHaveAttribute("data-sw-state", "on");
+        await prompt.hover();
+        await expect(prompt).toHaveCSS("background-color", "rgb(31, 31, 31)");
+        await context.grantPermissions(["clipboard-read", "clipboard-write"]);
+        const idleWidth = (await prompt.boundingBox())!.width;
+        await prompt.click();
+        await expect(prompt).toHaveAttribute("data-state", "copied");
+        await expect(prompt).toHaveAccessibleName("Prompt copied");
+        expect((await prompt.boundingBox())!.width).toBe(idleWidth);
+        const copied = await page.evaluate(() => navigator.clipboard.readText());
+        expect(copied).toContain("https://farmjs.dev/skill.md");
+        expect(copied).toContain("https://farmjs.dev/docs/plugins/mcp.md");
       }
       for (const width of [320, 390, 768, 1024, 1440]) {
         await page.setViewportSize({ width, height: 900 });
@@ -995,14 +1006,11 @@ test("agents page stays readable on mobile and without JavaScript", async ({
         expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(
           true,
         );
-        if (javaScriptEnabled) {
-          await expect(form).toBeVisible();
-          for (const control of [form.getByLabel("Email address"), form.getByRole("button")]) {
-            const box = await control.boundingBox();
-            expect(box!.height).toBeGreaterThanOrEqual(44);
-            expect(box!.x).toBeGreaterThanOrEqual(0);
-            expect(box!.x + box!.width).toBeLessThanOrEqual(width);
-          }
+        for (const control of [start, prompt]) {
+          const box = await control.boundingBox();
+          expect(box!.height).toBeGreaterThanOrEqual(44);
+          expect(box!.x).toBeGreaterThanOrEqual(0);
+          expect(box!.x + box!.width).toBeLessThanOrEqual(width);
         }
       }
       await page.setViewportSize({ width: 390, height: 900 });

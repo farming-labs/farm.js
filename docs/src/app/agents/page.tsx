@@ -18,7 +18,7 @@ import {
   PermissionsFigure,
   ReadinessFigure,
 } from "../../components/agents/iso-figures";
-import { AgentWaitlist } from "../../components/agents/waitlist";
+import { AgentPromptButton } from "../../components/agents/agent-prompt";
 import { DeskComputer } from "../../components/agents/desk-computer";
 import { SelectionWire } from "../../components/home/selection-wire";
 import { BlogFigure } from "../../components/blog/figures";
@@ -30,7 +30,6 @@ import {
   SiteHeader,
 } from "../../components/site-chrome";
 import "../../components/agents/iso-figures.css";
-import "../../components/agents/waitlist.css";
 import "../../components/agents/desk-computer.css";
 import "../../components/blog/figures.css";
 import "./agents.css";
@@ -162,10 +161,15 @@ export default function AgentsPage() {
                   </span>
                   .
                 </p>
-                <div id="waitlist" className="agents-signup">
-                  <AgentWaitlist source="agents" note={false} />
+                <div className="agents-cta">
+                  <a className="agents-cta-start" href="/docs/getting-started">
+                    <span aria-hidden>&gt;_</span>
+                    Get started
+                  </a>
+                  <AgentPromptButton />
                 </div>
-                {/* The landing hero's drag and wire, from "agents" into the waitlist button. */}
+                {/* The landing hero's drag and wire, from "agents" into the prompt button. The wire
+                    ends on the target's right edge, so it targets the row's last button. */}
                 <SelectionWire
                   clear=".agents-intro"
                   fitInk
@@ -173,10 +177,8 @@ export default function AgentsPage() {
                   over=".agents-hero-line"
                   padRight={0.14}
                   padX={0.03}
-                  pauseWithin=".agent-waitlist"
                   route="hug"
-                  target=".agent-waitlist button[type=submit]"
-                  targetLabel={{ text: "[data-agent-waitlist-label]", to: "Join now" }}
+                  target=".agents-cta-prompt"
                   word=".agents-hero-word"
                 />
               </div>
@@ -282,12 +284,12 @@ export default function AgentsPage() {
                   agents understand your website; it never grants them permission to act.
                 </p>
                 <p className="agents-availability">
-                  This infrastructure is upcoming, not part of Farm.js v0.1.0. The waitlist is for
-                  updates and early access—not a deployment console.
+                  This infrastructure is upcoming, not part of Farm.js v0.1.0. Everything under
+                  Available today ships now, so start there.
                 </p>
                 <div className="agents-links">
-                  <a href="#waitlist">
-                    Join the waitlist <ArrowRight size={14} aria-hidden />
+                  <a href="/docs/getting-started">
+                    Get started <ArrowRight size={14} aria-hidden />
                   </a>
                   <a href="/blog/0.1.0#agent-infrastructure">
                     Read the announcement <ArrowRight size={14} aria-hidden />

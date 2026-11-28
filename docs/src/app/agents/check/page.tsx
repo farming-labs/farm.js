@@ -196,8 +196,8 @@ export default function AgentCheckPage({
                   <a href="/agents">
                     Agent infrastructure <ArrowRight size={14} aria-hidden />
                   </a>
-                  <a href="/agents#waitlist">
-                    Join the waitlist <ArrowRight size={14} aria-hidden />
+                  <a href="/docs/getting-started">
+                    Get started <ArrowRight size={14} aria-hidden />
                   </a>
                 </div>
               </div>

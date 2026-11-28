@@ -703,6 +703,9 @@ function Hero() {
           <ButtonLink href="/docs/getting-started" glyph=">_" size="compact">
             Get Started
           </ButtonLink>
+          <ButtonLink href="/agents" glyph="#" size="compact" variant="secondary">
+            Agents
+          </ButtonLink>
         </div>
         <div className="mt-6 w-[calc(100%-3rem)] max-w-[34rem] text-left">
           <InstallCommand />
