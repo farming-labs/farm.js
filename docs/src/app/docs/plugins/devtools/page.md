@@ -107,7 +107,8 @@ to `/__farm/devtools` has no parent-app HMR connection, so use **Refresh** there
 Only known, already-transformed browser modules inside the project are eligible. Server-only
 modules, virtual modules, dependencies, hidden paths, and symlinks escaping the project are
 excluded. Supported source extensions are JS/TS (including JSX, TSX, MJS, CJS, MTS, and CTS),
-CSS, Vue, and Svelte. The list is capped at 500 modules. Source and generated output are each
+CSS, Vue, Svelte, and the renderer's own `componentExtensions`, such as a custom renderer's
+`.leaf`. The list is capped at 500 modules. Source and generated output are each
 limited to 1 MiB; the display shows up to 1,500 lines, while Copy includes the full bounded text.
 
 ## Options

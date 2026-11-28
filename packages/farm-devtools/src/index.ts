@@ -53,13 +53,21 @@ export function devtools(options: DevtoolsOptions = {}): FarmPlugin {
         ...(options.shortcut === undefined ? {} : { shortcut: options.shortcut }),
       };
       const { shortcut } = resolveFarmDevtoolsConfig(devtoolsConfig);
+      // A renderer's own component format, such as a custom renderer's `.leaf`, is browser
+      // source too, so Inspect lists those modules alongside JavaScript and CSS.
+      const extensions = (config.renderer ? (config.renderer.componentExtensions ?? []) : []).map(
+        (extension) => {
+          const normalized = extension.trim().toLowerCase();
+          return normalized.startsWith(".") ? normalized : `.${normalized}`;
+        },
+      );
       const vitePlugin: Plugin = {
         name: "farm:devtools-ui",
         enforce: "pre",
         apply: "serve",
         async configureServer(server) {
           const { installDevtoolsServer } = await import("./server.js");
-          installDevtoolsServer(server, { inspect, shortcut });
+          installDevtoolsServer(server, { inspect, shortcut, extensions });
         },
       };
       return {

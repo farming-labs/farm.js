@@ -27,9 +27,18 @@ function contained(root: string, file: string): boolean {
   );
 }
 
-/** Only already-transformed browser modules are eligible. Never transform or execute on request. */
-export function createModuleInspector(server: ViteDevServer) {
+/**
+ * Only already-transformed browser modules are eligible. Never transform or execute on request.
+ * `extensions` adds the renderer's own component formats, such as a custom renderer's `.leaf`.
+ */
+export function createModuleInspector(
+  server: ViteDevServer,
+  options: { extensions?: readonly string[] } = {},
+) {
   const root = path.resolve(server.config.root);
+  const extensions = new Set(options.extensions);
+  const isSource = (file: string) =>
+    SOURCE_EXTENSION.test(file) || extensions.has(path.extname(file).toLowerCase());
   // Resolved on first inspection, so a missing root never rejects while nothing awaits it.
   let rootReal: Promise<string> | undefined;
   function entries() {
@@ -40,7 +49,7 @@ export function createModuleInspector(server: ViteDevServer) {
           module.file &&
           module.transformResult &&
           contained(root, module.file) &&
-          SOURCE_EXTENSION.test(module.file) &&
+          isSource(module.file) &&
           !path
             .relative(root, module.file)
             .split(path.sep)
@@ -63,7 +72,7 @@ export function createModuleInspector(server: ViteDevServer) {
         throw error;
       }));
       return contained(realRoot, canonical) &&
-        SOURCE_EXTENSION.test(canonical) &&
+        isSource(canonical) &&
         !path
           .relative(realRoot, canonical)
           .split(path.sep)
