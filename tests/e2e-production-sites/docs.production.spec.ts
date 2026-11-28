@@ -1078,6 +1078,7 @@ for (const width of [280, 320, 345, 360, 1440]) {
     try {
       for (const pathname of [
         "/blog/0.1.0",
+        "/blog/0.2",
         "/blog/agent-native",
         "/blog/web-to-native",
         "/blog/native-internals",

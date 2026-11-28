@@ -21,6 +21,8 @@ Farm 0.1.0 already had typed routes, five renderers, server functions, MCP tools
 
 I’ll use a shop that sells canvas bags for $12 each. The example follows one order through a price quote, a Rust packing calculation, a payment event, and a refund decision.
 
+<BlogFigure kind="checkout-order" caption="One order, start to finish. TypeScript prices it, Rust packs it, the checkout run waits for its own payment, and the refund run waits for a person." />
+
 ### Calculate the price in TypeScript
 
 The file `src/app/api/examples/quote/route.ts` defines the quote endpoint. Zod validates the quantity before the handler calculates the price.
@@ -257,6 +259,8 @@ An empty title fails validation. A valid one gets a 201. File routes feed Farm's
 
 In the experimental Polyroute integration, the unit you move to Rust is a route. The checkout moves packing to Rust and keeps pricing in TypeScript. Its Farm config loads the Polyroute Vite plugin when you enable it for development or a build. The built server uses the compiled route. [Checkout configuration](https://github.com/farming-labs/farm.js/blob/9aa9670ee9aa/examples/agent/farm.config.ts)
 
+<BlogFigure kind="polyroute" caption="At build time Polyroute compiles the Rust route to WebAssembly and gives Farm a Fetch handler. A request runs Farm's middleware first, then the Rust handler." />
+
 Farm discovers the URL and runs its usual middleware. Polyroute compiles the handler to WebAssembly and supplies the Fetch adapter. In the separate prime-counting benchmark, `GET /api/primes?limit=10` returns `{"limit":10,"primes":4}`. The Rust handler decides which methods it accepts. Use `fetch` to call it: the TypeScript client generator cannot infer the schema from Rust. Removing the plugin turns Rust discovery off.
 
 The initial verified combination is a Node server with Polyroute's default V8 WebAssembly runtime. The checkout pins `@farming-labs/polyroute@0.1.0-beta.0` from npm. Add the `wasm32-wasip2` target on the build machine and package the compiled assets with `farm build --preset node-server`. Deploy that complete output. The benchmark gives a reason to choose your endpoint carefully: at ten connections, warm p95 on the CPU-heavy request went from 57.92 ms in TypeScript to 35.00 ms in Rust. The light request went from 3.08 ms to 4.06 ms. Those are warm measurements of one endpoint on one Mac. The TypeScript control also varied by 17% between runs on the light case. [Pinned setup and example](https://github.com/farming-labs/farm.js/blob/db718d5f8/docs/src/app/docs/api-routes/page.md#experimental-rust-routes) · [Benchmark method and results](https://github.com/farming-labs/polyroute/blob/6ec6f02cac043b21be23f33e19bd5dd70a7212a8/docs/benchmarks/2026-11-26-farm-route-output.md)
@@ -277,6 +281,8 @@ The mobile app opens the form over the current screen. Dismiss it and you’re b
 
 For a screen that uses the camera, put a `page.native.tsx` beside its web page. The phone opens the native screen at the same URL. Both screens can call the same API. You can also add a screen that only exists in the mobile app. [Native screens](https://farmjs.dev/docs/mobile/native-screens)
 
+<BlogFigure kind="mobile-arch" caption="A tap goes to the native navigator, which picks the screen by route. Every kind is served by your one backend: a web screen through the origin-scoped bridge, a server screen by fetching the page's rendered tree, and a React Native screen by calling the server functions it imports." />
+
 There’s a useful middle ground. The smaller Trail Guide example has no hand-written native screens. With `mobile.native.auto` enabled, Farm analyzes pages and can draw the ones it recognizes with native views from the server’s output. The route report shows which path a page takes. Start there before committing to a rewrite. The mobile builds need their platform toolchains, including Xcode for iOS. [Trail Guide and its config](https://github.com/farming-labs/farm.js/tree/v0.1.87/examples/mobile-minimal)
 
 Desktop takes a different approach. The desktop notes example runs its Farm production server on an OS-assigned loopback port inside an Electrobun app. The window talks to that server, and notes can live in the app’s local data directory. After setting up the desktop package, `farm dev --desktop` opens the app with hot reload and `farm build --desktop` packages it. [Desktop example](https://github.com/farming-labs/farm.js/tree/v0.1.87/examples/desktop-electrobun)
@@ -286,6 +292,8 @@ Desktop takes a different approach. The desktop notes example runs its Farm prod
 ## Send the page as HTML. Hydrate the controls that need it.
 
 Take a page with a list of crops and a counter you can click. The server can send the whole list as HTML. The counter needs code in the browser. With islands, the page stays on the server and each independent client component hydrates in place. A control marked `client:visible` can wait until it enters the viewport. Other triggers include page load, browser idle time, and the first interaction. A component inside a hydrating client layout can share that layout's root. [Islands guide](https://farmjs.dev/docs/server-rendering/islands)
+
+<BlogFigure kind="islands-flight" caption="Both engines send the crop list as HTML and hydrate the counter. Islands sends the counter's code and where to attach it. Flight also sends a payload that describes the React tree." />
 
 ### Choose the server-components engine
 
@@ -316,6 +324,8 @@ One small performance result captures the trade-off. Moving the route matcher ou
 ## What the Farm React compiler does on a click
 
 Imagine a counter displaying `Count: 4`. Its next click changes one text node. If Farm's ahead-of-time compiler can prove which state cell supplies that text and which DOM node receives it, it can prepare that binding at build time. A local update then patches the binding. When the component depends on behavior the compiler cannot prove safe, ordinary React reconciliation handles the update.
+
+<BlogFigure kind="compiler-click" caption="The build proves which text node shows the count. On a click, React runs the handler and the update patches that node. Code the compiler cannot prove keeps ordinary React reconciliation." />
 
 Here is the kind of component that gives the compiler a small, checkable job:
 
@@ -359,6 +369,8 @@ For an older app, replace `react({ experimental: { compiler: true } })` with `re
 ## Bring your own renderer
 
 I built Leaf, a small TypeScript UI library, to see where Farm still assumed React was installed. Its adapter tells Farm how to compile a `.leaf` file, render the component as HTML, and hydrate it in a browser. A Leaf page can now contain two copies of a client component, each keeping its own state as an island. Third-party authors can install the renderer conformance suite from npm and run it against their own adapters. [Build a renderer](https://farmjs.dev/blog/bring-your-own-renderer)
+
+<BlogFigure kind="renderer-seams" caption="A renderer is three modules. Farm compiles routes with the Vite module, renders them to HTML with the server module, and hydrates that HTML with the client module." />
 
 You can try that without building Farm itself. Use Node 22.13 or later and pnpm 8.12.1:
 

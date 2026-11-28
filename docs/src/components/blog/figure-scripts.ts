@@ -29,7 +29,11 @@ export type FigureKind =
   | "ast-native"
   | "mobile-arch"
   | "agent-scan"
-  | "renderer-seams";
+  | "renderer-seams"
+  | "checkout-order"
+  | "polyroute"
+  | "islands-flight"
+  | "compiler-click";
 export type IconKey =
   | "stripe"
   | "cloudflare"
@@ -2708,6 +2712,373 @@ const rendererSeams: FigureSpec = {
   },
 };
 
+/* ---------- 0.2 release preview: the post's running example and what is new around it ---------- */
+
+const GREEN = "#8fb8a0";
+const GREY = "#7a7a7a";
+const AMBER = "#c9a77a";
+const during = (t: number, a: number, b: number): PanelState | undefined =>
+  t >= a && t < b ? "hot" : undefined;
+/** A status line that reads one way until `at`, then fades in its settled wording. */
+const until = (t: number, shownAt: number, at: number, before: string, after: string) =>
+  t < at ? maSub(before, t, shownAt, AMBER) : maSub(after, t, at, GREEN);
+
+// One order for three canvas bags. TypeScript prices it, Rust packs it, the checkout run waits for
+// the payment event that names this order, and the refund run waits for a person.
+const CO = { quote: 0.4, pack: 1.3, wait: 2.2, pay: 3.2, paid: 3.9, refund: 4.9, ask: 5.6 };
+const CO_ANSWER = 6.5;
+
+const checkoutOrder: FigureSpec = {
+  duration: 7.6,
+  label:
+    "One order for three canvas bags: a TypeScript route prices it at $36.00, a Rust route packs it into one box, the checkout run waits until the payment event for this order arrives, and the refund run pauses until a person approves it",
+  panels: [
+    { id: "order", x: 16, y: 144, w: 200, h: 112, title: "bag-order-123" },
+    { id: "quote", x: 262, y: 16, w: 228, h: 112, title: "quote · route.ts" },
+    { id: "payment", x: 262, y: 144, w: 228, h: 112, title: "payment.succeeded" },
+    { id: "person", x: 262, y: 272, w: 228, h: 112, title: "A person" },
+    { id: "packing", x: 536, y: 16, w: 208, h: 112, title: "packing · route.rs" },
+    { id: "checkout", x: 536, y: 144, w: 208, h: 112, title: "checkout run" },
+    { id: "refund", x: 536, y: 272, w: 208, h: 112, title: "refund run" },
+  ],
+  wires: {
+    oq: [
+      [216, 200],
+      [239, 200],
+      [239, 72],
+      [262, 72],
+    ],
+    op: [
+      [216, 200],
+      [262, 200],
+    ],
+    qp: [
+      [490, 72],
+      [536, 72],
+    ],
+    pc: [
+      [640, 128],
+      [640, 144],
+    ],
+    ec: [
+      [490, 200],
+      [536, 200],
+    ],
+    cr: [
+      [640, 256],
+      [640, 272],
+    ],
+    ar: [
+      [490, 328],
+      [536, 328],
+    ],
+  },
+  frame: (t) => {
+    const at = (beat: number) => beat + PULSE;
+    return {
+      slots: {
+        order: maSub("3 canvas bags", t, 0) + maSub("$12 each", t, 0.15, GREY),
+        quote:
+          maSub("TypeScript · zod", t, at(CO.quote)) +
+          maSub("3 &times; $12 = $36.00", t, at(CO.quote) + 0.3, GREEN),
+        packing:
+          maSub("Rust · WebAssembly", t, at(CO.pack)) +
+          maSub("4 per box &rarr; 1 box", t, at(CO.pack) + 0.3, GREEN),
+        checkout:
+          maSub("waits for its payment", t, at(CO.wait)) +
+          until(t, at(CO.wait) + 0.3, at(CO.paid), "waiting · up to 1h", "resumed · paid 3600"),
+        payment:
+          maSub("orderId bag-order-123", t, at(CO.pay)) +
+          maSub("amount 3600", t, at(CO.pay) + 0.15, GREY),
+        refund:
+          maSub("asks approve-refund", t, at(CO.refund)) +
+          until(
+            t,
+            at(CO.refund) + 0.3,
+            at(CO_ANSWER),
+            "waiting for a person",
+            "refunded bag-order-123",
+          ),
+        person: maSub("approve-refund?", t, at(CO.ask)) + maSub("approved", t, CO_ANSWER, GREEN),
+      },
+      wires: {
+        oq: wire(t, CO.quote - 0.3, [[CO.quote]]),
+        qp: wire(t, CO.pack - 0.3, [[CO.pack]]),
+        pc: wire(t, CO.wait - 0.3, [[CO.wait]]),
+        op: wire(t, CO.pay - 0.3, [[CO.pay]]),
+        ec: wire(t, CO.paid - 0.3, [[CO.paid]]),
+        cr: wire(t, CO.refund - 0.3, [[CO.refund]]),
+        ar: wire(t, CO.ask - 0.3, [[CO.ask, false], [CO_ANSWER]]),
+      },
+      states: {
+        order: during(t, 0, at(CO.quote)) ?? during(t, CO.pay - 0.1, at(CO.pay)),
+        quote: during(t, at(CO.quote), at(CO.pack)),
+        packing: during(t, at(CO.pack), at(CO.wait)),
+        payment: during(t, at(CO.pay), at(CO.paid)),
+        checkout: during(t, at(CO.paid), at(CO.paid) + 0.45),
+        person: during(t, at(CO.ask), at(CO_ANSWER)),
+        refund: during(t, at(CO_ANSWER), at(CO_ANSWER) + 0.45),
+      },
+    };
+  },
+};
+
+// The Rust route in two passes. At build time Polyroute compiles route.rs to WebAssembly and hands
+// Farm a Fetch handler beside the TypeScript route. At request time Farm matches the URL and runs
+// its middleware before the Rust handler answers.
+const PR = { compile: 0.3, adapt: 1.1, mount: 1.9, req: 2.8, run: 3.6, back: 4.5 };
+
+const polyroute: FigureSpec = {
+  duration: 6.2,
+  stage: { w: 760, h: 288 },
+  label:
+    "At build time Polyroute compiles route.rs to WebAssembly and gives Farm a Fetch handler beside the TypeScript route; at request time Farm matches the URL and runs its middleware, then the Rust handler answers with one box for three bags",
+  panels: [
+    { id: "files", x: 16, y: 16, w: 200, h: 112, title: "src/app/api/examples" },
+    { id: "compile", x: 262, y: 16, w: 228, h: 112, title: "polyroute() · build" },
+    { id: "adapter", x: 536, y: 16, w: 208, h: 112, title: "Fetch handler" },
+    { id: "request", x: 16, y: 160, w: 200, h: 112, title: "Request" },
+    { id: "server", x: 262, y: 160, w: 228, h: 112, title: "Farm server" },
+    { id: "handler", x: 536, y: 160, w: 208, h: 112, title: "route.rs on V8" },
+  ],
+  wires: {
+    fc: [
+      [216, 72],
+      [262, 72],
+    ],
+    ca: [
+      [490, 72],
+      [536, 72],
+    ],
+    ah: [
+      [640, 128],
+      [640, 160],
+    ],
+    rs: [
+      [216, 216],
+      [262, 216],
+    ],
+    sh: [
+      [490, 216],
+      [536, 216],
+    ],
+  },
+  frame: (t) => {
+    const at = (beat: number) => beat + PULSE;
+    return {
+      slots: {
+        files: maSub("quote/route.ts", t, 0) + maSub("packing/route.rs", t, 0.15, AMBER),
+        compile:
+          maSub("route.rs &rarr; WebAssembly", t, at(PR.compile)) +
+          maSub("wasm32-wasip2", t, at(PR.compile) + 0.15, GREY),
+        adapter:
+          maSub("mounted beside route.ts", t, at(PR.adapt)) +
+          maSub("same URL rules", t, at(PR.adapt) + 0.15, GREY),
+        request:
+          maSub("GET &hellip;/packing", t, PR.req - 0.3) +
+          until(t, PR.req - 0.15, at(PR.back), "?quantity=3", "200 &middot; boxes: 1"),
+        server:
+          maSub("matches the file route", t, at(PR.req)) +
+          maSub("runs your middleware", t, at(PR.req) + 0.15, GREY),
+        handler:
+          maSub("Node &middot; V8 WebAssembly", t, at(PR.mount)) +
+          maSub("3 bags &rarr; 1 box", t, at(PR.run), GREEN),
+      },
+      wires: {
+        fc: wire(t, PR.compile - 0.2, [[PR.compile]]),
+        ca: wire(t, PR.adapt - 0.3, [[PR.adapt]]),
+        ah: wire(t, PR.mount - 0.3, [[PR.mount]]),
+        rs: wire(t, PR.req - 0.3, [[PR.req], [PR.back + 0.5, false]]),
+        sh: wire(t, PR.run - 0.3, [[PR.run], [PR.back, false]]),
+      },
+      states: {
+        files: during(t, 0, at(PR.compile)),
+        compile: during(t, at(PR.compile), at(PR.adapt)),
+        adapter: during(t, at(PR.adapt), at(PR.mount)),
+        server: during(t, at(PR.req), at(PR.run)) ?? during(t, at(PR.back), PR.back + 0.5),
+        handler: during(t, at(PR.run), at(PR.back)),
+        request: during(t, PR.back + 0.5 + PULSE, PR.back + 0.5 + PULSE + 0.45),
+      },
+    };
+  },
+};
+
+// The same page under each server-components engine. Both send the crop list as HTML and hydrate
+// the counter; islands tells the browser where to attach it, Flight also describes the React tree.
+const CROPS = ["Tomatoes", "Basil", "Kale"];
+const ISL = { html: 0.5, code: 1.9, hydrate: 2.6 };
+const FLT = { html: 0.7, payload: 2.1, hydrate: 3.0 };
+
+/** A page row: its text on the left, what carried it on the right. */
+const pageRow = (name: string, tag: string, tagColor: string, t: number, at: number) =>
+  t < at
+    ? ""
+    : `<span style="display:flex;justify-content:space-between;gap:1em;opacity:${ease(
+        prog(t, at, 0.3),
+      ).toFixed(2)}"><span>${name}</span><span style="color:${tagColor}">${tag}</span></span>`;
+
+const islandsFlight: FigureSpec = {
+  duration: 4.4,
+  stage: { w: 760, h: 232 },
+  label:
+    "The same page under each engine: both send the crop list as HTML and hydrate the counter; islands sends the counter's code and where to attach it, while React Flight also sends a payload that describes the whole React tree",
+  panels: [
+    {
+      id: "server",
+      x: 280,
+      y: 0,
+      w: 200,
+      h: 48,
+      flow: true,
+      icon: "page",
+      kicker: "Server page",
+      label: "/crops",
+    },
+    { id: "islands", x: 0, y: 96, w: 360, h: 136, title: "Islands" },
+    { id: "flight", x: 400, y: 96, w: 360, h: 136, title: "React Flight" },
+  ],
+  wires: {
+    isl: [
+      [340, 48],
+      [340, 72],
+      [180, 72],
+      [180, 96],
+    ],
+    flt: [
+      [420, 48],
+      [420, 72],
+      [580, 72],
+      [580, 96],
+    ],
+  },
+  frame: (t) => {
+    const at = (beat: number) => beat + PULSE;
+    const lane = (html: number, after: number, crop: string, counter: string, hydrate: number) =>
+      CROPS.map((name, i) =>
+        pageRow(name, t < after ? "HTML" : crop, GREY, t, html + i * 0.12),
+      ).join("") +
+      pageRow(
+        "Count: 4",
+        t < hydrate ? "HTML" : counter,
+        t < hydrate ? GREY : GREEN,
+        t,
+        html + CROPS.length * 0.12,
+      );
+    return {
+      slots: {
+        server: step(t, 0.2, at(FLT.payload)),
+        islands: lane(at(ISL.html), at(ISL.code), "HTML", "hydrated", at(ISL.hydrate)),
+        "islands:meta": t < at(ISL.code) ? "" : "+ Counter code",
+        flight: lane(at(FLT.html), at(FLT.payload), "HTML + tree", "hydrated", at(FLT.hydrate)),
+        "flight:meta": t < at(FLT.payload) ? "" : "+ Flight payload",
+      },
+      wires: {
+        isl: wire(t, 0.1, [[ISL.html], [ISL.code]]),
+        flt: wire(t, 0.2, [[FLT.html], [FLT.payload]]),
+      },
+      states: {
+        server: during(t, 0.2, at(FLT.html)),
+        islands: during(t, at(ISL.code), at(ISL.hydrate) + 0.45),
+        flight: during(t, at(FLT.payload), at(FLT.hydrate) + 0.45),
+      },
+    };
+  },
+};
+
+// One click on a compiled counter. The build proves which text node shows `count`; the click still
+// goes through React, and the update patches that node. Code the compiler cannot prove keeps
+// ordinary React reconciliation.
+const CC = { prove: 0.3, report: 1.0, click: 2.0, run: 2.7, patch: 3.4, fallback: 4.4 };
+
+const compilerClick: FigureSpec = {
+  duration: 5.6,
+  label:
+    "At build time the compiler proves which text node shows count and records the component in its report; on a click React runs the handler and the update patches that one text node, while code it cannot prove keeps ordinary React reconciliation",
+  panels: [
+    { id: "counter", x: 16, y: 144, w: 200, h: 112, title: "Counter" },
+    { id: "build", x: 262, y: 16, w: 228, h: 112, title: "At build time" },
+    { id: "click", x: 262, y: 144, w: 228, h: 112, title: "On a click" },
+    { id: "unproven", x: 262, y: 272, w: 228, h: 112, title: "Anything unproven" },
+    { id: "report", x: 536, y: 16, w: 208, h: 112, title: "react-compiler.json" },
+    { id: "patch", x: 536, y: 144, w: 208, h: 112, title: "The update" },
+    { id: "react", x: 536, y: 272, w: 208, h: 112, title: "React" },
+  ],
+  wires: {
+    cc: [
+      [216, 200],
+      [262, 200],
+    ],
+    bc: [
+      [376, 128],
+      [376, 144],
+    ],
+    br: [
+      [490, 72],
+      [536, 72],
+    ],
+    cp: [
+      [490, 200],
+      [536, 200],
+    ],
+    cu: [
+      [376, 256],
+      [376, 272],
+    ],
+    ur: [
+      [490, 328],
+      [536, 328],
+    ],
+  },
+  frame: (t) => {
+    const at = (beat: number) => beat + PULSE;
+    const patched = at(CC.patch);
+    return {
+      slots: {
+        counter:
+          (t < patched
+            ? maSub("Count: 4", t, 0)
+            : maSub(`Count: <span style="color:${GREEN}">5</span>`, t, patched)) +
+          maSub("one click", t, CC.click - 0.3, GREY),
+        build:
+          maSub("count &rarr; one text node", t, CC.prove) +
+          maSub("binding proven", t, CC.prove + 0.3, GREEN),
+        report:
+          maSub("Counter · compiled", t, at(CC.report)) +
+          maSub("production build", t, at(CC.report) + 0.15, GREY),
+        click:
+          maSub("React runs the handler", t, at(CC.click)) +
+          maSub("count 4 &rarr; 5", t, at(CC.click) + 0.3, GREY),
+        patch:
+          maSub("patches the binding", t, patched) +
+          maSub("one text node changes", t, patched + 0.15, GREEN),
+        unproven:
+          maSub("behavior it can't prove", t, at(CC.fallback)) +
+          maSub("falls back safely", t, at(CC.fallback) + 0.15, GREY),
+        react:
+          maSub("ordinary reconciliation", t, at(CC.fallback) + 0.5) +
+          maSub("handles the update", t, at(CC.fallback) + 0.65, GREY),
+      },
+      wires: {
+        br: wire(t, CC.report - 0.3, [[CC.report]]),
+        bc: wire(t, CC.prove + 0.4, [[CC.run]]),
+        cc: wire(t, CC.click - 0.3, [[CC.click]]),
+        cp: wire(t, CC.patch - 0.3, [[CC.patch]]),
+        cu: wire(t, CC.fallback - 0.3, [[CC.fallback]], true),
+        ur: wire(t, CC.fallback + 0.2, [[CC.fallback + 0.5]], true),
+      },
+      states: {
+        build: during(t, CC.prove, at(CC.report)) ?? during(t, CC.run, at(CC.run)),
+        report: during(t, at(CC.report), at(CC.report) + 0.45),
+        counter: during(t, CC.click - 0.3, at(CC.click)) ?? during(t, patched, patched + 0.45),
+        click: during(t, at(CC.click), at(CC.patch)),
+        patch: during(t, patched, patched + 0.45),
+        unproven: t >= at(CC.fallback) ? "dim" : undefined,
+        react: t >= at(CC.fallback) + 0.5 ? "dim" : undefined,
+      },
+    };
+  },
+};
+
 export const FIGURES: Record<FigureKind, FigureSpec> = {
   integration,
   agents,
@@ -2734,6 +3105,10 @@ export const FIGURES: Record<FigureKind, FigureSpec> = {
   "mobile-arch": mobileArch,
   "agent-scan": agentScan,
   "renderer-seams": rendererSeams,
+  "checkout-order": checkoutOrder,
+  polyroute,
+  "islands-flight": islandsFlight,
+  "compiler-click": compilerClick,
 };
 
 // The two callers stack, so a phone reads the refused run above the one that completes.
