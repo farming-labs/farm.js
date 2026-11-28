@@ -1045,7 +1045,6 @@ export class ServerRenderer {
     return this.rendererRuntime.wrapClientGraph(element);
   }
 
-  /** The page a hydrating layout keeps as server HTML: islands again, or a server tree. */
   /** The route root's strategy, inspecting packages with the dev server's latest plan's cache. */
   private resolveRouteRootStrategy(
     ...args: Parameters<typeof resolveFarmRouteRootStrategy>
@@ -1056,6 +1055,7 @@ export class ServerRenderer {
       : resolve();
   }
 
+  /** The page a hydrating layout keeps as server HTML: islands again, or a server tree. */
   private async isolateServerPage(element: unknown, serverTree: boolean): Promise<unknown> {
     if (islands && this.islandValues()) {
       const runtime = islands;
