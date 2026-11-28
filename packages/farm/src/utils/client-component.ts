@@ -2279,9 +2279,12 @@ function isTypeOnlyNamedClause(
 ): boolean {
   if (tokens[startIndex]?.value !== "{") return false;
 
-  const closingBraceIndex = tokens.findIndex(
-    (token, index) => index > startIndex && index < endIndex && token.value === "}",
-  );
+  let closingBraceIndex = -1;
+  for (let index = startIndex + 1; index < endIndex; index++) {
+    if (tokens[index].value !== "}") continue;
+    closingBraceIndex = index;
+    break;
+  }
   if (closingBraceIndex === -1) return false;
 
   let entryStartsAt = startIndex + 1;
