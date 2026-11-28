@@ -1095,7 +1095,8 @@ for (const width of [280, 320, 345, 360, 1440]) {
         "/blog/native-internals",
         "/blog/agent-markdown-scan",
         "/blog/bring-your-own-renderer",
-        "/blog",
+        // The index is left out: its pinned 0.2 card shows the release art, which has no panels.
+        "/blog/rust-and-go-routes",
         "/",
       ]) {
         await page.goto(pathname);

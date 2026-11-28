@@ -32,6 +32,7 @@ export type FigureKind =
   | "renderer-seams"
   | "checkout-order"
   | "polyroute"
+  | "polyroute-languages"
   | "islands-flight"
   | "compiler-click";
 export type IconKey =
@@ -2903,6 +2904,85 @@ const polyroute: FigureSpec = {
   },
 };
 
+// Rust and Go beside TypeScript: one compile step, one router, and a Go handler answering.
+const polyrouteLanguages: FigureSpec = {
+  duration: 6.2,
+  stage: { w: 760, h: 288 },
+  label:
+    "At build time Polyroute compiles route.rs and route.go to WebAssembly and gives Farm a Fetch handler beside the TypeScript route; at request time Farm matches the URL and runs its middleware, then the Go handler answers with the slug",
+  panels: [
+    { id: "files", x: 16, y: 16, w: 200, h: 112, title: "src/app/api" },
+    { id: "compile", x: 262, y: 16, w: 228, h: 112, title: "polyroute() · build" },
+    { id: "adapter", x: 536, y: 16, w: 208, h: 112, title: "Fetch handlers" },
+    { id: "request", x: 16, y: 160, w: 200, h: 112, title: "Request" },
+    { id: "server", x: 262, y: 160, w: 228, h: 112, title: "Farm server" },
+    { id: "handler", x: 536, y: 160, w: 208, h: 112, title: "route.go on V8" },
+  ],
+  wires: {
+    fc: [
+      [216, 72],
+      [262, 72],
+    ],
+    ca: [
+      [490, 72],
+      [536, 72],
+    ],
+    ah: [
+      [640, 128],
+      [640, 160],
+    ],
+    rs: [
+      [216, 216],
+      [262, 216],
+    ],
+    sh: [
+      [490, 216],
+      [536, 216],
+    ],
+  },
+  frame: (t) => {
+    const at = (beat: number) => beat + PULSE;
+    return {
+      slots: {
+        files:
+          maSub("hello/route.ts", t, 0) +
+          maSub("primes/route.rs", t, 0.15, AMBER) +
+          maSub("slug/route.go", t, 0.3, AMBER),
+        compile:
+          maSub("route.rs &rarr; WebAssembly", t, at(PR.compile)) +
+          maSub("route.go &rarr; WebAssembly", t, at(PR.compile) + 0.15),
+        adapter:
+          maSub("mounted beside route.ts", t, at(PR.adapt)) +
+          maSub("same URL rules", t, at(PR.adapt) + 0.15, GREY),
+        request:
+          maSub("GET /api/slug", t, PR.req - 0.3) +
+          until(t, PR.req - 0.15, at(PR.back), "?text=Hello Farm", "200 &middot; hello-farm"),
+        server:
+          maSub("matches the file route", t, at(PR.req)) +
+          maSub("runs your middleware", t, at(PR.req) + 0.15, GREY),
+        handler:
+          maSub("Node &middot; V8 WebAssembly", t, at(PR.mount)) +
+          maSub("&rarr; hello-farm", t, at(PR.run), GREEN),
+      },
+      wires: {
+        fc: wire(t, PR.compile - 0.2, [[PR.compile]]),
+        ca: wire(t, PR.adapt - 0.3, [[PR.adapt]]),
+        ah: wire(t, PR.mount - 0.3, [[PR.mount]]),
+        rs: wire(t, PR.req - 0.3, [[PR.req], [PR.back + 0.5, false]]),
+        sh: wire(t, PR.run - 0.3, [[PR.run], [PR.back, false]]),
+      },
+      states: {
+        files: during(t, 0, at(PR.compile)),
+        compile: during(t, at(PR.compile), at(PR.adapt)),
+        adapter: during(t, at(PR.adapt), at(PR.mount)),
+        server: during(t, at(PR.req), at(PR.run)) ?? during(t, at(PR.back), PR.back + 0.5),
+        handler: during(t, at(PR.run), at(PR.back)),
+        request: during(t, PR.back + 0.5 + PULSE, PR.back + 0.5 + PULSE + 0.45),
+      },
+    };
+  },
+};
+
 // The same page under each server-components engine. Both send the crop list as HTML and hydrate
 // the counter; islands tells the browser where to attach it, Flight also describes the React tree.
 const CROPS = ["Tomatoes", "Basil", "Kale"];
@@ -3107,8 +3187,46 @@ export const FIGURES: Record<FigureKind, FigureSpec> = {
   "renderer-seams": rendererSeams,
   "checkout-order": checkoutOrder,
   polyroute,
+  "polyroute-languages": polyrouteLanguages,
   "islands-flight": islandsFlight,
   "compiler-click": compilerClick,
+};
+
+// Build above request, in the order they happen; the rail is the build mounting the Go handler.
+polyrouteLanguages.narrow = {
+  stage: { w: 360, h: 696 },
+  panels: [
+    { id: "files", x: 0, y: 0, w: 340, h: 104, title: "src/app/api" },
+    { id: "compile", x: 0, y: 132, w: 340, h: 88, title: "polyroute() · build" },
+    { id: "adapter", x: 0, y: 248, w: 340, h: 88, title: "Fetch handlers" },
+    { id: "request", x: 0, y: 376, w: 340, h: 88, title: "Request" },
+    { id: "server", x: 0, y: 492, w: 340, h: 88, title: "Farm server" },
+    { id: "handler", x: 0, y: 608, w: 340, h: 88, title: "route.go on V8" },
+  ],
+  wires: {
+    fc: [
+      [170, 104],
+      [170, 132],
+    ],
+    ca: [
+      [170, 220],
+      [170, 248],
+    ],
+    ah: [
+      [340, 292],
+      [352, 292],
+      [352, 652],
+      [340, 652],
+    ],
+    rs: [
+      [170, 464],
+      [170, 492],
+    ],
+    sh: [
+      [170, 580],
+      [170, 608],
+    ],
+  },
 };
 
 // The two callers stack, so a phone reads the refused run above the one that completes.

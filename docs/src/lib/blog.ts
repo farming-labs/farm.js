@@ -254,10 +254,29 @@ export const durableAgentsSections = [
   ],
 ] as const satisfies BlogSections;
 
+export const polyrouteBetaPost: BlogPost = {
+  href: "/blog/rust-and-go-routes",
+  title: "Rust and Go API routes are in public beta",
+  description:
+    "Farm now serves route.rs and route.go next to route.ts through the experimental Polyroute plugin. How to try it, how it works, what the numbers say, and what the beta does not do yet.",
+  ...AUTHOR,
+  date: "Nov 2026",
+  dateTime: "2026-11-28",
+  category: "Release",
+};
+
+export const polyrouteBetaSections = [
+  ["try-it", "Try it"],
+  ["how-it-works", "How it works"],
+  ["measured-not-claimed", "Measured, not claimed"],
+  ["limits-of-the-beta", "Limits of the beta"],
+] as const satisfies BlogSections;
+
 /** Every post. The index features the first and lists the rest. */
 // The index features the first entry, so the 0.2 preview stays pinned above newer posts.
 export const posts: readonly { post: BlogPost; sections: BlogSections }[] = [
   { post: releasePreviewPost, sections: releasePreviewSections },
+  { post: polyrouteBetaPost, sections: polyrouteBetaSections },
   { post: durableAgentsPost, sections: durableAgentsSections },
   { post: rendererPost, sections: rendererSections },
   { post: agentScanPost, sections: agentScanSections },
