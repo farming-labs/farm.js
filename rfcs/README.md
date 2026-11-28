@@ -19,3 +19,4 @@ implementation changes default behavior.
 | [0012: An islands interface for renderers](./0012-renderer-islands-interface.md)                         | Draft, open for discussion                 |                                                            |
 | [0013: A smaller islands runtime for pages that hydrate at load](./0013-smaller-islands-runtime.md)      | Implemented (islands mode)                 |                                                            |
 | [0014: Experimental Rust API routes](./0014-experimental-rust-api-routes.md)                             | Experimental, opt-in                       |                                                            |
+| [0015: Report invalid doctor invocations as JSON](./0015-doctor-json-usage-errors.md)                    | Implemented in CLI                         |                                                            |

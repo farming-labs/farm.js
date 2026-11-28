@@ -41,6 +41,9 @@ React is the default renderer. `--skip-install` writes the files without install
 
 ## Commands
 
+Agents can run `farm agent commands --json` outside a project to discover the installed CLI's
+built-in commands, arguments, and options. See [The CLI command catalog](https://farmjs.dev/docs/cli#discover-commands-from-an-agent) for the JSON contract.
+
 | Command                           | What it does                                                                     |
 | --------------------------------- | -------------------------------------------------------------------------------- |
 | `farm dev`                        | Start the development server. `--port`, `--host`, and `--cron` are available.    |
@@ -90,8 +93,9 @@ references unchanged. `--dry-run` prints the package-manager commands without in
 ## Diagnose a project
 
 `farm doctor` probes the running app first and falls back to config and filesystem checks when
-none answers. It is read-only by default and exits non-zero only when a check fails, so it can run
-in CI. `--fix` applies safe additive corrections, such as creating a missing `src/app/layout.tsx`,
+none answers. A completed report exits 0 for success or warnings and 1 for failed checks. In CI,
+use `--json` to read the report. Invalid arguments in JSON mode exit 2 and return
+`error.code` set to `DOCTOR_INVALID_ARGUMENTS`. `--fix` applies safe additive corrections, such as creating a missing `src/app/layout.tsx`,
 and never overwrites application files.
 
 ## Telemetry

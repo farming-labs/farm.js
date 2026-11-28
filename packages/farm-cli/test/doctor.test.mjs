@@ -718,13 +718,70 @@ test("finds cron routes mounted under a custom API base path", async () => {
   }
 });
 
+test("doctor returns a usage error before applying fixes in JSON mode", async (t) => {
+  const root = await createTempProject({ layout: false });
+  t.after(() => rm(root, { recursive: true, force: true }));
+  const cases = [
+    [["--unknown-option", "--json"], "--unknown-option"],
+    [["--json", "--port"], "--port"],
+    [["--json", "--root="], "--root"],
+    [["--json", "--config="], "--config"],
+    [["--json", "unexpected"], "argument"],
+    [["--timeout", "12ms", "--json"], "--timeout"],
+    [["--json", "--timeout", "2147483648"], "--timeout"],
+    [["--port", "65536", "--json"], "--port"],
+    [["--json", "--url", "ftp://localhost"], "--url"],
+    [["--json", "--host", "localhost/path"], "--host"],
+  ];
+  for (const [args, detail] of cases) {
+    await assert.rejects(
+      execFileAsync(process.execPath, [cliBin, "doctor", "--root", root, "--fix", ...args]),
+      (error) => {
+        assert.equal(error.code, 2, args.join(" "));
+        const result = JSON.parse(error.stdout);
+        assert.equal(result.schemaVersion, 1);
+        assert.equal(result.error.code, "DOCTOR_INVALID_ARGUMENTS");
+        assert.ok(result.error.message.includes(detail), result.error.message);
+        assert.equal(error.stderr, "");
+        return true;
+      },
+    );
+  }
+  await assert.rejects(stat(path.join(root, "src/app/layout.tsx")), { code: "ENOENT" });
+});
+
+test("doctor keeps terminal usage errors on stderr", async () => {
+  await assert.rejects(
+    execFileAsync(process.execPath, [cliBin, "doctor", "--timeout", "bad"]),
+    (error) => {
+      assert.equal(error.code, 1);
+      assert.equal(error.stdout, "");
+      assert.match(error.stderr, /--timeout/);
+      return true;
+    },
+  );
+});
+
 test("prints a machine-readable report through the CLI", async () => {
   const root = await createTempProject();
 
   try {
     const result = await execFileAsync(
       process.execPath,
-      [cliBin, "doctor", "--offline", "--root", root, "--json"],
+      [
+        cliBin,
+        "doctor",
+        "--offline",
+        "--root",
+        root,
+        "--host",
+        "::1",
+        "--port",
+        "65535",
+        "--timeout",
+        "1",
+        "--json",
+      ],
       { env: { ...process.env, CRON_SECRET: "configured" } },
     );
     const report = JSON.parse(result.stdout);
