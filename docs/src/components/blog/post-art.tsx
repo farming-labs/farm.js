@@ -8,6 +8,7 @@ import {
   launchPost,
   nativeInternalsPost,
   nativePost,
+  polyrouteBetaPost,
   releasePreviewPost,
   rendererPost,
 } from "../../lib/blog";
@@ -26,6 +27,23 @@ export interface PostArt {
 }
 
 export const POST_ART: Record<string, PostArt> = {
+  [polyrouteBetaPost.href]: {
+    heading: (
+      <>
+        Rust and Go API routes <span>are in public beta.</span>
+      </>
+    ),
+    header: (
+      <div className="blog-post-artwork">
+        <BlogFigure fit kind="polyroute-languages" />
+      </div>
+    ),
+    card: (
+      <div className="blog-post-artwork">
+        <BlogFigure fit kind="polyroute-languages" />
+      </div>
+    ),
+  },
   [durableAgentsPost.href]: {
     heading: (
       <>
