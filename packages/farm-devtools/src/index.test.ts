@@ -1,5 +1,8 @@
 import { describe, expect, it } from "vitest";
+import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import type { IncomingMessage, ServerResponse } from "node:http";
+import os from "node:os";
+import path from "node:path";
 import type { Connect, Plugin, ViteDevServer } from "vite";
 import { devtools } from "./index.js";
 
@@ -86,6 +89,50 @@ describe("devtools plugin", () => {
       'data-shortcut="ctrl+k"',
     );
     expect(await embeddedHtml({ devtools: { shortcut: false } })).toContain('data-shortcut=""');
+  });
+  it("lists modules in the renderer's own component format", async () => {
+    const root = await mkdtemp(path.join(os.tmpdir(), "farm-devtools-renderer-"));
+    try {
+      const file = path.join(root, "src", "app", "page.leaf");
+      await mkdir(path.dirname(file), { recursive: true });
+      await writeFile(file, "<h1>Leaf</h1>");
+      const plugin = devtools();
+      const configured = await plugin.configure!(
+        { plugins: [plugin], renderer: { name: "leaf", componentExtensions: ["Leaf"] } } as never,
+        context(true),
+      );
+      const [vitePlugin] = (configured!.vite as { plugins: Plugin[] }).plugins;
+      let middleware!: Connect.NextHandleFunction;
+      const module = {
+        id: file,
+        file,
+        url: "/src/app/page.leaf",
+        transformResult: { code: "export default function Page() {}" },
+        importedModules: new Set(),
+        importers: new Set(),
+      };
+      const server = {
+        config: { root, server: {} },
+        moduleGraph: { idToModuleMap: new Map([[file, module]]) },
+        middlewares: { use: (fn: Connect.NextHandleFunction) => (middleware = fn) },
+      } as unknown as ViteDevServer;
+      await (vitePlugin.configureServer as (server: ViteDevServer) => Promise<void>)(server);
+      let body = "";
+      await middleware(
+        {
+          url: "/__farm/devtools/modules.json",
+          method: "GET",
+          headers: { host: "localhost:3000" },
+        } as IncomingMessage,
+        { setHeader() {}, end: (value: string) => (body = value) } as unknown as ServerResponse,
+        () => {},
+      );
+      expect(JSON.parse(body).modules.map((entry: { path: string }) => entry.path)).toEqual([
+        "src/app/page.leaf",
+      ]);
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
   });
   it("rejects contradictory configuration and duplicate instances", () => {
     const plugin = devtools();

@@ -47,9 +47,9 @@ const escapeAttribute = (value: string) =>
 
 export function installDevtoolsServer(
   server: ViteDevServer,
-  options: { inspect: boolean; shortcut?: string | false },
+  options: { inspect: boolean; shortcut?: string | false; extensions?: readonly string[] },
 ): void {
-  const inspector = createModuleInspector(server);
+  const inspector = createModuleInspector(server, { extensions: options.extensions });
   const assetRoot = new URL("./ui/", import.meta.url);
   const assets = new Map<string, Promise<Buffer>>();
   // Font file names are content hashed by the UI build; only serve the ones it shipped.

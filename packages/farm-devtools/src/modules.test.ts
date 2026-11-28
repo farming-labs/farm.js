@@ -64,6 +64,16 @@ describe("browser module inspector", () => {
     await f.add("src/data.json");
     expect((await f.inspector.list()).modules.map((item) => item.path)).toEqual(["src/browser.ts"]);
   });
+  it("lists the renderer's own component format only when asked to", async () => {
+    const f = await fixture();
+    await f.add("src/app/page.leaf", "<h1>Leaf</h1>");
+    await f.add("src/browser.ts");
+    expect((await f.inspector.list()).modules.map((item) => item.path)).toEqual(["src/browser.ts"]);
+    const inspector = createModuleInspector(f.server, { extensions: [".leaf"] });
+    const { modules } = await inspector.list();
+    expect(modules.map((item) => item.path)).toEqual(["src/app/page.leaf", "src/browser.ts"]);
+    expect(await inspector.read(modules[0].id)).toMatchObject({ source: "<h1>Leaf</h1>" });
+  });
   it("rejects arbitrary paths and unknown opaque identifiers", async () => {
     const f = await fixture();
     await f.add("src/value.ts");
