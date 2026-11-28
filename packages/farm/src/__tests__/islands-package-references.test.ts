@@ -1,7 +1,7 @@
 import fs, { mkdtempSync, readFileSync, rmSync, statSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   farmPackageClientImportExports,
   farmPackageClientReferencePath,
@@ -9,6 +9,7 @@ import {
   parseFarmResolveFrom,
   rewriteFarmPackageClientImports,
 } from "../islands-package-references";
+import { FarmSourceSnapshotStore, withFarmSourceSnapshot } from "../utils/source-snapshot";
 
 const roots: string[] = [];
 afterEach(() => {
@@ -245,6 +246,48 @@ describe("package client references", () => {
     expect(
       readFileSync(farmPackageClientReferencePath(root, "sonner", "Toaster"), "utf8"),
     ).toContain('from "sonner";');
+  });
+
+  it("looks a package up once while plans run, keeping what it found and not a miss", () => {
+    // A pnpm monorepo: packages/ui depends on sonner, the app does not.
+    const workspace = tempRoot();
+    const root = path.join(workspace, "apps/web");
+    const ui = path.join(workspace, "packages/ui");
+    fs.mkdirSync(root, { recursive: true });
+    const code = 'import { Toaster } from "sonner";\nexport default () => <Toaster />;\n';
+    const importers = ["a.tsx", "b.tsx", "c.tsx"].map((name) => path.join(ui, "src", name));
+    const store = new FarmSourceSnapshotStore();
+    const plan = () =>
+      withFarmSourceSnapshot(
+        () =>
+          importers.map(
+            (file) => rewriteFarmPackageClientImports({ code, file, root, isClientPackage })!,
+          ),
+        store,
+      );
+    // Each lookup for an importer in packages/ui/src starts at its own node_modules.
+    const first = path.join(ui, "src", "node_modules", "sonner");
+    const realpath = vi.spyOn(fs, "realpathSync");
+    const lookups = () => realpath.mock.calls.filter(([file]) => file === first).length;
+    try {
+      // Not installed yet: each importer gets the plain reference.
+      const plain = JSON.stringify(farmPackageClientReferencePath(root, "sonner", "Toaster"));
+      for (const output of plan()) expect(output).toContain(plain);
+      expect(lookups()).toBe(1);
+
+      // Installed: the next plan asks again and finds packages/ui's copy.
+      fs.mkdirSync(path.join(ui, "node_modules/sonner"), { recursive: true });
+      fs.writeFileSync(path.join(ui, "node_modules/sonner/package.json"), '{"name":"sonner"}');
+      const scoped = plan();
+      for (const output of scoped) expect(output).toMatch(/__from__[0-9a-f]{8}/);
+      expect(lookups()).toBe(2);
+
+      // A later plan reuses what it found.
+      expect(plan()).toEqual(scoped);
+      expect(lookups()).toBe(2);
+    } finally {
+      realpath.mockRestore();
+    }
   });
 
   it("reads only farm:resolve-from imports", () => {
