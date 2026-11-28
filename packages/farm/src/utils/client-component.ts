@@ -39,6 +39,7 @@ import {
 import { getFarmProjectSourceDir } from "./source-dir";
 import {
   farmSourceSnapshotPathKey,
+  getFarmSourceStamp,
   memoizeInFarmSourceSnapshot,
   noteFarmSourceRead,
 } from "./source-snapshot";
@@ -2368,7 +2369,10 @@ interface ProjectImportAlias {
   targets: string[];
 }
 
-const projectImportAliasCache = new Map<string, { stamp: string; aliases: ProjectImportAlias[] }>();
+const projectImportAliasCache = new Map<
+  string,
+  { sourceDir: string; stamps: Map<string, string>; aliases: ProjectImportAlias[] }
+>();
 const PROJECT_ALIAS_FILES = ["tsconfig.json", "jsconfig.json", "package.json"];
 
 /**
@@ -2415,20 +2419,27 @@ function matchProjectImportAlias(alias: ProjectImportAlias, specifier: string): 
 }
 
 function getProjectImportAliases(projectRoot: string): ProjectImportAlias[] {
-  const stamp = PROJECT_ALIAS_FILES.map((file) => {
-    try {
-      return String(fs.statSync(path.join(projectRoot, file)).mtimeMs);
-    } catch {
-      return "-";
-    }
-  }).join(":");
   const sourceDir = getFarmProjectSourceDir(projectRoot);
-  const cacheStamp = `${stamp}:${sourceDir}`;
   const cached = projectImportAliasCache.get(projectRoot);
-  if (cached?.stamp === cacheStamp) return cached.aliases;
+  const dependencies = new Set(
+    cached?.stamps.keys() ?? PROJECT_ALIAS_FILES.map((file) => path.join(projectRoot, file)),
+  );
+  const stamps = new Map<string, string>();
+  for (const file of dependencies) {
+    noteFarmSourceRead(file);
+    stamps.set(file, getFarmSourceStamp(file));
+  }
+  if (
+    cached?.sourceDir === sourceDir &&
+    [...stamps].every(([file, stamp]) => cached.stamps.get(file) === stamp)
+  )
+    return cached.aliases;
 
+  // Rebuild the dependency set when an extends chain changes, including missing parents.
+  dependencies.clear();
+  for (const file of PROJECT_ALIAS_FILES) dependencies.add(path.join(projectRoot, file));
   const aliases = [
-    ...readTsconfigPathAliases(projectRoot),
+    ...readTsconfigPathAliases(projectRoot, dependencies),
     ...readPackageImportAliases(projectRoot),
   ];
   if (!aliases.some((alias) => alias.prefix === "@/")) {
@@ -2440,15 +2451,23 @@ function getProjectImportAliases(projectRoot: string): ProjectImportAlias[] {
       targets: [path.join(projectRoot, sourceDir, "*")],
     });
   }
-  projectImportAliasCache.set(projectRoot, { stamp: cacheStamp, aliases });
+  stamps.clear();
+  for (const file of dependencies) {
+    noteFarmSourceRead(file);
+    stamps.set(file, getFarmSourceStamp(file));
+  }
+  projectImportAliasCache.set(projectRoot, { sourceDir, stamps, aliases });
   return aliases;
 }
 
-function readTsconfigPathAliases(projectRoot: string): ProjectImportAlias[] {
+function readTsconfigPathAliases(
+  projectRoot: string,
+  dependencies: Set<string>,
+): ProjectImportAlias[] {
   for (const name of ["tsconfig.json", "jsconfig.json"]) {
     const configPath = path.join(projectRoot, name);
     if (!fs.existsSync(configPath)) continue;
-    const resolved = readTsconfigPaths(configPath, new Set());
+    const resolved = readTsconfigPaths(configPath, new Set(), dependencies);
     if (!resolved?.paths) return [];
     const base = resolved.baseUrl ?? resolved.pathsDirectory;
     return Object.entries(resolved.paths).flatMap(([pattern, targets]) => {
@@ -2472,9 +2491,11 @@ function readTsconfigPathAliases(projectRoot: string): ProjectImportAlias[] {
 function readTsconfigPaths(
   configPath: string,
   visited: Set<string>,
+  dependencies: Set<string>,
 ): { paths?: Record<string, unknown>; pathsDirectory: string; baseUrl?: string } | null {
   if (visited.has(configPath)) return null;
   visited.add(configPath);
+  dependencies.add(configPath);
   const config = readJsonWithComments(configPath);
   if (!config) return null;
   const directory = path.dirname(configPath);
@@ -2490,7 +2511,7 @@ function readTsconfigPaths(
       directory,
       parent.endsWith(".json") ? parent : `${parent}.json`,
     );
-    inherited = readTsconfigPaths(parentPath, visited) ?? inherited;
+    inherited = readTsconfigPaths(parentPath, visited, dependencies) ?? inherited;
   }
 
   const options = config.compilerOptions ?? {};
