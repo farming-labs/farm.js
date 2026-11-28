@@ -13,7 +13,7 @@ import { withoutFarmDeploymentCookie } from "./deployment";
 import { createFarmMarkdownViewResponse } from "./markdown-view";
 import { FARM_ANONYMOUS_CLIENT_ADDRESS } from "./anonymous-client-address";
 import type { FarmMdxComponents, FarmMdxResolvedConfig } from "./app-markdown-config";
-import type { FarmServerRendererRuntime } from "./renderer";
+import type { FarmRendererServerModule } from "./renderer";
 
 // Preserve the existing entry points while keeping response-only imports
 // independent of the MDX compiler's dynamic dependency graph.
@@ -44,7 +44,7 @@ export interface FarmMarkdownPageModuleInput extends FarmMarkdownPageSource {
 }
 
 export type FarmMarkdownPageRenderer = Pick<
-  FarmServerRendererRuntime,
+  FarmRendererServerModule,
   "createElement" | "Fragment" | "markFunctionComponent"
 >;
 

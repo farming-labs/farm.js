@@ -13,7 +13,7 @@ import { stripFarmLocaleFromPathname } from "./i18n/routing";
 import { getFarmRouteContext } from "./route-context";
 import { normalizeFarmRouteRuntimeConfig, type FarmRouteRuntimeConfig } from "./route-runtime";
 import type { ServerFn } from "./server-fn";
-import type { FarmServerRendererRuntime } from "./renderer";
+import type { FarmRendererServerModule } from "./renderer";
 import {
   getProgrammaticRouteDefinitionSource,
   parseProgrammaticRoutePath as parseSharedProgrammaticRoutePath,
@@ -1032,7 +1032,7 @@ export function parseProgrammaticRoutePath(
 export function createRouteModuleFromProgrammaticPage(
   route: ProgrammaticPageRoute,
   rendererRuntime?: Pick<
-    FarmServerRendererRuntime,
+    FarmRendererServerModule,
     "createElement" | "Suspense" | "markFunctionComponent"
   >,
 ): RouteModule {
@@ -1121,7 +1121,7 @@ export function scanProgrammaticPagePaths(source: string): string[] {
 function createProgrammaticPageComponent(
   route: ProgrammaticPageRoute,
   rendererRuntime?: Pick<
-    FarmServerRendererRuntime,
+    FarmRendererServerModule,
     "createElement" | "Suspense" | "markFunctionComponent"
   >,
 ): ComponentType<PageProps> {
@@ -1136,7 +1136,7 @@ function createProgrammaticPageComponent(
     return route.component as ComponentType<PageProps>;
   }
 
-  const createElement: FarmServerRendererRuntime["createElement"] = (...args) => {
+  const createElement: FarmRendererServerModule["createElement"] = (...args) => {
     if (!rendererRuntime) {
       throw new Error(
         `Programmatic route "${route.path}" requires a FARMJS renderer runtime before it can render.`,

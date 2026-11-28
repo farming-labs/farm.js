@@ -73,7 +73,7 @@ import {
 import { getIntegrationProviders } from "../integrations";
 import type { MetadataImageKind } from "../metadata";
 import type { FarmIslandStrategy } from "../island";
-import type { FarmServerRendererRuntime } from "../renderer";
+import type { FarmRendererServerModule } from "../renderer";
 import { createFarmRouteRenderPlan, type FarmRouteRenderPlan } from "../navigation/render-plan";
 import { getFarmSourceRoots, type FarmSourceRoot } from "../layers";
 import {
@@ -331,7 +331,7 @@ export class RouteManager {
   private rendererRouteDirs: string[] = [];
   private rendererRouteModules = new Set<string>();
   private discovery: Promise<void> = Promise.resolve();
-  private rendererRuntime?: FarmServerRendererRuntime;
+  private rendererRuntime?: FarmRendererServerModule;
   private viteServer?: ViteDevServer;
   private packageClientBoundaryCacheFile?: string;
   private clientManifestCache?: {
@@ -374,7 +374,7 @@ export class RouteManager {
     if (viteServer) trackProgrammaticRouteSources();
   }
 
-  setRendererRuntime(rendererRuntime: FarmServerRendererRuntime): void {
+  setRendererRuntime(rendererRuntime: FarmRendererServerModule): void {
     this.rendererRuntime = rendererRuntime;
   }
 

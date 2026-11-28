@@ -277,21 +277,21 @@ default export. [Custom renderers](/docs/renderers/custom) walks through each mo
   visit.
 
 Check a renderer against the contract types from `@farm.js/core/renderer`. The full list of optional
-server exports is on `FarmServerRendererRuntime`.
+server exports is on `FarmRendererServerModule`.
 
 ```ts
 import type {
-  FarmRendererClientRuntime,
+  FarmRendererClientModule,
+  FarmRendererServerModule,
   FarmRendererViteModule,
-  FarmServerRendererRuntime,
 } from "@farm.js/core/renderer";
 import * as client from "./client";
 import * as server from "./server";
 import * as vite from "./vite";
 
 // Each line fails type-checking when a module drifts from what FARMJS imports.
-export const serverContract: FarmServerRendererRuntime = server;
-export const clientContract: FarmRendererClientRuntime = client;
+export const serverContract: FarmRendererServerModule = server;
+export const clientContract: FarmRendererClientModule = client;
 export const viteContract: FarmRendererViteModule = vite;
 ```
 

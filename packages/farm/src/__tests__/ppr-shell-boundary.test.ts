@@ -1,7 +1,7 @@
 // @vitest-environment node
 import { describe, expect, it } from "vitest";
 import { findStaticShellBoundary } from "../renderer/react/server";
-import type { FarmServerRendererRuntime } from "../renderer";
+import type { FarmRendererServerModule } from "../renderer";
 
 describe("static shell boundary detection is owned by the renderer", () => {
   it("React finds its own Fizz reveal markers", () => {
@@ -38,7 +38,7 @@ describe("static shell boundary detection is owned by the renderer", () => {
   it("the hook is optional on the runtime contract", () => {
     // A runtime without it is valid; core then skips the static shell instead
     // of treating a per-request response as cacheable.
-    const runtime: Partial<FarmServerRendererRuntime> = { name: "solid" };
+    const runtime: Partial<FarmRendererServerModule> = { name: "solid" };
     expect(runtime.findStaticShellBoundary).toBeUndefined();
   });
 });
