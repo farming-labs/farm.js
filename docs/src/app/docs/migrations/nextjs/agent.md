@@ -2,6 +2,31 @@
 
 This document is the complete contract for a coding agent migrating a Next.js App Router project to Farm by hand. Do not run `farm migrate`; follow the procedure below and use the parity reference to rewrite each Next.js feature. Every Farm import path, file convention, and config key here exists in Farm 0.1.14. Status values: `same` (works as-is), `rename` (same concept, change the import or name), `different` (rewrite needed, the row says how), `none` (no Farm equivalent, the row gives the workaround). Pages Router code (`pages/`, `getServerSideProps`, `getStaticProps`, `next/router`, `next/head`) is out of scope: port it to App Router conventions first, then apply this document.
 
+## Migration goals and current capabilities
+
+Read the [Next.js migration rationale](/docs/migrations/nextjs#why-move-from-nextjs) before planning
+the port. Its November 2026 measurements separate a real docs site, historical Vercel build charges,
+and a four-page fixture. Keep those workloads, versions, and measurement boundaries distinct.
+The reported Lambda savings are estimates; self-hosted throughput does not describe CDN delivery.
+Preserve the warm-build, CSS, hydration, and HMR tradeoffs when explaining the decision.
+
+Farm's current [DX and AX overview](/docs/migrations#what-you-gain-with-farmjs) covers generated API
+callers, diagnostics, integrations, plugins, Markdown/discovery, MCP, WebMCP, and agent runtimes.
+These are opportunities after behavioral parity, not instructions to install every capability.
+Do not expose an endpoint as an agent tool or enable an experimental rendering mode without that
+being part of the application's requirements.
+
+The parity reference below retains its original validation version. Check the installed release
+against the current linked guides, especially [server-component modes](/docs/server-rendering#react-server-components),
+before applying version-specific setup. Do not claim a measured speedup for the migrated app until
+you have measured it with equivalent content, rendering, caching, and deployment.
+
+Core agent readiness is part of `@farm.js/core`: Markdown mirrors, page discovery, capability
+manifests, and the default read-only MCP server. Check the
+[core defaults and limits](/docs/migrations#agent-native-at-the-core) for the selected rendering
+mode. Callable API tools, experimental WebMCP, and durable agent execution remain explicit,
+separately configured extensions.
+
 ## Ground rules
 
 - Farm's app directory is `src/app`. `@/` resolves to `src/`. `public/` stays at the project root.
@@ -339,7 +364,7 @@ Dynamic API segments bind through `params`: `src/app/api/todos/[id]/route.ts` ex
 
 #### Option B: server functions as actions
 
-The only supported way to make server functions callable from the browser is Farm's React Server Components pipeline. Turn it on in `farm.config.ts` with `experimental.serverComponents: { mode: "rsc" }` (`true` is Farm's islands engine): `farm dev`, `farm build`, and `farm start` then run it on the official `@vitejs/plugin-rsc`, and pages and layouts are server components, as in Next.js. `experimental.serverActions: true` without `serverComponents` does not load that pipeline and turns off the build check that stops a client component from bundling a `createServerFn` module, so server code and its imports reach the browser. Never set it alone.
+This option uses Farm's React Server Components pipeline. Turn it on in `farm.config.ts` with `experimental.serverComponents: { mode: "rsc" }` (`true` is Farm's islands engine): `farm dev`, `farm build`, and `farm start` then run it on the official `@vitejs/plugin-rsc`, and pages and layouts are server components, as in Next.js. Farm also supports actions in its experimental islands engine; see the current [rendering guide](/docs/server-rendering#react-server-components) before choosing a mode. Do not set `experimental.serverActions` alone: it does not select the required server-component pipeline.
 
 Install (the RSC pipeline refuses to start unless these exact versions resolve; pin React to them even if the Next.js app used another 19.x release):
 

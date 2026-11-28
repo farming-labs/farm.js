@@ -12,6 +12,30 @@ Status values: `same` works unchanged; `rename` keeps the behavior but moves the
 the import or name; `different` has a Farm equivalent with another shape, rewrite as shown; `none`
 has no Farm equivalent, apply the workaround and list it in the final report.
 
+## Migration goals and current capabilities
+
+Read the [Nuxt migration rationale](/docs/migrations/nuxt#why-move-from-nuxt). Keep Vue components
+while evaluating Farm's typed server APIs, integrations, diagnostics, and agent surface. Nuxt
+already has Vite, Nitro, modules, and layers; compare the contracts rather than presenting those
+shared concepts as new capabilities.
+
+The [performance evidence](/docs/migrations/nuxt#performance-evidence) compares Nuxt with Farm's
+React fixture. It is not evidence of a Vue-preserving port's speedup. Do not apply React compiler,
+RSC, or React-hook claims to Vue. Check hydration, navigation, plugin setup, and server-store state
+transfer explicitly.
+
+The [DX and AX overview](/docs/migrations#what-you-gain-with-farmjs) covers the current plugin and
+integration catalog, Markdown/discovery, MCP, experimental WebMCP, and durable agents. Keep tool
+exposure explicit and authorized. Add optional features only when required. The parity procedure
+below records older validation versions; check its version-specific instructions against the
+current [Vue renderer guide](/docs/renderers/vue) and installed packages.
+
+Core agent readiness is part of `@farm.js/core`: Markdown mirrors, page discovery, capability
+manifests, and the default read-only MCP server. Check the
+[core defaults and limits](/docs/migrations#agent-native-at-the-core) for the selected rendering
+mode. Callable API tools, experimental WebMCP, and durable agent execution remain explicit,
+separately configured extensions.
+
 ## Task contract
 
 **Goal.** The same URLs, API contracts, status codes, cookies, metadata, and interactive behavior,

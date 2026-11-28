@@ -7,6 +7,29 @@ Router feature to its Farm file convention, import path, and status. Do the migr
 this document: do not run `farm migrate`. The procedure was verified by migrating the official
 starter (`@tanstack/react-start` 1.169.2, created with `@tanstack/cli create`) to Farm 0.1.14.
 
+## Migration goals and current capabilities
+
+Read the [TanStack Start migration rationale](/docs/migrations/tanstack#why-move-from-tanstack-start).
+Farm's case is a shared contract for typed endpoints, service integrations, diagnostics, plugins,
+and agent access alongside React and Vite. Keep TanStack Query where it owns application data;
+do not introduce a second cache without deciding which one owns each read.
+
+The [performance section](/docs/migrations/tanstack#performance-evidence) is a historical SSR
+fixture, not an HMR, browser, or application benchmark. Measure the migrated app separately.
+The [DX and AX overview](/docs/migrations#what-you-gain-with-farmjs) lists current capabilities,
+including Markdown/discovery, explicit MCP tools, experimental WebMCP, and durable agent runtimes.
+Add only what the application's requirements call for, after preserving existing behavior.
+
+The procedure below records its original validation version. Check installed packages against
+the current [rendering guide](/docs/server-rendering#react-server-components) before applying
+experimental server-function setup. A shared function name is not a compatibility guarantee.
+
+Core agent readiness is part of `@farm.js/core`: Markdown mirrors, page discovery, capability
+manifests, and the default read-only MCP server. Check the
+[core defaults and limits](/docs/migrations#agent-native-at-the-core) for the selected rendering
+mode. Callable API tools, experimental WebMCP, and durable agent execution remain explicit,
+separately configured extensions.
+
 ## Task contract
 
 - Keep the TanStack app runnable until Farm passes dev, build, start, and type-check. Work on a
@@ -78,8 +101,8 @@ Gate: `pnpm dev` starts on port 3000 without Vite plugin errors.
 ### Phase 3: convert `__root.tsx` into `src/app/layout.tsx`
 
 Farm does not read `__root.tsx`. Without this phase every route loses the global stylesheet, the
-header and footer, and the document title. Farm supports a root layout that returns the full
-`<html>` document. Before (starter):
+header and footer, and the document title. Farm owns the HTML document shell; the new layout
+returns application UI. Before (starter):
 
 ```tsx
 // src/routes/__root.tsx
@@ -138,26 +161,17 @@ import Footer from "../components/Footer";
 import Header from "../components/Header";
 import "../styles.css";
 
-const THEME_INIT_SCRIPT = `(function(){ /* unchanged */ })();`;
-
 export const metadata: Metadata = {
   title: "TanStack Start Starter",
 };
 
 export default function RootLayout({ children }: LayoutProps) {
   return (
-    <html lang="en" suppressHydrationWarning>
-      <head>
-        <meta charSet="utf-8" />
-        <meta name="viewport" content="width=device-width, initial-scale=1" />
-        <script dangerouslySetInnerHTML={{ __html: THEME_INIT_SCRIPT }} />
-      </head>
-      <body className="font-sans antialiased [overflow-wrap:anywhere] selection:bg-[rgba(79,184,178,0.24)]">
-        <Header />
-        {children}
-        <Footer />
-      </body>
-    </html>
+    <div className="font-sans antialiased [overflow-wrap:anywhere] selection:bg-[rgba(79,184,178,0.24)]">
+      <Header />
+      {children}
+      <Footer />
+    </div>
   );
 }
 ```
@@ -166,6 +180,10 @@ Rules: import CSS directly (drop `?url` and the stylesheet `links` entry); delet
 `Scripts`, and the TanStack devtools (Farm injects its head tags, assets, and client runtime before
 `</head>` and `</body>`); move `meta` title and description into `metadata`. `Header` uses TanStack
 `Link`, so convert it in Phase 5 before checking this phase in a browser.
+
+Move the theme initialization behavior into Farm's [theme configuration](/docs/themes), checking
+the old storage key, default theme, and no-flash behavior. The old document's `<head>` and `<body>`
+must not be copied inside Farm's managed shell.
 
 Gate: `/` returns 200 with styles, header, footer, and the title.
 
