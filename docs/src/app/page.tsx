@@ -459,7 +459,7 @@ const reactCompilerConfigPrefix = `import { defineConfig } from "@farm.js/core";
 import { react } from "@farm.js/react";
 
 export default defineConfig({
-  renderer: react({ experimental: {`;
+  renderer: react({`;
 const reactCompilerConfigVariants = [
   {
     id: "automatic",
@@ -473,7 +473,7 @@ const reactCompilerConfigVariants = [
     },`,
   },
 ] as const satisfies readonly [HighlightedCodeValueVariant, ...HighlightedCodeValueVariant[]];
-const reactCompilerConfigSuffix = `  } }),
+const reactCompilerConfigSuffix = `  }),
 });`;
 const layersConfigTabs = [
   {
