@@ -4,7 +4,7 @@ import { pathToFileURL } from "node:url";
 import type { DocsConfig } from "@farming-labs/docs";
 import type { FarmLayoutFonts } from "../font";
 import type { FarmMCPServerRegistration } from "../mcp-catalog";
-import type { FarmServerRendererRuntime } from "../renderer";
+import type { FarmRendererServerModule } from "../renderer";
 import { getFarmDocsAdapterConfigModule } from "./adapter-client";
 import {
   getFarmDocsAdapterRenderer,
@@ -42,7 +42,7 @@ interface FarmDocsAdapterRuntimeHandlerOptions {
    */
   loadRenderer?: () => Promise<
     Pick<
-      FarmServerRendererRuntime,
+      FarmRendererServerModule,
       "name" | "createElement" | "Fragment" | "renderToString" | "generateHydrationScript"
     >
   >;

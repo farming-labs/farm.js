@@ -198,7 +198,7 @@ import {
   resolveFarmRendererAppSetup,
   resolveFarmRendererModule,
   type FarmRendererRenderOptions,
-  type FarmServerRendererRuntime,
+  type FarmRendererServerModule,
   resolveFarmComponentExtensions,
   assertFarmRendererServerModule,
 } from "../renderer";
@@ -236,8 +236,8 @@ import {
  * streams the Web stream itself, so without this such a renderer streamed only in production.
  */
 function pipeFarmRendererWebStream(
-  runtime: FarmServerRendererRuntime,
-): NonNullable<FarmServerRendererRuntime["renderToPipeableStream"]> {
+  runtime: FarmRendererServerModule,
+): NonNullable<FarmRendererServerModule["renderToPipeableStream"]> {
   return (element, callbacks) => {
     let source: Readable | undefined;
     let destination: NodeJS.WritableStream | undefined;
@@ -295,14 +295,14 @@ let islands: typeof import("../client/islands-runtime") | undefined;
 
 /** Islands mode: every render of the runtime is one islands render (`withFarmIslandsRender`). */
 function withFarmIslandsRenders(
-  runtime: FarmServerRendererRuntime,
+  runtime: FarmRendererServerModule,
   islandsRuntime: typeof import("../client/islands-runtime"),
-): FarmServerRendererRuntime {
+): FarmRendererServerModule {
   const wrap = (element: unknown) =>
     islandsRuntime.withFarmIslandsRender(
       element as Parameters<typeof islandsRuntime.withFarmIslandsRender>[0],
     );
-  const wrapped: FarmServerRendererRuntime = {
+  const wrapped: FarmRendererServerModule = {
     ...runtime,
     renderToString: (element, ...rest) => runtime.renderToString(wrap(element), ...rest),
   };
@@ -793,7 +793,7 @@ export class ServerRenderer {
   private dataCache = getFarmDataCache();
   private i18nRuntime?: FarmI18nRuntime;
   private viteServer?: ViteDevServer;
-  private rendererRuntime!: FarmServerRendererRuntime;
+  private rendererRuntime!: FarmRendererServerModule;
   private rendererServerModuleCurrent: () => boolean = () => true;
   private reactRenderer?: typeof import("../renderer/react/server");
   private appliedAppSetupModule: unknown;
@@ -855,7 +855,7 @@ export class ServerRenderer {
       !isFarmRendererDisabled(this.config.renderer)
         ? createFarmDevModuleCheck(this.viteServer, loaded)
         : () => true;
-    const runtime = loaded as Partial<FarmServerRendererRuntime>;
+    const runtime = loaded as Partial<FarmRendererServerModule>;
     assertFarmRendererServerModule(runtime, this.config.renderer);
 
     assertFarmRendererStreamingRuntime(
@@ -867,8 +867,8 @@ export class ServerRenderer {
 
     this.rendererRuntime =
       islands && this.islandValues()
-        ? withFarmIslandsRenders(runtime as FarmServerRendererRuntime, islands)
-        : (runtime as FarmServerRendererRuntime);
+        ? withFarmIslandsRenders(runtime as FarmRendererServerModule, islands)
+        : (runtime as FarmRendererServerModule);
     this.routeManager.setRendererRuntime?.(this.rendererRuntime);
     await this.applyRendererAppSetup();
   }

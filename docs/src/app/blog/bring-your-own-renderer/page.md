@@ -186,17 +186,17 @@ That's all eleven required exports: six on the server, four in the client, and o
 ```ts
 // packages/farm-leaf/test/contract.ts
 import type {
-  FarmRendererClientRuntime,
+  FarmRendererClientModule,
+  FarmRendererServerModule,
   FarmRendererViteModule,
-  FarmServerRendererRuntime,
 } from "@farm.js/core/renderer";
 import * as client from "../src/client.js";
 import * as server from "../src/server.js";
 import * as vite from "../src/vite.js";
 
 // Each line fails type-checking when a module drifts from what Farm imports.
-export const serverContract: FarmServerRendererRuntime = server;
-export const clientContract: FarmRendererClientRuntime = client;
+export const serverContract: FarmRendererServerModule = server;
+export const clientContract: FarmRendererClientModule = client;
 export const viteContract: FarmRendererViteModule = vite;
 ```
 

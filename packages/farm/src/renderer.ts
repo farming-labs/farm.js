@@ -278,7 +278,7 @@ export interface FarmRendererClientRoot {
  * Named exports of a renderer client module. Farm's development and production client entries
  * import them by name, so the module needs no default export.
  */
-export interface FarmRendererClientRuntime {
+export interface FarmRendererClientModule {
   /** Builds the route tree in the browser, as the server module's createElement() does. */
   createElement(type: unknown, props?: unknown, ...children: unknown[]): unknown;
   /** Wraps a page that has a loading file while the browser navigates to it. */
@@ -297,6 +297,9 @@ export interface FarmRendererClientRuntime {
   /** Receives the descriptor's `appSetup` module. Required when the descriptor sets `appSetup`. */
   configureApp?(setup: unknown): void;
 }
+
+/** @deprecated Use `FarmRendererClientModule`. */
+export type FarmRendererClientRuntime = FarmRendererClientModule;
 
 const DEFAULT_RENDERER_CAPABILITIES: Readonly<FarmRendererCapabilities> = Object.freeze({
   streaming: Object.freeze({ node: false, web: false }),
@@ -357,7 +360,7 @@ export function getFarmRendererStreamingCapabilitiesForRuntime(
   return streaming.runtimes?.[runtime] ?? { node: streaming.node, web: streaming.web };
 }
 
-/** The named exports Farm reads from every renderer server module (`FarmServerRendererRuntime`). */
+/** The named exports Farm reads from every renderer server module (`FarmRendererServerModule`). */
 const FARM_RENDERER_SERVER_EXPORTS = [
   "name",
   "createElement",
@@ -414,7 +417,7 @@ export function assertFarmRendererStreamingRuntime(
   name: string,
   renderer: Pick<FarmRenderer, "capabilities"> | undefined,
   runtimeModule: Pick<
-    Partial<FarmServerRendererRuntime>,
+    Partial<FarmRendererServerModule>,
     "capabilities" | "renderToPipeableStream" | "renderToReadableStream"
   >,
   runtime: FarmRendererRuntime | "unknown",
@@ -490,7 +493,7 @@ export interface FarmRendererRenderOptions {
  * Named exports of a renderer server module. Farm's development server and its production SSR
  * entry import them by name, so the module needs no default export.
  */
-export interface FarmServerRendererRuntime {
+export interface FarmRendererServerModule {
   readonly name: string;
   readonly Fragment: unknown;
   readonly Suspense: unknown;
@@ -598,6 +601,9 @@ export interface FarmServerRendererRuntime {
     },
   ) => ReadableStream<Uint8Array | string> | Promise<ReadableStream<Uint8Array | string>>;
 }
+
+/** @deprecated Use `FarmRendererServerModule`. */
+export type FarmServerRendererRuntime = FarmRendererServerModule;
 
 export const REACT_RENDERER: Readonly<FarmRenderer> = Object.freeze({
   name: "react",

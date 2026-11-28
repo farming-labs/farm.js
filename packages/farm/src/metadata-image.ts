@@ -5,7 +5,7 @@ import {
   VERCEL_OG_INSTALL_HINT,
   withOptionalPeerCause,
 } from "./optional-peer";
-import type { FarmServerRendererRuntime } from "./renderer";
+import type { FarmRendererServerModule } from "./renderer";
 import { omitFarmResponseBody } from "./response-body";
 import { matchesFarmIfNoneMatch } from "./server-http";
 
@@ -39,7 +39,7 @@ export type FarmMetadataImageModule = {
  * from that markup. A React element still goes to Satori directly.
  */
 export type FarmMetadataImageRenderer = Pick<
-  FarmServerRendererRuntime,
+  FarmRendererServerModule,
   "createElement" | "isValidElement" | "renderToString"
 >;
 
