@@ -1,4 +1,4 @@
-import { lstat, mkdir, readFile, readdir, realpath, rm } from "node:fs/promises";
+import { lstat, mkdir, readFile, readdir, realpath, rm, writeFile } from "node:fs/promises";
 import path from "node:path";
 import * as pagefind from "pagefind";
 import type { ResolvedSearchOptions } from "./config.js";
@@ -85,11 +85,22 @@ export async function writeSearchIndex(input: SearchBuildInput): Promise<SearchB
       indexedRoutes.push(route);
     }
 
+    // Write the files here rather than through `index.writeFiles()`: Pagefind's backend answers
+    // that before its files are on disk, and closing it below then left some of them empty.
+    const bundle = await index.getFiles();
+    if (bundle.errors.length) throw pagefindError("could not write the index", bundle.errors);
+
     await assertOutputPathIsOwned(outputPath);
     await rm(outputPath, { recursive: true, force: true });
-    await mkdir(path.dirname(outputPath), { recursive: true });
-    const written = await index.writeFiles({ outputPath });
-    if (written.errors.length) throw pagefindError("could not write the index", written.errors);
+    for (const file of bundle.files) {
+      const target = path.resolve(outputPath, file.path);
+      const relative = path.relative(outputPath, target);
+      if (!relative || relative === ".." || relative.startsWith(`..${path.sep}`)) {
+        throw new Error(`[farm:search] Pagefind returned a file outside the index: ${file.path}`);
+      }
+      await mkdir(path.dirname(target), { recursive: true });
+      await writeFile(target, file.content);
+    }
   } finally {
     try {
       await index.deleteIndex();

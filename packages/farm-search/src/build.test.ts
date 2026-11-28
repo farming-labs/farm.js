@@ -5,6 +5,7 @@ import {
   readFile,
   readdir,
   rm,
+  stat,
   symlink,
   writeFile,
 } from "node:fs/promises";
@@ -337,7 +338,48 @@ describe("writeSearchIndex", { concurrent: false }, () => {
     expect(result.indexedRoutes).toContain("/");
     await expect(access(path.join(bundle, "stale.txt"))).rejects.toThrow();
   });
+
+  it("has every index file on disk when it resolves", async () => {
+    const { outputDir, publicDir } = await createOutput();
+    await writeFile(path.join(publicDir, "index.html"), page("Home", "Farm home"));
+    await mkdir(path.join(publicDir, "docs"), { recursive: true });
+    await writeFile(path.join(publicDir, "docs", "index.html"), page("Docs", "Server functions"));
+
+    // Pagefind's backend answered a write before its files were on disk, and closing it then
+    // left most builds with empty files. One build could get lucky, so build a few times.
+    for (let build = 0; build < 5; build++) {
+      const result = await writeSearchIndex({
+        outputDir,
+        publicDir,
+        preset: "node-server",
+        basePath: "/",
+        options: resolveSearchOptions({}),
+      });
+
+      const files = await listFiles(result.outputPath);
+      expect(files).toContain("pagefind-entry.json");
+      const empty: string[] = [];
+      for (const file of files) {
+        if ((await stat(path.join(result.outputPath, file))).size === 0) empty.push(file);
+      }
+      expect(empty).toEqual([]);
+      const entry = JSON.parse(
+        await readFile(path.join(result.outputPath, "pagefind-entry.json"), "utf8"),
+      );
+      expect(entry.languages.en.page_count).toBe(2);
+    }
+  }, 60_000);
 });
+
+async function listFiles(directory: string, base = directory): Promise<string[]> {
+  const files: string[] = [];
+  for (const entry of await readdir(directory, { withFileTypes: true })) {
+    const entryPath = path.join(directory, entry.name);
+    if (entry.isDirectory()) files.push(...(await listFiles(entryPath, base)));
+    else files.push(path.relative(base, entryPath));
+  }
+  return files;
+}
 
 describe("search route matching", () => {
   it.each([
