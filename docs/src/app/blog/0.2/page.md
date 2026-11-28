@@ -249,21 +249,7 @@ export const POST = createEndpoint(
 
 An empty title fails validation. A valid one gets a 201. File routes feed Farm's typed client generator. Middleware, storage, cron, health probes and graceful shutdown still run. You can mount an existing Hono or Express handler to migrate a service a route at a time. A missing URL returns a JSON 404. Put a page or layout into this app and Farm names the offending files at startup or build time. Page-derived discovery such as the default page-reading MCP server is off in this mode. [Backend-only guide](https://farmjs.dev/docs/backend) · [Runnable todo API](https://github.com/farming-labs/farm.js/tree/v0.1.87/examples/api-server)
 
-### Keep an existing backend inside the app
-
-A shop may already have a Hono service. Farm can mount its Fetch handler under an app route. This file, `src/app/api/shop/[...path]/route.ts`, makes the Hono route available at `/api/shop/products`.
-
-```ts
-import { mountFetchHandler } from "@farm.js/core/api";
-import { Hono } from "hono";
-
-const shop = new Hono();
-shop.get("/products", (c) => c.json([{ id: "canvas-bag", priceCents: 1200 }]));
-
-export const { GET } = mountFetchHandler(shop, { stripMountPath: true });
-```
-
-`stripMountPath` removes the Farm mount prefix before Hono matches the request. Elysia uses the same Fetch integration. Express, Koa, Fastify, and Nest can use `mountNodeHandler` from `@farm.js/core/api/node` on a Node runtime. This lets a team move the surrounding app while keeping an existing service's routes. [Mounting existing servers](https://farmjs.dev/docs/api-routes#mount-another-backend-framework)
+**Bring an existing backend.** Mount Hono or Elysia with `mountFetchHandler`, or Express, Koa, Fastify, and Nest with `mountNodeHandler` on Node. Move a service into Farm one route at a time. [Backend adapters](https://farmjs.dev/docs/api-routes#mount-another-backend-framework)
 
 <span id="put-one-compute-heavy-endpoint-in-rust" className="blog-heading-anchor" />
 
@@ -386,21 +372,7 @@ pnpm dev
 
 Open `/islands/leaf` at the address printed by the dev server. Click one planter, then the other. Each count belongs to the button you clicked. [Example source](https://github.com/farming-labs/leaf/tree/7da8b6a)
 
-### Share state and forms across renderer choices
-
-Renderer work also expanded the everyday APIs available to Solid, Vue, Svelte, and custom renderers. A cart store can live in a plain module.
-
-```ts
-import { createStore } from "@farm.js/core/renderer-client";
-
-export const cart = createStore({ items: [] as string[] }, (store) => ({
-  add(item: string) {
-    store.items.set((items) => [...items, item]);
-  },
-}));
-```
-
-Each renderer binds that store through its own reactive API. Solid, Vue, and Svelte also have typed `Link` components and action-form bindings, and their browser code can import Farm server functions. The shared store holds client state in memory. Persisting the cart uses your app's storage or Sync layer. [Renderer APIs and bindings](https://farmjs.dev/docs/renderers)
+**Shared renderer APIs.** `createStore` provides in-memory client state with renderer-native bindings. Solid, Vue, and Svelte also gain typed links, action forms, and browser imports of server functions. [Renderer APIs](https://farmjs.dev/docs/renderers)
 
 <span id="an-agent-can-read-part-of-a-page-or-wait-an-hour-for-an-event" className="blog-heading-anchor" />
 
@@ -428,27 +400,7 @@ const payment = await run.waitFor<{ orderId: string; amount: number }>("payment.
 
 A verified payment event can resume the matching order. An approval can pause a run across a deployment, and a disconnected client can reconnect from its last event. Use persistent run storage for that deployment. The integration uses agent-unit and works with plain TypeScript agents as well as supported agent SDKs. [Durable agents and event delivery](https://farmjs.dev/docs/integrations/agent)
 
-### Let an assistant call the same server operation
-
-MCP tools can now reuse a server function or query. For the shop, a product query can carry its tool name alongside its normal cache key and handler.
-
-```ts
-// src/features/catalog/server.ts
-import { createServerQuery } from "@farm.js/core/server-query";
-
-export const listProducts = createServerQuery({
-  key: () => ["products"],
-  mcp: {
-    name: "list_products",
-    description: "List products and their prices.",
-  },
-  handler: () => [{ id: "canvas-bag", priceCents: 1200 }],
-});
-```
-
-Register `listProducts` in `mcp.tools` alongside your MCP authorization function. The tool uses the server operation's validation, middleware, and handler. A query advertises a read-only hint. Server functions can expose mutations through the same pattern, keeping the operation's authorization and cache invalidation together.
-
-MCP servers can also publish resources and prompts. OpenAPI now includes plugin-provided routes and supports hiding selected routes from the generated specification. Farm's public manifest and API catalog help clients discover those surfaces. [Server operations as tools](https://farmjs.dev/docs/plugins/mcp#server-functions-and-queries) · [Resources and prompts](https://farmjs.dev/docs/plugins/mcp#resources-and-prompts) · [OpenAPI](https://farmjs.dev/docs/openapi)
+**More ways to expose an API.** Register server functions and queries as MCP tools with their validation, middleware, and handler. MCP also supports resources and prompts. OpenAPI includes plugin routes and lets you hide selected routes, while the public manifest and API catalog describe available surfaces. [MCP tools](https://farmjs.dev/docs/plugins/mcp#server-functions-and-queries) · [Resources and prompts](https://farmjs.dev/docs/plugins/mcp#resources-and-prompts) · [OpenAPI](https://farmjs.dev/docs/openapi)
 
 <span id="farm-infra" className="blog-heading-anchor" />
 
@@ -487,89 +439,15 @@ The CLI prints a public URL and a dashboard link for that session. A teammate ca
 
 <span id="the-rest-of-the-release-matters-when-you-operate-the-app" className="blog-heading-anchor" />
 
-## The rest of the release matters when you operate the app
+## Other improvements
 
-### Ship product guides alongside the app
-
-The docs engine gained multiple documentation roots, adapter prerendering, guarded pages, and renderer-aware adapters. A shop could keep its public product guide at `/docs` and its developer reference at `/developers`.
-
-```ts
-export default defineConfig({
-  docs: {
-    entry: "/docs",
-    roots: [{ entry: "/developers" }],
-    prerender: true,
-  },
-});
-```
-
-Each root reads its own content directory and has its own search scope. The root can override navigation and other docs settings. The first root supplies shared discovery surfaces such as the sitemap and docs MCP entry.
-
-Prerendering produces HTML during the build. Pages that require a request-time guard need a compatible runtime and adapter. Farm checks that contract, and guarded pages are excluded from public discovery where supported. Docs adapters now receive the app's renderer, including custom renderers. [Multiple docs roots](https://farmjs.dev/docs/docs-engine#several-docs-roots) · [Docs prerendering](https://farmjs.dev/docs/docs-engine#prerender-docs-pages)
-
-### Upgrade plugins with their database schema
-
-A plugin can declare the tables it owns, its dependencies, and versioned migration steps. Farm can compare that declaration with the database and explain what an upgrade changes.
-
-For a configured plugin named `teams`, `farm teams migrate` displays its plan. `--apply` executes it. The schema-derived path can add safe missing columns and indexes. Renames, data migrations, and destructive changes need explicit migration steps, with destructive work requiring `--allow-destructive`.
-
-This also gives the app a view across plugins. `farm schema check` reports mismatches and pending upgrades, and migrations can run in dependency order. A plugin extending an app-owned table requires the app's permission. [Plugin tables and migrations](https://farmjs.dev/docs/plugins/schema-tables)
-
-The provider integrations expanded too. Convex has a dedicated integration, and Strapi can generate content types from the project's schema. [Convex](https://farmjs.dev/docs/integrations/convex) · [Strapi](https://farmjs.dev/docs/integrations/strapi)
-
-### Run background jobs inside the app
-
-The jobs integration can run tasks through `local()` or through a custom runtime. Existing Trigger.dev and Inngest integrations remain available. Given tasks declared with `defineTasks`, a local integration looks like this.
-
-```ts
-import { jobs, local } from "@farm.js/jobs";
-import { tasks } from "./jobs";
-
-export const appIntegrations = {
-  jobs: jobs({
-    runtime: local(),
-    tasks,
-  }),
-};
-```
-
-Mount `appIntegrations` in the app's `integrations` config. The local runtime executes the task's `run` callback and stores run records in the `jobs` storage namespace. Production needs a persistent driver there. Delays and retries depend on the runtime checking for due work, through its server timer or tick endpoint.
-
-With a hosted provider, the provider runs the task code deployed to it. The typed task contract connects callers to that implementation. Runtime capabilities state which scheduling, cancellation, and retry options a provider supports. [Jobs and runtime choices](https://farmjs.dev/docs/integrations/jobs)
-
-### Check inbound events and outbound URLs
-
-Webhook support now includes signature verification and outgoing signing through `@farm.js/webhooks`. It supports Standard Webhooks, GitHub's scheme, and custom schemes. Verification uses the raw request body and can validate the decoded payload with a Standard Schema validator. Use the provider event ID to deduplicate repeated deliveries. [Webhook verification](https://farmjs.dev/docs/integrations/webhooks)
-
-For URLs submitted by a visitor, `safeFetch` checks the network address at connection time and on every redirect.
-
-```ts
-import { safeFetch } from "@farm.js/core/safe-fetch";
-
-const response = await safeFetch(userSubmittedUrl, {
-  signal: AbortSignal.timeout(5_000),
-});
-```
-
-It refuses private and reserved addresses, including cloud metadata endpoints. The current implementation requires Node. This is useful for importing a feed, inspecting a user-supplied page, or delivering to a configured webhook URL. [Safe Fetch behavior and runtime support](https://farmjs.dev/docs/safe-fetch)
-
-The bot-protection plugin adds server-verified form checks through Turnstile, hCaptcha, reCAPTCHA, or a custom provider. Its form component and server verification belong together. [Bot protection](https://farmjs.dev/docs/plugins/bot)
-
-### See whether the app is ready to serve
-
-Dependency-aware health probes distinguish a running process from an app that can reach its required services. `/health/live` checks the runtime, `/health/ready` checks readiness and required dependencies, and `/health/startup` records whether startup checks have passed. Optional dependency failures can report a degraded service while required failures return HTTP 503. [Health probes](https://farmjs.dev/docs/plugins/health)
-
-DevTools exposes plugin order and hooks. The analyzer can report broken internal links after a build. Boundary diagnostics include error codes and source positions, helping locate server code that crossed into a client module. [DevTools](https://farmjs.dev/docs/devtools)
-
-### Cover the rest of the web experience
-
-| Area        | What expanded since the first stable release                                                                      |
-| ----------- | ----------------------------------------------------------------------------------------------------------------- |
-| Navigation  | Plain-link prefetch, allow and deny rules, a progress plugin, scroll restoration, and screen-reader announcements |
-| Metadata    | Typed JSON-LD helpers, generated social images, video cards, verification tags, and extended robots directives    |
-| Markdown    | Outlines, section requests, continuation cursors, form descriptions, and conditional requests using ETags         |
-| Development | Vite 8 across development and production, plus renderer-island updates during hot reload                          |
-
-These features have their own configuration and defaults. [Prefetch](https://farmjs.dev/docs/plugins/prefetch) · [Progress](https://farmjs.dev/docs/plugins/progress) · [Scroll restoration](https://farmjs.dev/docs/plugins/scroll-restoration) · [Markdown requests](https://farmjs.dev/docs/markdown)
+- **Docs engine.** Multiple roots with separate search, opt-in prerendering, guarded pages, and renderer-aware adapters. Guarded pages need a compatible runtime and adapter. [Docs engine](https://farmjs.dev/docs/docs-engine#several-docs-roots)
+- **Plugin schemas.** Declare tables, dependencies, and versioned migrations. Preview changes before applying them, check live schemas, and require explicit approval for destructive work. [Plugin migrations](https://farmjs.dev/docs/plugins/schema-tables)
+- **Data integrations.** Dedicated Convex integration and schema-generated Strapi content types. [Convex](https://farmjs.dev/docs/integrations/convex) · [Strapi](https://farmjs.dev/docs/integrations/strapi)
+- **Background jobs.** Local and custom runtimes join Trigger.dev and Inngest. Local production jobs need persistent storage and a timer or tick endpoint for due work. [Jobs](https://farmjs.dev/docs/integrations/jobs)
+- **Request protection.** Verify and sign webhooks, block private-network requests with Node-only `safeFetch`, and verify bot challenges on the server. [Webhooks](https://farmjs.dev/docs/integrations/webhooks) · [Safe Fetch](https://farmjs.dev/docs/safe-fetch) · [Bot protection](https://farmjs.dev/docs/plugins/bot)
+- **Operations.** Dependency-aware liveness, readiness, and startup probes, plugin hooks in DevTools, broken-link analysis, and source locations in boundary errors. [Health probes](https://farmjs.dev/docs/plugins/health) · [DevTools](https://farmjs.dev/docs/devtools)
+- **Navigation and metadata.** Prefetch rules, navigation progress, scroll restoration, screen-reader announcements, typed JSON-LD, social images, video cards, verification tags, and robots directives. [Prefetch](https://farmjs.dev/docs/plugins/prefetch) · [Progress](https://farmjs.dev/docs/plugins/progress) · [Scroll restoration](https://farmjs.dev/docs/plugins/scroll-restoration)
+- **Markdown and development.** Section requests, outlines, continuation cursors, form descriptions, and ETags. Vite 8 powers development and production, with renderer-island updates during hot reload. [Markdown](https://farmjs.dev/docs/markdown)
 
 If you’re upgrading an existing app, start with its config. Keep the current rendering mode explicit when migrating, then enable the React compiler report if you want to see which client updates Farm can compile. For a new service, try the todo API first. You can send it a request before you decide whether your app needs a web page or a native screen. [Upgrade guide](https://farmjs.dev/docs/upgrading) · [Todo API](https://github.com/farming-labs/farm.js/tree/v0.1.87/examples/api-server) · [Mobile example](https://github.com/farming-labs/farm.js/tree/v0.1.87/examples/mobile)
