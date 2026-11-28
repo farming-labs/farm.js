@@ -496,18 +496,25 @@ export interface FarmServerRendererRuntime {
   readonly Suspense: unknown;
   createElement(type: unknown, props?: unknown, ...children: unknown[]): unknown;
   isValidElement(value: unknown): boolean;
-  /** Wraps a route-owned client tree so compiled leaf boundaries stay inside that React root. */
+  /**
+   * Marks a tree that hydrates as one root: a client page, or a `"use client"` layout and what it
+   * renders. `withIsland` renders a client component inside it plain, as part of that root. Farm
+   * calls it only when the app has islands, and renders what it returns.
+   */
   wrapClientGraph?(element: unknown): unknown;
-  /** Lets a server-only page under a route-owned client tree render its own isolated islands. */
+  /**
+   * Marks a server page that a hydrating layout keeps as HTML. `withIsland` renders the client
+   * components inside it as islands again.
+   */
   isolateServerPageGraph?(element: unknown): unknown;
   /** Resolves an async page below a hydrating layout into a tree the browser rebuilds there. */
   renderServerTreePage?(element: unknown, options?: { values?: boolean }): Promise<unknown>;
   /**
    * Wraps a client component so that, rendered from server output, it starts an island: it calls
    * `resolveFarmIsland` and renders the result around the component. Inside a tree that
-   * `wrapClientGraph` marks, it renders the component plain. Farm calls it on each export of a
-   * client module in the server graph. Required when the descriptor declares
-   * `capabilities.islands`.
+   * `wrapClientGraph` marks, it renders the component plain, unless `isolateServerPageGraph`
+   * marks a page in between. Farm calls it on each export of a client module in the server graph.
+   * Required when the descriptor declares `capabilities.islands`.
    */
   withIsland?(component: unknown, reference: FarmIslandReference): unknown;
   /**
