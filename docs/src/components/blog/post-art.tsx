@@ -1,6 +1,6 @@
 import type { ReactNode } from "react";
 import { BlogFigure } from "./figures";
-import { ReleaseArtwork } from "./release-artwork";
+import { RELEASES, ReleaseArtwork } from "./release-artwork";
 import {
   durableAgentsPost,
   agentNativePost,
@@ -8,6 +8,7 @@ import {
   launchPost,
   nativeInternalsPost,
   nativePost,
+  releasePreviewPost,
   rendererPost,
 } from "../../lib/blog";
 
@@ -82,8 +83,17 @@ export const POST_ART: Record<string, PostArt> = {
         Farm.js v0.1.0: Stable, Integrated, <span>and Agent-Native.</span>
       </>
     ),
-    header: <ReleaseArtwork fullBleed />,
-    card: <ReleaseArtwork />,
+    header: <ReleaseArtwork release={RELEASES["0.1.0"]} fullBleed />,
+    card: <ReleaseArtwork release={RELEASES["0.1.0"]} />,
+  },
+  [releasePreviewPost.href]: {
+    heading: (
+      <>
+        Farm.js 0.2 preview. <span>From an API route to a native screen.</span>
+      </>
+    ),
+    header: <ReleaseArtwork release={RELEASES["0.2.0"]} fullBleed />,
+    card: <ReleaseArtwork release={RELEASES["0.2.0"]} />,
   },
   [agentNativePost.href]: {
     heading: (

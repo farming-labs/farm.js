@@ -497,7 +497,10 @@ test("blog enhancements survive client navigation, re-entry, and back/forward wi
 test("shared artwork rolls down, waves, pauses offscreen, and respects reduced motion", async ({
   page,
 }) => {
-  for (const path of ["/blog/0.1.0"]) {
+  for (const [path, digits] of [
+    ["/blog/0.1.0", ["0", "1", "0"]],
+    ["/blog/0.2", ["0", "2", "0"]],
+  ] as const) {
     await page.setViewportSize({ width: 1440, height: 1000 });
     await page.emulateMedia({ reducedMotion: "no-preference" });
     await page.goto(path);
@@ -505,7 +508,7 @@ test("shared artwork rolls down, waves, pauses offscreen, and respects reduced m
     const art = page.locator(".blog-release-art");
     const version = art.locator(".blog-art-version");
     await expect(art).toHaveAttribute("data-motion", "running");
-    await expect(version.locator(".blog-art-value")).toHaveText(["0", "1", "0"]);
+    await expect(version.locator(".blog-art-value")).toHaveText([...digits]);
     await expect(version.locator(".blog-art-dot")).toHaveCount(2);
     const reels = art.locator(".blog-art-reel");
     await expect(reels).toHaveCount(3);
