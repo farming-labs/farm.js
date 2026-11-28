@@ -292,6 +292,8 @@ describe("production slot route preparation", () => {
         "feed/@activity/default.tsx",
         "feed/@modal/default.tsx",
         "feed/@modal/(.)photo/[id]/page.tsx",
+        "login/page.tsx",
+        "feed/@modal/(..)login/page.tsx",
         "docs/[[...slug]]/page.tsx",
         "docs/@panel/[[...slug]]/page.tsx",
         "shop/[team]/[id]/page.tsx",
@@ -348,6 +350,10 @@ describe("production slot route preparation", () => {
         ["/feed/photo/%ZZ", "/feed"],
         ["/feed/photo/42", "/outside"],
         ["/feed/photo/42", "/feedling"],
+        ["/login"],
+        ["/login", "/feed"],
+        ["/login", "/feed/photo/42"],
+        ["/login", "/outside"],
         ["/docs"],
         ["/docs/a%2Fb/c"],
         ["/docs/%ZZ"],
@@ -361,6 +367,11 @@ describe("production slot route preparation", () => {
           project(manager.matchRoute(pathname, { interceptFrom }).slots),
         );
       }
+      // A (..) interception targets a URL outside its owner: it is selected from the owner only.
+      expect(prod.select("/login", "/feed")).toEqual([
+        expect.objectContaining({ name: "modal", ownerPattern: "/feed", interception: true }),
+      ]);
+      expect(prod.select("/login")).toEqual([]);
       // Production snapshots are build-local, not a process-global cache. Dev
       // rediscovery sees new routes; creating a new runtime must see them too.
       writeRoute("feed/@activity/photo/[id]/page.tsx");
