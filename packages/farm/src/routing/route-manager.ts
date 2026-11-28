@@ -357,7 +357,8 @@ export class RouteManager {
   // read, so a production build can tell whether a route module's plan still holds.
   private planStamps = new Map<string, string>();
   private sourceChangeTracking = false;
-  private linkedSources = new Map<string, string | null>();
+  // planSourcePath of each file a plan read.
+  private planSources = new Map<string, string | null>();
   // Whether each package directory under `node_modules` a plan read from links to a workspace.
   private linkedPackages = new Map<string, boolean>();
   // What the plans read, parsed and resolved, kept between dev plans while the files are unchanged.
@@ -954,7 +955,7 @@ export class RouteManager {
     }
     this.editedSources = null;
     this.sourceSnapshot?.clear();
-    this.linkedSources.clear();
+    this.planSources.clear();
     this.linkedPackages.clear();
   }
 
@@ -1035,20 +1036,22 @@ export class RouteManager {
    * installed package; a plan reads thousands of files of an icon package.
    */
   private planSourcePath(file: string): string | null {
+    // Every route module that imports a package reads the same files of it, so each file is
+    // answered once: a replan after an edit to a shared component maps them again for each route.
+    let source = this.planSources.get(file);
+    if (source !== undefined) return source;
+    source = file;
     const index = file.lastIndexOf(NODE_MODULES_SEGMENT);
-    if (index === -1) return file;
-    const directory = getInstalledPackageDirectory(file, index + NODE_MODULES_SEGMENT.length);
-    let linked = this.linkedPackages.get(directory);
-    if (linked === undefined) {
-      linked = realPathOutsideNodeModules(directory) !== null;
-      this.linkedPackages.set(directory, linked);
+    if (index !== -1) {
+      const directory = getInstalledPackageDirectory(file, index + NODE_MODULES_SEGMENT.length);
+      let linked = this.linkedPackages.get(directory);
+      if (linked === undefined) {
+        linked = realPathOutsideNodeModules(directory) !== null;
+        this.linkedPackages.set(directory, linked);
+      }
+      source = linked ? realPathOutsideNodeModules(file) : null;
     }
-    if (!linked) return null;
-    let source = this.linkedSources.get(file);
-    if (source === undefined) {
-      source = realPathOutsideNodeModules(file);
-      this.linkedSources.set(file, source);
-    }
+    this.planSources.set(file, source);
     return source;
   }
 
