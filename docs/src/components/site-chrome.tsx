@@ -17,7 +17,7 @@ import type { LucideIcon } from "lucide-react";
 import githubIconUrl from "simple-icons/icons/github.svg?url";
 import xIconUrl from "simple-icons/icons/x.svg?url";
 import farmingLabsLogoUrl from "../assets/farming-labs-logo-dark.svg?url";
-import { launchPost } from "../lib/blog";
+import { releasePreviewPost } from "../lib/blog";
 import { formatCount, NO_READING, useScrambledText, useSiteStats } from "./site-stats";
 
 // Matches .farm-nav-link, so the stars read as one more nav cell.
@@ -222,12 +222,12 @@ function BrandLockup() {
 export function AnnouncementBar() {
   return (
     <div className="farm-announcement flex min-h-7 flex-wrap items-center justify-center gap-x-2 border-b border-white/12 px-4 font-mono text-[10px] font-normal uppercase tracking-normal">
-      <span>Farm.js v0.1.0 is released</span>
+      <span>Farm.js 0.2 preview is out</span>
       <a
         className="inline-flex min-h-7 shrink-0 items-center text-white/80 underline decoration-white/40 underline-offset-2 hover:text-white hover:decoration-white active:text-white/60 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-white"
-        href={launchPost.href}
+        href={releasePreviewPost.href}
       >
-        Read the announcement
+        Read the preview
       </a>
     </div>
   );

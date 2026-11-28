@@ -805,7 +805,7 @@ test("agents page connects the blog, planned capabilities, and Markdown", async 
       .locator(".truncate")
       .evaluateAll((labels) => labels.every((label) => label.scrollWidth <= label.clientWidth)),
   ).toBe(true);
-  // The site banner has its own "Read the announcement" link; use the agents page's section link.
+  // Pick the agents page's section link by its anchor, not by its text alone.
   await page
     .getByRole("link", { name: "Read the announcement", exact: true })
     .and(page.locator('[href$="#agent-infrastructure"]'))
