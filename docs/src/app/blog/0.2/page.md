@@ -11,6 +11,11 @@ You can build a Farm.js app with just an API. When you need a screen, you can ad
 
 **The 0.2 plan promotes the React compiler and server components out of experimental configuration.** Those are two independent choices. Server components decide what crosses from server to browser. The compiler decides how an eligible React component updates the DOM once it is running. The plan keeps both opt-in. The compiler already accepts its new spelling in the 0.1 series; the top-level server-components setting shown below is the planned 0.2 spelling.
 
+Both have measured results behind the promotion:
+
+- **Row swaps 19× faster than plain React.** We built the same keyed table with the compiler off and on. Swapping two of its 1,000 rows takes 0.2 ms from click to DOM write instead of 3.8 ms, the median of 25 runs. On the independent js-framework-benchmark for Chrome 158, Farm's React entry scores 1.125, where 1 would be fastest at every operation. React 19.2 scores 1.555, the React Compiler entry 1.601, and Solid 1.133. [Compiler benchmark](https://github.com/farming-labs/farm.js/tree/8ad9d92a8f6a/benchmarks/compiler) · [js-framework-benchmark](https://krausest.github.io/js-framework-benchmark/current.html)
+- **Server components with 61% less JavaScript.** We built one app in both server-components modes. With islands, a page loads 27.6 KB of JavaScript instead of 71.0 KB with React Flight and does about half the main-thread work, because its client components wait for a click. A long blog post serves 224 requests per second instead of 31. [How islands compare](https://farmjs.dev/docs/server-rendering/islands#how-it-compares-with-react-server-components)
+
 The 0.1 announcement also sketched a hosted service for apps and agents. With 0.2 we can show what that became. Farm Infra gives a team one place to share a running app, see which tools get called, and answer an agent that is waiting for a person. [Farm Infra](https://app.farmjs.dev/)
 
 Farm 0.1.0 already had typed routes, five renderers, server functions, MCP tools, and production deployments. Most examples here run on 0.1.87. The Rust integration described below landed afterward on main. [Original 0.1 announcement](https://farmjs.dev/blog/0.1.0)
