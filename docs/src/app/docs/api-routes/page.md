@@ -61,21 +61,24 @@ the server and `apiClient` sends HTTP requests. Endpoint middleware runs for bot
 middleware is not replayed by direct calls. Never import endpoint modules into the shared caller file.
 
 <span id="experimental-rust-routes" />
+<span id="experimental-rust-and-go-routes" />
 
-## Experimental Rust and Go routes
+## Experimental Rust, Go, and Python routes
 
-Opt in by adding Polyroute to `vite.plugins`. Farm discovers `src/app/api/**/route.rs` and
-`src/app/api/**/route.go` and serves them through the same API router and middleware as a
-TypeScript handler. Removing the plugin turns this discovery off. This early integration has been
-tested with the Node server target and Polyroute’s default V8 WebAssembly runtime.
+Opt in by adding Polyroute to `vite.plugins`. Farm discovers `src/app/api/**/route.rs`,
+`src/app/api/**/route.go`, and `src/app/api/**/route.py` and serves them through the same API
+router and middleware as a TypeScript handler. Removing the plugin turns this discovery off. This
+early integration has been tested with the Node server target and Polyroute’s default V8
+WebAssembly runtime.
 
-Rust route discovery first shipped in Farm `0.2.0-beta.0`. Go route discovery is on `main` and
-ships in the next Farm beta. To use the versions tested together, install Farm core, the CLI, and
-Polyroute in your app. Add the Rust target on the machine where you build the app.
+Rust route discovery first shipped in Farm `0.2.0-beta.0` and Go in `0.2.0-beta.1`. Python route
+discovery is on `main` and ships in the next Farm beta. To use the versions tested together, install
+Farm core, the CLI, and Polyroute in your app. Add the Rust target on the machine where you build
+the app.
 
 ```sh
-pnpm add --save-exact @farm.js/core@0.2.0-beta.0
-pnpm add -D --save-exact @farm.js/cli@0.2.0-beta.0 @farming-labs/polyroute@0.1.0-beta.0
+pnpm add --save-exact @farm.js/core@0.2.0-beta.1
+pnpm add -D --save-exact @farm.js/cli@0.2.0-beta.1 @farming-labs/polyroute@0.1.0-beta.0
 rustup target add wasm32-wasip2
 ```
 
@@ -91,7 +94,7 @@ export default defineConfig({
 For example, put the [prime-counting handler](https://github.com/farming-labs/polyroute/blob/v0.1.0-beta.0/examples/polyglot/app/api/primes/route.rs)
 at `src/app/api/primes/route.rs`. Start `farm dev` and request `/api/primes?limit=10` to get
 `{"limit":10,"primes":4}`. The Rust handler decides which HTTP methods it accepts.
-Call it with `fetch`. Farm’s TypeScript client generator cannot infer a Rust or Go schema.
+Call it with `fetch`. Farm’s TypeScript client generator cannot infer a Rust, Go, or Python schema.
 
 A Go route is a `main` package with its own `go.mod` beside `route.go`, built with Go 1.27.1 or
 newer. Other `.go` files in that directory belong to the route, but only `route.go` defines the URL.
@@ -100,15 +103,24 @@ Copy Polyroute’s [slug handler](https://github.com/farming-labs/polyroute/tree
 `/api/slug?text=Hello%20Farm` to get `{"slug":"hello-farm","text":"Hello Farm"}`. The first build
 downloads the route’s Go modules, so it needs the Go module proxy or a module cache that has them.
 
+A Python route defines a function per HTTP method, such as `def POST(request: Request) -> Response`,
+with `Request` and `Response` imported from Polyroute’s `polyroute` module. It can import the
+standard library and modules beside `route.py`, but only `route.py` defines the URL. Build it with
+componentize-py 0.25 (`pip install componentize-py==0.25.1`). Copy Polyroute’s
+[stats handler](https://github.com/farming-labs/polyroute/blob/v0.1.0-beta.0/examples/polyglot/app/api/stats/route.py)
+to `src/app/api/stats/route.py`, then `POST` `[1, 2, 3, 4]` to `/api/stats` to get
+`{"count":4,"mean":2.5,"median":2.5}`. componentize-py runs the route’s top-level code once, at
+build time, and snapshots the result.
+
 Run `farm build --preset node-server` on a machine with the toolchain for each route language.
 Deploy the entire Node output so the compiled Wasm files travel with the Fetch adapter. The running
-server needs only Node. Provider deployments and Python are outside the verified Farm surface.
+server needs only Node. Provider deployments are outside the verified Farm surface.
 
 Use this for an endpoint whose latency is dominated by computation. In the local Farm benchmark
 at ten connections, Rust lowered warm p95 for the CPU-heavy request from 57.92 ms to 35.00 ms.
-For a light request on that same route it increased p95 from 3.08 ms to 4.06 ms. Go adds more
-fixed cost per request: Polyroute measured a route that does almost no work at about 4× a
-TypeScript one. Measure your own endpoint before choosing either. [Benchmark methodology and results](https://github.com/farming-labs/polyroute/blob/6ec6f02cac043b21be23f33e19bd5dd70a7212a8/docs/benchmarks/2026-11-26-farm-route-output.md).
+For a light request on that same route it increased p95 from 3.08 ms to 4.06 ms. Go and Python add
+more fixed cost per request: Polyroute measured routes that do almost no work at about 4× a
+TypeScript one. Measure your own endpoint before choosing a language. [Benchmark methodology and results](https://github.com/farming-labs/polyroute/blob/6ec6f02cac043b21be23f33e19bd5dd70a7212a8/docs/benchmarks/2026-11-26-farm-route-output.md).
 
 ## MCP tool opt-in
 
