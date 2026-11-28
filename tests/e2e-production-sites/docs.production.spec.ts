@@ -872,6 +872,10 @@ test("blog and agents omit removed illustrations after navigation", async ({ pag
   await expect(page).toHaveURL(/\/agents$/);
   await expect(page.locator("[data-story], .farm-story, .agents-illustration")).toHaveCount(0);
   await expect(page.locator(".agents-cta-start")).toHaveAttribute("href", "/docs/getting-started");
+  await expect(page.locator(".agents-cta-docs")).toHaveAttribute(
+    "href",
+    "/docs/integrations/agent",
+  );
   await expect(page.locator(".agents-cta-prompt")).toHaveCount(1);
   await expect(page.locator(".agents-capabilities article")).toHaveCount(4);
   expect(
@@ -950,9 +954,11 @@ test("agents page stays readable on mobile and without JavaScript", async ({
     try {
       await page.goto("/agents");
       const start = page.locator(".agents-cta-start");
+      const docs = page.locator(".agents-cta-docs");
       const prompt = page.locator(".agents-cta-prompt");
       await expect(page.locator('input[type="email"], [data-agent-waitlist-root]')).toHaveCount(0);
       await expect(start).toHaveAttribute("href", "/docs/getting-started");
+      await expect(docs).toHaveAttribute("href", "/docs/integrations/agent");
       await expect(prompt).toBeVisible();
       if (javaScriptEnabled) {
         await expect(prompt).toHaveAttribute("data-sw-state", "on");
@@ -1002,7 +1008,7 @@ test("agents page stays readable on mobile and without JavaScript", async ({
         expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(
           true,
         );
-        for (const control of [start, prompt]) {
+        for (const control of [start, docs, prompt]) {
           const box = await control.boundingBox();
           expect(box!.height).toBeGreaterThanOrEqual(44);
           expect(box!.x).toBeGreaterThanOrEqual(0);

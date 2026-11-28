@@ -166,6 +166,10 @@ export default function AgentsPage() {
                     <span aria-hidden>&gt;_</span>
                     Get started
                   </a>
+                  <a className="agents-cta-docs" href="/docs/integrations/agent">
+                    <span aria-hidden>#</span>
+                    Agent docs
+                  </a>
                   <AgentPromptButton />
                 </div>
                 {/* The landing hero's drag and wire, from "agents" into the prompt button. The wire

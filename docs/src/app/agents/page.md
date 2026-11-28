@@ -28,7 +28,7 @@ From your codebase to the agent web. We're building a home for your agents, thei
 
 These are planned capabilities, not features available in Farm.js v0.1.0. Discovery does not guarantee indexing by every agent and does not grant authorization to act.
 
-Everything under "Agent-ready with one config block" ships now. [Get started](/docs/getting-started), or copy the agent prompt at the top of [/agents](/agents) into Claude Code, Codex, or Cursor; it points the agent at [skill.md](/skill.md), [AGENTS.md](/AGENTS.md), and [llms.txt](/llms.txt).
+Everything under "Agent-ready with one config block" ships now. [Get started](/docs/getting-started), read the [agent docs](/docs/integrations/agent), or copy the agent prompt at the top of [/agents](/agents) into Claude Code, Codex, or Cursor; it points the agent at [skill.md](/skill.md), [AGENTS.md](/AGENTS.md), and [llms.txt](/llms.txt).
 
 [Read the announcement](/blog/0.1.0#agent-infrastructure).
 
