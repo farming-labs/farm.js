@@ -76,6 +76,42 @@ describe("APIRouteManager", () => {
     expect(manager.getRoutes().size).toBe(0);
   });
 
+  it("discovers route.py only when the Polyroute Vite plugin is active", async () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), "farm-polyroute-python-"));
+    tempDirs.push(root);
+    const dir = path.join(root, "api", "stats");
+    fs.mkdirSync(path.join(dir, "__pycache__"), { recursive: true });
+    fs.writeFileSync(path.join(dir, "route.py"), "def POST(request): ...\n");
+    // A Python route can import modules beside it; only route.py is the entry.
+    fs.writeFileSync(path.join(dir, "summary.py"), "def mean(numbers): ...\n");
+    fs.writeFileSync(path.join(dir, "__pycache__", "route.cpython-314.pyc"), "");
+    const imported: string[] = [];
+    const plugins: { name: string }[] = [];
+    const manager = new APIRouteManager(root, {
+      config: { plugins },
+      environments: {
+        ssr: {
+          runner: {
+            import: async (file: string) => {
+              imported.push(path.basename(file));
+              return { POST: () => new Response() };
+            },
+          },
+        },
+      },
+    } as any);
+    await manager.discoverRoutes();
+    expect(manager.getRoutes().size).toBe(0);
+    plugins.push({ name: "polyroute" });
+    await manager.discoverRoutes();
+    expect([...manager.getRoutes().keys()]).toEqual(["/api/stats"]);
+    expect(manager.getRoutes().get("/api/stats")?.methods).toEqual(["POST"]);
+    expect(imported).toEqual(["route.py"]);
+    fs.unlinkSync(path.join(dir, "route.py"));
+    await manager.discoverRoutes();
+    expect(manager.getRoutes().size).toBe(0);
+  });
+
   it("discovers JSX route files", async () => {
     const root = fs.mkdtempSync(path.join(os.tmpdir(), "farm-api-route-"));
     tempDirs.push(root);
