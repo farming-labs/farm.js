@@ -16,7 +16,7 @@ import {
   listFarmModuleExports,
   listFarmPackageExports,
 } from "./islands-react-server-exports";
-import { memoizeInFarmSourceSnapshot } from "./utils/source-snapshot";
+import { farmSourceSnapshotPathKey, memoizeInFarmSourceSnapshot } from "./utils/source-snapshot";
 
 type AstNode = Record<string, any>;
 
@@ -264,17 +264,26 @@ function packageLookup(
   directory: string,
   packageName: string,
 ): { from: string; real: string } | null {
-  for (let current = directory; ; current = path.dirname(current)) {
-    if (path.basename(current) !== "node_modules") {
-      const candidate = path.join(current, "node_modules", packageName);
-      try {
-        return { from: current, real: fs.realpathSync(candidate) };
-      } catch {
-        // Not installed here.
+  // Every route module that reaches a module asks again for the packages it imports. A package
+  // installed later can fill a miss, so a miss holds for this plan only.
+  return memoizeInFarmSourceSnapshot(
+    "package-lookup",
+    `${farmSourceSnapshotPathKey(directory)}\0${packageName}`,
+    () => {
+      for (let current = directory; ; current = path.dirname(current)) {
+        if (path.basename(current) !== "node_modules") {
+          const candidate = path.join(current, "node_modules", packageName);
+          try {
+            return { from: current, real: fs.realpathSync(candidate) };
+          } catch {
+            // Not installed here.
+          }
+        }
+        if (path.dirname(current) === current) return null;
       }
-    }
-    if (path.dirname(current) === current) return null;
-  }
+    },
+    (result) => result !== null,
+  );
 }
 
 /**
