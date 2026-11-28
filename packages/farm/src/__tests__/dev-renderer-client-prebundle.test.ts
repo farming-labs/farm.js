@@ -129,6 +129,18 @@ describe("the development dependency optimizer", () => {
     }
   }, 60_000);
 
+  // A renderer's bindings import Farm's renderer API, and an app's components reach it only
+  // through them, from files Vite's scan may not read (a `.leaf` page). Served as source from a
+  // linked renderer, its own imports were found on the first request instead, and Vite bundled
+  // again and reloaded the page about two seconds after it loaded.
+  it("pre-bundles Farm's renderer API for a renderer linked from the workspace", async () => {
+    for (const linked of [false, true]) {
+      expect(await discoveredDependencies(await createApp({ linked }))).toContain(
+        "@farm.js/core/renderer-client",
+      );
+    }
+  }, 60_000);
+
   it("leaves out a client module given as a file path", () => {
     for (const client of ["./renderer/client.ts", path.join(packageRoot, "renderer/client.ts")]) {
       expect(
@@ -138,8 +150,8 @@ describe("the development dependency optimizer", () => {
   });
 
   it("adds nothing for React, whose entry imports react-dom/client", () => {
-    expect(createFarmClientOptimizeDepsConfig([], REACT_RENDERER)?.include).not.toContain(
-      REACT_RENDERER.client,
-    );
+    const include = createFarmClientOptimizeDepsConfig([], REACT_RENDERER)?.include;
+    expect(include).not.toContain(REACT_RENDERER.client);
+    expect(include).not.toContain("@farm.js/core/renderer-client");
   });
 });
