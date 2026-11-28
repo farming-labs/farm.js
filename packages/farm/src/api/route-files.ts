@@ -1,9 +1,14 @@
-/** The experimental Rust convention is active only where Vite loaded Polyroute. */
+/** The experimental Rust and Go conventions are active only where Vite loaded Polyroute. */
 export function hasPolyroutePlugin(plugins?: readonly { name: string }[]): boolean {
   return plugins?.some((plugin) => plugin.name === "polyroute") === true;
 }
 
+/** Route entries Polyroute compiles. A Go route's other files and `go.mod` are not entries. */
+export function isPolyrouteRouteFileName(fileName: string): boolean {
+  return fileName === "route.rs" || fileName === "route.go";
+}
+
 export function isFarmAPIRouteFileName(fileName: string, polyroute = false): boolean {
-  if (polyroute && fileName === "route.rs") return true;
+  if (polyroute && isPolyrouteRouteFileName(fileName)) return true;
   return /^route\.(?:ts|tsx|js|jsx)$/.test(fileName);
 }

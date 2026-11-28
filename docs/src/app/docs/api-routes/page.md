@@ -60,16 +60,18 @@ from the generated router. Both callers reuse this route definition: `api` dispa
 the server and `apiClient` sends HTTP requests. Endpoint middleware runs for both; outer HTTP
 middleware is not replayed by direct calls. Never import endpoint modules into the shared caller file.
 
-## Experimental Rust routes
+<span id="experimental-rust-routes" />
+
+## Experimental Rust and Go routes
 
 Opt in by adding Polyroute to `vite.plugins`. Farm discovers `src/app/api/**/route.rs` and
-serves it through the same API router and middleware as a TypeScript handler. Removing the plugin
-turns Rust route discovery off. This early integration has been tested with the Node server
-target and Polyroute’s default V8 WebAssembly runtime.
+`src/app/api/**/route.go` and serves them through the same API router and middleware as a
+TypeScript handler. Removing the plugin turns this discovery off. This early integration has been
+tested with the Node server target and Polyroute’s default V8 WebAssembly runtime.
 
-Rust route discovery first shipped in Farm `0.2.0-beta.0`. To use the versions tested
-together, install Farm core, the CLI, and Polyroute in your app. Add the Rust target on
-the machine where you build the app.
+Rust route discovery first shipped in Farm `0.2.0-beta.0`. Go route discovery is on `main` and
+ships in the next Farm beta. To use the versions tested together, install Farm core, the CLI, and
+Polyroute in your app. Add the Rust target on the machine where you build the app.
 
 ```sh
 pnpm add --save-exact @farm.js/core@0.2.0-beta.0
@@ -89,16 +91,24 @@ export default defineConfig({
 For example, put the [prime-counting handler](https://github.com/farming-labs/polyroute/blob/v0.1.0-beta.0/examples/polyglot/app/api/primes/route.rs)
 at `src/app/api/primes/route.rs`. Start `farm dev` and request `/api/primes?limit=10` to get
 `{"limit":10,"primes":4}`. The Rust handler decides which HTTP methods it accepts.
-Call it with `fetch`. Farm’s TypeScript client generator cannot infer a Rust schema.
+Call it with `fetch`. Farm’s TypeScript client generator cannot infer a Rust or Go schema.
 
-Run `farm build --preset node-server` on a machine with the Rust toolchain. Deploy the entire
-Node output so the compiled Wasm files travel with the Fetch adapter. The running server needs
-Node. Provider deployments, Go, and Python are outside the verified Farm surface.
+A Go route is a `main` package with its own `go.mod` beside `route.go`, built with Go 1.27.1 or
+newer. Other `.go` files in that directory belong to the route, but only `route.go` defines the URL.
+Copy Polyroute’s [slug handler](https://github.com/farming-labs/polyroute/tree/v0.1.0-beta.0/examples/polyglot/app/api/slug)
+(`route.go`, `go.mod`, and `go.sum`) into `src/app/api/slug/`, then request
+`/api/slug?text=Hello%20Farm` to get `{"slug":"hello-farm","text":"Hello Farm"}`. The first build
+downloads the route’s Go modules, so it needs the Go module proxy or a module cache that has them.
+
+Run `farm build --preset node-server` on a machine with the toolchain for each route language.
+Deploy the entire Node output so the compiled Wasm files travel with the Fetch adapter. The running
+server needs only Node. Provider deployments and Python are outside the verified Farm surface.
 
 Use this for an endpoint whose latency is dominated by computation. In the local Farm benchmark
 at ten connections, Rust lowered warm p95 for the CPU-heavy request from 57.92 ms to 35.00 ms.
-For a light request on that same route it increased p95 from 3.08 ms to 4.06 ms. Measure your
-own endpoint before choosing it. [Benchmark methodology and results](https://github.com/farming-labs/polyroute/blob/6ec6f02cac043b21be23f33e19bd5dd70a7212a8/docs/benchmarks/2026-11-26-farm-route-output.md).
+For a light request on that same route it increased p95 from 3.08 ms to 4.06 ms. Go adds more
+fixed cost per request: Polyroute measured a route that does almost no work at about 4× a
+TypeScript one. Measure your own endpoint before choosing either. [Benchmark methodology and results](https://github.com/farming-labs/polyroute/blob/6ec6f02cac043b21be23f33e19bd5dd70a7212a8/docs/benchmarks/2026-11-26-farm-route-output.md).
 
 ## MCP tool opt-in
 

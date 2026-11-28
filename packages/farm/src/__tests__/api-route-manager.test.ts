@@ -40,6 +40,42 @@ describe("APIRouteManager", () => {
     expect(manager.getRoutes().size).toBe(0);
   });
 
+  it("discovers route.go only when the Polyroute Vite plugin is active", async () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), "farm-polyroute-go-"));
+    tempDirs.push(root);
+    const dir = path.join(root, "api", "slug");
+    fs.mkdirSync(dir, { recursive: true });
+    fs.writeFileSync(path.join(dir, "route.go"), "package main\n");
+    // A Go route is its own module and may span several files; only route.go is the entry.
+    fs.writeFileSync(path.join(dir, "go.mod"), "module example.com/slug\n");
+    fs.writeFileSync(path.join(dir, "slugify.go"), "package main\n");
+    const imported: string[] = [];
+    const plugins: { name: string }[] = [];
+    const manager = new APIRouteManager(root, {
+      config: { plugins },
+      environments: {
+        ssr: {
+          runner: {
+            import: async (file: string) => {
+              imported.push(path.basename(file));
+              return { GET: () => new Response() };
+            },
+          },
+        },
+      },
+    } as any);
+    await manager.discoverRoutes();
+    expect(manager.getRoutes().size).toBe(0);
+    plugins.push({ name: "polyroute" });
+    await manager.discoverRoutes();
+    expect([...manager.getRoutes().keys()]).toEqual(["/api/slug"]);
+    expect(manager.getRoutes().get("/api/slug")?.methods).toEqual(["GET"]);
+    expect(imported).toEqual(["route.go"]);
+    fs.unlinkSync(path.join(dir, "route.go"));
+    await manager.discoverRoutes();
+    expect(manager.getRoutes().size).toBe(0);
+  });
+
   it("discovers JSX route files", async () => {
     const root = fs.mkdtempSync(path.join(os.tmpdir(), "farm-api-route-"));
     tempDirs.push(root);
